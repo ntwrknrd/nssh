@@ -236,7 +236,7 @@ def _install_completions(
         )
 
 
-@app.command()
+@app.callback(invoke_without_command=True)
 def install(
     bin_dir: Annotated[
         Path,
