@@ -486,6 +486,34 @@ run_recording_check() {
     run_cli_command recording-check "$hostname"
 }
 
+check_age_key() {
+    local age_key_path
+    # Check explicit env var first
+    if [ -n "${NSSH_AGE_KEY:-}" ]; then
+        age_key_path="$NSSH_AGE_KEY"
+    else
+        # Default path
+        age_key_path="${HOME}/.config/age/keys.txt"
+    fi
+
+    # Expand ~ if needed
+    age_key_path="${age_key_path/#\~/$HOME}"
+
+    if [ ! -f "$age_key_path" ]; then
+        echo "Error: Age encryption key not found at: $age_key_path" >&2
+        echo "" >&2
+        echo "To generate a new age key, run:" >&2
+        echo "  mkdir -p ~/.config/age" >&2
+        echo "  age-keygen -o ~/.config/age/keys.txt" >&2
+        echo "" >&2
+        echo "For more information, see: https://github.com/FiloSottile/age" >&2
+        finalize_and_exit 1
+    fi
+}
+
+# Check age key exists before initializing credential pipes
+check_age_key
+
 # Unified host selection + credential resolution (single Python call)
 prepare_pass_pipe_env
 timer_log "START: connect module"
@@ -543,7 +571,48 @@ fi
 
 # Check for error
 if [ $connect_status -ne 0 ]; then
-    # Show error messages (filter out timing logs)
+    # Special handling for "no host found" - passthrough to vanilla SSH
+    if [ $connect_status -eq 3 ]; then
+        echo "Note: Host '$search_term' not in nssh config, using vanilla SSH" >&2
+        discard_pending_pass_fd
+
+        # Build vanilla SSH command with all original arguments
+        vanilla_ssh_cmd=(ssh)
+
+        # Add username if provided
+        if [ -n "$username" ]; then
+            vanilla_ssh_cmd+=(-l "$username")
+        fi
+
+        # Add verbose flag if set
+        if [ "$verbose_flag" = "1" ]; then
+            vanilla_ssh_cmd+=(-v)
+        fi
+
+        # Add search term (the hostname)
+        vanilla_ssh_cmd+=("$search_term")
+
+        # Add remaining arguments (captured in $@ after shift on line 451)
+        if [ $# -gt 0 ]; then
+            vanilla_ssh_cmd+=("$@")
+        fi
+
+        # Clean up timing stages before exec
+        if [ -n "$WRAPPER_START_STAGE" ]; then
+            end_stage "wrapper-start" "$WRAPPER_START_STAGE" "$search_term"
+            WRAPPER_START_STAGE=""
+        fi
+        if [ -n "$WRAPPER_RUN_START" ]; then
+            end_run "$WRAPPER_RUN_LABEL" "$WRAPPER_RUN_START" "$search_term" "0"
+            WRAPPER_RUN_START=""
+        fi
+        cleanup_pass_pipes
+
+        # exec replaces current process with vanilla SSH
+        exec "${vanilla_ssh_cmd[@]}"
+    fi
+
+    # Show error messages for other errors (filter out timing logs)
     echo "$output" | grep -v "TIMING:" >&2
     discard_pending_pass_fd
     finalize_and_exit $connect_status

@@ -98,6 +98,7 @@ def test_find_host_match_signals_missing_host(tmp_path, monkeypatch, capsys):
         connect.find_host_match("missing")
 
     assert "No hosts matching" in str(exc.value)
+    assert exc.value.exit_code == 3
 
 
 def test_find_host_match_signals_multiple_matches(tmp_path, monkeypatch, capsys):
