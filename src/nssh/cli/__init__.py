@@ -6,7 +6,6 @@ wrapper fast-path (``nssh <host>``) avoids paying for Click/Typer startup.
 
 from __future__ import annotations
 
-from importlib import metadata
 from typing import Any
 
 __all__ = [
