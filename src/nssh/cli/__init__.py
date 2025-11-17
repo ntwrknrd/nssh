@@ -1,0 +1,68 @@
+"""nssh CLI package bootstrap helpers.
+
+We expose Typer and selected Rich classes but only import them on demand so the
+wrapper fast-path (``nssh <host>``) avoids paying for Click/Typer startup.
+"""
+
+from __future__ import annotations
+
+from importlib import metadata
+from typing import Any
+
+__all__ = [
+    "typer",
+    "Console",
+    "Prompt",
+    "Confirm",
+    "Panel",
+    "Table",
+    "Syntax",
+]
+
+
+def _fail_missing_dependency(exc: Exception) -> None:
+    print(f"Error: Required library not found. {exc}")
+    print("Install with: pip install rich typer")
+    raise SystemExit(1)
+
+
+def _load_rich_attribute(name: str) -> Any:
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.prompt import Confirm, Prompt
+        from rich.syntax import Syntax
+        from rich.table import Table
+    except ImportError as exc:  # pragma: no cover - dependency missing
+        _fail_missing_dependency(exc)
+
+    globals().update(
+        {
+            "Console": Console,
+            "Panel": Panel,
+            "Confirm": Confirm,
+            "Prompt": Prompt,
+            "Syntax": Syntax,
+            "Table": Table,
+        }
+    )
+    return globals()[name]
+
+
+def __getattr__(name: str) -> Any:  # pragma: no cover - import indirection
+    if name == "typer":
+        try:
+            import typer as _typer
+        except ImportError as exc:
+            _fail_missing_dependency(exc)
+        globals()["typer"] = _typer
+        return _typer
+
+    if name in {"Console", "Prompt", "Confirm", "Panel", "Table", "Syntax"}:
+        return _load_rich_attribute(name)
+
+    raise AttributeError(f"module 'nssh.cli' has no attribute '{name}'")
+
+
+def __dir__() -> list[str]:  # pragma: no cover - introspection helper
+    return sorted(set(globals().keys()) | set(__all__))

@@ -1,0 +1,23 @@
+╭───────────────────────────╮
+│ Capturing timing data     │
+│ Warmups: 1  |  Samples: 3 │
+╰───────────────────────────╯
+Command: /Users/alice/.local/bin/nssh rpi-a -n
+Warmup run 1/1 complete (ignored).
+Sample 1/3: total 161.7 ms
+Sample 2/3: total 163.6 ms
+Sample 3/3: total 166.8 ms
+Timing log written to timing.log
+╭──────────────────────────┬──────────┬──────────┬─────────────────────┬──────────┬─────────╮
+│ Stage                    │ Mean     │ Median   │ Min/Max             │ Std Dev  │ Samples │
+├──────────────────────────┼──────────┼──────────┼─────────────────────┼──────────┼─────────┤
+│ wrapper-start            │ 123.4 ms │ 123.2 ms │ 120.6 ms / 126.5 ms │ 2.4 ms   │ 3       │
+│ host-selection           │ 234.0 µs │ 236.0 µs │ 225.8 µs / 240.1 µs │ 6.0 µs   │ 3       │
+│ credential-vault         │ 5.4 ms   │ 5.3 ms   │ 5.1 ms / 5.8 ms     │ 279.4 µs │ 3       │
+│ connection-orchestration │ 15.4 µs  │ 15.0 µs  │ 13.5 µs / 17.6 µs   │ 1.7 µs   │ 3       │
+│ recording-setup          │ 211.7 µs │ 197.5 µs │ 194.4 µs / 243.2 µs │ 22.3 µs  │ 3       │
+│ ssh-connection           │ 39.0 ms  │ 38.9 ms  │ 38.6 ms / 39.5 ms   │ 388.0 µs │ 3       │
+│ wrapper-teardown         │ 207.9 µs │ 207.5 µs │ 207.0 µs / 209.3 µs │ 1.0 µs   │ 3       │
+├──────────────────────────┼──────────┼──────────┼─────────────────────┼──────────┼─────────┤
+│ TOTAL                    │ 164.0 ms │ 163.6 ms │ 161.7 ms / 166.8 ms │ 2.1 ms   │ 3       │
+╰──────────────────────────┴──────────┴──────────┴─────────────────────┴──────────┴─────────╯

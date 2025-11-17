@@ -1,0 +1,23 @@
+╭───────────────────────────╮
+│ Capturing timing data     │
+│ Warmups: 1  |  Samples: 3 │
+╰───────────────────────────╯
+Command: /Users/alice/.local/bin/nssh remote-host.example.com -n
+Warmup run 1/1 complete (ignored).
+Sample 1/3: total 464.4 ms
+Sample 2/3: total 488.4 ms
+Sample 3/3: total 474.0 ms
+Timing log written to timing.log
+╭──────────────────────────┬──────────┬──────────┬─────────────────────┬──────────┬─────────╮
+│ Stage                    │ Mean     │ Median   │ Min/Max             │ Std Dev  │ Samples │
+├──────────────────────────┼──────────┼──────────┼─────────────────────┼──────────┼─────────┤
+│ wrapper-start            │ 126.1 ms │ 123.3 ms │ 121.6 ms / 133.5 ms │ 5.3 ms   │ 3       │
+│ host-selection           │ 109.2 µs │ 108.4 µs │ 106.0 µs / 113.2 µs │ 3.0 µs   │ 3       │
+│ credential-vault         │ 5.7 ms   │ 5.5 ms   │ 5.5 ms / 6.0 ms     │ 229.8 µs │ 3       │
+│ connection-orchestration │ 16.5 µs  │ 16.3 µs  │ 15.1 µs / 18.1 µs   │ 1.2 µs   │ 3       │
+│ recording-setup          │ 203.8 µs │ 206.6 µs │ 192.3 µs / 212.5 µs │ 8.5 µs   │ 3       │
+│ ssh-connection           │ 347.1 ms │ 350.5 ms │ 338.4 ms / 352.4 ms │ 6.2 ms   │ 3       │
+│ wrapper-teardown         │ 469.9 µs │ 515.0 µs │ 308.8 µs / 585.8 µs │ 117.5 µs │ 3       │
+├──────────────────────────┼──────────┼──────────┼─────────────────────┼──────────┼─────────┤
+│ TOTAL                    │ 475.6 ms │ 474.0 ms │ 464.4 ms / 488.4 ms │ 9.9 ms   │ 3       │
+╰──────────────────────────┴──────────┴──────────┴─────────────────────┴──────────┴─────────╯

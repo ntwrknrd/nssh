@@ -1,0 +1,34 @@
+╭───────────────────────────────────────────────────────╮
+│ nssh install-shell                                    │
+│ Install nssh wrapper + shell helpers into local paths │
+╰───────────────────────────────────────────────────────╯
+
+Usage:
+  nssh install-shell [OPTIONS]
+    Install the wrapper script plus shell helpers into local paths              
+
+Options:
+  --bin-dir PATH
+    Directory for executables (default: ~/.local/bin)                           
+  --share-dir PATH
+    Directory for shared shell assets (default: ~/.local/share/nssh)            
+  --shell-profile PATH
+    Optional shell profile to append integration snippet                        
+  --fish-functions-dir PATH
+    Fish functions directory (default: ~/.config/fish/functions)                
+  --fish-completions-dir PATH
+    Fish completions directory (default: ~/.config/fish/completions)            
+  --install-fish / --no-install-fish
+    Toggle installing the fish function script (default: install)               
+  --install-completions / --no-install-completions
+    Toggle installing fish completion files (default: install)                  
+  --symlink / --copy
+    Symlink assets instead of copying (default: copy)                           
+  --dry-run / --no-dry-run
+    Preview actions without writing (default: no-dry-run)                       
+  -f, --force / --no-force
+    Overwrite files without prompting (default: no-force)                       
+  -h, --help
+    Show this message and exit                                                  
+  -v, -V, --version
+    Show version and exit                                                       

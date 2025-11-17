@@ -1,0 +1,76 @@
+[project]
+name = "nssh"
+version = "0.6.2"
+description = "SSH host and password management tools for nssh"
+requires-python = ">=3.14"
+readme = "README.md"
+license = {text = "GPL-3.0-or-later"}
+authors = [
+    {name = "Christopher Jones", email = "cj@encapsulated.io"},
+]
+keywords = [
+    "ssh",
+    "network",
+    "automation",
+    "credentials",
+    "credential-manager",
+    "password-manager",
+    "ssh-manager",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: Linux",
+    "Operating System :: macOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Networking",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+    "Environment :: Console",
+]
+dependencies = [
+    "rich>=13.0.0",
+    "typer>=0.9.0",
+    "tomli>=2.0.1; python_version < '3.11'",
+]
+
+[project.urls]
+Homepage = "https://github.com/ntwrknrd/nssh"
+Repository = "https://github.com/ntwrknrd/nssh"
+Issues = "https://github.com/ntwrknrd/nssh/issues"
+Documentation = "https://github.com/ntwrknrd/nssh/blob/main/README.md"
+
+[project.scripts]
+nssh = "nssh.cli.main:main"
+
+
+[tool.uv]
+package = true
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.package-data]
+"nssh" = [
+    "assets/scripts/*",
+    "assets/completions/*",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.18.2",
+    "ruff>=0.14.5",
+    "pytest>=8.0.0",
+    "black>=25.11.0",
+]
+
+[tool.mypy]
+python_version = "3.14"
+packages = ["nssh"]
+exclude = [
+    "build/.*",
+]

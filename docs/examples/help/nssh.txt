@@ -1,0 +1,24 @@
+╭───────────────────────────────────────╮
+│ nssh                                  │
+│ Unified SSH helper and management CLI │
+╰───────────────────────────────────────╯
+
+Connection:
+  nssh <host> 
+    Resolve credentials and print SSH launch metadata                           
+  nssh connect [HOST] [USERNAME]
+    Direct access to the connect helper without shell wrapper                   
+
+Management Commands:
+  nssh host 
+    Manage SSH config entries                                                   
+  nssh cred 
+    Manage encrypted credentials                                                
+  nssh log 
+    Inspect and manage recordings                                               
+  nssh benchmark 
+    Measure wrapper + SSH performance                                           
+  nssh install-shell
+    Install the wrapper, shell integration, and completions                     
+  nssh recording-check
+    Audit recording configuration used by the wrapper                           
