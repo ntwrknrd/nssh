@@ -39,7 +39,7 @@ class MultipleMatchesError(ConnectError):
 
 
 class NoMatchesError(ConnectError):
-    exit_code = 1
+    exit_code = 3
 
 
 class CredentialExpectationError(ConnectError):
