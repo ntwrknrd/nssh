@@ -75,6 +75,15 @@ def _usage_sections():
             ],
         ),
         UsageSection(
+            "Options",
+            rows=[
+                UsageRow("-h, --help", "Show this message and exit"),
+                UsageRow("-v, --version", "Show version and exit"),
+                UsageRow("-V, --verbose", "Enable verbose SSH debug output (ssh -v)"),
+                UsageRow("-u, --user <username>", "Specify username for connection"),
+            ],
+        ),
+        UsageSection(
             "Management Commands",
             rows=[
                 UsageRow("nssh host [subcommand]", "Manage SSH config entries"),

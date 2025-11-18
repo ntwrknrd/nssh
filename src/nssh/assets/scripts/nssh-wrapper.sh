@@ -787,8 +787,11 @@ if [[ "$result" =~ ^([^|]+)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$ ]]; then
 
         # Capture stderr to detect compatibility errors (for recording path)
         ssh_stderr_file=$(mktemp)
+        ssh_start_time=$(date +%s)
         "${record_cmd[@]}" 2>"$ssh_stderr_file"
         ssh_status=$?
+        ssh_end_time=$(date +%s)
+        ssh_duration=$((ssh_end_time - ssh_start_time))
 
         # Output captured stderr to terminal
         if [ -s "$ssh_stderr_file" ]; then
@@ -801,39 +804,44 @@ if [[ "$result" =~ ^([^|]+)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$ ]]; then
 
         # Show error context if SSH connection failed
         if [ $ssh_status -ne 0 ]; then
-            echo "" >&2
-            echo "SSH connection failed with exit code $ssh_status" >&2
-            echo "Host: $target_host" >&2
-            if [ -n "$final_username" ]; then
-                echo "User: $final_username" >&2
-            fi
-            echo "Auth: $auth_method" >&2
-            echo "" >&2
-            echo "Common causes:" >&2
-            echo "  - Host unreachable or SSH service not running" >&2
-            echo "  - Authentication failure (wrong credentials or key)" >&2
-            echo "  - SSH protocol mismatch (KexAlgorithms, MACs, Ciphers)" >&2
-            echo "  - Network connectivity issues" >&2
-            echo "" >&2
-            echo "Check SSH config and try: ssh -v $target_host" >&2
-
-            # If verbose flag is set, also output raw SSH stderr for parsing
-            if [ "$verbose_flag" = "1" ]; then
+            # Check if it's exit code 255 and lasted >= 3 seconds (established session disconnect)
+            if [ $ssh_status -eq 255 ] && [ $ssh_duration -ge 3 ]; then
                 echo "" >&2
-                echo "=== RAW SSH OUTPUT ===" >&2
-                if [ -f "$ssh_stderr_file" ]; then
-                    echo "[DEBUG: File exists, size=$(wc -c < "$ssh_stderr_file")]" >&2
-                    cat "$ssh_stderr_file" >&2
-                else
-                    echo "[DEBUG: File does not exist: $ssh_stderr_file]" >&2
+                echo "nssh: SSH connection to $target_host closed unexpectedly." >&2
+            else
+                # Show detailed error for quick failures or other exit codes
+                echo "" >&2
+                echo "SSH connection failed with exit code $ssh_status" >&2
+                echo "Host: $target_host" >&2
+                if [ -n "$final_username" ]; then
+                    echo "User: $final_username" >&2
                 fi
-                echo "=== END RAW OUTPUT ===" >&2
-            fi
+                echo "Auth: $auth_method" >&2
+                echo "" >&2
+                echo "Try running:" >&2
+                echo "  nssh host update $target_host --compat" >&2
+                echo "" >&2
+                echo "If that fails, use verbose mode for debugging:" >&2
+                echo "  nssh -V $target_host" >&2
 
-            # Check for compatibility errors and offer to fix
-            if [ -f "$ssh_stderr_file" ]; then
-                ssh_stderr_content=$(cat "$ssh_stderr_file")
-                detect_and_fix_ssh_compatibility "$target_host" "$ssh_stderr_content" "$ssh_status"
+                # If verbose flag is set, also output raw SSH stderr for parsing
+                if [ "$verbose_flag" = "1" ]; then
+                    echo "" >&2
+                    echo "=== RAW SSH OUTPUT ===" >&2
+                    if [ -f "$ssh_stderr_file" ]; then
+                        echo "[DEBUG: File exists, size=$(wc -c < "$ssh_stderr_file")]" >&2
+                        cat "$ssh_stderr_file" >&2
+                    else
+                        echo "[DEBUG: File does not exist: $ssh_stderr_file]" >&2
+                    fi
+                    echo "=== END RAW OUTPUT ===" >&2
+                fi
+
+                # Check for compatibility errors and offer to fix
+                if [ -f "$ssh_stderr_file" ]; then
+                    ssh_stderr_content=$(cat "$ssh_stderr_file")
+                    detect_and_fix_ssh_compatibility "$target_host" "$ssh_stderr_content" "$ssh_status"
+                fi
             fi
         fi
 
@@ -848,8 +856,11 @@ if [[ "$result" =~ ^([^|]+)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$ ]]; then
 
         # Capture stderr to detect compatibility errors
         ssh_stderr_file=$(mktemp)
+        ssh_start_time=$(date +%s)
         "${ssh_cmd[@]}" 2>"$ssh_stderr_file"
         ssh_status=$?
+        ssh_end_time=$(date +%s)
+        ssh_duration=$((ssh_end_time - ssh_start_time))
 
         # Output captured stderr to terminal
         if [ -s "$ssh_stderr_file" ]; then
@@ -861,39 +872,44 @@ if [[ "$result" =~ ^([^|]+)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$ ]]; then
 
         # Show error context if SSH connection failed
         if [ $ssh_status -ne 0 ]; then
-            echo "" >&2
-            echo "SSH connection failed with exit code $ssh_status" >&2
-            echo "Host: $target_host" >&2
-            if [ -n "$final_username" ]; then
-                echo "User: $final_username" >&2
-            fi
-            echo "Auth: $auth_method" >&2
-            echo "" >&2
-            echo "Common causes:" >&2
-            echo "  - Host unreachable or SSH service not running" >&2
-            echo "  - Authentication failure (wrong credentials or key)" >&2
-            echo "  - SSH protocol mismatch (KexAlgorithms, MACs, Ciphers)" >&2
-            echo "  - Network connectivity issues" >&2
-            echo "" >&2
-            echo "Check SSH config and try: ssh -v $target_host" >&2
-
-            # If verbose flag is set, also output raw SSH stderr for parsing
-            if [ "$verbose_flag" = "1" ]; then
+            # Check if it's exit code 255 and lasted >= 3 seconds (established session disconnect)
+            if [ $ssh_status -eq 255 ] && [ $ssh_duration -ge 3 ]; then
                 echo "" >&2
-                echo "=== RAW SSH OUTPUT ===" >&2
-                if [ -f "$ssh_stderr_file" ]; then
-                    echo "[DEBUG: File exists, size=$(wc -c < "$ssh_stderr_file")]" >&2
-                    cat "$ssh_stderr_file" >&2
-                else
-                    echo "[DEBUG: File does not exist: $ssh_stderr_file]" >&2
+                echo "nssh: SSH connection to $target_host closed unexpectedly." >&2
+            else
+                # Show detailed error for quick failures or other exit codes
+                echo "" >&2
+                echo "SSH connection failed with exit code $ssh_status" >&2
+                echo "Host: $target_host" >&2
+                if [ -n "$final_username" ]; then
+                    echo "User: $final_username" >&2
                 fi
-                echo "=== END RAW OUTPUT ===" >&2
-            fi
+                echo "Auth: $auth_method" >&2
+                echo "" >&2
+                echo "Try running:" >&2
+                echo "  nssh host update $target_host --compat" >&2
+                echo "" >&2
+                echo "If that fails, use verbose mode for debugging:" >&2
+                echo "  nssh -V $target_host" >&2
 
-            # Check for compatibility errors and offer to fix
-            if [ -f "$ssh_stderr_file" ]; then
-                ssh_stderr_content=$(cat "$ssh_stderr_file")
-                detect_and_fix_ssh_compatibility "$target_host" "$ssh_stderr_content" "$ssh_status"
+                # If verbose flag is set, also output raw SSH stderr for parsing
+                if [ "$verbose_flag" = "1" ]; then
+                    echo "" >&2
+                    echo "=== RAW SSH OUTPUT ===" >&2
+                    if [ -f "$ssh_stderr_file" ]; then
+                        echo "[DEBUG: File exists, size=$(wc -c < "$ssh_stderr_file")]" >&2
+                        cat "$ssh_stderr_file" >&2
+                    else
+                        echo "[DEBUG: File does not exist: $ssh_stderr_file]" >&2
+                    fi
+                    echo "=== END RAW OUTPUT ===" >&2
+                fi
+
+                # Check for compatibility errors and offer to fix
+                if [ -f "$ssh_stderr_file" ]; then
+                    ssh_stderr_content=$(cat "$ssh_stderr_file")
+                    detect_and_fix_ssh_compatibility "$target_host" "$ssh_stderr_content" "$ssh_status"
+                fi
             fi
         fi
 
