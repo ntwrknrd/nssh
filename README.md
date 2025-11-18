@@ -33,7 +33,7 @@ _Coming soon: asciinema embed highlighting fuzzy host search + credential resolu
 
 1. Ensure OpenSSH, `sshpass`, `age`, `jq`, `fzf`, `uv`, and Python 3.14 (installed via `uv python install 3.14`) are available on your system.
 2. (Recommended) Install `asciinema` v3+ for session recording features - see [Session Recording & Playback](docs/USER_GUIDE.md#nssh-log-session-recording)
-3. Ensure you have an age key configured for credential encryption.
+3. Ensure you have an age key configured for credential encryption - see [Key Management](docs/USER_GUIDE.md#key-management).
 
 
 ### Install
