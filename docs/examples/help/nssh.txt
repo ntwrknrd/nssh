@@ -9,6 +9,16 @@ Connection:
   nssh connect [HOST] [USERNAME]
     Direct access to the connect helper without shell wrapper                   
 
+Options:
+  -h, --help
+    Show this message and exit                                                  
+  -v, --version
+    Show version and exit                                                       
+  -V, --verbose
+    Enable verbose SSH debug output (ssh -v)                                    
+  -u, --user <username>
+    Specify username for connection                                             
+
 Management Commands:
   nssh host 
     Manage SSH config entries                                                   
