@@ -4,8 +4,8 @@
 ╰───────────────────────────────────────────╯
 
 Commands:
-  nssh self install [OPTIONS]
-    Install CLI and optional shell helpers                                      
+  nssh self init [OPTIONS]
+    Initialize nssh with configuration and shell helpers                        
   nssh self cleanup [OPTIONS]
     Remove files installed by self                                              
   nssh self status

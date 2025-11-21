@@ -3,15 +3,22 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from importlib import resources
 
 from nssh.cli.self.manifest import InstallManifest
-from nssh.cli.common.prompt import confirm
+from nssh.cli.common.prompt import (
+    confirm,
+    ask_text,
+    prompt_password_with_confirmation,
+)
 from nssh.core.env.paths import age_key_path as get_age_key_path
 from nssh.core.env.paths import credential_file_path as get_credential_file_path
 from nssh.core.env.paths import ssh_config_path, ssh_include_dir
+from nssh.core.auth.credentials import CredentialManager
 from nssh.core.ui.console import get_console
 
 console = get_console()
@@ -161,6 +168,271 @@ Host *
     console.print(f"[green]✓[/green] Created: {ssh_conf_d}/")
     manifest.add_file(ssh_conf_d, "directory", "generated/ssh_conf_d")
     return True
+
+
+def create_first_include_file(
+    manifest: InstallManifest,
+    dry_run: bool,
+    force: bool = False,
+) -> Path | None:
+    """Offer to create first include file in conf.d structure.
+
+    Args:
+        manifest: Install manifest to track files
+        dry_run: Preview mode (don't create files)
+        force: Skip prompts and use defaults
+
+    Returns:
+        Path to created include file, or None if skipped
+    """
+    ssh_conf_d = ssh_include_dir()
+
+    # Check if conf.d directory exists
+    if not ssh_conf_d.exists():
+        console.print(
+            "[yellow]![/yellow] Cannot create include file: conf.d/ directory not found"
+        )
+        return None
+
+    # Check if there are already include files
+    existing_files = list(ssh_conf_d.glob("*"))
+    if existing_files:
+        console.print(
+            f"[green]✓[/green] Include files exist: {len(existing_files)} file(s) in {ssh_conf_d}/"
+        )
+        return None
+
+    # Offer to create first include file
+    if not force:
+        console.print()
+        console.print("[cyan]Create first include file?[/cyan]")
+        console.print(
+            "[dim]Include files organize hosts (e.g., work_hosts, homelab_hosts)[/dim]"
+        )
+
+        if not confirm("Create first include file?", default=True):
+            console.print(
+                "[dim]Skipped. Create later with: touch ~/.ssh/conf.d/<name>[/dim]"
+            )
+            return None
+
+        include_file_name = ask_text(
+            "Enter include file name (without path)",
+            default="default",
+        )
+    else:
+        include_file_name = "default"
+
+    # Ensure no extension or path separators
+    include_file_name = include_file_name.strip()
+    if "/" in include_file_name or "\\" in include_file_name:
+        console.print(
+            "[yellow]Warning: Include file name should not contain path separators[/yellow]"
+        )
+        include_file_name = Path(include_file_name).name
+
+    include_file = ssh_conf_d / include_file_name
+
+    if include_file.exists():
+        console.print(f"[yellow]![/yellow] Include file already exists: {include_file}")
+        return include_file
+
+    console.print(f"[dim]Creating include file: {include_file}[/dim]")
+
+    if dry_run:
+        console.print(f"[dim]Would create: {include_file}[/dim]")
+        return include_file
+
+    include_file.touch()
+    include_file.chmod(0o644)
+    manifest.add_file(include_file, "file", "generated/include_file")
+    console.print(f"[green]✓[/green] Created: {include_file}")
+
+    return include_file
+
+
+def guided_context_setup(
+    include_file: Path | None,
+    dry_run: bool,
+    force: bool = False,
+) -> bool:
+    """Guide user through creating first context credential.
+
+    Args:
+        include_file: Path to include file (if created), or None
+        dry_run: Preview mode (don't create credentials)
+        force: Skip prompts and use defaults
+
+    Returns:
+        True if context was created, False otherwise
+    """
+    if include_file is None:
+        console.print("[dim]Skipping context setup: No include file created[/dim]")
+        return False
+
+    # Check if we have an age key (required for encryption)
+    age_key_path = get_age_key_path()
+    if not age_key_path.exists():
+        console.print(
+            "[yellow]![/yellow] Cannot create context: Age key not found (required for encryption)"
+        )
+        return False
+
+    # Offer to create context credential
+    if not force:
+        console.print()
+        console.print("[cyan]Set up context credential?[/cyan]")
+        console.print(
+            "[dim]Context credentials provide fallback auth for all hosts in the include file[/dim]"
+        )
+
+        if not confirm("Create context credential now?", default=True):
+            console.print(
+                f"[dim]Skipped. Create later with: nssh cred ctx add <name> --file {include_file.name}[/dim]"
+            )
+            return False
+
+        # Prompt for context name
+        default_context_name = include_file.stem or "default"
+        context_name = ask_text(
+            "Enter context name",
+            default=default_context_name,
+        )
+
+        # Prompt for username
+        import os
+
+        default_username = os.getenv("USER", "admin")
+        username = ask_text(
+            "Enter default username for this context",
+            default=default_username,
+        )
+    else:
+        context_name = include_file.stem or "default"
+        username = "admin"
+
+    # Preview what will be created
+    console.print()
+    console.print("[bold]Context Preview:[/bold]")
+    console.print(f"  Name: {context_name}")
+    console.print(f"  File: {include_file.name}")
+    console.print(f"  User: {username}")
+    console.print()
+
+    if dry_run:
+        console.print(
+            f"[dim]Would create context '{context_name}' for file '{include_file.name}' with username '{username}'[/dim]"
+        )
+        console.print("[dim]Would prompt for password (not shown in dry-run)[/dim]")
+        return True
+
+    # Prompt for password
+    try:
+        password = prompt_password_with_confirmation(
+            f"[cyan]Enter password for {username} in context '{context_name}'[/cyan]"
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return False
+
+    # Create context and credential
+    try:
+        cm = CredentialManager()
+
+        # Create context
+        cm.create_context(context_name, include_file.name)
+        console.print(f"[green]✓[/green] Context '{context_name}' created")
+
+        # Add credential
+        cm.add_context_credential(context_name, username, password, overwrite=True)
+        console.print(
+            f"[green]✓[/green] Fallback credential set for context '{context_name}'"
+        )
+
+        console.print()
+        console.print("[bold green]✓ Context setup complete![/bold green]")
+        console.print(
+            f"[dim]All hosts in {include_file.name} will use this credential by default[/dim]"
+        )
+        return True
+    except Exception as exc:
+        console.print(f"[red]Error creating context: {exc}[/red]")
+        return False
+
+
+def offer_config_template(
+    manifest: InstallManifest,
+    dry_run: bool,
+    force: bool = False,
+) -> bool:
+    """Offer to create config.toml from example template.
+
+    Args:
+        manifest: Install manifest to track files
+        dry_run: Preview mode (don't create files)
+        force: Skip prompts and use defaults
+
+    Returns:
+        True if config file was created, False otherwise
+    """
+    config_path = Path.home() / ".config/nssh/config.toml"
+
+    if config_path.exists():
+        console.print(f"[green]✓[/green] Config file: {config_path}")
+        if not dry_run:
+            manifest.add_reference_file(config_path, "config")
+        return False
+
+    # Offer to create config file
+    if not force:
+        console.print()
+        console.print("[cyan]Create config file from template?[/cyan]")
+        console.print(
+            "[dim]Optional: Customize recording, encryption paths, etc.[/dim]"
+        )
+
+        if not confirm("Create config.toml?", default=False):
+            console.print(
+                "[dim]Skipped. Config file is optional (defaults will be used)[/dim]"
+            )
+            return False
+
+    if dry_run:
+        console.print(f"[dim]Would create: {config_path}[/dim]")
+        console.print("[dim]Would copy from: docs/examples/config.toml[/dim]")
+        return True
+
+    # Copy example config
+    try:
+        # Try to get the asset from package resources
+        import nssh.assets.examples  # type: ignore[import-not-found]
+
+        with resources.as_file(
+            resources.files(nssh.assets.examples) / "config.toml"  # type: ignore[attr-defined]
+        ) as example_config:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(example_config, config_path)
+            config_path.chmod(0o644)
+            console.print(f"[green]✓[/green] Created: {config_path}")
+            console.print("[dim]Edit this file to customize nssh behavior[/dim]")
+            manifest.add_file(config_path, "file", "generated/config")
+            return True
+    except (ImportError, FileNotFoundError):
+        # Fallback: try to find example in docs (development mode)
+        docs_example = Path("docs/examples/config.toml")
+        if docs_example.exists():
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(docs_example, config_path)
+            config_path.chmod(0o644)
+            console.print(f"[green]✓[/green] Created: {config_path}")
+            console.print("[dim]Edit this file to customize nssh behavior[/dim]")
+            manifest.add_file(config_path, "file", "generated/config")
+            return True
+        else:
+            console.print(
+                "[yellow]![/yellow] Could not find example config.toml template"
+            )
+            return False
 
 
 def check_credentials_file(manifest: InstallManifest, dry_run: bool) -> None:

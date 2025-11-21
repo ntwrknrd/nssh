@@ -78,3 +78,23 @@ def test_self_status_command_runs_in_isolated_env(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     assert "nssh self status" in result.stdout
+
+
+def test_self_init_command_dry_run(tmp_path, monkeypatch):
+    """Init command --dry-run executes without creating files."""
+
+    share_dir = tmp_path / "share"
+    share_dir.mkdir(parents=True)
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[self]\n")
+
+    monkeypatch.setenv("NSSH_SHARE_DIR", str(share_dir))
+    monkeypatch.setenv("NSSH_CONFIG", str(config_path))
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("nssh.cli.self.init.check_nssh_on_path", lambda: True)
+
+    result = runner.invoke(self_app, ["init", "--dry-run", "--force"])
+
+    assert result.exit_code == 0
+    assert "nssh self init" in result.stdout

@@ -11,7 +11,7 @@ from nssh.cli.common.help import UsageRow, UsageSection, render_usage
 from nssh import __version__
 
 from .cleanup import cleanup_command
-from .install import install_command
+from .init import init_command
 from .reinstall import reinstall_command
 from .status import status_command
 
@@ -20,7 +20,7 @@ APP_SUBTITLE = "Install nssh CLI + optional shell helpers"
 
 app = typer.Typer(add_help_option=False, rich_markup_mode=None)
 
-app.command("install")(install_command)
+app.command("init")(init_command)
 app.command("cleanup")(cleanup_command)
 app.command("status")(status_command)
 app.command("reinstall")(reinstall_command)
@@ -37,8 +37,8 @@ def _usage_sections() -> list[UsageSection]:
             "Commands",
             rows=[
                 UsageRow(
-                    "nssh self install [OPTIONS]",
-                    "Install CLI and optional shell helpers",
+                    "nssh self init [OPTIONS]",
+                    "Initialize nssh with configuration and shell helpers",
                 ),
                 UsageRow(
                     "nssh self cleanup [OPTIONS]",

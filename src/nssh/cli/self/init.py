@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Install command for self - install nssh and optional shell helpers."""
+"""Init command for self - initialize nssh with configuration and shell helpers."""
 
 from __future__ import annotations
 
+import os
+import platform
 import sys
 from pathlib import Path
 from typing import Annotated, Optional
@@ -11,8 +13,14 @@ from nssh.cli import typer
 from nssh.cli.self.assets import append_profile_snippet, install_resource
 from nssh.cli.self.manifest import InstallManifest, write_manifest
 from nssh.cli.self.system import check_nssh_on_path, check_system_dependencies
-from nssh.cli.self.validation import validate_and_setup_configuration
+from nssh.cli.self.validation import (
+    validate_and_setup_configuration,
+    create_first_include_file,
+    guided_context_setup,
+    offer_config_template,
+)
 from nssh.cli.common import ui
+from nssh.cli.common.prompt import confirm
 from nssh.core.env.paths import (
     fish_completions_dir as resolve_fish_completions_dir,
     fish_functions_dir as resolve_fish_functions_dir,
@@ -23,7 +31,28 @@ from nssh.core.ui.console import get_console
 console = get_console()
 
 
-def install_command(
+def detect_user_shell() -> tuple[str, Path]:
+    """Detect user's shell and suggest rc file.
+
+    Returns:
+        Tuple of (shell_name, rc_file_path)
+    """
+    shell = os.environ.get("SHELL", "")
+
+    if "fish" in shell:
+        return "fish", Path.home() / ".config/fish/config.fish"
+    elif "zsh" in shell:
+        return "zsh", Path.home() / ".zshrc"
+    elif "bash" in shell:
+        # Prefer .bashrc on Linux, .bash_profile on macOS
+        if platform.system() == "Darwin":
+            return "bash", Path.home() / ".bash_profile"
+        return "bash", Path.home() / ".bashrc"
+    else:
+        return "unknown", Path.home() / ".bashrc"
+
+
+def init_command(
     install_shell_helpers: Annotated[
         bool,
         typer.Option(
@@ -61,7 +90,7 @@ def install_command(
         typer.Option("-f", "--force", help="Overwrite files without prompting"),
     ] = False,
 ):
-    """Install shell helpers and optional shell integration."""
+    """Initialize nssh with configuration and optional shell integration."""
     share_dir = resolve_share_dir()
     fish_functions_dir = resolve_fish_functions_dir()
     fish_completions_dir = resolve_fish_completions_dir()
@@ -82,8 +111,8 @@ def install_command(
         sys.exit(1)
 
     ui.show_panel(
-        "nssh self install",
-        "Validate configuration and install shell helpers",
+        "nssh self init",
+        "Initialize nssh configuration and shell helpers",
         style="cyan",
     )
 
@@ -95,6 +124,19 @@ def install_command(
     validate_and_setup_configuration(manifest, dry_run=dry_run)
 
     console.print()  # Blank line for readability
+
+    # Auto-detect shell and offer integration if not explicitly specified
+    if not install_shell_helpers and append_shell_snippet is None and not force:
+        shell_name, rc_file = detect_user_shell()
+        console.print(f"[dim]Detected shell: {shell_name}[/dim]")
+
+        if shell_name != "unknown":
+            if confirm(f"Install shell integration for {shell_name}?", default=True):
+                install_shell_helpers = True
+                append_shell_snippet = rc_file
+                console.print(
+                    f"[dim]Will install helpers and append to {rc_file}[/dim]"
+                )
 
     # Install shell helpers if requested
     if install_shell_helpers:
@@ -158,6 +200,16 @@ def install_command(
         append_profile_snippet(
             append_shell_snippet.expanduser(), share_dir, dry_run, manifest
         )
+
+    # Offer to create first include file
+    created_include_file = create_first_include_file(manifest, dry_run, force)
+
+    # Offer to set up context credential for the include file
+    if created_include_file:
+        guided_context_setup(created_include_file, dry_run, force)
+
+    # Offer to create config.toml from template
+    offer_config_template(manifest, dry_run, force)
 
     # Write manifest
     if not dry_run:

@@ -16,9 +16,86 @@ from nssh.core.env.paths import (
     ssh_config_path,
     ssh_include_dir,
 )
+from nssh.core.auth.credentials import CredentialManager
+from nssh.core.ssh.config import SSHConfigParser
 from nssh.core.ui.console import get_console
 
 console = get_console()
+
+
+def show_next_steps() -> None:
+    """Show actionable next steps based on current configuration state."""
+    age_key_path = get_age_key_path()
+    ssh_config = ssh_config_path()
+    ssh_conf_d = ssh_include_dir()
+
+    has_age_key = age_key_path.exists()
+    has_ssh_config = ssh_config.exists()
+    has_include_files = ssh_conf_d.exists() and list(ssh_conf_d.glob("*"))
+
+    # Check for contexts
+    has_contexts = False
+    try:
+        cm = CredentialManager()
+        contexts = cm.list_contexts()
+        has_contexts = len(contexts) > 0
+    except Exception:
+        pass
+
+    # Check for hosts
+    has_hosts = False
+    hosts: list[tuple[str, list[str]]] = []
+    try:
+        parser = SSHConfigParser()
+        for file_path in parser.find_include_files():
+            _, file_hosts = parser.parse_ssh_config(file_path)
+            hosts.extend(file_hosts)
+        has_hosts = len(hosts) > 0
+    except Exception:
+        pass
+
+    console.print("[bold cyan]Setup Status:[/bold cyan]")
+    console.print(
+        f"  {'[green]✓[/green]' if has_age_key else '[red]✗[/red]'} Age encryption key"
+    )
+    console.print(
+        f"  {'[green]✓[/green]' if has_ssh_config else '[red]✗[/red]'} SSH config"
+    )
+    console.print(
+        f"  {'[green]✓[/green]' if has_include_files else '[yellow]![/yellow]'} Include files ({len(list(ssh_conf_d.glob('*'))) if ssh_conf_d.exists() else 0})"
+    )
+    console.print(
+        f"  {'[green]✓[/green]' if has_contexts else '[yellow]![/yellow]'} Contexts ({len(contexts) if has_contexts else 0})"
+    )
+    console.print(
+        f"  {'[green]✓[/green]' if has_hosts else '[yellow]![/yellow]'} Hosts ({len(hosts) if has_hosts else 0})"
+    )
+
+    console.print()
+    console.print("[bold cyan]Next Steps:[/bold cyan]")
+
+    if not has_age_key:
+        console.print("  1. [cyan]Run: nssh self init[/cyan] (to create age key)")
+    elif not has_ssh_config or not has_include_files:
+        console.print("  1. [cyan]Run: nssh self init[/cyan] (to set up SSH config)")
+    elif not has_contexts:
+        console.print(
+            "  1. [cyan]Create first context:[/cyan] nssh cred ctx add <name> --file <file>"
+        )
+        console.print(
+            "     [dim]or run:[/dim] nssh self init [dim](guided setup)[/dim]"
+        )
+    elif not has_hosts:
+        console.print("  1. [cyan]Add first host:[/cyan] nssh host add")
+    else:
+        console.print(
+            "  [green]✓ Ready to connect![/green] Try: [cyan]nssh <hostname>[/cyan]"
+        )
+        console.print()
+        console.print("[dim]Additional commands:[/dim]")
+        console.print("  [dim]• nssh host list - Show all configured hosts[/dim]")
+        console.print("  [dim]• nssh cred ctx list - Show all contexts[/dim]")
+        console.print("  [dim]• nssh log list - Show recorded sessions[/dim]")
 
 
 def status_command():
@@ -146,3 +223,7 @@ def status_command():
             exists = profile_path.exists()
             status_icon = "[green]✓[/green]" if exists else "[red]✗[/red]"
             console.print(f"  {status_icon} {profile_path}")
+
+    # Show next steps based on configuration state
+    console.print()
+    show_next_steps()

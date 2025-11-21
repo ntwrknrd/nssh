@@ -3,7 +3,12 @@
 This guide covers the full CLI usage, credential workflows, configuration details, and development notes. Pair it with the main [README.md](../README.md) for a high-level overview.
 
 ## Table of Contents
-- [Quick Start Reference](#quick-start-reference)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Initial Setup](#initial-setup)
+  - [SSH Include Files and Context Credentials](#ssh-include-files-and-context-credentials)
+  - [First Connection](#first-connection)
+- [Quick Reference](#quick-reference)
 - [Core Concepts](#core-concepts)
   - [Credential Resolution](#credential-resolution)
 - [Configuration](#configuration)
@@ -18,17 +23,322 @@ This guide covers the full CLI usage, credential workflows, configuration detail
   - [nssh self (CLI & Shell Management)](#nssh-self-cli--shell-management)
 - [Security Best Practices](#security-best-practices)
   - [Credential Protection](#credential-protection)
-  - [Password Handling](#password-handling)
   - [Recording Privacy](#recording-privacy)
   - [File Permissions](#file-permissions)
   - [Key Management](#key-management)
   - [Safe Debugging](#safe-debugging)
-  - [Manual Credential Editing (Advanced)](#manual-credential-editing)
   - [Key Rotation](#key-rotation)
-  - [Multi-User Security](#multi-user-security)
 - [Troubleshooting](#troubleshooting)
 
-## Quick Start Reference
+## Getting Started
+
+This section walks you through setting up nssh from scratch to your first SSH connection.
+
+### Prerequisites
+
+Before installing nssh, ensure you have these tools installed:
+
+1. **OpenSSH** - SSH client (ships with most Unix systems)
+   ```bash
+   ssh -V  # Should show OpenSSH version
+   ```
+
+2. **age** - Modern file encryption tool for credential storage
+   ```bash
+   # macOS
+   brew install age
+
+   # Linux (most distros)
+   # Download from https://github.com/FiloSottile/age/releases
+   ```
+
+3. **fzf** - Fuzzy finder for interactive host selection
+   ```bash
+   # macOS
+   brew install fzf
+
+   # Linux
+   # apt: sudo apt install fzf
+   # dnf: sudo dnf install fzf
+   ```
+
+4. **uv** - Python package installer
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+5. **Python 3.14** - Install via uv
+   ```bash
+   uv python install 3.14
+   ```
+
+6. **(Optional) asciinema v3+** - For session recording features
+   ```bash
+   # macOS
+   brew install asciinema
+
+   # Linux: https://docs.asciinema.org/getting-started/
+   ```
+
+### Initial Setup
+
+**Step 1: Install nssh**
+
+```bash
+# Clone the repository
+git clone https://github.com/ntwrknrd/nssh.git
+cd nssh
+
+# Install nssh binary to ~/.local/bin
+uv tool install .
+```
+
+**Step 2: Initialize nssh**
+
+Run the interactive setup wizard:
+
+```bash
+nssh self init
+```
+
+This command will guide you through:
+- Creating age encryption key (if missing)
+- Setting up SSH config structure
+- Installing shell integration (auto-detects your shell)
+- Creating first include file (optional)
+- Setting up context credential (optional)
+- Creating config.toml (optional)
+
+**Manual setup options:**
+
+If you prefer to skip interactive prompts:
+```bash
+# Non-interactive with defaults
+nssh self init --force
+
+# Preview without making changes
+nssh self init --dry-run
+
+# Manual shell integration (skip auto-detection)
+nssh self init --install-shell-helpers --append-shell-snippet ~/.bashrc
+```
+
+After running `init`, reload your shell:
+```bash
+source ~/.bashrc  # or ~/.zshrc, or restart your terminal
+```
+
+**Step 3: Verify installation**
+
+```bash
+nssh --help        # Should show nssh help
+nssh self status   # Shows what's configured and next steps
+```
+
+After initialization, you'll have:
+- `~/.local/bin/nssh` - The nssh binary (installed by uv)
+- `~/.config/age/keys.txt` - Your age encryption key
+- `~/.ssh/config` - SSH config with Include structure
+- `~/.ssh/conf.d/` - Directory for include files (if created)
+
+The following files are created automatically as you use nssh:
+- `~/.ssh/nssh_credentials.age` - Encrypted password storage (when you add credentials)
+- `~/.ssh/.nssh_host_index` - Fast host lookup index (when you add hosts)
+- `~/.ssh/backups/` - SSH config backups (timestamped, when you modify config)
+
+### What `nssh self init` Does
+
+The `nssh self init` command is an interactive setup wizard that automates the entire configuration process. Here's what happens when you run it:
+
+**1. System Validation**
+- Checks for required dependencies (age, fzf, Python 3.14+)
+- Verifies nssh is installed and on PATH
+- Shows clear error messages with installation links if anything is missing
+
+**2. Age Encryption Key**
+- Checks if `~/.config/age/keys.txt` exists
+- If missing, offers to create it with `age-keygen`
+- Sets secure permissions (0600) automatically
+
+**3. SSH Config Structure**
+- Checks for `~/.ssh/config`
+- If missing, offers to create with `Include` directive structure
+- Creates `~/.ssh/conf.d/` directory for include files
+- Uses best practices (ServerAliveInterval 60, Include pattern)
+
+**4. Shell Integration** (Auto-detected)
+- Detects your shell from `$SHELL` environment variable
+- Suggests appropriate rc file (`.bashrc`, `.zshrc`, `.config/fish/config.fish`)
+- Offers to install shell helpers and append sourcing snippet
+- Fish users get completions automatically
+
+**5. First Include File** (Optional)
+- Offers to create your first include file (e.g., `default`, `work`, `homelab`)
+- Creates file in `~/.ssh/conf.d/` with proper permissions
+- Skipped if include files already exist
+
+**6. Context Credential** (Optional)
+- If include file was created, offers to set up context credential
+- Prompts for context name, username, and password
+- Creates encrypted credential as fallback for all hosts in that include file
+- Password entered securely (not echoed, confirmed twice)
+
+**7. Config Template** (Optional)
+- Offers to create `~/.config/nssh/config.toml` from example
+- Allows customization of recording, encryption paths, etc.
+- Completely optional (defaults work fine)
+
+**Interactive vs. Non-Interactive:**
+- **Default mode**: Prompts for each step with sensible defaults
+- **`--force` flag**: Uses defaults, no prompts (except for passwords)
+- **`--dry-run` flag**: Shows what would be done without making changes
+- **Manual flags**: Can specify `--install-shell-helpers`, `--append-shell-snippet`, etc.
+
+**After init completes:**
+- Run `nssh self status` to see what was configured
+- Get actionable next steps (e.g., "Add first host: nssh host add")
+- All changes tracked in manifest for clean uninstall via `nssh self cleanup`
+
+### SSH Include Files and Context Credentials
+
+Before adding hosts, it's recommended to organize your SSH config using Include files and set up context credentials. This provides fallback authentication for entire groups of hosts.
+
+> **NOTE:** `nssh self init` can guide you through this setup interactively. The instructions below are for manual setup or for understanding how it works.
+
+**What are Include files?**
+
+SSH config Include files let you split your configuration into multiple files (e.g., `work_hosts`, `homelab_hosts`, `prod_hosts`). This keeps your config organized and enables nssh's context-based credential fallbacks.
+
+**Step 1: Create an Include file**
+
+```bash
+# Create a file for your hosts (e.g., work equipment)
+touch ~/.ssh/work_hosts
+
+# Or for homelab devices
+touch ~/.ssh/homelab_hosts
+```
+
+**Step 2: Reference it in your main SSH config**
+
+Add an Include directive at the top of `~/.ssh/config`:
+
+```bash
+# Add to ~/.ssh/config
+Include work_hosts
+Include homelab_hosts
+```
+
+**Step 3: Create a context credential (fallback)**
+
+A context credential provides default authentication for all hosts in an Include file:
+
+```bash
+# Create a context named "work" that references the work_hosts file
+nssh cred ctx add work --file work_hosts --username alice
+
+# You'll be prompted to enter the password (twice for safety)
+# This password will be used for any host in work_hosts that doesn't have its own credential
+```
+
+**Why does this matter?**
+
+When you connect to a host, nssh uses this five-step credential resolution:
+
+1. **Host-specific credential** (if you added one with `nssh cred add hostname`)
+2. **Context fallback credential** (the credential you just created above)
+3. **SSH keys** (if no password credential found)
+
+This means:
+- Add 20 switches to `work_hosts` → only set the password once in the context credential
+- Override specific devices → use `nssh cred add special-switch --username admin`
+- No credential needed → nssh falls back to SSH key authentication
+
+For detailed credential resolution behavior and examples, see [Core Concepts - Credential Resolution](#credential-resolution).
+
+### First Connection
+
+**Option 1: Add host to an Include file with context credential**
+
+If you set up a context credential above, add hosts to that Include file without re-entering passwords:
+
+```bash
+# Add to work_hosts - will use the context credential you created
+nssh host add switch.example.com --file work_hosts --user alice
+
+# Or let it infer the username from the context
+nssh host add switch.example.com --file work_hosts
+```
+
+The host will automatically use the context credential for authentication.
+
+**Option 2: Add host with its own password**
+
+For hosts that need different credentials, create a host-specific credential:
+
+```bash
+# Interactive guided setup (recommended for first time)
+nssh host add
+
+# Or specify details directly
+nssh host add switch.example.com --user admin
+
+# You'll be prompted for the password (entered twice for safety)
+```
+
+This does three things:
+1. Adds the host to your SSH config (`~/.ssh/config`)
+2. Stores the encrypted password in `~/.ssh/nssh_credentials.age`
+3. Tests the connection automatically (use `--no-test` to skip)
+
+**Option 3: Add host with SSH key authentication**
+
+If you prefer SSH keys:
+
+```bash
+nssh host add server.example.com --user myuser --auth key
+```
+
+**Connect to your host**
+
+```bash
+# Exact hostname - connects immediately
+nssh switch.example.com
+
+# Partial match - opens fuzzy finder if multiple matches
+nssh switch
+
+# Connect as different user
+nssh admin@switch.example.com
+```
+
+**What just happened?**
+
+1. nssh looked up "switch.example.com" in your SSH config
+2. Found the matching credential (username + encrypted password)
+3. Decrypted the password using your age key
+4. Injected the password through an in-process PTY connector
+5. Established the SSH connection
+
+**Next Steps**
+
+- View your hosts: `nssh host list`
+- Manage credentials: `nssh cred list`
+- View recordings (if enabled): `nssh log list`
+- Benchmark performance: `nssh benchmark run switch.example.com`
+
+**Common First-Time Issues**
+
+| Issue | Solution |
+|-------|----------|
+| `nssh: command not found` | Ensure `~/.local/bin` is in your PATH: `export PATH="$HOME/.local/bin:$PATH"` |
+| `Failed to decrypt credentials` | Verify age key exists: `ls ~/.config/age/keys.txt` |
+| `age-keygen: command not found` | Install age: `brew install age` (macOS) or download from [age releases](https://github.com/FiloSottile/age/releases) |
+| Connection test fails | Check credentials are correct, or skip test with `--no-test` flag |
+
+See the sections below for detailed CLI usage and advanced features.
+
+## Quick Reference
 
 ```bash
 nssh core-switch                           # Connect (fuzzy search)
@@ -216,10 +526,10 @@ Optional shell integration for Fish, Bash, Zsh with history tracking and tab com
 
 ```bash
 # Install shell helpers + completions
-nssh self install --install-shell-helpers --append-shell-snippet ~/.bashrc
+nssh self init --install-shell-helpers --append-shell-snippet ~/.bashrc
 
 # Preview changes
-nssh self install --dry-run
+nssh self init --dry-run
 
 # Remove shell helpers (keeps CLI binary)
 nssh self cleanup

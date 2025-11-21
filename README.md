@@ -7,9 +7,6 @@ SSH tooling for operators who need fast, repeatable access to network equipment 
 - [Demo](#demo)
 - [Features](#features)
 - [Installation](#installation)
-  - [Prerequisites](#prerequisites)
-  - [Install](#install)
-  - [Uninstall](#uninstall)
 - [Learn More](#learn-more)
 - [Acknowledgements](#acknowledgements)
 - [Roadmap](#roadmap)
@@ -30,29 +27,25 @@ _Coming soon: asciinema embed highlighting fuzzy host search + credential resolu
 
 ## Installation
 
-### Prerequisites
+### Quick Install
 
-1. Ensure OpenSSH, `age`, `fzf`, `uv`, and Python 3.14 (installed via `uv python install 3.14`) are available on your system.
-2. (Recommended) Install `asciinema` v3+ for session recording features - see [Session Recording & Playback](docs/USER_GUIDE.md#nssh-log-session-recording)
-3. Ensure you have an age key configured for credential encryption - see [Key Management](docs/USER_GUIDE.md#key-management).
+```bash
+# Install prerequisites: OpenSSH, age, fzf, uv, Python 3.14
 
+# Clone and install
+git clone https://github.com/ntwrknrd/nssh.git
+cd nssh
+uv tool install .
 
-### Install
+# Initialize nssh (interactive setup)
+nssh self init
+```
 
-1. Clone the repo:
-   ```bash
-   git clone https://github.com/ntwrknrd/nssh.git
-   cd nssh
-   ```
-2. Install the Python entry points into `~/.local/bin`:
-   ```bash
-   uv tool install .
-   ```
-3. (Optional) Install shell helpers for better history integration and Atuin support:
-   ```bash
-   nssh self install --install-shell-helpers --append-shell-snippet ~/.bashrc
-   # add --dry-run to preview, --install-fish-completions for Fish completions
-   ```
+The `init` command guides you through: age key creation, SSH config setup, shell integration, include file creation, and optional context credential setup.
+
+> **TIP:** After installation, run `nssh self status` to see what's configured and get actionable next steps.
+
+For detailed prerequisites, manual setup options, and platform-specific installation instructions, see [Getting Started](docs/USER_GUIDE.md#getting-started).
 
 
 ### Uninstall
