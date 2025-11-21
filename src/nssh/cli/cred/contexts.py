@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from pathlib import Path
+from typing import Dict, List, Optional
 
 from nssh.cli import typer
 from nssh.cli.common import ui
@@ -11,11 +12,66 @@ from nssh.cli.common.prompt import (
     prompt_required,
 )
 from nssh.cli.common.workflows import confirm_or_exit
+from nssh.core.env.paths import ssh_include_dir
+from nssh.core.ssh.config import SSHConfigParser
 
 from .common import complete_context, console, get_manager
 
 
-def create_context_command(
+def _abbreviate_home(path: Path) -> str:
+    """Return path string with home directory replaced by ``~`` when possible."""
+
+    home = Path.home().resolve()
+    try:
+        candidate = path.expanduser().resolve()
+    except OSError:
+        candidate = path.expanduser()
+
+    candidate_str = str(candidate)
+    home_str = str(home)
+
+    if candidate_str.startswith(home_str):
+        remainder = candidate_str[len(home_str) :].lstrip("/")
+        return f"~/{remainder}" if remainder else "~"
+
+    return candidate_str
+
+
+def _include_lookup() -> Dict[str, List[Path]]:
+    """Return lookup of include file basenames to actual config paths."""
+
+    parser = SSHConfigParser()
+    lookup: Dict[str, List[Path]] = {}
+
+    for include_path in parser.find_include_files():
+        lookup.setdefault(include_path.name, []).append(include_path)
+
+    return lookup
+
+
+def _display_include_path(
+    include_name: str, include_lookup: Dict[str, List[Path]]
+) -> str:
+    """Return preferred display string for an include file."""
+
+    if not include_name:
+        return "-"
+
+    matches = include_lookup.get(include_name)
+    if matches:
+        display = _abbreviate_home(matches[0])
+        extra = len(matches) - 1
+        return f"{display} (+{extra} more)" if extra > 0 else display
+
+    include_dir_candidate = ssh_include_dir() / include_name
+    if include_dir_candidate.exists():
+        return _abbreviate_home(include_dir_candidate)
+
+    ssh_root_candidate = Path.home() / ".ssh" / include_name
+    return _abbreviate_home(ssh_root_candidate)
+
+
+def add_context_command(
     ctx: typer.Context,
     name: Optional[str] = typer.Argument(None, help="Context name"),
     file: Optional[str] = typer.Option(
@@ -41,30 +97,25 @@ def create_context_command(
         console.print(f"Context '{final_name}' created for file '{git_include_file}'")
         console.print("\nNext: Add credentials with:")
         console.print(
-            f"  [cyan]nssh cred add-context-cred {final_name} --username USER[/cyan]"
+            f"  [cyan]nssh cred ctx update {final_name} --username USER[/cyan]"
         )
     except Exception as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1)
 
 
-def add_context_cred_command(
+def update_context_command(
     ctx: typer.Context,
     name: Optional[str] = typer.Argument(
         None, help="Context name", autocompletion=complete_context
     ),
     username: Optional[str] = typer.Option(None, "--username", help="Username"),
-    overwrite: bool = typer.Option(
-        False,
-        "--overwrite",
-        help="Replace the existing fallback credential if present",
-    ),
 ) -> None:
     """Set or replace the fallback credential for a context."""
 
     cm = get_manager(ctx)
 
-    ui.show_panel("Add Context Credential", "Add username/password to context")
+    ui.show_panel("Update Context Credential", "Set username/password for context")
 
     final_name = prompt_required("Context name", name)
     final_username = prompt_required("Username", username)
@@ -78,16 +129,9 @@ def add_context_cred_command(
         raise typer.Exit(1)
 
     try:
-        cm.add_context_credential(
-            final_name, final_username, password, overwrite=overwrite
-        )
+        cm.add_context_credential(final_name, final_username, password, overwrite=True)
         console.print("\n[bold green]✓ Success![/bold green]")
-        if overwrite:
-            console.print(
-                f"Fallback credential for context '{final_name}' was replaced"
-            )
-        else:
-            console.print(f"Fallback credential set for context '{final_name}'")
+        console.print(f"Fallback credential set for context '{final_name}'")
     except Exception as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1)
@@ -109,11 +153,12 @@ def list_contexts_command(
     ui.show_panel("Context List", "All credential contexts")
 
     contexts = cm.list_contexts()
+    include_lookup = _include_lookup()
 
     if not contexts:
         console.print("\n[yellow]No contexts configured[/yellow]")
         console.print("\nCreate one with:")
-        console.print("  [cyan]nssh cred create-context NAME --file NAME[/cyan]")
+        console.print("  [cyan]nssh cred ctx add NAME --file NAME[/cyan]")
         return
 
     if search:
@@ -139,10 +184,13 @@ def list_contexts_command(
     rows = []
     for entry in contexts:
         credential = entry["credential"]
+        include_display = _display_include_path(
+            entry["git_include_file"], include_lookup
+        )
         rows.append(
             (
                 entry["name"],
-                entry["git_include_file"],
+                include_display,
                 credential["username"] if credential else "-",
             )
         )
@@ -157,7 +205,7 @@ def list_contexts_command(
     )
 
 
-def delete_context_command(
+def rm_context_command(
     ctx: typer.Context,
     name: Optional[str] = typer.Argument(
         None, help="Context name", autocompletion=complete_context

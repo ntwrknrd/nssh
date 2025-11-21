@@ -17,7 +17,7 @@ from .listing import list_hosts_command
 from .remove import remove_command
 from .update import update_command
 from .context import (
-    complete_config_file,
+    complete_context,
     get_parser as _get_parser,
 )
 from .sort import cmd_sort
@@ -37,17 +37,16 @@ app.command("update")(update_command)
 @app.command("sort")
 def sort(
     ctx: typer.Context,
-    file: Optional[str] = typer.Option(
+    context: Optional[str] = typer.Option(
         None,
-        "--file",
-        help="SSH config file name in ~/.ssh/",
-        autocompletion=complete_config_file,
+        "--context",
+        help="Context name (default: sort all Include files)",
+        autocompletion=complete_context,
     ),
-    all: bool = typer.Option(False, "--all", help="Sort all Include files"),
 ):
     """Sort SSH config files alphabetically"""
     parser = _get_parser(ctx)
-    cmd_sort(parser, file=file, all=all)
+    cmd_sort(parser, context_arg=context)
 
 
 def _usage_sections() -> list[UsageSection]:
@@ -56,78 +55,40 @@ def _usage_sections() -> list[UsageSection]:
             "Commands",
             rows=[
                 UsageRow(
-                    "nssh host add [FQDN] [OPTIONS]",
-                    "Add new SSH host to config file (interactive or with options)",
-                    examples=["nssh host add server.example.com --password"],
+                    "nssh host [bold]add[/bold] [FQDN] [OPTIONS]",
+                    "Add SSH host to config file",
                 ),
                 UsageRow(
-                    "nssh host rm [HOSTNAME]",
-                    "Remove host from config and optionally delete stored credentials",
+                    "nssh host [bold]rm[/bold] [HOSTNAME] [OPTIONS]",
+                    "Remove host from config",
                 ),
                 UsageRow(
-                    "nssh host list [SEARCH]",
-                    "List all hosts from SSH configs (optionally filter by keyword)",
+                    "nssh host [bold]list[/bold] [OPTIONS]",
+                    "List all hosts from SSH configs",
                 ),
                 UsageRow(
-                    "nssh host sort [OPTIONS]",
-                    "Sort hosts alphabetically and remove duplicates",
+                    "nssh host [bold]sort[/bold] [OPTIONS]",
+                    "Sort hosts alphabetically in config files",
                 ),
                 UsageRow(
-                    "nssh host update [HOSTNAME] [OPTIONS]",
-                    "Update authentication and/or auto-fix compatibility issues",
-                    examples=["nssh host update myhost --auth password --compat"],
+                    "nssh host [bold]update[/bold] [HOSTNAME]",
+                    "Auto-detect auth requirements and compatibility",
                 ),
             ],
         ),
         UsageSection(
-            "Add Options",
+            "Options",
             rows=[
                 UsageRow(
-                    "--hostname NAME",
-                    "Custom SSH alias (default: first part of FQDN)",
+                    "--auth password|key",
+                    "Authentication type (default: password)",
                 ),
                 UsageRow(
-                    "--user USERNAME",
-                    "SSH username (default: context, $NSSH_DEFAULT_USER, or $USER)",
+                    "--context NAME",
+                    "Specify context name (default: interactive selection)",
                 ),
-                UsageRow("--port PORT", "SSH port (default: 22)"),
-                UsageRow(
-                    "--password / --key",
-                    "Choose password auth (managed via nssh cred) or key-only auth",
-                ),
-                UsageRow(
-                    "--file NAME",
-                    "Target SSH config file in ~/.ssh/ (skips interactive selection)",
-                ),
-                UsageRow("--no-test", "Skip connection test after adding host"),
-                UsageRow(
-                    "--skip-password-prompt",
-                    "Skip password prompt and use context fallback credentials",
-                ),
-            ],
-        ),
-        UsageSection(
-            "Sort Options",
-            rows=[
-                UsageRow("--file NAME", "Sort specific file in ~/.ssh/"),
-                UsageRow("--all", "Sort all Include files found in ~/.ssh/config"),
-            ],
-        ),
-        UsageSection(
-            "Update Options",
-            rows=[
-                UsageRow(
-                    "--auth TYPE",
-                    "Set authentication: password, keyboard-interactive, publickey",
-                ),
-                UsageRow(
-                    "--compat",
-                    "Auto-detect and fix SSH compatibility issues",
-                ),
-                UsageRow(
-                    "--max-iterations N",
-                    "Maximum attempts for compatibility fixing (default: 5)",
-                ),
+                UsageRow("--search TERM, -s", "Filter by keyword (repeatable)"),
+                UsageRow("--force, -f", "Skip all prompts and use defaults"),
             ],
         ),
     ]

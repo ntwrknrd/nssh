@@ -58,9 +58,13 @@ def _print_examples(row: UsageRow) -> None:
 
     console = get_console()
     for example in row.examples:
+        if row.example_prefix:
+            text = f"{row.example_prefix}: {example}"
+        else:
+            text = example
         console.print(
             Padding(
-                _to_text(f"{row.example_prefix}: {example}", style="dim"),
+                _to_text(text, style="dim"),
                 (0, 0, 0, 4),
             )
         )
@@ -77,9 +81,12 @@ def render_usage(
 
     ui.show_panel(app_title, subtitle, style="cyan")
     console = get_console()
+    console.print()  # Add blank line after banner
 
-    for section in sections:
-        console.print(f"\n[bold]{section.title}:[/bold]")
+    for idx, section in enumerate(sections):
+        if section.title:
+            prefix = "\n" if idx > 0 else ""
+            console.print(f"{prefix}[bold]{section.title}:[/bold]")
 
         if section.body is not None:
             content: RenderableType

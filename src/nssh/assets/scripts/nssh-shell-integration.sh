@@ -12,15 +12,17 @@
 nssh() {
     local -a original_args=("$@")
 
-    # Find nssh wrapper (check common locations)
-    local nssh_cmd=""
-    if [ -x "$HOME/.local/bin/nssh" ]; then
-        nssh_cmd="$HOME/.local/bin/nssh"
-    elif [ -x "$HOME/bin/nssh" ]; then
-        nssh_cmd="$HOME/bin/nssh"
-    else
-        echo "Error: nssh wrapper not found in \$HOME/.local/bin or \$HOME/bin" >&2
-        return 1
+    # Resolve the installed nssh CLI (prefer PATH, fall back to common locations)
+    local nssh_cmd
+    if ! nssh_cmd="$(type -P nssh 2>/dev/null)"; then
+        if [ -x "$HOME/.local/bin/nssh" ]; then
+            nssh_cmd="$HOME/.local/bin/nssh"
+        elif [ -x "$HOME/bin/nssh" ]; then
+            nssh_cmd="$HOME/bin/nssh"
+        else
+            echo "Error: nssh binary not found on PATH or in \$HOME/.local/bin" >&2
+            return 1
+        fi
     fi
 
     if [ $# -eq 0 ]; then
@@ -28,13 +30,13 @@ nssh() {
         return 1
     fi
 
-    # Allow Typer/click completion helpers to reach the CLI without wrapper logic
+    # Allow Typer/click completion helpers to reach the CLI without custom routing
     if [ -n "${_NSSH_COMPLETE:-}" ] || [ -n "${_TYPER_COMPLETE:-}" ]; then
         command "$nssh_cmd" "$@"
         return $?
     fi
 
-    local -a subcommands=(connect host cred log benchmark install-shell recording-check help version __list-subcommands)
+    local -a subcommands=(host cred log benchmark bootstrap recording-check help version __list-subcommands)
     local detected
     if detected=$(command "$nssh_cmd" __list-subcommands 2>/dev/null); then
         read -r -a subcommands <<<"$detected"
@@ -62,8 +64,7 @@ nssh() {
         atuin_id=$(atuin history start $actual_cmd)
     fi
 
-    # Call nssh wrapper (which uses unified connect.py)
-    # Use 'command' to bypass the function and call the actual executable
+    # Use 'command' to bypass this function and invoke the installed CLI
     command "$nssh_cmd" "${original_args[@]}"
     local exit_code=$?
 

@@ -10,7 +10,6 @@ from typing import Callable, Sequence
 from typing import TYPE_CHECKING
 
 from nssh.core.ui.console import get_console
-from nssh.core.diag.version import maybe_print_version_and_exit
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     pass
@@ -75,8 +74,6 @@ def run_cli(
         return
 
     args = list(sys.argv[1:] if argv is None else argv)
-    maybe_print_version_and_exit(args, cli_name=cli_name)
-
     if _is_global_help_request(args):
         usage_cb()
         raise SystemExit(0)

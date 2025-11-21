@@ -18,6 +18,37 @@ age_key = "~/.config/age/keys.txt"
 # Tilde (~) expansion is supported
 credential_file = "~/.ssh/nssh_credentials.age"
 
+[ssh]
+# Main SSH config file location
+# Default: ~/.ssh/config
+# Environment override: NSSH_SSH_CONFIG=/path/to/config
+# Tilde (~) expansion is supported
+config_file = "~/.ssh/config"
+
+# Include directory for context-specific SSH config files
+# When adding hosts with 'nssh host add', context files are created here
+# Default: ~/.ssh/conf.d
+# Environment override: NSSH_SSH_CONF_INCLUDE=/path/to/conf.d
+# Tilde (~) expansion is supported
+include_dir = "~/.ssh/conf.d"
+
+# Host index file for fast lookups
+# Default: ~/.ssh/.nssh_host_index
+# Environment override: NSSH_HOST_INDEX=/custom/index
+host_index = "~/.ssh/.nssh_host_index"
+
+[self]
+# Directory that stores installed shell helpers / manifests
+# Default: ~/.local/share/nssh
+# Environment override: NSSH_SHARE_DIR=/custom/share
+share_dir = "~/.local/share/nssh"
+
+# Fish integration directories
+# Defaults leverage XDG_CONFIG_HOME (e.g. ~/.config/fish/...)
+# Environment overrides: NSSH_FISH_FUNCTIONS_DIR / NSSH_FISH_COMPLETIONS_DIR
+fish_functions_dir = "~/.config/fish/functions"
+fish_completions_dir = "~/.config/fish/completions"
+
 [recording]
 # Enable or disable automatic session recording
 # Default: false

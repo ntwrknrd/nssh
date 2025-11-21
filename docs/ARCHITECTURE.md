@@ -4,10 +4,11 @@ This document describes the internal implementation, algorithms, performance opt
 
 ## Overview
 
-`nssh` is built on a two-layer architecture:
+`nssh` is a pure Python CLI that launches OpenSSH through an in-process PTY connector:
 
-- **Bash layer** handles user interaction, orchestration, and SSH command execution
-- **Python layer** manages encrypted credentials, SSH config parsing, and data operations
+- **Python CLI** handles argument parsing, host/credential resolution, and PTY management
+- **PTY connector** spawns SSH directly, injects passwords, and handles interactive prompts
+- **Core modules** manage encrypted credentials, SSH config parsing, and data operations
 
 This document covers:
 
@@ -19,72 +20,27 @@ This document covers:
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Two-Layer Architecture](#two-layer-architecture)
-  - [Bash Layer (Orchestration)](#bash-layer)
-  - [Python Layer (Data Management)](#python-layer)
-  - [Core Modules](#core-modules)
-- [Connection Flow](#connection-flow)
-  - [Optimized Connection Flow (Primary)](#optimized-connection-flow)
-  - [Fallback Behavior](#fallback-behavior)
-- [SSH Compatibility Detection and Remediation](#ssh-compatibility-detection-and-remediation)
-- [Credential Resolution Algorithm](#credential-resolution-algorithm)
-  - [Five-Step Resolution Flow](#five-step-resolution-flow)
-  - [Priority Order Summary](#priority-order-summary)
-  - [Context Definition](#context-definition)
-- [Recording System Architecture](#recording-system-architecture)
-  - [Recording Workflow](#recording-workflow)
-  - [Lock Mechanism Implementation](#lock-mechanism-implementation)
-  - [Session Metadata Format](#session-metadata-format)
-  - [Configuration Loading and Pattern Matching](#configuration-loading-and-pattern-matching)
-  - [Cleanup Policy Implementation](#cleanup-policy-implementation)
-  - [Security Considerations](#security-considerations)
-  - [Integration with nssh log CLI](#integration-with-nssh-log-cli)
-- [API Reference](#api-reference)
-  - [Python API](#python-api)
-    - [CredentialManager Class](#credentialmanager-class)
-    - [SSHConfigParser Class](#sshconfigparser-class)
-  - [Data Formats](#data-formats)
-    - [Credential File Format](#credential-file-format)
-    - [Host Index Format](#host-index-format)
-    - [Timing Log Format](#timing-log-format)
-  - [Exit Codes](#exit-codes)
-- [Host Index Implementation](#host-index-implementation)
-  - [Index File Format](#index-file-format)
-  - [Index Generation Process](#index-generation-process)
-  - [Automatic Rebuilding](#automatic-rebuilding)
-  - [Lookup Performance](#lookup-performance)
-- [Performance Metrics](#performance-metrics)
-  - [Current Measurements](#current-measurements)
-  - [Optimization History](#optimization-history)
-  - [Key Optimizations](#key-optimizations)
-- [Debugging and Profiling](#debugging-and-profiling)
-  - [Testing Python Modules](#testing-python-modules)
-  - [SSH Debugging](#ssh-debugging)
-  - [Timing Instrumentation](#timing-instrumentation)
-  - [Performance Profiling](#performance-profiling)
-  - [Credential Decryption Testing](#credential-decryption-testing)
+- [Connection Architecture](#connection-architecture) - Python CLI, core modules, PTY connector
+- [Connection Flow](#connection-flow) - Host resolution, credential lookup, SSH execution
+- [SSH Compatibility Detection](#ssh-compatibility-detection-and-remediation)
+- [Credential Resolution Algorithm](#credential-resolution-algorithm) - Five-step flow, priority order
+- [Recording System](#recording-system-architecture) - Workflow, locks, metadata, security
+- [API Reference](#api-reference) - Python APIs, data formats, exit codes
+- [Host Index](#host-index-implementation) - Format, generation, performance
+- [Debugging](#debugging-and-profiling) - SSH debugging, timing, credential testing
 
-## Two-Layer Architecture
+## Connection Architecture
 
-### Bash Layer (Orchestration)
+### Python CLI
 
-The bash wrapper (`src/nssh/assets/scripts/nssh-wrapper.sh`) serves as the main entry point and orchestration layer:
+The `nssh` command is a pure Python entry point (`src/nssh/cli/main.py`) that:
 
-- Parses user input (`[user@]<search-term>`)
-- Invokes the unified Python module for host selection and credential resolution
-- Executes SSH connections using `sshpass` for password authentication or native SSH for key-based auth
-- Integrates with shell history to record actual hostnames (not search terms)
-- Handles fuzzy selection via `fzf` when multiple hosts match
+- Parses `[user@]<search-term>` arguments (fast path avoids importing Typer when possible)
+- Resolves hosts + credentials inside `nssh.core.connect`
+- Handles fuzzy selection internally (`fzf` is called from Python when multiple hosts match)
+- Integrates with shell history via the optional shell functions
 
-### Python Layer (Data Management)
-
-The Python package (`nssh`) handles all data operations:
-
-- **Credential management:** Age-encrypted storage, context-based resolution
-- **SSH config parsing:** Include directive resolution, host extraction, alphabetical sorting
-- **Host indexing:** Pre-compiled index for fast lookups
-- **Unified connection logic:** Combined host selection and credential resolution
+For host selection and credential resolution details, see [Connection Flow](#connection-flow) and [Credential Resolution Algorithm](#credential-resolution-algorithm). For PTY connector implementation, see [PTY Connector Architecture](#pty-connector-architecture).
 
 ### Core Modules
 
@@ -93,39 +49,117 @@ The Python package (`nssh`) handles all data operations:
 - Unified host selection + credential resolution in single invocation
 - Eliminates duplicate Python bootstrapping overhead
 - Index-based fast path for exact matches
-- Invoked via: `uv run python -m nssh.core.connect <search> [username]`
-- Outputs: `hostname|filepath|username|@fd:<number>`
+- Launches PTY connector for direct SSH execution
 
-**`src/nssh/core/credentials.py`**
+**`src/nssh/core/auth/credentials.py`**
 
 - `CredentialManager` class - age-encrypted credential storage
 - Manages contexts (environment-specific defaults) and host-specific credentials
 - Methods: `decrypt_credentials()`, `encrypt_credentials()`, `resolve_credential()`
 
-**`src/nssh/core/ssh_config.py`**
+**`src/nssh/core/ssh/config.py`**
 
 - `SSHConfigParser` class - SSH config file manipulation
 - Handles Include directives, alphabetical sorting, backups, index rebuilding
 - Methods: `parse_ssh_config()`, `write_ssh_config()`, `create_backup()`, `rebuild_index()`
 
-**`src/nssh/core/paths.py`**
-
-- Lazy helpers for resolving credential/age key/backup paths
-- Honors env variables + `config.toml` overrides at call time
-
-**`src/nssh/core/system.py`**
-
-- Thin subprocess + permission helpers (`run_command`, `check_command`, `set_secure_permissions`)
-
-**`src/nssh/core/fzf.py`**
-
-- Minimal integration layer around the external `fzf` binary
-- Used by CLI selectors; keeps subprocess code isolated from core logic
-
-**`src/nssh/core/ssh_compat.py`**
+**`src/nssh/core/ssh/fixer.py`**
 
 - Authentication presets and legacy compatibility fixers
 - Functions: `generate_ssh_config()`, `detect_auth_type()`, `parse_ssh_compatibility_error()`, `iterative_compatibility_fix()`
+
+**`src/nssh/core/connector/pty.py`**
+
+- PTY-based connector for direct OpenSSH execution
+- Handles password injection, host key prompts, keyboard-interactive auth
+- Integrates with recording system via asciinema wrapper
+- Real-time prompt detection and credential auto-answer
+
+**`src/nssh/core/env/paths.py`**
+
+- Lazy helpers for resolving credential/age key/backup/recording paths
+- Honors env variables + `config.toml` overrides at call time
+- Centralized path resolution for all nssh components
+
+**`src/nssh/core/env/settings.py`**
+
+- Configuration file loading and environment variable resolution
+- Handles `~/.config/nssh/config.toml` parsing
+- Provides default values for all configurable paths and settings
+
+**`src/nssh/core/env/system.py`**
+
+- Thin subprocess + permission helpers (`run_command`, `check_command`, `set_secure_permissions`)
+- System-level utilities for command execution and file operations
+
+**`src/nssh/core/ui/fzf.py`**
+
+- Minimal integration layer around the external `fzf` binary
+- Used by CLI selectors and interactive host selection
+- Keeps subprocess code isolated from core logic
+
+**`src/nssh/core/ui/console.py`**
+
+- Rich console output utilities
+- Shared console instance for consistent output formatting
+
+**`src/nssh/core/recording/manager.py`**
+
+- Recording plan computation and session management
+- Lock mechanism for concurrent session safety
+- Metadata generation and session indexing
+
+**`src/nssh/core/recording/proxy.py`**
+
+- Recording proxy layer for PTY connector integration
+- Handles asciinema subprocess wrapper when recording is enabled
+
+## PTY Connector Architecture
+
+The PTY connector (`src/nssh/core/connector/pty.py`) is the core innovation in nssh's architecture. It eliminates the need for external tools like `sshpass` by providing native password injection through PTY manipulation.
+
+### Key Features
+
+1. **Direct SSH Execution**: Uses `pty.fork()` + `os.execvpe()` to spawn OpenSSH directly
+2. **In-Process Password Injection**: Monitors PTY output for password prompts via regex patterns
+3. **Host Key Handling**: Detects and passes through host key confirmation prompts to user
+4. **Keyboard-Interactive Auth**: Supports multi-stage authentication challenges
+5. **Recording Integration**: Wraps SSH in asciinema subprocess when recording is enabled
+
+### Password Injection Flow
+
+```text
+1. PTY connector spawns SSH via pty.fork()
+2. Parent process enters select() loop monitoring PTY master FD
+3. Buffer accumulates output; regex patterns detect "password:" or "passcode:" prompts
+4. Credential written directly to PTY (never echoes to user terminal)
+5. Control returns to user for remainder of interactive session
+```
+
+### Implementation Details
+
+**Key Components:**
+- `run_with_pty()` - Main entry point accepting hostname, credentials, SSH args
+- `_relay_loop()` - I/O multiplexing between user terminal and SSH PTY
+- `PASSWORD_PATTERNS` - Compiled regex for prompt detection (case-insensitive)
+- `HOSTKEY_PROMPT_RE` - Host key verification pattern
+- `_inject_password()` - Writes credential to PTY with terminal echo disabled
+
+**Recording Integration:**
+When recording is enabled, the connector spawns:
+```
+asciinema rec --command "ssh ..." --append → pty.fork() → ssh
+```
+
+**Exit Code Handling:**
+- SSH exit code is propagated to shell ($?)
+- Recording lock released automatically via context manager
+- PTY cleanup happens in finally block
+
+**Signal Handling:**
+- SIGWINCH (terminal resize) forwarded to SSH subprocess
+- SIGINT/SIGTERM propagated for clean shutdown
+- Child process waited via os.waitpid()
 
 ## Connection Flow
 
@@ -133,43 +167,28 @@ The Python package (`nssh`) handles all data operations:
 
 ```text
 1. User runs: nssh [user@]<search>
-   └─> nssh-wrapper.sh extracts optional user@ prefix
+   └─> CLI fast-path extracts optional user@ prefix
 
-2. Wrapper calls: uv run python -m nssh.core.connect <search> [username]
-   └─> Single Python invocation (eliminates duplicate bootstrap)
+2. `connect.py` checks `~/.ssh/.nssh_host_index` for exact match
+   ├─> Index hit: proceeds immediately
+   └─> Index miss: parses SSH configs and Include directives
 
-3. connect.py checks ~/.ssh/.nssh_host_index for exact match
-   ├─> Index hit: proceeds immediately with hostname|filepath (~1ms)
-   └─> Index miss: parses SSH configs, follows Include directives (~200ms)
+3. Host matching:
+   ├─> Exact match: continues to credential resolution
+   └─> Multiple matches: launches in-process `fzf` for interactive selection
 
-4. Host matching:
-   ├─> Exact match: proceeds to credential resolution
-   └─> Multiple matches: outputs list, exits for fzf selection
+4. Credential resolution:
+   ├─> Loads `~/.ssh/nssh_credentials.age`
+   ├─> Prefers host-specific credentials (respecting requested username)
+   ├─> Falls back to the context credential referenced by the Include file
+   └─> Returns `(username, password)` tuple or `None`
 
-5. If fzf needed:
-   ├─> Bash wrapper presents menu
-   ├─> User selects hostname
-   └─> Re-invokes connect.py with selected hostname
+5. Connection execution:
+   └─> PTY connector spawns `ssh -tt`, injects passwords when prompted, mirrors host-key prompts, and streams output directly to the user
 
-6. Credential resolution:
-   ├─> Loads ~/.ssh/nssh_credentials.age (age decrypt)
-   ├─> Searches host-specific credentials (matching username if specified)
-   ├─> Falls back to context fallback credential from the matching Include file
-   └─> Returns: hostname|filepath|username|@fd:<number>
-
-7. connect.py outputs result and exits
-
-8. nssh-wrapper.sh receives output:
-   ├─> If credential found: sshpass -d "$pipe_fd" ssh -o User="$username" "$hostname" (password streams through in-memory pipe)
-   └─> If no credential: ssh "$hostname" (key-based auth)
-
-9. SSH connection established
-
-10. Shell history integration (optional):
-    └─> Records actual hostname in shell history (not search term)
+6. Shell history integration (optional):
+   └─> Shell helpers record both the initial search term and the resolved hostname
 ```
-
-**Performance:** Single Python invocation (minimal overhead beyond SSH connection time)
 
 ### Fallback Behavior
 
@@ -179,7 +198,7 @@ When the pre-compiled index (`~/.ssh/.nssh_host_index`) is missing or doesn't co
 2. Reads `~/.ssh/config` and follows all `Include` directives
 3. Extracts all `Host` entries with their source files
 4. Performs fuzzy matching against the search term
-5. Results are identical to index-based lookup, just slower (~200ms vs ~1ms)
+5. Results are identical to index-based lookup, just slower 
 
 The index is automatically rebuilt by `nssh host` commands (`add`, `remove`, `sort`, `update`), so this fallback is rare in normal usage.
 
@@ -187,9 +206,9 @@ The index is automatically rebuilt by `nssh host` commands (`add`, `remove`, `so
 
 nssh automatically detects and fixes SSH compatibility issues with legacy network equipment by monitoring SSH stderr for error patterns (kex, macs, ciphers, hostkey mismatches). When `nssh host add` tests a connection and detects an issue, it prompts to apply the appropriate fix and retests iteratively (default: 3 iterations, configurable with `--max-iterations`).
 
-Legacy algorithms are appended to modern defaults using the `+` prefix (e.g., `KexAlgorithms +diffie-hellman-group1-sha1`) to maintain security for modern hosts while enabling compatibility for legacy devices. Users can manually apply fixes with `nssh host update hostname --compat <type>`.
+Legacy algorithms are appended to modern defaults using the `+` prefix (e.g., `KexAlgorithms +diffie-hellman-group1-sha1`) to maintain security for modern hosts while enabling compatibility for legacy devices. Users can trigger the automated remediation workflow with `nssh host update hostname`.
 
-Implementation details in `src/nssh/core/ssh_compat.py`. For user-facing documentation, see [USER_GUIDE.md - SSH Config Management](USER_GUIDE.md#nssh-host).
+Implementation details in `src/nssh/core/ssh/fixer.py`. For user-facing documentation, see [USER_GUIDE.md - SSH Config Management](USER_GUIDE.md#nssh-host).
 
 ## Credential Resolution Algorithm
 
@@ -259,33 +278,29 @@ nssh integrates with asciinema v3 to provide automatic SSH session recording wit
 
 ```text
 1. User runs: nssh hostname
-   └─> nssh-wrapper.sh checks recording configuration
+   └─> CLI resolves host and credentials
 
-2. Configuration loading (Python):
-   ├─> Check ~/.config/nssh/config.toml for [recording] section
-   ├─> Parse include_hosts/exclude_hosts patterns (glob or regex)
-   ├─> Check environment overrides (NSSH_RECORD, NSSH_RECORD_DIR)
-   └─> Determine if recording should happen for this host
+2. PTY connector initialization:
+   ├─> Calls recording._compute_plan(hostname)
+   ├─> Checks NSSH_RECORD environment variable (fast path if =0)
+   ├─> Loads ~/.config/nssh/config.toml [recording] section
+   ├─> Evaluates include/exclude patterns (glob or regex)
+   └─> Returns RecordingPlan(enabled=True/False, cast_path, lock_directory, ...)
 
 3. Recording decision:
-   ├─> If enabled=false or host excluded: proceed without recording
-   ├─> If enabled=true and host included: prepare recording session
-   └─> If NSSH_RECORD=force: fail if asciinema not available
+   ├─> If enabled=false: spawn SSH directly via PTY
+   ├─> If enabled=true: acquire lock, spawn asciinema wrapper
+   └─> If NSSH_RECORD=force: fail if asciinema missing
 
-4. Recording initialization (if enabled):
-   ├─> Acquire recording lock (prevent concurrent recording conflicts)
-   ├─> Create session directory: <dir>/<hostname>/<YYYY-MM-DD>/
-   ├─> Determine session file:
-   │   ├─> append_mode=true: session-000.cast (daily file)
-   │   └─> append_mode=false: session-NNN.cast (new file per session)
-   ├─> Write metadata.json with session info
-   └─> Prepare asciinema command with --append flag
+4. SSH execution:
+   ├─> Without recording: pty.fork() -> execvpe("ssh", ...)
+   └─> With recording: pty.fork() -> execvpe("asciinema", ["rec", "--command", "ssh", ...])
 
-5. SSH connection via asciinema:
-   └─> Execute: asciinema rec [--append] <session-file> --command "ssh ..."
+5. Session I/O:
+   └─> PTY connector relays stdin/stdout (recording happens in asciinema subprocess)
 
-6. Post-connection cleanup:
-   └─> Release recording lock and exit
+6. Post-connection:
+   └─> Lock released automatically (context manager)
 ```
 
 ### Lock Mechanism Implementation
@@ -360,12 +375,6 @@ The `nssh log` CLI provides a management interface to the recording system:
 | `nssh log upload` | Locates `.cast` file, invokes `asciinema upload --server-url` with ASCIINEMA_SERVER_URL or --server option |
 | `nssh log export` | Locates `.cast` file, invokes `asciinema convert` or `asciicast2gif`, saves to current directory |
 
-**Internal commands:**
-
-| Command | Implementation |
-|---------|---------------|
-| `nssh recording-check` | Internal-only command called by nssh wrapper. Loads config, evaluates patterns, returns recording plan. Optimized for minimal startup time (no CLI framework imports). |
-
 **Export behavior notes:**
 
 - By default, exports to the current working directory (where user is working)
@@ -398,10 +407,10 @@ For programmatic access to credential and SSH config management:
 
 #### CredentialManager Class
 
-Located in `nssh.core.credentials`:
+Located in `nssh.core.auth.credentials`:
 
 ```python
-from nssh.core.credentials import CredentialManager
+from nssh.core.auth.credentials import CredentialManager
 
 cm = CredentialManager()
 ```
@@ -421,10 +430,10 @@ cm = CredentialManager()
 
 #### SSHConfigParser Class
 
-Located in `nssh.core.ssh_config`:
+Located in `nssh.core.ssh.config`:
 
 ```python
-from nssh.core.ssh_config import SSHConfigParser
+from nssh.core.ssh.config import SSHConfigParser
 
 parser = SSHConfigParser()
 ```
@@ -451,15 +460,15 @@ See [docs/examples/nssh_credentials.json](examples/nssh_credentials.json) for co
 
 #### Host Index Format
 
-File: `~/.ssh/.nssh_host_index` (plaintext, auto-generated). Format: `hostname|filepath` pairs (one per line). Automatically rebuilt by `nssh host` commands. Used for fast exact-match lookups (~1ms vs ~200ms full parse).
+File: `~/.ssh/.nssh_host_index` (plaintext, auto-generated). Format: `hostname|filepath` pairs (one per line). Automatically rebuilt by `nssh host` commands. Used for fast exact-match lookups (fast vs slower full parse).
 
 See [docs/examples/.nssh_host_index](examples/.nssh_host_index) for format example.
 
 #### Timing Log Format
 
-Output format when `NSSH_DEBUG=1` or via `nssh benchmark capture`: `[timestamp] TIMING: stage-name - XXXms`
+Output format when `NSSH_DEBUG=1` or via `nssh benchmark`: `[timestamp] TIMING: stage-name - XXXms`
 
-See [benchmark-capture-local.txt](examples/benchmark-capture-local.txt) and [benchmark-capture-remote.txt](examples/benchmark-capture-remote.txt) for complete output examples. For stage definitions, see [Performance Metrics](#performance-metrics).
+See [benchmark-run-example.txt](examples/benchmark-run-example.txt) for example benchmark output.
 
 ### Exit Codes
 
@@ -467,15 +476,12 @@ See [benchmark-capture-local.txt](examples/benchmark-capture-local.txt) and [ben
 |------|---------|---------|
 | `0` | Success | Command completed successfully |
 | `1` | Error | User error, validation failure, or runtime error |
-| `2` | Budget violation | Performance budget exceeded (nssh benchmark only) |
 
 **Examples:**
 
 - Credential not found → Exit 0 (fallback to SSH keys is not an error)
 - Invalid hostname → Exit 1
 - Missing required option → Exit 1
-- `nssh benchmark` total time exceeds `--total-budget` → Exit 2
-- `nssh benchmark` stage exceeds `--stage-budget` → Exit 2
 
 ## Host Index Implementation
 
@@ -525,7 +531,7 @@ def rebuild_index():
 
 ```bash
 grep "^hostname|" ~/.ssh/.nssh_host_index
-# Result: ~1ms (single grep operation)
+# Result: fast (single grep operation)
 ```
 
 **Full config parsing (index miss or partial match):**
@@ -534,7 +540,7 @@ grep "^hostname|" ~/.ssh/.nssh_host_index
 # Parse ~/.ssh/config
 # Follow all Include directives
 # Extract all Host entries
-# Result: ~200ms (Python initialization + file I/O + parsing)
+# Result: slower (Python initialization + file I/O + parsing)
 ```
 
 **Why the index is fast:**
@@ -544,93 +550,7 @@ grep "^hostname|" ~/.ssh/.nssh_host_index
 - No Include directive resolution required
 - No SSH config syntax parsing needed
 
-## Performance Metrics
-
-### Current Measurements
-
-Measured with `nssh benchmark capture` on Apple M3 Pro silicon (recording disabled via `NSSH_RECORD=0`):
-
-| Stage | LAN (rpi-a) | VPN (test-host) | Notes |
-|-------|-------------|-----------------|-------|
-| **wrapper-start** | 177.7ms | 148.8ms | Python/uv bootstrap (constant) |
-| **host-selection** | 0.2ms | 0.1ms | Index-based lookup (constant) |
-| **credential-vault** | 5.9ms | 5.8ms | Age decryption (constant) |
-| **connection-orch.** | negligible | negligible | Command preparation |
-| **recording-setup** | 0.2ms | N/A | Recording plan check (skipped when `NSSH_RECORD=0`) |
-| **ssh-connection** | **40.5ms** | **324.0ms** | **Network-dependent (8x difference!)** |
-| **wrapper-teardown** | 0.2ms | 1.0ms | Cleanup |
-| **TOTAL** | **219.8ms** | **477.4ms** | |
-
-**With recording enabled** (`NSSH_RECORD=1`):
-
-| Stage | LAN (rpi-a) | Notes |
-|-------|-------------|-------|
-| **recording-setup** | 99.2ms | Config load + plan computation (Python imports optimized) |
-| **ssh-connection** | 65.1ms | Slightly higher due to asciinema wrapper overhead |
-| **TOTAL** | 357.9ms | Recording adds ~138ms overhead |
-
-See [benchmark-capture-local.txt](examples/benchmark-capture-local.txt) and [benchmark-capture-remote.txt](examples/benchmark-capture-remote.txt) for full benchmark output.
-
-**Key insights:**
-
-1. **Python/uv bootstrap dominates nssh overhead** (~178ms constant)
-2. **Credential operations are fast** (~6ms constant)
-3. **Network type dominates total time:** LAN is 8x faster than VPN for SSH connection (40ms vs 324ms)
-4. **Recording overhead is isolated:** The `recording-setup` stage shows ~99ms when enabled, <1ms when disabled
-5. **Total time:** LAN ~220ms (recording disabled), ~358ms (recording enabled); VPN ~477ms
-
-### Optimization History
-
-The unified architecture eliminated duplicate Python invocations:
-
-- **Before:** Separate host selection + credential resolution (2× Python bootstrap)
-- **After:** Single `connect.py` invocation (1× Python bootstrap)
-- **Result:** Removed ~140ms duplicate bootstrap overhead
-
-### Key Optimizations
-
-1. **Pre-compiled Host Index** (`~/.ssh/.nssh_host_index`)
-   - Format: `hostname|filepath` (one per line)
-   - Exact match lookups: ~1ms (grep) vs ~200ms (full Python parse)
-   - Automatically rebuilt by `nssh host add/remove/sort/update`
-   - Falls back to full config parsing if index miss
-
-2. **Unified Architecture**
-   - Single Python invocation instead of separate select + connect
-   - Eliminates duplicate uv bootstrap overhead (~140ms saved)
-   - Combines host selection + credential resolution in `connect.py`
-   - Returns `hostname|filepath|username|@fd:<number>` in single output
-
-3. **Recording Setup Optimization**
-   - Dedicated `nssh recording-check` command (no CLI framework imports)
-   - Retired the heavier `nssh log check` Typer command (removing ~165ms overhead)
-   - Fast-path for `NSSH_RECORD=0` skips Python entirely in shell wrapper
-   - Result: 244ms → 99ms when recording enabled, <1ms when disabled
-
-4. **Timing Instrumentation**
-   - Enable with: `NSSH_DEBUG=1`
-   - Outputs: `[timestamp] TIMING: operation - XXXms`
-   - Tracks: Python bootstrap, index lookup, credential resolution, recording setup, SSH connection
-   - Isolated `recording-setup` stage shows recording overhead separately from SSH connection
-
 ## Debugging and Profiling
-
-For common user issues, see [USER_GUIDE.md - Troubleshooting](USER_GUIDE.md#troubleshooting). For contributor debugging, see [CONTRIBUTING.md](../CONTRIBUTING.md).
-
-### Testing Python Modules
-
-Test modules without installing:
-
-```bash
-# Test credential resolution
-uv run python -m nssh.core.connect hostname [username]
-
-# Test credential manager
-uv run python -c "from nssh.core.credentials import CredentialManager; print(CredentialManager().decrypt_credentials())"
-
-# Rebuild host index manually
-uv run python -c "from nssh.core.ssh_config import SSHConfigParser; SSHConfigParser().rebuild_index()"
-```
 
 ### SSH Debugging
 
@@ -647,11 +567,50 @@ Enable timing output and identify bottlenecks:
 NSSH_DEBUG=1 nssh hostname
 ```
 
-See [benchmark-capture-local.txt](examples/benchmark-capture-local.txt) and [benchmark-capture-remote.txt](examples/benchmark-capture-remote.txt) for example output. Performance expectations: wrapper-start ~178ms, host-selection ~0.2ms, credential-vault ~6ms, recording-setup ~0.2ms (disabled) or ~99ms (enabled), ssh-connection varies by network (LAN: 40-65ms, VPN: 200-400ms).
+**Timing Stages (PTY Connector Architecture):**
 
-### Performance Profiling
+| Stage | Description | When |
+|-------|-------------|------|
+| `pty-start` | PTY process initialization | Always |
+| `config-parse` | SSH config file parsing | On index miss |
+| `host-selection` | Index lookup + SSH config resolution | Always |
+| `credential-vault` | Age decryption + credential resolution | Always |
+| `connection-orchestration` | PTY setup + recording plan computation | Always |
+| `recording-setup` | Lock acquisition + metadata generation | If recording enabled |
+| `recording-session` | SSH + asciinema wrapper (contains ssh-connection) | If recording enabled |
+| `  ssh-connection` | Actual SSH execution time (nested stage) | Always |
+| `pty-teardown` | PTY cleanup and exit | Always |
 
-Use `nssh benchmark capture` for systematic performance analysis. Expected timings (M3 Pro): LAN ~220ms total (recording disabled), ~358ms total (recording enabled), VPN ~477ms total. If significantly higher, check disk I/O, credential file size, network filesystem usage, or large SSH configs (>10,000 hosts).
+**Nested Stages:**
+
+When session recording is enabled (`NSSH_RECORD=1`), `ssh-connection` is nested *inside* `recording-session`. The relationship is:
+
+```
+recording-session = ssh-connection + asciinema-overhead (~75ms)
+```
+
+The benchmark renderer calculates and displays `asciinema-overhead` as a derived metric by subtracting `ssh-connection` from `recording-session`.
+
+**Key Differences from Legacy Wrapper Architecture:**
+- No `wrapper-start` or `wrapper-teardown` stages
+- No `python-bootstrap` stage (CLI is already in-process)
+- `ssh-connection` exists in both recording and non-recording modes (nested when recording enabled)
+
+**Example Output:**
+
+See [benchmark-run-example.txt](examples/benchmark-run-example.txt) for example benchmark output. Note: the example shows recording disabled mode (`NSSH_RECORD=0`), so only `config-parse` and `host-selection` stages appear. The `config-parse` stage only appears when the host index cache misses.
+
+**Recording Mode Behavior:**
+
+- When recording is enabled (`NSSH_RECORD=1`): Both `recording-session` and nested `ssh-connection` stages appear
+- When recording is disabled (`NSSH_RECORD=0`): Only `ssh-connection` stage appears (as shown in the example)
+
+**Benchmark Options:**
+
+- Use `nssh benchmark HOST` for detailed stage-by-stage timing breakdown
+- Use `nssh benchmark --simple-only HOST` for end-to-end "hit Enter" latency only
+- Use `nssh benchmark --no-record HOST` to measure SSH overhead without recording influence
+
 
 ### Credential Decryption Testing
 
@@ -660,14 +619,10 @@ Test age decryption:
 ```bash
 # Manually decrypt credentials
 
-age -d -i ~/.config/age/keys.txt ~/.ssh/nssh_credentials.age | jq .
+age -d -i ~/.config/age/keys.txt ~/.ssh/nssh_credentials.age | python3 -m json.tool
 
 # If decryption fails:
 # - Check file permissions (should be 600)
 # - Verify age key hasn't been rotated
 # - Ensure credentials.age was encrypted with your current public key
 ```
-
----
-
-For end-user documentation and operational workflows, see [USER_GUIDE.md](USER_GUIDE.md). For development setup and contribution guidelines, see [CONTRIBUTING.md](../CONTRIBUTING.md).

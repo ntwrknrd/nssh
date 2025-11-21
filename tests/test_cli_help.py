@@ -20,10 +20,10 @@ HELP_CASES = {
         "--help",
     ],
     "nssh-log.txt": [sys.executable, "-m", "nssh.cli.log", "--help"],
-    "nssh-install-shell.txt": [
+    "nssh-self.txt": [
         sys.executable,
         "-m",
-        "nssh.cli.install_shell",
+        "nssh.cli.self",
         "--help",
     ],
 }

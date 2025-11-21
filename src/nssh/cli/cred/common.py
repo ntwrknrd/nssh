@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Dict, List, cast
 
 from nssh.cli import typer
 from nssh.core.ui.console import get_console
 from nssh.core.auth.credentials import CredentialManager
-from nssh.core.env.paths import age_key_path
+from nssh.core.env.paths import age_key_path, host_index_path
 from nssh.core.env.system import check_command
 
 console = get_console()
@@ -46,7 +45,7 @@ def complete_hostname(incomplete: str) -> List[str]:
     """Autocomplete hostnames from the cached host index."""
 
     try:
-        index_path = Path.home() / ".ssh" / ".nssh_host_index"
+        index_path = host_index_path()
         if not index_path.exists():
             return []
         matches: List[str] = []

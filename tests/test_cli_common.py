@@ -47,8 +47,17 @@ def test_select_include_file_with_argument(monkeypatch, tmp_path):
 
     monkeypatch.setattr(Path, "home", lambda: home)
 
+    # Mock CredentialManager to return context with git_include_file
+    class MockCredentialManager:
+        def list_contexts(self):
+            return [{"name": "work", "git_include_file": "work.conf"}]
+
+    import nssh.cli.common.selectors as sel_module
+
+    monkeypatch.setattr(sel_module, "CredentialManager", MockCredentialManager)
+
     parser = DummyParser([])
-    result = selectors.select_include_file(parser, "work.conf")
+    result = selectors.select_include_file(parser, "work")
     assert result == target
 
 
@@ -57,17 +66,29 @@ def test_select_include_file_missing_file(monkeypatch, tmp_path):
     (home / ".ssh").mkdir(parents=True)
     monkeypatch.setattr(Path, "home", lambda: home)
 
+    # Mock CredentialManager to return empty contexts
+    class MockCredentialManager:
+        def list_contexts(self):
+            return []
+
+    import nssh.cli.common.selectors as sel_module
+
+    monkeypatch.setattr(sel_module, "CredentialManager", MockCredentialManager)
+
     parser = DummyParser([])
     with pytest.raises(Exit) as exc:
-        selectors.select_include_file(parser, "missing.conf")
+        selectors.select_include_file(parser, "missing")
     assert exc.value.exit_code == 1
 
 
 def test_select_include_file_requires_include(monkeypatch):
     parser = DummyParser([])
+    monkeypatch.setattr(selectors, "check_fzf", lambda: True)
+    monkeypatch.setattr(selectors, "fzf_select", lambda options, prompt: "")
     with pytest.raises(Exit) as exc:
         selectors.select_include_file(parser)
-    assert exc.value.exit_code == 1
+    # When no files exist, user can still create new context, so cancel returns 0
+    assert exc.value.exit_code == 0
 
 
 def test_select_include_file_all_option(monkeypatch, tmp_path):
@@ -76,7 +97,7 @@ def test_select_include_file_all_option(monkeypatch, tmp_path):
         path.write_text("# test")
 
     parser = DummyParser(files)
-    monkeypatch.setattr(selectors, "require_fzf", lambda: None)
+    monkeypatch.setattr(selectors, "check_fzf", lambda: True)
     monkeypatch.setattr(selectors, "fzf_select", lambda options, prompt: "[All files]")
 
     result = selectors.select_include_file(parser, allow_all=True)
@@ -89,8 +110,8 @@ def test_select_include_file_specific_choice(monkeypatch, tmp_path):
         path.write_text("# test")
 
     parser = DummyParser(files)
-    monkeypatch.setattr(selectors, "require_fzf", lambda: None)
-    monkeypatch.setattr(selectors, "fzf_select", lambda options, prompt: str(files[1]))
+    monkeypatch.setattr(selectors, "check_fzf", lambda: True)
+    monkeypatch.setattr(selectors, "fzf_select", lambda options, prompt: "two.conf")
 
     result = selectors.select_include_file(parser)
     assert result == files[1]
@@ -102,7 +123,7 @@ def test_select_include_file_cancel(monkeypatch, tmp_path):
         path.write_text("# test")
 
     parser = DummyParser(files)
-    monkeypatch.setattr(selectors, "require_fzf", lambda: None)
+    monkeypatch.setattr(selectors, "check_fzf", lambda: True)
     monkeypatch.setattr(selectors, "fzf_select", lambda options, prompt: "")
 
     with pytest.raises(Exit) as exc:

@@ -1,6 +1,6 @@
 [project]
 name = "nssh"
-version = "1.0.5"
+version = "1.6.3"
 description = "SSH host and password management tools for nssh"
 requires-python = ">=3.14"
 readme = "README.md"
@@ -58,6 +58,7 @@ include-package-data = true
 "nssh" = [
     "assets/scripts/*",
     "assets/completions/*",
+    "py.typed",
 ]
 
 [dependency-groups]

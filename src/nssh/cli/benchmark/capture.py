@@ -2,112 +2,164 @@
 
 from __future__ import annotations
 
+import json
 import os
+import platform
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from nssh.cli import typer
 
 from nssh.core.diag import timing as timing_core
+from nssh.core.env.paths import project_root
 
 from . import common
 
 
+def _save_benchmark_archive(
+    archive_dir: Path,
+    output_txt_path: Path,
+    metadata_path: Path,
+    host: str,
+    warmups: int,
+    samples: int,
+    simple_only: bool,
+    no_record: bool,
+    summary: timing_core.BenchmarkSummary | timing_core.TimingSummary | None = None,
+) -> None:
+    """Save output.txt, metadata.json, and create latest symlink."""
+    import importlib.metadata
+
+    # Get nssh version
+    try:
+        nssh_version = importlib.metadata.version("nssh")
+    except importlib.metadata.PackageNotFoundError:
+        nssh_version = "dev"
+
+    # Create metadata
+    metadata = {
+        "timestamp": datetime.now().isoformat(),
+        "host": host,
+        "warmups": warmups,
+        "samples": samples,
+        "simple_only": simple_only,
+        "no_record": no_record,
+        "nssh_version": nssh_version,
+        "python_version": platform.python_version(),
+    }
+    metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
+
+    # Create output.txt with summary
+    output_lines = [
+        "nssh Benchmark Results",
+        "=" * 50,
+        f"Timestamp: {metadata['timestamp']}",
+        f"Host: {host}",
+        f"Warmups: {warmups}",
+        f"Samples: {samples}",
+        f"Simple mode: {simple_only}",
+        f"Recording disabled: {no_record}",
+        f"nssh version: {nssh_version}",
+        f"Python version: {metadata['python_version']}",
+        "",
+    ]
+
+    if summary:
+        output_lines.append("Summary Statistics:")
+        output_lines.append("-" * 50)
+        if isinstance(summary, timing_core.BenchmarkSummary):
+            # Structured benchmark summary
+            for stage_name in summary.ordered_stages:
+                stage = summary.stage_stats[stage_name]
+                output_lines.append(
+                    f"{stage.stage}: "
+                    f"mean={timing_core.format_duration_ms(stage.mean_ms)}, "
+                    f"median={timing_core.format_duration_ms(stage.median_ms)}, "
+                    f"min={timing_core.format_duration_ms(stage.min_ms)}, "
+                    f"max={timing_core.format_duration_ms(stage.max_ms)}"
+                )
+        else:
+            # Legacy summary
+            output_lines.append(f"Total: {summary.total_ms}ms")
+            for event in summary.events:
+                output_lines.append(
+                    f"  {event.message}: {event.elapsed_ms}ms (+{event.delta_ms}ms)"
+                )
+
+    output_txt_path.write_text("\n".join(output_lines) + "\n")
+
+    # Create/update 'latest' symlink
+    latest_link = archive_dir.parent / "latest"
+    if latest_link.exists() or latest_link.is_symlink():
+        latest_link.unlink()
+    latest_link.symlink_to(archive_dir.name, target_is_directory=True)
+
+    # Print success message
+    common.console.print(
+        f"\n[green]Benchmark results archived to:[/green] {archive_dir}"
+    )
+    common.console.print("[dim]  - timing.log: raw timing data")
+    common.console.print("[dim]  - output.txt: summary and statistics")
+    common.console.print("[dim]  - metadata.json: run configuration")
+    common.console.print(f"[dim]  - Latest run: benchmark/latest -> {archive_dir.name}")
+
+
 def capture_command(
     host: str = typer.Argument(..., help="Host alias passed to nssh"),
-    output: Path = typer.Option(
-        Path("timing.log"),
-        "--output",
-        "-o",
-        help="Destination for captured timing log",
-    ),
-    dry_run: bool = typer.Option(
-        False,
-        "--dry-run/--real-run",
-        help="Use a ProxyCommand stub instead of establishing a real SSH session",
-    ),
-    session_exit: bool = typer.Option(
-        True,
-        "--session-exit/--no-session-exit",
-        help="Automatically close the SSH session (sends EOF via -n)",
-    ),
-    ssh_arg: Optional[List[str]] = typer.Option(
-        None,
-        "--ssh-arg",
-        "-a",
-        help="Additional arguments forwarded to nssh (repeatable)",
-    ),
     warmups: int = typer.Option(1, "--warmups", help="Warmup runs ignored in summary"),
     samples: int = typer.Option(3, "--samples", help="Measured runs captured"),
-    json_output: Optional[Path] = typer.Option(
-        None,
-        "--json-output",
-        help="Write benchmark summary JSON to PATH",
-    ),
-    stage_budget: Optional[List[str]] = typer.Option(
-        None,
-        "--stage-budget",
-        help="Enforce stage budget (stage=MS). Repeat for multiple stages",
-    ),
-    total_budget: Optional[int] = typer.Option(
-        None,
-        "--total-budget",
-        help="Fail if total metric exceeds this many ms",
-    ),
-    budget_metric: str = typer.Option(
-        "max",
-        "--budget-metric",
-        help="Metric for budget enforcement: max, mean, or median",
-        show_default=True,
-    ),
     simple_only: bool = typer.Option(
         False,
         "--simple-only/--structured",
         help="Disable instrumentation and report only total wall-clock durations",
     ),
+    no_record: bool = typer.Option(
+        False,
+        "--no-record",
+        help="Force disable session recording (overrides NSSH_RECORD env/config)",
+    ),
 ) -> None:
-    """Capture a timing log by running nssh with NSSH_DEBUG=1."""
+    """Capture timing data and archive results in benchmark/{timestamp}/ directory."""
     if samples < 1:
         raise typer.BadParameter("--samples must be at least 1")
     if warmups < 0:
         raise typer.BadParameter("--warmups must be >= 0")
 
-    try:
-        stage_budgets = common.parse_stage_budget(stage_budget)
-    except ValueError as exc:
-        raise typer.BadParameter(str(exc)) from exc
+    # Create timestamped archive directory
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    root = project_root()
+    archive_dir = root / "benchmark" / timestamp
+    archive_dir.mkdir(parents=True, exist_ok=True)
 
-    metric_choice = budget_metric.lower()
-    if metric_choice not in {"max", "mean", "median"}:
-        raise typer.BadParameter("--budget-metric must be one of: max, mean, median")
-
-    if simple_only and (stage_budgets or total_budget is not None):
-        common.console.print(
-            "[yellow]Stage/total budgets are ignored in --simple-only mode.[/yellow]"
-        )
-        stage_budgets = {}
-        total_budget = None
-    if simple_only and json_output:
-        common.console.print(
-            "[yellow]--json-output is ignored in --simple-only mode.[/yellow]"
-        )
-        json_output = None
+    # Prepare output file paths
+    timing_log_path = archive_dir / "timing.log"
+    output_txt_path = archive_dir / "output.txt"
+    metadata_path = archive_dir / "metadata.json"
 
     try:
         nssh_binary = common.resolve_nssh_binary()
     except FileNotFoundError as exc:
         common.console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
-    base_cmd = [nssh_binary, host]
-    if dry_run:
-        base_cmd.extend(["-o", "ProxyCommand=echo 'Would connect'; exit 1"])
-    if ssh_arg:
-        base_cmd.extend(list(ssh_arg))
-    if not dry_run and session_exit:
-        base_cmd.append("-n")
+
+    # Handle both str (binary path) and list (dev mode command prefix)
+    if isinstance(nssh_binary, list):
+        base_cmd = nssh_binary + [host, "--", "echo", "nssh-benchmark-test"]
+    else:
+        base_cmd = [nssh_binary, host, "--", "echo", "nssh-benchmark-test"]
 
     env_base: Dict[str, str] = os.environ.copy()
-    env_base.setdefault("NSSH_RECORD", "0")
+
+    # Handle recording configuration
+    if no_record:
+        # Force disable recording when --no-record is specified
+        env_base["NSSH_RECORD"] = "0"
+    else:
+        # Always enable headless mode for benchmarks to avoid terminal capability
+        # detection timeouts (benchmarks are non-interactive by design)
+        env_base["NSSH_RECORD_HEADLESS"] = "1"
+
     if not simple_only:
         env_base["NSSH_DEBUG"] = "1"
 
@@ -124,6 +176,23 @@ def capture_command(
             common.run_simple_capture(base_cmd, env_base, warmups, samples)
         except RuntimeError:
             raise typer.Exit(1) from None
+
+        # For simple mode, save minimal metadata and output
+        timing_log_path.write_text(
+            "Simple mode: detailed timing instrumentation disabled\n"
+            "Only total wall-clock measurements were captured\n"
+        )
+        _save_benchmark_archive(
+            archive_dir,
+            output_txt_path,
+            metadata_path,
+            host,
+            warmups,
+            samples,
+            simple_only,
+            no_record,
+            None,
+        )
         return
 
     recorded_samples: List[timing_core.BenchmarkSample] = []
@@ -170,29 +239,23 @@ def capture_command(
                 f"[yellow]Underlying nssh exited with {result.returncode}; continuing for timing.[/yellow]"
             )
 
-    output = output.expanduser()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text("\n".join(aggregated_lines).rstrip() + "\n")
-    common.console.print(f"[green]Timing log written to[/green] {output}")
+    # Write timing log
+    timing_log_path.write_text("\n".join(aggregated_lines).rstrip() + "\n")
 
     if recorded_samples:
         summary = timing_core.summarize_benchmark(recorded_samples)
         common.render_benchmark_summary(summary)
-
-        if stage_budgets or total_budget is not None:
-            try:
-                timing_core.enforce_budgets(
-                    summary,
-                    stage_budgets=stage_budgets,
-                    total_budget_ms=total_budget,
-                    metric=metric_choice,
-                )
-            except timing_core.TimingBudgetError as exc:
-                common.console.print(f"[red]Budget violation: {exc}[/red]")
-                raise typer.Exit(2)
-
-        if json_output:
-            common.write_summary_json(json_output, summary)
+        _save_benchmark_archive(
+            archive_dir,
+            output_txt_path,
+            metadata_path,
+            host,
+            warmups,
+            samples,
+            simple_only,
+            no_record,
+            summary,
+        )
         return
 
     if not last_entries:
@@ -205,9 +268,15 @@ def capture_command(
         common.console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
 
-    if stage_budgets or total_budget:
-        common.console.print(
-            "[yellow]Budgets ignored because stage instrumentation was not detected.[/yellow]"
-        )
-
     common.render_event_summary(legacy_summary)
+    _save_benchmark_archive(
+        archive_dir,
+        output_txt_path,
+        metadata_path,
+        host,
+        warmups,
+        samples,
+        simple_only,
+        no_record,
+        legacy_summary,
+    )

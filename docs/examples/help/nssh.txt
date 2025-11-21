@@ -1,34 +1,18 @@
-╭───────────────────────────────────────╮
-│ nssh                                  │
-│ Unified SSH helper and management CLI │
-╰───────────────────────────────────────╯
+╭───────────────────────────────────╮
+│ nssh                              │
+│ SSH tooling for network operators │
+╰───────────────────────────────────╯
 
-Connection:
-  nssh <host> 
-    Resolve credentials and print SSH launch metadata                           
-  nssh connect [HOST] [USERNAME]
-    Direct access to the connect helper without shell wrapper                   
-
-Options:
-  -h, --help
-    Show this message and exit                                                  
-  -v, --version
-    Show version and exit                                                       
-  -V, --verbose
-    Enable verbose SSH debug output (ssh -v)                                    
-  -u, --user <username>
-    Specify username for connection                                             
-
-Management Commands:
+  nssh [USER@]HOST [SSH_ARGS...]
+    Connect to host                                                             
+    ('nssh -- host' if name == subcommand)                                      
   nssh host 
     Manage SSH config entries                                                   
   nssh cred 
     Manage encrypted credentials                                                
   nssh log 
-    Inspect and manage recordings                                               
+    Manage recordings                                                           
   nssh benchmark 
-    Measure wrapper + SSH performance                                           
-  nssh install-shell
-    Install the wrapper, shell integration, and completions                     
-  nssh recording-check
-    Audit recording configuration used by the wrapper                           
+    Performance benchmarking and analysis                                       
+  nssh self 
+    Manage CLI and optional shell helpers                                       

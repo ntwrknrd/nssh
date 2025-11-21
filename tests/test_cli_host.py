@@ -23,6 +23,10 @@ class DummyCredentialManager:
             return None
         return self.contexts.get(include_file)
 
+    def list_contexts(self) -> list[dict]:
+        """Return all contexts as a list."""
+        return list(self.contexts.values())
+
     def add_host_credential(self, hostname: str, username: str, password: str) -> None:
         self.host_credentials.setdefault(hostname, []).append(
             {"username": username, "password": password}
@@ -80,7 +84,14 @@ def host_cli_env(tmp_path, monkeypatch) -> HostCliEnv:
     monkeypatch.setenv("NSSH_BACKUP_DIR", str(backups_dir))
 
     dummy_creds = DummyCredentialManager()
+    # Set up a context for the work.conf file
+    dummy_creds.set_context("work.conf", name="work")
     monkeypatch.setattr(host_context, "CredentialManager", lambda: dummy_creds)
+
+    # Also patch CredentialManager in selectors module for context resolution
+    import nssh.cli.common.selectors as selectors_module
+
+    monkeypatch.setattr(selectors_module, "CredentialManager", lambda: dummy_creds)
 
     env = os.environ.copy()
     env["HOME"] = str(home)
@@ -104,16 +115,12 @@ def test_host_add_list_remove_flow(host_cli_env: HostCliEnv):
         [
             "add",
             "web.example.com",
-            "--hostname",
-            "web",
-            "--user",
-            "deploy",
-            "--port",
-            "2222",
-            "--key",
-            "--file",
-            "work.conf",
+            "--auth",
+            "key",
+            "--context",
+            "work",
             "--no-test",
+            "--force",
         ],
         env=host_cli_env.env,
         input="\n\n\n\n",
@@ -123,7 +130,7 @@ def test_host_add_list_remove_flow(host_cli_env: HostCliEnv):
     contents = host_cli_env.include_file.read_text()
     assert "Host web" in contents
     assert "HostName web.example.com" in contents
-    assert "Port 2222" in contents
+    assert "Port 22" in contents
 
     list_result = runner.invoke(app, ["list"], env=host_cli_env.env)
     assert list_result.exit_code == 0, list_result.output
@@ -136,8 +143,8 @@ def test_host_add_list_remove_flow(host_cli_env: HostCliEnv):
     assert "Host web" not in host_cli_env.include_file.read_text()
 
 
-def test_host_update_switches_authentication(host_cli_env: HostCliEnv):
-    """nssh host update --auth rewrites the config entry."""
+def test_host_update_switches_authentication(host_cli_env: HostCliEnv, monkeypatch):
+    """nssh host update auto-aligns auth based on SSH probe output."""
     host_cli_env.include_file.write_text(
         "Host api\n"
         "  HostName api.example.com\n"
@@ -146,18 +153,38 @@ def test_host_update_switches_authentication(host_cli_env: HostCliEnv):
         "  PubkeyAuthentication no\n"
     )
 
+    def fake_iterative(parser, hostname, max_iterations=5, verbose=True):
+        assert hostname == "api"
+        return {
+            "success": True,
+            "iterations": 1,
+            "fixes_applied": [],
+            "final_test_result": {
+                "success": True,
+                "exit_code": 0,
+                "stderr": 'Authenticated to api using "keyboard-interactive".',
+                "stdout": "",
+                "auth_method": "keyboard-interactive",
+            },
+            "stopped_reason": "connection_succeeded",
+        }
+
+    monkeypatch.setattr(
+        "nssh.cli.host.compat.iterative_compatibility_fix",
+        fake_iterative,
+    )
+
     runner = host_cli_env.runner
     result = runner.invoke(
         app,
-        ["update", "api", "--auth", "publickey"],
+        ["update", "api"],
         env=host_cli_env.env,
-        input="\n",
     )
     assert result.exit_code == 0, result.output
 
     updated = host_cli_env.include_file.read_text()
-    assert "PubkeyAuthentication yes" in updated
-    assert "PasswordAuthentication no" in updated
+    assert "PreferredAuthentications keyboard-interactive" in updated
+    assert "PubkeyAuthentication no" in updated
 
 
 def test_host_add_password_uses_context_credentials(
@@ -178,16 +205,12 @@ def test_host_add_password_uses_context_credentials(
         [
             "add",
             "db.example.com",
-            "--hostname",
-            "db",
-            "--user",
-            "netop",
-            "--port",
-            "2222",
-            "--password",
-            "--file",
-            "work.conf",
+            "--auth",
+            "password",
+            "--context",
+            "work",
             "--no-test",
+            "--force",
         ],
         env=host_cli_env.env,
         input="\n\n\n\n",
@@ -218,13 +241,10 @@ def test_host_add_password_custom_stores_credentials(
         [
             "add",
             "cache.example.com",
-            "--hostname",
-            "cache",
-            "--user",
-            "deploy",
-            "--password",
-            "--file",
-            "work.conf",
+            "--auth",
+            "password",
+            "--context",
+            "work",
             "--no-test",
         ],
         env=host_cli_env.env,
@@ -235,8 +255,53 @@ def test_host_add_password_custom_stores_credentials(
     assert stored and stored[0]["password"] == "s3cret!"
 
 
-def test_host_update_compat_triggers_auto_fix(host_cli_env: HostCliEnv, monkeypatch):
-    """nssh host update --compat invokes the iterative compatibility workflow."""
+def test_host_add_switches_to_keyboard_interactive(
+    host_cli_env: HostCliEnv, monkeypatch
+):
+    """If the test succeeds via keyboard-interactive, config is rewritten."""
+    host_cli_env.creds.set_context(
+        "work.conf", name="expedient", username="chris.jones", password="ctx-secret"
+    )
+
+    def fake_test(hostname, timeout, parser):
+        return {
+            "success": True,
+            "exit_code": 0,
+            "stderr": 'Authenticated to {} using "keyboard-interactive".\n'.format(
+                hostname
+            ),
+            "stdout": "",
+            "auth_method": "keyboard-interactive",
+        }
+
+    monkeypatch.setattr(
+        "nssh.cli.host.add.test_ssh_connection_via_cli",
+        fake_test,
+    )
+
+    result = host_cli_env.runner.invoke(
+        app,
+        [
+            "add",
+            "switch.example.com",
+            "--context",
+            "expedient",
+            "--auth",
+            "password",
+            "--force",
+        ],
+        env=host_cli_env.env,
+        input="\n\n\n\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    contents = host_cli_env.include_file.read_text()
+    assert "PreferredAuthentications keyboard-interactive" in contents
+    assert "PubkeyAuthentication no" in contents
+
+
+def test_host_update_triggers_auto_fix(host_cli_env: HostCliEnv, monkeypatch):
+    """nssh host update always runs the compatibility workflow."""
     host_cli_env.include_file.write_text(
         "Host legacy\n"
         "  HostName legacy.example.com\n"
@@ -269,7 +334,7 @@ def test_host_update_compat_triggers_auto_fix(host_cli_env: HostCliEnv, monkeypa
 
     result = host_cli_env.runner.invoke(
         app,
-        ["update", "legacy", "--compat"],
+        ["update", "legacy"],
         env=host_cli_env.env,
     )
     assert result.exit_code == 0, result.output

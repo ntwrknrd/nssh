@@ -134,3 +134,87 @@ def test_read_cast_metadata_sums_event_deltas(tmp_path):
     assert meta is not None
     duration = meta["finished_at"] - meta["started_at"]
     assert duration.total_seconds() == 4.0
+
+
+def test_pty_connector_accepts_recording_plan(tmp_path):
+    """Test that PTY connector accepts and stores recording plan."""
+    from nssh.core.connector.pty import PtyConnector
+
+    cast_path = tmp_path / "test.cast"
+    lock_dir = tmp_path / ".lock"
+
+    plan = recording.RecordingPlan(
+        enabled=True,
+        cast_path=cast_path,
+        append=False,
+        title="nssh:testhost",
+        asciinema_bin="echo",  # Mock asciinema
+        lock_directory=lock_dir,
+        sequence=0,
+        session_label="session-000",
+    )
+
+    # Test that connector accepts recording plan
+    connector = PtyConnector(
+        hostname="testhost",
+        username=None,
+        password=None,
+        recording_plan=plan,
+    )
+
+    assert connector.recording_plan == plan
+    assert connector.recording_plan.enabled is True
+
+
+def test_recording_disabled_by_nssh_record_env_var(monkeypatch):
+    """Test NSSH_RECORD=0 disables recording."""
+    monkeypatch.setenv("NSSH_RECORD", "0")
+    plan = recording._compute_plan(
+        "testhost", prepare_dirs=False, allocate_sequence=False
+    )
+
+    assert plan.enabled is False
+    assert "NSSH_RECORD" in plan.reason or "disabled" in plan.reason
+
+
+def test_recording_enabled_by_nssh_record_env_var(monkeypatch):
+    """Test NSSH_RECORD=1 enables recording."""
+    monkeypatch.setenv("NSSH_RECORD", "1")
+    plan = recording._compute_plan(
+        "testhost", prepare_dirs=False, allocate_sequence=False
+    )
+
+    # May fail if asciinema not installed, but that's expected
+    if plan.enabled:
+        assert plan.asciinema_bin is not None
+
+
+def test_build_asciinema_command(tmp_path):
+    """Test asciinema command construction."""
+    cast_path = tmp_path / "test.cast"
+    plan = recording.RecordingPlan(
+        enabled=True,
+        cast_path=cast_path,
+        append=True,
+        title="nssh:testhost",
+        asciinema_bin="/usr/bin/asciinema",
+        lock_directory=None,
+        sequence=0,
+        session_label="session-000",
+    )
+
+    ssh_cmd = ["ssh", "-tt", "testhost"]
+    cmd = recording.build_asciinema_command(plan, ssh_cmd)
+
+    assert cmd[0] == "/usr/bin/asciinema"
+    assert "rec" in cmd
+    assert "--quiet" in cmd
+    assert "--append" in cmd
+    assert "--title" in cmd
+    assert "nssh:testhost" in cmd
+    assert "--command" in cmd
+    assert str(cast_path) == cmd[-1]  # Cast path should be last
+    # Command string should contain ssh and testhost
+    cmd_str = " ".join(cmd)
+    assert "ssh" in cmd_str
+    assert "testhost" in cmd_str

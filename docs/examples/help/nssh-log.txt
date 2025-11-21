@@ -5,48 +5,26 @@
 
 Commands:
   nssh log list [OPTIONS]
-    List all recorded sessions with filtering options                           
-    Example: nssh log list --search lab-switch                                  
-    Example: nssh log list --search 2025-11-15                                  
+    List recorded sessions                                                      
   nssh log play [OPTIONS]
-    Play a recorded session using asciinema                                     
-    Example: nssh log play                                                      
-    Example: nssh log play --date 2025-11-14                                    
-    Example: nssh log play --file session-001.cast                              
+    Play a recorded session                                                     
   nssh log upload [OPTIONS]
-    Upload a recording to an asciinema server                                   
-    Example: nssh log upload  # requires ASCIINEMA_SERVER_URL                   
-    Example: nssh log upload --server https://asciinema.example.com             
+    Upload recording to asciinema server                                        
   nssh log export [OPTIONS]
-    Export recording to text or GIF format                                      
-    Example: nssh log export                                                    
-    Example: nssh log export --gif                                              
-    Example: nssh log export --output demo.txt                                  
+    Export to text or GIF format                                                
   nssh log cleanup [OPTIONS]
-    Remove old recordings based on max_age_days configuration                   
-    Example: nssh log cleanup --dry-run                                         
+    Remove old recordings                                                       
 
-Common Options:
+Options:
   --file FILE, -f
-    Direct path to recording file                                               
+    Path to recording file                                                      
   --date YYYY-MM-DD
-    Filter interactive picker by date (default: today)                          
-  --dry-run
-    Preview actions without executing                                           
-
-List Options:
+    Filter by date                                                              
   --search TERM, -s
-    Filter by keyword (repeatable for AND logic)                                
-
-Export Options:
+    Filter by keyword                                                           
   --output FILE, -o
-    Output path (default: ./{host}_{date}_{session}.{format})                   
-  --txt
-    Export as text (default format)                                             
-  --gif
-    Export as animated GIF (requires asciicast2gif)                             
-
-Interactive Mode:
-  When --file is not specified, commands launch an fzf picker to select a       
-  recording.                                                                    
-  Use --date to filter by a specific date (defaults to today).                  
+    Output path for export                                                      
+  --format txt|gif
+    Export format (default: txt)                                                
+  --dry-run
+    Preview without executing                                                   

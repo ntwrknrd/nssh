@@ -1,7 +1,7 @@
 """Recording helper utilities for nssh.
 
 This module centralizes configuration parsing for the automatic asciinema
-recorder, surfaces runtime helpers for the shell wrapper, and stores simple
+recorder, surfaces runtime helpers for the PTY connector, and stores simple
 session metadata files that future tooling (like ``nssh log``) can consume.
 """
 
@@ -445,6 +445,66 @@ def acquire_lock(lock_path: Path) -> Iterator[None]:
         handle.close()
 
 
+@contextmanager
+def acquire_session_lock(lock_directory: Path | None) -> Iterator[None]:
+    """Acquire directory-based lock for recording sessions.
+
+    Args:
+        lock_directory: Path to lock directory (e.g., .session-000.lock/)
+
+    Yields:
+        None
+
+    The lock directory contains a .lockinfo file with PID for stale detection.
+    """
+    if lock_directory is None:
+        yield
+        return
+
+    lock_dir = Path(lock_directory)
+    lock_info = lock_dir / ".lockinfo"
+
+    # Try to create lock directory
+    max_attempts = 100
+    for attempt in range(max_attempts):
+        try:
+            lock_dir.mkdir(parents=True, exist_ok=False)
+            # Successfully created - write our PID
+            lock_info.write_text(f"pid={os.getpid()}\ncmd=nssh\n", encoding="utf-8")
+            break
+        except FileExistsError:
+            # Lock exists - check if stale
+            if _is_session_locked(lock_dir):
+                # Still locked by live process
+                import time
+
+                time.sleep(0.1)
+                continue
+            else:
+                # Stale lock - remove and retry
+                try:
+                    import shutil as shutil_mod
+
+                    shutil_mod.rmtree(lock_dir)
+                except OSError:
+                    pass
+                continue
+    else:
+        raise RuntimeError(
+            f"Failed to acquire recording lock after {max_attempts} attempts"
+        )
+
+    try:
+        yield
+    finally:
+        # Release lock
+        try:
+            lock_info.unlink(missing_ok=True)
+            lock_dir.rmdir()
+        except OSError:
+            pass
+
+
 def _lock_handle(handle) -> None:
     if os.name == "posix":
         import fcntl
@@ -470,14 +530,24 @@ def _unlock_handle(handle) -> None:
 def build_asciinema_command(plan: RecordingPlan, ssh_cmd: Sequence[str]) -> List[str]:
     if not plan.cast_path or not plan.asciinema_bin:
         raise ValueError("Recording plan missing cast path or asciinema binary")
+
+    # Build SSH command as a single string for asciinema's --command flag
+    import shlex
+
+    ssh_cmd_string = " ".join(shlex.quote(arg) for arg in ssh_cmd)
+
     command: List[str] = [plan.asciinema_bin, "rec", "--quiet"]
+
+    # Use headless mode if requested (disables terminal capability detection)
+    if os.getenv("NSSH_RECORD_HEADLESS") in ("1", "true", "True"):
+        command.append("--headless")
+
     if plan.append:
         command.append("--append")
     if plan.title:
         command.extend(["--title", plan.title])
+    command.extend(["--command", ssh_cmd_string])
     command.append(str(plan.cast_path))
-    command.append("--")
-    command.extend(ssh_cmd)
     return command
 
 

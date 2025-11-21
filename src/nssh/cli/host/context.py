@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Dict, Iterator, cast
 
 from nssh.cli import typer
 from nssh.core.ui.console import get_console
+from nssh.core.env.paths import host_index_path
 from nssh.core.auth.credentials import CredentialManager
 from nssh.core.ssh.config import SSHConfigParser
 
@@ -44,7 +44,7 @@ def get_manager(ctx: typer.Context) -> CredentialManager:
 
 def complete_hostname(incomplete: str) -> Iterator[str]:
     try:
-        index_path = Path.home() / ".ssh" / ".nssh_host_index"
+        index_path = host_index_path()
         if not index_path.exists():
             return
         with open(index_path) as handle:
@@ -65,5 +65,18 @@ def complete_config_file(incomplete: str) -> Iterator[str]:
             filename = file_path.name
             if filename.startswith(incomplete):
                 yield filename
+    except Exception:
+        return
+
+
+def complete_context(incomplete: str) -> Iterator[str]:
+    """Autocomplete context names from the credential store."""
+    try:
+        cm = CredentialManager()
+        contexts = cm.list_contexts()
+        for entry in contexts:
+            name = entry.get("name", "")
+            if name.startswith(incomplete):
+                yield name
     except Exception:
         return

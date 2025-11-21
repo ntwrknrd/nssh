@@ -16,7 +16,7 @@ SAMPLE_LINES = [
 
 STRUCTURED_LINES = [
     '[1000] TIMING: {"kind":"run","phase":"start","run":1}',
-    '[1001] TIMING: {"kind":"stage","stage":"wrapper-overhead","phase":"start","run":1}',
+    '[1001] TIMING: {"kind":"stage","stage":"pty-start","phase":"start","run":1}',
     '[1010] TIMING: {"kind":"stage","stage":"config-parse","phase":"start","run":1}',
     '[1040] TIMING: {"kind":"stage","stage":"config-parse","phase":"finish","duration_ms":30,"run":1}',
     '[1050] TIMING: {"kind":"stage","stage":"host-selection","phase":"start","run":1}',
@@ -25,14 +25,14 @@ STRUCTURED_LINES = [
     '[1180] TIMING: {"kind":"stage","stage":"credential-vault","phase":"finish","duration_ms":40,"run":1}',
     '[1190] TIMING: {"kind":"stage","stage":"connection-orchestration","phase":"start","run":1}',
     '[1210] TIMING: {"kind":"stage","stage":"connection-orchestration","phase":"finish","duration_ms":20,"run":1}',
-    '[1211] TIMING: {"kind":"stage","stage":"wrapper-overhead","phase":"finish","duration_ms":110,"run":1}',
-    '[1212] TIMING: {"kind":"stage","stage":"wrapper-teardown","phase":"start","run":1}',
+    '[1211] TIMING: {"kind":"stage","stage":"pty-start","phase":"finish","duration_ms":110,"run":1}',
+    '[1212] TIMING: {"kind":"stage","stage":"pty-teardown","phase":"start","run":1}',
     '[1215] TIMING: {"kind":"stage","stage":"ssh-connection","phase":"start","run":1}',
     '[1355] TIMING: {"kind":"stage","stage":"ssh-connection","phase":"finish","duration_ms":140,"run":1}',
-    '[1358] TIMING: {"kind":"stage","stage":"wrapper-teardown","phase":"finish","duration_ms":3,"run":1}',
+    '[1358] TIMING: {"kind":"stage","stage":"pty-teardown","phase":"finish","duration_ms":3,"run":1}',
     '[1230] TIMING: {"kind":"run","phase":"finish","run":1,"duration_ms":230,"status":"ok"}',
     '[2000] TIMING: {"kind":"run","phase":"start","run":2}',
-    '[2001] TIMING: {"kind":"stage","stage":"wrapper-overhead","phase":"start","run":2}',
+    '[2001] TIMING: {"kind":"stage","stage":"pty-start","phase":"start","run":2}',
     '[2010] TIMING: {"kind":"stage","stage":"config-parse","phase":"start","run":2}',
     '[2050] TIMING: {"kind":"stage","stage":"config-parse","phase":"finish","duration_ms":40,"run":2}',
     '[2060] TIMING: {"kind":"stage","stage":"host-selection","phase":"start","run":2}',
@@ -41,11 +41,11 @@ STRUCTURED_LINES = [
     '[2230] TIMING: {"kind":"stage","stage":"credential-vault","phase":"finish","duration_ms":60,"run":2}',
     '[2240] TIMING: {"kind":"stage","stage":"connection-orchestration","phase":"start","run":2}',
     '[2290] TIMING: {"kind":"stage","stage":"connection-orchestration","phase":"finish","duration_ms":50,"run":2}',
-    '[2291] TIMING: {"kind":"stage","stage":"wrapper-overhead","phase":"finish","duration_ms":120,"run":2}',
-    '[2292] TIMING: {"kind":"stage","stage":"wrapper-teardown","phase":"start","run":2}',
+    '[2291] TIMING: {"kind":"stage","stage":"pty-start","phase":"finish","duration_ms":120,"run":2}',
+    '[2292] TIMING: {"kind":"stage","stage":"pty-teardown","phase":"start","run":2}',
     '[2295] TIMING: {"kind":"stage","stage":"ssh-connection","phase":"start","run":2}',
     '[2455] TIMING: {"kind":"stage","stage":"ssh-connection","phase":"finish","duration_ms":160,"run":2}',
-    '[2470] TIMING: {"kind":"stage","stage":"wrapper-teardown","phase":"finish","duration_ms":15,"run":2}',
+    '[2470] TIMING: {"kind":"stage","stage":"pty-teardown","phase":"finish","duration_ms":15,"run":2}',
     '[2320] TIMING: {"kind":"run","phase":"finish","run":2,"duration_ms":320,"status":"ok"}',
 ]
 
@@ -104,7 +104,7 @@ def test_parse_timing_lines_preserves_payload() -> None:
     assert entries[0].payload is not None
     assert entries[1].payload is not None
     assert entries[0].payload["kind"] == "run"
-    assert entries[1].payload["stage"] == "wrapper-overhead"
+    assert entries[1].payload["stage"] == "pty-start"
 
 
 def test_parse_timing_lines_retains_detail_and_status_fields() -> None:
@@ -127,7 +127,7 @@ def test_build_benchmark_samples_extracts_stage_data() -> None:
     assert samples[0].total_ms == 230
     assert samples[1].stages[1].stage == "host-selection"
     assert samples[0].stages[-2].stage == "ssh-connection"
-    assert samples[0].stages[-1].stage == "wrapper-teardown"
+    assert samples[0].stages[-1].stage == "pty-teardown"
 
 
 def test_summarize_benchmark_reports_variance() -> None:
@@ -141,9 +141,9 @@ def test_summarize_benchmark_reports_variance() -> None:
     assert summary.total_stats.max_ms == 320
     ssh_stats = summary.stage_stats["ssh-connection"]
     assert ssh_stats.mean_ms == pytest.approx((140 + 160) / 2)
-    wrapper_stats = summary.stage_stats["wrapper-overhead"]
-    assert wrapper_stats.median_ms == pytest.approx((110 + 120) / 2)
-    teardown_stats = summary.stage_stats["wrapper-teardown"]
+    pty_start_stats = summary.stage_stats["pty-start"]
+    assert pty_start_stats.median_ms == pytest.approx((110 + 120) / 2)
+    teardown_stats = summary.stage_stats["pty-teardown"]
     assert teardown_stats.mean_ms == pytest.approx((3 + 15) / 2)
 
 

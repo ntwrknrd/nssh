@@ -12,7 +12,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple, Optional
 
-from nssh.core.env.paths import backup_directory
+from nssh.core.env.paths import (
+    backup_directory,
+    host_index_path,
+    ssh_config_path,
+)
 from nssh.core.env.system import set_secure_permissions
 
 
@@ -31,7 +35,7 @@ class SSHConfigParser:
     def __init__(
         self, config_file: Optional[Path] = None, backup_dir: Optional[Path] = None
     ):
-        self.config_file = config_file or Path.home() / ".ssh" / "config"
+        self.config_file = config_file or ssh_config_path()
         self.backup_dir = backup_dir or _resolved_backup_dir()
 
     @staticmethod
@@ -347,7 +351,7 @@ class SSHConfigParser:
         Raises:
             RuntimeError: If index creation fails
         """
-        index_path = Path.home() / ".ssh" / ".nssh_host_index"
+        index_path = host_index_path()
 
         try:
             # Get all config files

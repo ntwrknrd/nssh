@@ -21,54 +21,32 @@ Thanks for helping improve nssh. This guide captures the contributor-focused det
 - [Additional References](#additional-references)
 
 ## Getting Started
-1. Install prerequisites (OpenSSH, `sshpass`, `age`, `jq`, `fzf`, Python 3.14+, and `uv`).
-2. Sync dependencies inside the repo:
-   ```bash
-   uv sync
-   ```
-3. Run the CLIs locally without installing:
-   ```bash
-   uv run nssh host list
-   uv run nssh cred list-contexts
-   ```
-4. When you need the binaries on your PATH, reinstall with:
-   ```bash
-   uv tool install --force --reinstall .
-   ```
+
+Prerequisites: See [README.md Installation](../README.md#installation).
+
+**Developer workflow:**
+```bash
+uv sync                                    # Sync dependencies
+uv run nssh host list                      # Run without installing
+uv tool install --force --reinstall .      # Test installed entry points
+```
 
 ## Developer Notes
-- **Shared CLI toolkit:** All Rich panels, prompts, `fzf` pickers, usage renderers, and prompt workflows live under `src/nssh/cli/common/` (`ui.py`, `prompt.py`, `selectors.py`, `help.py`, `app.py`, `workflows.py`). Import from these modules (instead of `rich.panel.Panel` or `nssh.core.fzf.fzf_select`) so every command inherits the same look-and-feel.
-- **Host CLI tests:** Use Typer's `CliRunner` with the ready-made fixture in `tests/test_cli_host.py`. This test suite stubs `CredentialManager`, rewrites `HOME` into a temp directory, and lets you extend flows (add/list/rm/update) without touching real SSH configs. Run it with `uv run pytest tests/test_cli_host.py` or `uv run pytest` for the full matrix.
+- **Shared CLI toolkit:** Import from `src/nssh/cli/common/` (`ui.py`, `prompt.py`, `selectors.py`, etc.) for consistent look-and-feel across commands.
+- **Host CLI tests:** Use `tests/test_cli_host.py` with temp `$HOME` fixture to test SSH config flows without touching real configs.
 
 ## Development Workflow
-- Repo layout: Bash wrapper + shell helpers remain at the root; Python modules live under `src/nssh/` (`core/` for shared logic, `cli/` for Typer entry points).
+
+- Repo layout: Shell helpers live under `src/nssh/assets/`; Python modules live under `src/nssh/` (`core/` for shared logic, `cli/` for Typer entry points).
 - Work in feature branches, keep changes scoped, and stash experimental helpers inside `src/nssh/assets/completions/` or `build/` so the root stays tidy.
 - Iterate with `uv run ...` for quick tests; reinstall via `uv tool install --force --reinstall .` only when verifying installed entry points.
-
-### Setup
-
-```bash
-cd nssh  # adjust to your cloned path
-
-# Install dependencies
-uv sync
-
-# Run CLI tools directly from source (uses local code, no installation needed)
-uv run nssh cred list
-uv run nssh host add --help
-uv run nssh connect hostname
-uv run nssh benchmark capture hostname
-uv run nssh install-shell --help
-
-# Only install when you need the binaries on PATH or want to test installed entry points
-uv tool install --force --reinstall .
-```
 
 ### Making Changes
 
 1. Edit code:
-   - Bash script: `nssh`
-   - Python package: `src/nssh/`
+   - Python CLI: `src/nssh/cli/`
+   - Core modules: `src/nssh/core/`
+   - Shell helpers: `src/nssh/assets/scripts/`
 2. Test immediately—installed tools require a reinstall to pick up edits.
 3. Clean caches when needed:
    ```bash
@@ -88,76 +66,32 @@ uv tool install --force --reinstall .
 
 ### Manual Smoke Tests
 
-Before submitting a PR, run these manual smoke tests to verify basic functionality:
-
 ```bash
-# Credential flows
-uv run nssh cred list-contexts
-uv run nssh cred list
-
-# Host management
+uv run nssh cred ctx list
 uv run nssh host list
-uv run nssh host list work
-
-# Full connection flow (requires configured host)
 uv run nssh test-host
 ```
 
 ### Automated Unit Tests
 
-The project has comprehensive test coverage with 40+ tests across 7 test files:
+18 test files (~2900 lines) covering CLI, credentials, SSH config, PTY connector, recording, benchmarking.
 
 ```bash
-# Run all tests
-uv run pytest
-
-# Run with verbose output
-uv run pytest -v
-
-# Run with coverage report
-uv run pytest --cov=nssh --cov-report=term-missing
-
-# Run specific test file
-uv run pytest tests/test_benchmark_core.py
-
-# Run tests matching a pattern
-uv run pytest -k "credential"
-```
-
-**Test coverage:**
-The test suite includes 10+ test files covering CLI help, credentials, SSH config parsing, connection flow, benchmarking, recording, and shell integration. See the `tests/` directory for the current test suite.
-
-**CLI integration tests:** `tests/test_cli_host.py` uses Typer's `CliRunner` plus a temp `$HOME` fixture so you can exercise `nssh host` subcommands without touching a real SSH setup. Extend this file for new flows (password prompts, compat fixes, etc.) and run it directly via:
-
-```bash
-uv run pytest tests/test_cli_host.py
+uv run pytest                              # All tests
+uv run pytest -v                           # Verbose
+uv run pytest --cov=nssh                   # Coverage
+uv run pytest tests/test_benchmark_core.py # Specific file
+uv run pytest -k "credential"              # Pattern match
 ```
 
 ### Performance Benchmarking
 
-For performance-sensitive changes, capture timing artifacts:
+Include benchmark results if you modified credential resolution, config parsing, host indexing, or connection flow:
 
 ```bash
-# Basic benchmark
-uv run nssh benchmark capture hostname --warmups 1 --samples 3
-
-# With budget enforcement
-uv run nssh benchmark capture hostname \
-  --stage-budget host-selection=150 \
-  --total-budget 500 \
-  --budget-metric max
-
-# Generate JSON artifact for PR
-uv run nssh benchmark capture hostname --samples 5 --json-output benchmark/hostname.json
+uv run nssh benchmark run hostname --warmups 1 --samples 3
 ```
 
-**Include benchmark results in your PR if you modified:**
-- Credential resolution logic
-- SSH config parsing
-- Host indexing
-- Any performance-critical code path
-
-For code architecture and module organization, see [ARCHITECTURE.md - Two-Layer Architecture](docs/ARCHITECTURE.md#two-layer-architecture).
 
 ## Troubleshooting and Debugging
 
@@ -171,7 +105,7 @@ For developer-specific debugging:
 
 ## Coding Standards
 - Target Python 3.14+ with full type hints on new public functions. Keep to PEP 8 spacing (4-space indents, ~100 character lines).
-- CLI command names stay kebab-case (e.g., `add-context-cred`); internal helpers use descriptive snake_case like `prompt_required`.
+- CLI command names use simple verbs (e.g., `add`, `get`, `list`, `rm`); internal helpers use descriptive snake_case like `prompt_required`.
 - Prefer Rich panels/tables for human-facing output, and keep docstrings short and action-oriented.
 - Use the shared CLI toolkit in `src/nssh/cli/common/`: `ui.show_panel`/`print_table` for Rich output, `prompt.ask_text`/`confirm` for questions, `selectors.select_via_fzf` for `fzf` prompts, `help.render_usage` for `--help`, `app.run_cli` for startup/KeyboardInterrupt handling, and `workflows.*` for multi-step confirmations. Adding new helpers there keeps styles consistent across commands.
 - Maintain context-aware credential defaults: route new logic through the shared analyzers in `src/nssh/core/` instead of bespoke scripts.
@@ -216,6 +150,3 @@ uv run black src/ tests/ && uv run ruff check src/ tests/ && uv run mypy
 - Never commit decrypted credentials, `.nssh_host_index`, or age key material. Stub sensitive paths in tests via temp directories.
 - Document new environment variables in [README.md](README.md) and/or `docs/` as part of your change.
 - Default to prompting via `prompt_required` rather than accepting raw passwords on the command line.
-
-## Additional References
-- Jump straight to [Testing Expectations](#testing-expectations) for the required test plan, or to [Security and Configuration](#security-and-configuration) for guardrails.

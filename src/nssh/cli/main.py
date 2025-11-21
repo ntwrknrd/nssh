@@ -5,21 +5,21 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Sequence
 
+from nssh import __version__
+
 APP_TITLE = "nssh"
-APP_SUBTITLE = "Unified SSH helper and management CLI"
+APP_SUBTITLE = "SSH tooling for network operators"
 
 _connection_context = {"allow_extra_args": True, "ignore_unknown_options": True}
 
 TOP_LEVEL_COMMANDS = [
-    "connect",
     "host",
     "cred",
     "log",
     "benchmark",
-    "install-shell",
-    "recording-check",
-    "help",
+    "self",
     "version",
+    "help",
     "__list-subcommands",
 ]
 
@@ -62,44 +62,24 @@ def _usage_sections():
 
     return [
         UsageSection(
-            "Connection",
+            "",
             rows=[
                 UsageRow(
-                    "nssh <host> [ssh-options...]",
-                    "Resolve credentials and print SSH launch metadata",
+                    "nssh [USER@]HOST [SSH_ARGS...]",
+                    "Connect to host",
+                    examples=["('nssh -- host' if name == subcommand)"],
+                    example_prefix="",
                 ),
-                UsageRow(
-                    "nssh connect [HOST] [USERNAME]",
-                    "Direct access to the connect helper without shell wrapper",
-                ),
-            ],
-        ),
-        UsageSection(
-            "Options",
-            rows=[
-                UsageRow("-h, --help", "Show this message and exit"),
-                UsageRow("-v, --version", "Show version and exit"),
-                UsageRow("-V, --verbose", "Enable verbose SSH debug output (ssh -v)"),
-                UsageRow("-u, --user <username>", "Specify username for connection"),
-            ],
-        ),
-        UsageSection(
-            "Management Commands",
-            rows=[
                 UsageRow("nssh host [subcommand]", "Manage SSH config entries"),
                 UsageRow("nssh cred [subcommand]", "Manage encrypted credentials"),
-                UsageRow("nssh log [subcommand]", "Inspect and manage recordings"),
+                UsageRow("nssh log [subcommand]", "Manage recordings"),
                 UsageRow(
                     "nssh benchmark [subcommand]",
-                    "Measure wrapper + SSH performance",
+                    "Performance benchmarking and analysis",
                 ),
                 UsageRow(
-                    "nssh install-shell",
-                    "Install the wrapper, shell integration, and completions",
-                ),
-                UsageRow(
-                    "nssh recording-check",
-                    "Audit recording configuration used by the wrapper",
+                    "nssh self [subcommand]",
+                    "Manage CLI and optional shell helpers",
                 ),
             ],
         ),
@@ -121,17 +101,13 @@ def _build_cli_bundle() -> _CliBundle:
         app as benchmark_app,
         print_usage as benchmark_print_usage,
     )
+    from nssh.cli.self import (
+        app as self_app,
+        print_usage as self_print_usage,
+    )
     from nssh.cli.cred import app as cred_app, print_usage as cred_print_usage
     from nssh.cli.host import app as host_app, print_usage as host_print_usage
-    from nssh.cli.install_shell import (
-        app as install_shell_app,
-        print_usage as install_shell_print_usage,
-    )
     from nssh.cli.log import app as log_app, print_usage as log_print_usage
-    from nssh.cli.recording_check import (
-        app as recording_check_app,
-        print_usage as recording_check_print_usage,
-    )
 
     app = _typer.Typer(
         add_help_option=False,
@@ -139,28 +115,21 @@ def _build_cli_bundle() -> _CliBundle:
         rich_markup_mode=None,
     )
 
-    @app.command("connect", context_settings=_connection_context)
-    def connect_command(ctx: _typer.Context) -> None:
-        _run_connect(ctx.args)
-
     @app.command("help")
     def help_command() -> None:
         print_usage()
         raise _typer.Exit(code=0)
 
-    @app.command("version")
+    @app.command("version", hidden=True)
     def version_command() -> None:
-        from nssh.core.diag.version import version_string
-
-        _typer.echo(version_string("nssh"))
+        _typer.echo(f"nssh {__version__}")
         raise _typer.Exit(code=0)
 
     app.add_typer(host_app, name="host")
     app.add_typer(cred_app, name="cred")
     app.add_typer(log_app, name="log")
     app.add_typer(benchmark_app, name="benchmark")
-    app.add_typer(install_shell_app, name="install-shell")
-    app.add_typer(recording_check_app, name="recording-check")
+    app.add_typer(self_app, name="self")
 
     @app.command("__list-subcommands", hidden=True)
     def list_subcommands_command() -> None:
@@ -171,8 +140,7 @@ def _build_cli_bundle() -> _CliBundle:
         "cred": cred_print_usage,
         "log": log_print_usage,
         "benchmark": benchmark_print_usage,
-        "install-shell": install_shell_print_usage,
-        "recording-check": recording_check_print_usage,
+        "self": self_print_usage,
     }
 
     return _CliBundle(app=app, subcommand_usage=subcommand_usage)
@@ -199,15 +167,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         if not first_arg.startswith("-") and first_arg not in TOP_LEVEL_COMMANDS:
             _run_connect(args)
             return
-        # Handle 'connect' command
-        if first_arg == "connect":
-            connect_args = args[1:]
-            if not connect_args or any(arg in {"-h", "--help"} for arg in connect_args):
-                # Defer to Typer for help/usage
-                pass
-            else:
-                _run_connect(connect_args)
-                return
 
     # Handle completion requests
     if (

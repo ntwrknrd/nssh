@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import os
+import io
 import re
-import subprocess
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import Any, Dict, List
 
-if TYPE_CHECKING:
-    from nssh.core.ssh.config import SSHConfigParser
+from nssh.core.auth.credentials import CredentialManager
+from nssh.core.connector.pty import PtyConnector
+from nssh.core.ssh.config import SSHConfigParser
 
 AUTH_CONFIGS: Dict[str, Dict[str, Any]] = {
     "password": {
@@ -61,7 +61,10 @@ COMPAT_CONFIGS: Dict[str, Dict[str, Any]] = {
             "  KexAlgorithms +diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1,diffie-hellman-group-exchange-sha256\n",
         ],
         "detection_patterns": [r"KexAlgorithms\s+"],
-        "error_pattern": r"no matching key exchange method found",
+        "error_patterns": [
+            r"no matching key exchange method found",
+            r"unable to negotiate [^:]+: no matching key exchange",
+        ],
     },
     "macs": {
         "name": "Legacy MACs",
@@ -70,7 +73,10 @@ COMPAT_CONFIGS: Dict[str, Dict[str, Any]] = {
             "  MACs +hmac-sha1,hmac-sha1-96,hmac-md5,hmac-md5-96\n",
         ],
         "detection_patterns": [r"MACs\s+"],
-        "error_pattern": r"no matching MAC found",
+        "error_patterns": [
+            r"no matching macs? found",
+            r"unable to negotiate [^:]+: no matching mac",
+        ],
     },
     "ciphers": {
         "name": "Legacy Ciphers",
@@ -79,7 +85,10 @@ COMPAT_CONFIGS: Dict[str, Dict[str, Any]] = {
             "  Ciphers +aes128-cbc,3des-cbc,aes192-cbc,aes256-cbc\n",
         ],
         "detection_patterns": [r"Ciphers\s+"],
-        "error_pattern": r"no matching cipher found",
+        "error_patterns": [
+            r"no matching ciphers? found",
+            r"unable to negotiate [^:]+: no matching cipher",
+        ],
     },
     "hostkey": {
         "name": "Legacy Host Key Algorithms",
@@ -88,7 +97,10 @@ COMPAT_CONFIGS: Dict[str, Dict[str, Any]] = {
             "  HostKeyAlgorithms +ssh-rsa,ssh-dss\n",
         ],
         "detection_patterns": [r"HostKeyAlgorithms\s+"],
-        "error_pattern": r"no matching host key type found",
+        "error_patterns": [
+            r"no matching host key type found",
+            r"unable to negotiate [^:]+: no matching host key",
+        ],
     },
 }
 
@@ -96,42 +108,144 @@ COMPAT_CONFIGS: Dict[str, Dict[str, Any]] = {
 def parse_ssh_compatibility_error(stderr_text: str) -> List[str]:
     needed: List[str] = []
     for compat_type, config in COMPAT_CONFIGS.items():
-        pattern = str(config.get("error_pattern", ""))
-        if pattern and re.search(pattern, stderr_text, re.IGNORECASE):
-            needed.append(compat_type)
+        patterns = config.get("error_patterns") or [config.get("error_pattern", "")]
+        for pattern in patterns:
+            if pattern and re.search(pattern, stderr_text, re.IGNORECASE):
+                needed.append(compat_type)
+                break
     return needed
 
 
-def test_ssh_connection_via_wrapper(hostname: str, timeout: int = 10) -> Dict[str, Any]:
-    try:
-        env = os.environ.copy()
-        env["NSSH_RECORD"] = "0"
-        result = subprocess.run(
-            ["nssh", "-V", hostname, "exit", "0"],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=env,
-            stdin=subprocess.DEVNULL,
+def _is_auth_failure_after_successful_kex(stderr_text: str) -> bool:
+    """Check if connection failed on auth after successful key exchange.
+
+    This indicates compatibility issues were resolved but authentication
+    failed (expected when using BatchMode with password-only hosts).
+    """
+    has_successful_kex = bool(re.search(r"debug1:.*kex:.*algorithm:", stderr_text))
+    has_auth_failure = bool(
+        re.search(
+            r"(Permission denied|No more authentication methods)",
+            stderr_text,
+            re.IGNORECASE,
         )
-        return {
-            "success": result.returncode == 0,
-            "exit_code": result.returncode,
-            "stderr": result.stderr,
-            "stdout": result.stdout,
-        }
-    except subprocess.TimeoutExpired:
+    )
+    return has_successful_kex and has_auth_failure
+
+
+def _extract_authenticated_method(stderr_text: str) -> str | None:
+    match = re.search(
+        r'Authenticated to [^\s]+(?:\s+\([^)]+\))?\s+using\s+"([^"]+)"',
+        stderr_text,
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).lower()
+    return None
+
+
+def _did_authentication_succeed(stderr_text: str) -> bool:
+    return bool(
+        re.search(
+            r"Authenticated to [^\s]+(?:\s+\([^)]+\))?", stderr_text, re.IGNORECASE
+        )
+    )
+
+
+def test_ssh_connection_via_cli(
+    hostname: str,
+    timeout: int = 10,
+    parser: SSHConfigParser | None = None,
+) -> Dict[str, Any]:
+    parser_obj = parser or SSHConfigParser()
+    host_info = parser_obj.find_host_in_files(hostname)
+    if not host_info:
         return {
             "success": False,
-            "exit_code": 124,
-            "stderr": f"Connection timed out after {timeout} seconds",
+            "exit_code": 3,
+            "stderr": f"Host '{hostname}' not found in SSH config",
             "stdout": "",
         }
+
+    target_file, host_lines = host_info
+    fields = extract_ssh_fields(host_lines)
+    configured_user = fields.get("user") or None
+    auth_type = detect_auth_type(host_lines)
+
+    password_required = auth_type in {"password", "keyboard-interactive"}
+    resolved_username = configured_user
+    password: str | None = None
+    credential_warning: str | None = None
+
+    if password_required:
+        try:
+            cm = CredentialManager()
+        except RuntimeError as exc:
+            return {
+                "success": False,
+                "exit_code": 1,
+                "stderr": str(exc),
+                "stdout": "",
+            }
+
+        credential = cm.resolve_credential(
+            hostname,
+            git_include_file=target_file.name,
+            username=configured_user,
+        )
+
+        if credential:
+            resolved_username, password = credential
+        else:
+            credential_warning = (
+                f"[nssh] No stored credential for host '{hostname}'. "
+                "Running compatibility test in BatchMode (authentication will fail)."
+            )
+
+    batch_mode = password is None
+
+    ssh_args = [
+        "-vv",
+        "-o",
+        f"ConnectTimeout={timeout}",
+        "-o",
+        "NumberOfPasswordPrompts=1",
+    ]
+    if batch_mode:
+        ssh_args.extend(["-o", "BatchMode=yes"])
+    else:
+        ssh_args.extend(
+            [
+                "-o",
+                "PreferredAuthentications=password,keyboard-interactive,publickey",
+            ]
+        )
+    ssh_args.extend(
+        [
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "--",
+            "exit",
+        ]
+    )
+
+    output_buffer = io.BytesIO()
+
+    try:
+        connector = PtyConnector(
+            hostname=hostname,
+            username=resolved_username,
+            password=password,
+            ssh_args=ssh_args,
+            stdout=output_buffer,
+            attach_stdin=False,
+        )
+        exit_code = connector.run()
     except FileNotFoundError:
         return {
             "success": False,
             "exit_code": 127,
-            "stderr": "nssh command not found in PATH",
+            "stderr": "ssh command not found in PATH",
             "stdout": "",
         }
     except Exception as exc:  # pragma: no cover - defensive fallback
@@ -142,9 +256,41 @@ def test_ssh_connection_via_wrapper(hostname: str, timeout: int = 10) -> Dict[st
             "stdout": "",
         }
 
+    raw_output = output_buffer.getvalue().decode("utf-8", errors="ignore")
+    auth_method = _extract_authenticated_method(raw_output)
+    lowered = raw_output.lower()
+    if "timed out" in lowered and exit_code != 0:
+        return {
+            "success": False,
+            "exit_code": 124,
+            "stderr": f"Connection timed out after {timeout} seconds",
+            "stdout": raw_output,
+        }
+
+    if credential_warning:
+        raw_output = (
+            f"{credential_warning}\n{raw_output}" if raw_output else credential_warning
+        )
+
+    success = exit_code == 0
+    if not success and _did_authentication_succeed(raw_output):
+        success = True
+        raw_output = (
+            "[nssh] Remote CLI rejected probe command 'exit'; treating connection as successful.\n"
+            f"{raw_output}"
+        )
+
+    return {
+        "success": success,
+        "exit_code": exit_code,
+        "stderr": raw_output,
+        "stdout": "",
+        "auth_method": auth_method,
+    }
+
 
 def iterative_compatibility_fix(
-    parser: "SSHConfigParser",
+    parser: SSHConfigParser,
     hostname: str,
     max_iterations: int = 5,
     verbose: bool = True,
@@ -165,7 +311,11 @@ def iterative_compatibility_fix(
                 f"\n[dim]Iteration {iteration}/{max_iterations}: Testing connection...[/dim]"
             )
 
-        test_result = test_ssh_connection_via_wrapper(hostname, timeout=10)
+        test_result = test_ssh_connection_via_cli(
+            hostname,
+            timeout=10,
+            parser=parser,
+        )
 
         if test_result["success"]:
             return {
@@ -176,17 +326,27 @@ def iterative_compatibility_fix(
                 "stopped_reason": "connection_succeeded",
             }
 
-        raw_ssh_output = ""
-        if "=== RAW SSH OUTPUT ===" in test_result["stderr"]:
-            parts = test_result["stderr"].split("=== RAW SSH OUTPUT ===")
-            if len(parts) > 1:
-                raw_ssh_output = parts[1].split("=== END RAW SSH OUTPUT ===")[0].strip()
-
-        compat_types = parse_ssh_compatibility_error(
-            raw_ssh_output or test_result["stderr"]
-        )
+        # Parse SSH verbose output (stderr) for compatibility errors
+        compat_types = parse_ssh_compatibility_error(test_result["stderr"])
 
         if not compat_types:
+            # Check if we succeeded at key exchange but failed at auth
+            # This means compatibility issues are resolved (success!)
+            if all_fixes_applied and _is_auth_failure_after_successful_kex(
+                test_result["stderr"]
+            ):
+                if verbose and console:
+                    console.print(
+                        "[dim]Key exchange successful, authentication failed (expected with BatchMode)[/dim]"
+                    )
+                return {
+                    "success": True,
+                    "iterations": iteration,
+                    "fixes_applied": all_fixes_applied,
+                    "final_test_result": test_result,
+                    "stopped_reason": "auth_failed_after_kex_success",
+                }
+
             if test_result["exit_code"] != 255:
                 reason = {
                     124: "timeout",
@@ -254,7 +414,7 @@ def iterative_compatibility_fix(
                 "stopped_reason": "fix_application_error",
             }
 
-    final_test = test_ssh_connection_via_wrapper(hostname, timeout=10)
+    final_test = test_ssh_connection_via_cli(hostname, timeout=10, parser=parser)
     return {
         "success": final_test["success"],
         "iterations": max_iterations,
@@ -317,6 +477,6 @@ __all__ = [
     "detect_auth_type",
     "extract_ssh_fields",
     "parse_ssh_compatibility_error",
-    "test_ssh_connection_via_wrapper",
+    "test_ssh_connection_via_cli",
     "iterative_compatibility_fix",
 ]
