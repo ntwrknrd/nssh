@@ -3,38 +3,16 @@
 │ Measure nssh overhead on your system │
 ╰──────────────────────────────────────╯
 
-Commands:
-  nssh benchmark capture HOST [OPTIONS]
-    Run nssh with NSSH_DEBUG timing enabled and save the log                    
-  nssh benchmark analyze [LOG] [OPTIONS]
-    Render or archive a saved timing log (defaults to stdin)                    
+Usage:
+  nssh benchmark run HOST [OPTIONS]
+    Measure timing and archive results in benchmark/{timestamp}/                
 
-Capture Options:
-  -o, --output PATH
-    Write raw timing log to PATH (default: timing.log)                          
-  --dry-run
-    Replace SSH dial with a ProxyCommand stub                                   
-  --no-session-exit
-    Keep the SSH session open instead of auto 'exit'                            
-  -a, --ssh-arg ARG
-    Forward extra args to nssh (repeatable)                                     
+Options:
   --warmups N
-    Number of warmup runs ignored in summary                                    
+    Number of warmup runs ignored in summary (default: 1)                       
   --samples N
     Number of measured runs (default: 3)                                        
-  --json-output PATH
-    Write benchmark summary JSON to PATH                                        
-  --stage-budget KEY=MS
-    Enforce per-stage max (repeatable)                                          
-  --total-budget MS
-    Enforce total max ms threshold                                              
-  --budget-metric M
-    Metric for budgets: max, mean, median                                       
   --simple-only
     Disable instrumentation; report totals only                                 
-
-Analyze Options:
-  --archive-dir DIR
-    Persist raw log + JSON summary                                              
-  --label TEXT
-    Tag archived artifacts for later comparison                                 
+  --no-record
+    Force disable session recording (overrides env/config)                      

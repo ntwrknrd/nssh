@@ -3,98 +3,367 @@
 This guide covers the full CLI usage, credential workflows, configuration details, and development notes. Pair it with the main [README.md](../README.md) for a high-level overview.
 
 ## Table of Contents
-- [Quick Start Reference](#quick-start-reference)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Initial Setup](#initial-setup)
+  - [SSH Include Files and Context Credentials](#ssh-include-files-and-context-credentials)
+  - [First Connection](#first-connection)
+- [Quick Reference](#quick-reference)
 - [Core Concepts](#core-concepts)
   - [Credential Resolution](#credential-resolution)
 - [Configuration](#configuration)
   - [Environment Variables](#environment-variables)
   - [Configuration File](#configuration-file)
 - [CLI Usage](#cli-usage)
-  - [nssh (Connection Wrapper)](#nssh-connection-wrapper)
+- [nssh (Interactive Connector)](#nssh-interactive-connector)
   - [nssh cred (Credential Management)](#nssh-cred-credential-management)
   - [nssh host (SSH Config Management)](#nssh-host-ssh-config-management)
   - [nssh log (Session Recording)](#nssh-log-session-recording)
   - [nssh benchmark (Performance Analysis)](#nssh-benchmark-performance-analysis)
-  - [nssh install-shell (Shell Integration)](#nssh-install-shell-shell-integration)
+  - [nssh self (CLI & Shell Management)](#nssh-self-cli--shell-management)
 - [Security Best Practices](#security-best-practices)
   - [Credential Protection](#credential-protection)
-  - [Password Handling](#password-handling)
   - [Recording Privacy](#recording-privacy)
   - [File Permissions](#file-permissions)
   - [Key Management](#key-management)
   - [Safe Debugging](#safe-debugging)
-  - [Manual Credential Editing (Advanced)](#manual-credential-editing)
   - [Key Rotation](#key-rotation)
-  - [Multi-User Security](#multi-user-security)
 - [Troubleshooting](#troubleshooting)
 
-## Quick Start Reference
+## Getting Started
+
+This section walks you through setting up nssh from scratch to your first SSH connection.
+
+### Prerequisites
+
+Before installing nssh, ensure you have these tools installed:
+
+1. **OpenSSH** - SSH client (ships with most Unix systems)
+   ```bash
+   ssh -V  # Should show OpenSSH version
+   ```
+
+2. **age** - Modern file encryption tool for credential storage
+   ```bash
+   # macOS
+   brew install age
+
+   # Linux (most distros)
+   # Download from https://github.com/FiloSottile/age/releases
+   ```
+
+3. **fzf** - Fuzzy finder for interactive host selection
+   ```bash
+   # macOS
+   brew install fzf
+
+   # Linux
+   # apt: sudo apt install fzf
+   # dnf: sudo dnf install fzf
+   ```
+
+4. **uv** - Python package installer
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+5. **Python 3.14** - Install via uv
+   ```bash
+   uv python install 3.14
+   ```
+
+6. **(Optional) asciinema v3+** - For session recording features
+   ```bash
+   # macOS
+   brew install asciinema
+
+   # Linux: https://docs.asciinema.org/getting-started/
+   ```
+
+### Initial Setup
+
+**Step 1: Install nssh**
 
 ```bash
-# Connect to a host (fuzzy search)
-nssh core-switch
+# Clone the repository
+git clone https://github.com/ntwrknrd/nssh.git
+cd nssh
+
+# Install nssh binary to ~/.local/bin
+uv tool install .
+```
+
+**Step 2: Initialize nssh**
+
+Run the interactive setup wizard:
+
+```bash
+nssh self init
+```
+
+This command will guide you through:
+- Creating age encryption key (if missing)
+- Setting up SSH config structure
+- Installing shell integration (auto-detects your shell)
+- Creating first include file (optional)
+- Setting up context credential (optional)
+- Creating config.toml (optional)
+
+**Manual setup options:**
+
+If you prefer to skip interactive prompts:
+```bash
+# Non-interactive with defaults
+nssh self init --force
+
+# Preview without making changes
+nssh self init --dry-run
+
+# Manual shell integration (skip auto-detection)
+nssh self init --install-shell-helpers --append-shell-snippet ~/.bashrc
+```
+
+After running `init`, reload your shell:
+```bash
+source ~/.bashrc  # or ~/.zshrc, or restart your terminal
+```
+
+**Step 3: Verify installation**
+
+```bash
+nssh --help        # Should show nssh help
+nssh self status   # Shows what's configured and next steps
+```
+
+After initialization, you'll have:
+- `~/.local/bin/nssh` - The nssh binary (installed by uv)
+- `~/.config/age/keys.txt` - Your age encryption key
+- `~/.ssh/config` - SSH config with Include structure
+- `~/.ssh/conf.d/` - Directory for include files (if created)
+
+The following files are created automatically as you use nssh:
+- `~/.ssh/nssh_credentials.age` - Encrypted password storage (when you add credentials)
+- `~/.ssh/.nssh_host_index` - Fast host lookup index (when you add hosts)
+- `~/.ssh/backups/` - SSH config backups (timestamped, when you modify config)
+
+### What `nssh self init` Does
+
+The `nssh self init` command is an interactive setup wizard that automates the entire configuration process. Here's what happens when you run it:
+
+**1. System Validation**
+- Checks for required dependencies (age, fzf, Python 3.14+)
+- Verifies nssh is installed and on PATH
+- Shows clear error messages with installation links if anything is missing
+
+**2. Age Encryption Key**
+- Checks if `~/.config/age/keys.txt` exists
+- If missing, offers to create it with `age-keygen`
+- Sets secure permissions (0600) automatically
+
+**3. SSH Config Structure**
+- Checks for `~/.ssh/config`
+- If missing, offers to create with `Include` directive structure
+- Creates `~/.ssh/conf.d/` directory for include files
+- Uses best practices (ServerAliveInterval 60, Include pattern)
+
+**4. Shell Integration** (Auto-detected)
+- Detects your shell from `$SHELL` environment variable
+- Suggests appropriate rc file (`.bashrc`, `.zshrc`, `.config/fish/config.fish`)
+- Offers to install shell helpers and append sourcing snippet
+- Fish users get completions automatically
+
+**5. First Include File** (Optional)
+- Offers to create your first include file (e.g., `default`, `work`, `homelab`)
+- Creates file in `~/.ssh/conf.d/` with proper permissions
+- Skipped if include files already exist
+
+**6. Context Credential** (Optional)
+- If include file was created, offers to set up context credential
+- Prompts for context name, username, and password
+- Creates encrypted credential as fallback for all hosts in that include file
+- Password entered securely (not echoed, confirmed twice)
+
+**7. Config Template** (Optional)
+- Offers to create `~/.config/nssh/config.toml` from example
+- Allows customization of recording, encryption paths, etc.
+- Completely optional (defaults work fine)
+
+**Interactive vs. Non-Interactive:**
+- **Default mode**: Prompts for each step with sensible defaults
+- **`--force` flag**: Uses defaults, no prompts (except for passwords)
+- **`--dry-run` flag**: Shows what would be done without making changes
+- **Manual flags**: Can specify `--install-shell-helpers`, `--append-shell-snippet`, etc.
+
+**After init completes:**
+- Run `nssh self status` to see what was configured
+- Get actionable next steps (e.g., "Add first host: nssh host add")
+- All changes tracked in manifest for clean uninstall via `nssh self cleanup`
+
+### SSH Include Files and Context Credentials
+
+Before adding hosts, it's recommended to organize your SSH config using Include files and set up context credentials. This provides fallback authentication for entire groups of hosts.
+
+> **NOTE:** `nssh self init` can guide you through this setup interactively. The instructions below are for manual setup or for understanding how it works.
+
+**What are Include files?**
+
+SSH config Include files let you split your configuration into multiple files (e.g., `work_hosts`, `homelab_hosts`, `prod_hosts`). This keeps your config organized and enables nssh's context-based credential fallbacks.
+
+**Step 1: Create an Include file**
+
+```bash
+# Create a file for your hosts (e.g., work equipment)
+touch ~/.ssh/work_hosts
+
+# Or for homelab devices
+touch ~/.ssh/homelab_hosts
+```
+
+**Step 2: Reference it in your main SSH config**
+
+Add an Include directive at the top of `~/.ssh/config`:
+
+```bash
+# Add to ~/.ssh/config
+Include work_hosts
+Include homelab_hosts
+```
+
+**Step 3: Create a context credential (fallback)**
+
+A context credential provides default authentication for all hosts in an Include file:
+
+```bash
+# Create a context named "work" that references the work_hosts file
+nssh cred ctx add work --file work_hosts --username alice
+
+# You'll be prompted to enter the password (twice for safety)
+# This password will be used for any host in work_hosts that doesn't have its own credential
+```
+
+**Why does this matter?**
+
+When you connect to a host, nssh uses this five-step credential resolution:
+
+1. **Host-specific credential** (if you added one with `nssh cred add hostname`)
+2. **Context fallback credential** (the credential you just created above)
+3. **SSH keys** (if no password credential found)
+
+This means:
+- Add 20 switches to `work_hosts` → only set the password once in the context credential
+- Override specific devices → use `nssh cred add special-switch --username admin`
+- No credential needed → nssh falls back to SSH key authentication
+
+For detailed credential resolution behavior and examples, see [Core Concepts - Credential Resolution](#credential-resolution).
+
+### First Connection
+
+**Option 1: Add host to an Include file with context credential**
+
+If you set up a context credential above, add hosts to that Include file without re-entering passwords:
+
+```bash
+# Add to work_hosts - will use the context credential you created
+nssh host add switch.example.com --file work_hosts --user alice
+
+# Or let it infer the username from the context
+nssh host add switch.example.com --file work_hosts
+```
+
+The host will automatically use the context credential for authentication.
+
+**Option 2: Add host with its own password**
+
+For hosts that need different credentials, create a host-specific credential:
+
+```bash
+# Interactive guided setup (recommended for first time)
+nssh host add
+
+# Or specify details directly
+nssh host add switch.example.com --user admin
+
+# You'll be prompted for the password (entered twice for safety)
+```
+
+This does three things:
+1. Adds the host to your SSH config (`~/.ssh/config`)
+2. Stores the encrypted password in `~/.ssh/nssh_credentials.age`
+3. Tests the connection automatically (use `--no-test` to skip)
+
+**Option 3: Add host with SSH key authentication**
+
+If you prefer SSH keys:
+
+```bash
+nssh host add server.example.com --user myuser --auth key
+```
+
+**Connect to your host**
+
+```bash
+# Exact hostname - connects immediately
+nssh switch.example.com
+
+# Partial match - opens fuzzy finder if multiple matches
+nssh switch
 
 # Connect as different user
-nssh admin@firewall
+nssh admin@switch.example.com
+```
 
-# List all configured hosts
-nssh host list
+**What just happened?**
 
-# Add a new host with credential
-nssh host add switch.example.com --user admin --password
+1. nssh looked up "switch.example.com" in your SSH config
+2. Found the matching credential (username + encrypted password)
+3. Decrypted the password using your age key
+4. Injected the password through an in-process PTY connector
+5. Established the SSH connection
 
-# Manage credentials
-nssh cred list-contexts
-nssh cred add-context-cred work --username alice
-nssh cred add hostname --username admin
+**Next Steps**
+
+- View your hosts: `nssh host list`
+- Manage credentials: `nssh cred list`
+- View recordings (if enabled): `nssh log list`
+- Benchmark performance: `nssh benchmark run switch.example.com`
+
+**Common First-Time Issues**
+
+| Issue | Solution |
+|-------|----------|
+| `nssh: command not found` | Ensure `~/.local/bin` is in your PATH: `export PATH="$HOME/.local/bin:$PATH"` |
+| `Failed to decrypt credentials` | Verify age key exists: `ls ~/.config/age/keys.txt` |
+| `age-keygen: command not found` | Install age: `brew install age` (macOS) or download from [age releases](https://github.com/FiloSottile/age/releases) |
+| Connection test fails | Check credentials are correct, or skip test with `--no-test` flag |
+
+See the sections below for detailed CLI usage and advanced features.
+
+## Quick Reference
+
+```bash
+nssh core-switch                           # Connect (fuzzy search)
+nssh admin@firewall                        # Connect as different user
+nssh host list                             # List hosts
+nssh host add switch.example.com --user admin
 ```
 
 ## Core Concepts
 
 ### Credential Resolution
 
-nssh resolves credentials using this priority order:
+nssh resolves credentials in this priority order:
 
 1. **Host-specific credential** matching username → password auth
-2. **Context fallback credential** matching username (or default) → password auth
+2. **Context fallback credential** (from SSH config Include file) → password auth
 3. **No matching credential** → SSH keys or interactive prompt
 
 **Key concepts:**
 
-- **Context Fallbacks** - Each context stores a single fallback credential that only applies when a host inside that Include file has no host-specific password
 - **Host Overrides** - Host-specific credentials take priority over context fallbacks
+- **Context Fallbacks** - Each context (SSH config Include file) can have a single fallback credential
 - **User Prefixing** - `user@host` syntax preserves your intent; falls back to SSH keys if no credential exists
 
-**Context Definition:**
-
-Contexts map SSH config Include files to a single fallback credential. Example: All hosts in `~/.ssh/work_hosts` can automatically use the `alice` fallback username/password unless a host-specific credential exists or a different username is specified.
-
-For the detailed five-step resolution algorithm, see [ARCHITECTURE.md - Credential Resolution Algorithm](ARCHITECTURE.md#credential-resolution-algorithm).
-
-### Extended Authentication Scenarios
-
-#### Scenario 1: Host with Specific Credential
-
-```bash
-# Configuration:
-# - Host "firewall" has credential: username="admin"
-
-nssh firewall                  # → Uses admin credential (password auth)
-nssh root@firewall             # → No root credential, uses SSH key
-nssh admin@firewall            # → Uses admin credential (password auth)
-```
-
-**Resolution path for `nssh firewall`:**
-1. Check host credentials → found "admin" → use it
-2. (context check skipped because host credential found)
-3. Execute: `sshpass -d <FD> ssh -o User="admin" firewall` (credential streamed via pipe)
-
-**Resolution path for `nssh root@firewall`:**
-1. Check host credentials for "root" → not found
-2. Check context fallback credential for "root" → not found
-3. Return None → execute: `ssh root@firewall` (SSH key auth)
-
-For more detailed credential resolution scenarios and the full algorithm, see [ARCHITECTURE.md - Credential Resolution Algorithm](ARCHITECTURE.md#credential-resolution-algorithm).
+For the complete five-step resolution algorithm, context definitions, and detailed scenarios, see [ARCHITECTURE.md - Credential Resolution Algorithm](ARCHITECTURE.md#credential-resolution-algorithm).
 
 ## Configuration
 
@@ -121,48 +390,48 @@ For recording configuration details, see [examples/config.toml](examples/config.
 
 ### Configuration File
 
-nssh supports optional configuration via `~/.config/nssh/config.toml`. Configure encryption paths, recording settings, host filters, and cleanup policies. All settings have sensible defaults. See [examples/config.toml](examples/config.toml) for a complete annotated example. Environment variables take precedence over config file settings.
-
-For SSH config structure examples, see [examples/homelab_hosts](examples/homelab_hosts), [examples/work_hosts](examples/work_hosts), and [examples/ssh_config](examples/ssh_config).
+Optional config via `~/.config/nssh/config.toml` for encryption paths, recording settings, host filters. Environment variables override config. See [examples/config.toml](examples/config.toml).
 
 ### Data Files
 
-| File | Purpose | Created By |
-|------|---------|------------|
-| `~/.ssh/config` | Main SSH config with Include directives | User/nssh host |
-| `~/.ssh/.nssh_host_index` | Pre-compiled host index for fast lookups | nssh host |
-| `~/.ssh/nssh_credentials.age` | Age-encrypted credential store | nssh cred |
-| `~/.config/age/keys.txt` | Age encryption key | age-keygen |
-| `~/.ssh/backups/*.bak` | Timestamped config backups | nssh host |
-| `~/.config/nssh/config.toml` | Recording & encryption config (optional) | User |
-| `~/.local/state/nssh/casts/` | Session recordings (if enabled) | nssh |
-
-See [examples/](examples/) for file format references.
+| File | Purpose |
+|------|---------|
+| `~/.ssh/config` | Main SSH config with Include directives |
+| `~/.ssh/.nssh_host_index` | Pre-compiled host index for fast lookups |
+| `~/.ssh/nssh_credentials.age` | Age-encrypted credential store |
+| `~/.config/age/keys.txt` | Age encryption key |
+| `~/.config/nssh/config.toml` | Recording & encryption config (optional) |
+| `~/.local/state/nssh/casts/` | Session recordings (if enabled) |
 
 ## CLI Usage
 
-### nssh (Connection Wrapper)
+### nssh (Interactive Connector)
 
 ```bash
 nssh core-switch-01      # Exact match connects immediately
 nssh core                # Partial match opens fzf when multiple hits
 nssh admin@firewall      # Force connection as admin user
-nssh -u netadmin router  # Override username via flag
+nssh router -l netadmin  # Override username via SSH -l flag
+nssh -- host             # Escape when hostname matches subcommand (e.g., 'host', 'cred')
 nssh -V hostname         # Enable verbose SSH output for debugging
 nssh hostname -vvv       # Pass raw ssh options through
 ```
 
 `nssh` preserves any `user@` prefix throughout fuzzy selection. When multiple candidates match, it launches `fzf` so you can choose interactively; single matches connect automatically. For all command options, run `nssh --help` or see [docs/examples/help/nssh.txt](examples/help/nssh.txt).
 
+#### How nssh Works
+
+nssh uses an in-process PTY connector for password injection during SSH connections. For technical details, see [ARCHITECTURE.md - PTY Connector Architecture](ARCHITECTURE.md#pty-connector-architecture).
+
 ### nssh cred (Credential Management)
 
 Contexts organize credentials around SSH config files (e.g., `work_hosts`).
 
 ```bash
-nssh cred create-context work --file work_hosts
-nssh cred add-context-cred work --username alice
-nssh cred list-contexts
-nssh cred delete-context work
+nssh cred ctx add work --file work_hosts
+nssh cred ctx update work --username alice
+nssh cred ctx list
+nssh cred ctx rm work
 ```
 
 Host-specific overrides allow fine-grained control:
@@ -170,8 +439,8 @@ Host-specific overrides allow fine-grained control:
 ```bash
 nssh cred add special-switch --username netadmin
 nssh cred add firewall --username readonly
-nssh cred list-host firewall
-nssh cred delete firewall --username readonly
+nssh cred list firewall
+nssh cred rm firewall --username readonly
 ```
 
 See [docs/examples/help/nssh-cred.txt](examples/help/nssh-cred.txt) for the exhaustive command list and option descriptions.
@@ -182,15 +451,13 @@ Add hosts interactively or via flags:
 
 ```bash
 nssh host add                           # Guided flow with previews (includes connection test)
-nssh host add switch.example.com --user admin --password
-nssh host add device.local --file homelab_hosts --key
-nssh host add legacy-server --password --no-test  # Skip connection test
+nssh host add switch.example.com --user admin            # password auth (default)
+nssh host add device.local --file homelab_hosts --auth key
+nssh host add legacy-server --auth password --no-test  # Skip connection test
 nssh host rm old-server
 nssh host list 192.168
 nssh host sort --file homelab_hosts
-nssh host update hostname --auth password           # password, keyboard-interactive, publickey
-nssh host update hostname --compat kex              # kex, macs, ciphers, hostkey
-nssh host update hostname --compat kex --compat macs  # multiple compat options
+nssh host update hostname                            # Auto-detect auth + legacy compat
 ```
 
 For detailed information about SSH compatibility detection and troubleshooting for legacy devices, see [ARCHITECTURE.md - SSH Compatibility Detection and Remediation](ARCHITECTURE.md#ssh-compatibility-detection-and-remediation). Use `nssh host add --help` or see [docs/examples/help/nssh-host.txt](examples/help/nssh-host.txt) for command options.
@@ -210,7 +477,7 @@ nssh log list --search 2025-11-14
 nssh log list --search lab --search 2025-11-15  # AND logic
 
 # Play sessions (interactive picker)
-nssh log play                    # Pick from today's recordings
+nssh log play                    # Pick from most recent recordings
 nssh log play --date 2025-11-14  # Pick from specific date
 nssh log play --file session-001.cast  # Play specific file
 
@@ -236,44 +503,41 @@ nssh log cleanup --dry-run  # Preview what would be deleted
 nssh log cleanup            # Actually delete old recordings
 ```
 
-**Interactive Mode**: Commands without `--file` launch an fzf picker showing available recordings sorted by modification time. Use arrow keys and fuzzy search to select a recording. The `--date` option filters picker results (defaults to today).
+**Interactive Mode**: Commands without `--file` launch an fzf picker showing available recordings sorted by modification time. Use arrow keys and fuzzy search to select a recording. The `--date` option filters picker results (defaults to recent sessions).
 
 See [docs/examples/help/nssh-log.txt](examples/help/nssh-log.txt) for complete command reference. For privacy considerations when recording is enabled by default, see [Security Best Practices](#recording-privacy).
 
 ### nssh benchmark (Performance Analysis)
 
-Use `NSSH_DEBUG=1 nssh hostname` to see timing breakdown for connection stages. For detailed performance analysis, benchmarking tools, and metrics, see [ARCHITECTURE.md - Performance Metrics](ARCHITECTURE.md#performance-metrics) and [docs/examples/help/nssh-benchmark.txt](examples/help/nssh-benchmark.txt).
+The `nssh benchmark run` command provides structured performance analysis with warmup runs, multiple samples, and statistical summaries. Use `NSSH_DEBUG=1 nssh hostname` to see timing breakdown for connection stages during normal usage. For detailed performance analysis, timing stages explanation, and benchmarking tools, see [ARCHITECTURE.md - Debugging and Profiling](ARCHITECTURE.md#debugging-and-profiling) and [docs/examples/help/nssh-benchmark.txt](examples/help/nssh-benchmark.txt).
 
-### nssh install-shell (Shell Integration)
+`nssh benchmark run` has two useful modes:
 
-nssh provides optional shell integration for Fish, Bash, and Zsh with shell history tracking and tab completion. Installation deploys wrapper scripts and completion files to your local environment.
+- **Structured (default):** Enables instrumentation and reports each stage (pty-start, host-selection, credential-vault, ssh-connection, recording-session, pty-teardown, etc.). Measures timing from within the Python CLI process. Use this to identify stage-level regressions.
+- **Simple-only (`--simple-only`):** Disables instrumentation and times the entire binary invocation (shell → interpreter startup → connect workflow). This measures what you experience: "how long from pressing Enter to getting a shell prompt."
 
-**Basic installation:**
+By default, the benchmark command respects your recording configuration (from `NSSH_RECORD` env var or `config.toml`), so you can measure the real user experience with recording enabled or disabled. Use `--no-record` to force disable recording and measure pure SSH connection overhead without recording influence.
+
+For a complete list of timing stages and their meanings (including nested stages like ssh-connection within recording-session), see the Timing Stages table in [ARCHITECTURE.md](ARCHITECTURE.md#debugging-and-profiling).
+
+### nssh self (CLI & Shell Management)
+
+Optional shell integration for Fish, Bash, Zsh with history tracking and tab completion.
 
 ```bash
-# Install shell wrapper + completions
-nssh install-shell --shell-profile ~/.bashrc
-nssh install-shell --shell-profile ~/.zshrc
-nssh install-shell --shell-profile ~/.config/fish/config.fish
+# Install shell helpers + completions
+nssh self init --install-shell-helpers --append-shell-snippet ~/.bashrc
 
-# Preview without changes
-nssh install-shell --shell-profile ~/.bashrc --dry-run
+# Preview changes
+nssh self init --dry-run
+
+# Remove shell helpers (keeps CLI binary)
+nssh self cleanup
 ```
 
-**What gets installed:**
+**Shell history:** Tracks both search term (`nssh core`) and resolved hostname (`nssh core-switch-01`). Atuin compatible.
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| nssh wrapper script | `~/.local/share/nssh/nssh-wrapper.sh` | Shell history integration |
-| Python CLI shim | `~/.local/share/nssh/nssh-python-cli` | Direct Typer entrypoint used by the wrapper |
-| Fish function | `~/.config/fish/functions/nssh.fish` | Fish-specific wrapper |
-| Fish completions | `~/.config/fish/completions/nssh.fish` | Tab completion for nssh subcommands + hosts |
-
-**Shell history:** The wrapper tracks both your search term (`nssh core`) and the selected hostname (`nssh core-switch-01`), preserving workflow context. Compatible with Atuin for synced history across devices.
-
-**Tab completions (Fish only):** A single completion file powers subcommand suggestions plus hostname completion for the bare `nssh <host>` path. The completion script queries `nssh __list-subcommands` so the top-level list stays in sync without manual edits.
-
-For manual installation, advanced options, and complete command reference, see [docs/examples/help/nssh-install-shell.txt](examples/help/nssh-install-shell.txt).
+For complete command reference and options, see [docs/examples/help/nssh-self.txt](examples/help/nssh-self.txt).
 
 ## Security Best Practices
 
@@ -281,11 +545,7 @@ nssh implements multiple security layers to protect credentials and minimize att
 
 ### Credential Protection
 
-Credentials in `~/.ssh/nssh_credentials.age` are encrypted using [age](https://github.com/FiloSottile/age) with modern encryption (ChaCha20-Poly1305 + X25519). Credentials are never written to disk in plaintext, never appear in shell history or process listings, and are passed securely to sshpass via file descriptor.
-
-### Password Handling
-
-nssh requires interactive password prompts and never accepts passwords via CLI arguments. When adding credentials, nssh prompts twice to prevent typos.
+Credentials in `~/.ssh/nssh_credentials.age` are encrypted using [age](https://github.com/FiloSottile/age) (ChaCha20-Poly1305 + X25519). Passwords are never written to plaintext, never appear in shell history or process listings, and are streamed directly into the PTY. Interactive prompts only (no CLI args); double-prompted to prevent typos.
 
 ### Recording Privacy
 
@@ -308,63 +568,19 @@ NSSH_RECORD=0 nssh prod-db-01  # Disable recording for this session
 
 ### File Permissions
 
-nssh enforces secure file permissions automatically:
-
-| File | Permissions | Purpose |
-|------|-------------|---------|
-| `~/.ssh/nssh_credentials.age` | `600` | Encrypted credential store |
-| `~/.config/age/keys.txt` | `600` | Age private key |
-| `~/.ssh/.nssh_host_index` | `644` | Host index (no secrets) |
-| `~/.ssh/config` | `644` | SSH config (no secrets) |
-| `~/.ssh/backups/*.bak` | `600` | Config backups |
-
-Verify with: `ls -la ~/.ssh/nssh_credentials.age ~/.config/age/keys.txt`
+nssh enforces secure file permissions automatically. Sensitive files (credentials, age keys, backups) are `600`; configs/indexes are `644`. Verify: `ls -la ~/.ssh/nssh_credentials.age ~/.config/age/keys.txt`
 
 ### Key Management
 
-Generate your age key during initial setup:
-
-```bash
-mkdir -p ~/.config/age
-age-keygen -o ~/.config/age/keys.txt
-```
-
-Each user must have their own age key and credential file. nssh does not support shared credentials across users. See [Key Rotation](#key-rotation) and [Multi-User Security](#multi-user-security) below for more details.
+Generate age key during initial setup: `mkdir -p ~/.config/age && age-keygen -o ~/.config/age/keys.txt`. Each user needs their own key - no shared credentials.
 
 ### Safe Debugging
 
-When `NSSH_DEBUG=1` is enabled, only timing data is logged. Credentials are never logged:
-
-```bash
-NSSH_DEBUG=1 nssh hostname  # Shows timing, no credentials
-```
-
-To view credentials explicitly: `nssh cred show` (displays plaintext passwords to stdout)
-To list without passwords: `nssh cred list`, `nssh cred list-contexts`, `nssh cred list-host hostname`
-
-### Manual Credential Editing (Advanced)
-
-For emergency manual editing of the encrypted credential store, decrypt with `age -d`, edit the JSON, and re-encrypt with `age -r`. Use `nssh cred` commands instead when possible. See [docs/examples/nssh_credentials.json](examples/nssh_credentials.json) for format reference.
+`NSSH_DEBUG=1` logs timing only, never credentials. View passwords: `nssh cred get`. List without passwords: `nssh cred list`.
 
 ### Key Rotation
 
-If your age key is compromised: backup credentials, decrypt with old key, generate new age key, re-encrypt with new public key, verify decryption works, and securely delete temporary files.
-
-```bash
-# Decrypt, rotate, and re-encrypt
-age -d -i ~/.config/age/keys.txt ~/.ssh/nssh_credentials.age > /tmp/creds.json
-mv ~/.config/age/keys.txt ~/.config/age/keys.txt.old
-age-keygen -o ~/.config/age/keys.txt
-age -r "$(age-keygen -y ~/.config/age/keys.txt)" -o ~/.ssh/nssh_credentials.age /tmp/creds.json
-age -d -i ~/.config/age/keys.txt ~/.ssh/nssh_credentials.age | jq .  # Verify
-rm -P /tmp/creds.json  # macOS; use shred -u on Linux
-```
-
-Rotate keys after suspected compromise, security audits, or system compromise. Test decryption before deleting temporary files.
-
-### Multi-User Security
-
-Each user must have their own age key (`~/.config/age/keys.txt`) and credential file (`~/.ssh/nssh_credentials.age`). nssh does not support shared credentials - age keys are user-specific and sharing compromises the security model. For shared infrastructure, use separate nssh setups per user with individual credential stores.
+If compromised: decrypt with old key, generate new key, re-encrypt, verify, securely delete temp files. See [examples/nssh_credentials.json](examples/nssh_credentials.json) for manual editing format.
 
 ## Troubleshooting
 
@@ -383,11 +599,11 @@ Each user must have their own age key (`~/.config/age/keys.txt`) and credential 
 
 Verify credential configuration:
 ```bash
-nssh cred list-contexts        # Check context mappings
-nssh cred list-host hostname   # Check host-specific credentials
+nssh cred ctx list            # Check context mappings
+nssh cred list hostname       # Check host-specific credentials
 ```
 
-If credentials exist but aren't matching, check that your SSH config file is mapped to the correct context with `nssh cred list-contexts`.
+If credentials exist but aren't matching, check that your SSH config file is mapped to the correct context with `nssh cred ctx list`.
 
 ### "Host not found" errors
 
@@ -415,7 +631,7 @@ Verify the SSH config has password auth enabled:
 nssh host list hostname         # Check Auth column shows "passwd"
 ```
 
-If it shows "key", update the host: `nssh host update hostname --auth password`
+If it shows "key", run `nssh host update hostname` to realign authentication automatically.
 
 ### Performance debugging
 
@@ -424,7 +640,7 @@ Enable timing instrumentation:
 NSSH_DEBUG=1 nssh hostname     # Shows timing breakdown
 ```
 
-For detailed performance metrics and troubleshooting, see [nssh benchmark (Performance Analysis)](#nssh-benchmark) and [ARCHITECTURE.md](ARCHITECTURE.md#performance-metrics).
+For detailed timing information and troubleshooting, see [nssh benchmark (Performance Analysis)](#nssh-benchmark-performance-analysis) and [ARCHITECTURE.md - Timing Instrumentation](ARCHITECTURE.md#timing-instrumentation).
 
 ### "Authorization denied: Cannot authorize shell for unknown sessionId"
 
@@ -439,7 +655,3 @@ ssh -O exit <hostname>
 ```
 
 Then retry your nssh connection. The `-O exit` command cleanly terminates the SSH master connection, allowing a fresh session to be established.
-
----
-
-For architecture internals, see [ARCHITECTURE.md](ARCHITECTURE.md). For contributor workflow, see [CONTRIBUTING.md](../CONTRIBUTING.md).

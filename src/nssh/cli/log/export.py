@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from nssh.cli import typer
 
@@ -18,19 +18,15 @@ def export_command(
     output: Optional[Path] = typer.Option(
         None, "--output", "-o", help="Output file path"
     ),
-    txt: bool = typer.Option(False, "--txt", help="Export as text (default format)"),
-    gif: bool = typer.Option(
-        False,
-        "--gif",
-        help="Export as animated GIF (requires asciicast2gif)",
+    format: Literal["txt", "gif"] = typer.Option(
+        "txt",
+        "--format",
+        help="Export format: txt or gif",
     ),
     dry_run: bool = common.DRY_RUN_OPTION,
 ) -> None:
     """Export recording to text or GIF format."""
-    if txt and gif:
-        raise typer.BadParameter("Cannot specify both --txt and --gif")
-
-    export_format = "gif" if gif else "txt"
+    export_format = format
 
     settings = recording.load_recording_settings()
     target = common.resolve_recording_path(file, date, settings)

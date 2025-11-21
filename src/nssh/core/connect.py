@@ -2,6 +2,8 @@
 """Connect helper that streams credentials through inherited file descriptors."""
 
 import os
+import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,14 +11,12 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from nssh.core.diag import timing as timing_core
 from nssh.core.auth.credentials import CredentialManager
+from nssh.core.env.paths import host_index_path
 from nssh.core.ssh.config import SSHConfigParser
 from nssh.core.ssh.fixer import detect_auth_type
-from nssh.core.diag.version import maybe_print_version_and_exit
 
 LOGGER = timing_core.get_logger()
 DEBUG_ENABLED = os.getenv(timing_core.TIMING_ENV_FLAG, "0") == "1"
-
-PASSWORD_FD_PREFIX = "@fd:"
 
 
 class ConnectError(RuntimeError):
@@ -62,33 +62,6 @@ def log_debug(message: str) -> None:
     """Emit structured log lines when timing is enabled."""
 
     LOGGER.emit_log(f"connect.py - {message}")
-
-
-def _emit_password_token(password: str) -> str:
-    """Write password to inherited FD specified via env and return token."""
-
-    fd_env = os.environ.get("NSSH_PASS_FD")
-    if not fd_env:
-        raise RuntimeError("NSSH_PASS_FD not set; upgrade nssh-wrapper")
-
-    try:
-        fd = int(fd_env)
-    except ValueError as exc:  # pragma: no cover - invalid env
-        raise RuntimeError("Invalid NSSH_PASS_FD") from exc
-
-    data = (password + "\n").encode("utf-8")
-
-    try:
-        os.write(fd, data)
-    except OSError as exc:  # pragma: no cover - pipe closed
-        raise RuntimeError(f"Failed to stream credential: {exc}") from exc
-    finally:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
-
-    return f"{PASSWORD_FD_PREFIX}{fd}"
 
 
 def find_exact_match_in_index(
@@ -163,7 +136,7 @@ def find_host_match(search_term: str) -> HostMatch:
     """
     with timing_core.stage("host-selection"):
         # Try index file first for exact match
-        index_path = Path.home() / ".ssh" / ".nssh_host_index"
+        index_path = host_index_path()
         result = find_exact_match_in_index(search_term, index_path)
 
         if result:
@@ -265,6 +238,105 @@ def _normalize_args(argv: Sequence[str] | None = None) -> List[str]:
     return list(sys.argv[1:] if argv is None else argv)
 
 
+def _select_host_with_fzf(matches: Dict[str, str]) -> HostMatch:
+    if not matches:
+        raise ConnectError("No matches available for selection")
+
+    if shutil.which("fzf") is None:
+        raise ConnectError("Multiple matches found but 'fzf' is not installed")
+
+    hostnames = sorted(matches.keys())
+    candidates = "\n".join(hostnames)
+
+    try:
+        result = subprocess.run(
+            [
+                "fzf",
+                "--prompt",
+                "Select host: ",
+                "--height",
+                "40%",
+                "--layout",
+                "reverse",
+            ],
+            input=candidates,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:  # pragma: no cover - system call failure
+        raise ConnectError(f"Failed to launch fzf: {exc}") from exc
+
+    if result.returncode != 0:
+        raise ConnectError("Host selection cancelled", exit_code=1)
+
+    selection = result.stdout.strip()
+    if not selection:
+        raise ConnectError("Host selection cancelled", exit_code=1)
+
+    filepath = matches.get(selection)
+    if filepath is None:
+        raise ConnectError(f"Invalid host selected: {selection}")
+
+    return HostMatch(selection, filepath)
+
+
+def _split_extra_args(args: List[str]) -> Tuple[List[str], List[str]]:
+    if "--" not in args:
+        return args, []
+
+    idx = args.index("--")
+    # Include the -- separator in the ssh_args for PTY connector
+    return args[:idx], args[idx:]
+
+
+def _split_connection_args(args: List[str]) -> Tuple[List[str], List[str]]:
+    base, trailing = _split_extra_args(args)
+
+    if len(base) <= 1:
+        return base, trailing
+
+    # All args after hostname are SSH passthrough args
+    ssh_args = base[1:] + trailing
+    return [base[0]], ssh_args
+
+
+def _run_pty_connector(
+    *,
+    hostname: str,
+    requested_username: Optional[str],
+    resolved_username: Optional[str],
+    password: Optional[str],
+    ssh_args: Sequence[str],
+) -> int:
+    """Run PTY connector for interactive SSH session with optional recording."""
+    from nssh.core.connector import run_with_pty
+    from nssh.core.recording import manager as recording
+
+    with timing_core.stage("connection-orchestration", detail=hostname):
+        ssh_username = requested_username or resolved_username
+        normalized_args: Sequence[str] = tuple(ssh_args) if ssh_args else ()
+
+    with timing_core.stage("recording-setup", detail=hostname):
+        plan = recording._compute_plan(
+            hostname,
+            prepare_dirs=True,
+            allocate_sequence=True,
+        )
+
+    try:
+        return run_with_pty(
+            hostname=hostname,
+            username=ssh_username,
+            password=password,
+            ssh_args=normalized_args,
+            recording_plan=plan,
+        )
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+
 def main(argv: Sequence[str] | None = None):
     """
     Main entry point - unified host selection and credential resolution
@@ -272,46 +344,41 @@ def main(argv: Sequence[str] | None = None):
     Args (via command line):
         search_term: Hostname or partial hostname to search for
         username: Optional username for credential resolution
-
-    Output:
-        hostname|filepath|username|@fd:<number>
-        (username/password fields empty when no credential is resolved)
+        -- [SSH_ARGS]: Optional SSH arguments to pass through
 
     Exit codes:
         0: Success
         1: Error
-        2: Multiple matches - bash should run fzf
     """
 
-    args = _normalize_args(argv)
-    maybe_print_version_and_exit(args, cli_name="nssh connect")
+    raw_args = _normalize_args(argv)
+
+    args, ssh_passthrough_args = _split_connection_args(raw_args)
 
     with timing_core.run_span("connect-workflow"):
         if not args:
-            print("Usage: nssh connect SEARCH_TERM [USERNAME]", file=sys.stderr)
+            print(
+                "Usage: nssh [USER@]HOST [SSH_ARGS...]",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         search_term = args[0]
-        username = args[1] if len(args) > 1 else None
+        username = None
 
         # Strip user@ prefix if present (for consistency with nssh-select)
         if "@" in search_term and not search_term.startswith("@"):
             parts = search_term.split("@", 1)
             if len(parts) == 2 and parts[1]:
                 # user@hostname format
-                if not username:  # Only use prefix if username not already specified
-                    username = parts[0]
+                username = parts[0]
                 search_term = parts[1]
 
         # Find hostname (exact or fuzzy)
         try:
             host_match = find_host_match(search_term)
         except MultipleMatchesError as exc:
-            log_debug("END: multiple matches - need fzf")
-            print("MULTIPLE_MATCHES", file=sys.stderr)
-            for hostname in sorted(exc.matches.keys()):
-                print(f"{hostname}|{exc.matches[hostname]}")
-            sys.exit(exc.exit_code)
+            host_match = _select_host_with_fzf(exc.matches)
         except ConnectError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(exc.exit_code)
@@ -327,37 +394,18 @@ def main(argv: Sequence[str] | None = None):
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(exc.exit_code)
 
-        # Detect auth type from SSH config
-        auth_type = "unknown"
-        parser = SSHConfigParser()
-        host_info = parser.find_host_in_files(hostname)
-        if host_info:
-            _, host_lines = host_info
-            auth_type = detect_auth_type(host_lines)
+        resolved_username = credential_result.username
+        password = credential_result.password
 
-        with timing_core.stage("connection-orchestration", detail=hostname):
-            username_field = ""
-            password_field = ""
-
-            resolved_username = credential_result.username
-            password = credential_result.password
-
-            if resolved_username and password:
-                try:
-                    password_field = _emit_password_token(password)
-                except RuntimeError as exc:
-                    print(f"Error: {exc}", file=sys.stderr)
-                    sys.exit(1)
-                username_field = resolved_username
-
-            output_line = (
-                f"{hostname}|{filepath}|{username_field}|{password_field}|{auth_type}"
-            )
-            if DEBUG_ENABLED:
-                print(f"DEBUG: about to print: {output_line}", file=sys.stderr)
-            print(output_line)
-
-    sys.exit(0)
+        # Run PTY connector for interactive SSH session
+        exit_code = _run_pty_connector(
+            hostname=hostname,
+            requested_username=username,
+            resolved_username=resolved_username,
+            password=password,
+            ssh_args=ssh_passthrough_args,
+        )
+        sys.exit(exit_code)
 
 
 def cli():

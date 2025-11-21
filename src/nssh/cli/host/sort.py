@@ -167,9 +167,7 @@ def _sort_config_file(
     return len(misplaced), len(duplicates)
 
 
-def cmd_sort(
-    parser: SSHConfigParser, file: Optional[str] = None, all: bool = False
-) -> None:
+def cmd_sort(parser: SSHConfigParser, context_arg: Optional[str] = None) -> None:
     """Sort SSH config file(s)."""
 
     ui.show_panel(
@@ -178,16 +176,17 @@ def cmd_sort(
         style="cyan",
     )
 
-    if all:
+    if context_arg:
+        selection = select_include_file(
+            parser, context_arg, "Select config file to sort:"
+        )
+        # select_include_file returns Path when allow_all=False (default)
+        files_to_sort = [selection] if isinstance(selection, Path) else selection
+    else:
         files_to_sort = parser.find_include_files()
         if not files_to_sort:
             console.print("[red]Error: No Include files found in ~/.ssh/config[/red]")
             raise typer.Exit(1)
-    else:
-        selection = select_include_file(
-            parser, file, "Select config file to sort:", allow_all=True
-        )
-        files_to_sort = selection if isinstance(selection, list) else [selection]
 
     total_misplaced = 0
     total_duplicates = 0

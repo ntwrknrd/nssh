@@ -37,85 +37,36 @@ def _usage_sections() -> list[UsageSection]:
             rows=[
                 UsageRow(
                     "nssh log [bold]list[/bold] [OPTIONS]",
-                    "List all recorded sessions with filtering options",
-                    examples=[
-                        "nssh log list --search lab-switch",
-                        "nssh log list --search 2025-11-15",
-                    ],
+                    "List recorded sessions",
                 ),
                 UsageRow(
                     "nssh log [bold]play[/bold] [OPTIONS]",
-                    "Play a recorded session using asciinema",
-                    examples=[
-                        "nssh log play",
-                        "nssh log play --date 2025-11-14",
-                        "nssh log play --file session-001.cast",
-                    ],
+                    "Play a recorded session",
                 ),
                 UsageRow(
                     "nssh log [bold]upload[/bold] [OPTIONS]",
-                    "Upload a recording to an asciinema server",
-                    examples=[
-                        "nssh log upload  # requires ASCIINEMA_SERVER_URL",
-                        "nssh log upload --server https://asciinema.example.com",
-                    ],
+                    "Upload recording to asciinema server",
                 ),
                 UsageRow(
                     "nssh log [bold]export[/bold] [OPTIONS]",
-                    "Export recording to text or GIF format",
-                    examples=[
-                        "nssh log export",
-                        "nssh log export --gif",
-                        "nssh log export --output demo.txt",
-                    ],
+                    "Export to text or GIF format",
                 ),
                 UsageRow(
                     "nssh log [bold]cleanup[/bold] [OPTIONS]",
-                    "Remove old recordings based on max_age_days configuration",
-                    examples=["nssh log cleanup --dry-run"],
+                    "Remove old recordings",
                 ),
             ],
         ),
         UsageSection(
-            "Common Options",
+            "Options",
             rows=[
-                UsageRow("--file FILE, -f", "Direct path to recording file"),
-                UsageRow(
-                    "--date YYYY-MM-DD",
-                    "Filter interactive picker by date (default: today)",
-                ),
-                UsageRow("--dry-run", "Preview actions without executing"),
+                UsageRow("--file FILE, -f", "Path to recording file"),
+                UsageRow("--date YYYY-MM-DD", "Filter by date"),
+                UsageRow("--search TERM, -s", "Filter by keyword"),
+                UsageRow("--output FILE, -o", "Output path for export"),
+                UsageRow("--format txt|gif", "Export format (default: txt)"),
+                UsageRow("--dry-run", "Preview without executing"),
             ],
-        ),
-        UsageSection(
-            "List Options",
-            rows=[
-                UsageRow(
-                    "--search TERM, -s",
-                    "Filter by keyword (repeatable for AND logic)",
-                )
-            ],
-        ),
-        UsageSection(
-            "Export Options",
-            rows=[
-                UsageRow(
-                    "--output FILE, -o",
-                    "Output path (default: ./{host}_{date}_{session}.{format})",
-                ),
-                UsageRow("--txt", "Export as text (default format)"),
-                UsageRow("--gif", "Export as animated GIF (requires asciicast2gif)"),
-            ],
-        ),
-        UsageSection(
-            "Interactive Mode",
-            body="\n".join(
-                [
-                    "When --file is not specified, commands launch an fzf picker to select a recording.",
-                    "Use --date to filter by a specific date (defaults to today).",
-                ]
-            ),
-            body_style="dim",
         ),
     ]
 

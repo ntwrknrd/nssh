@@ -1,7 +1,7 @@
 """nssh CLI package bootstrap helpers.
 
 We expose Typer and selected Rich classes but only import them on demand so the
-wrapper fast-path (``nssh <host>``) avoids paying for Click/Typer startup.
+bare ``nssh <host>`` fast-path avoids paying for Click/Typer startup.
 """
 
 from __future__ import annotations

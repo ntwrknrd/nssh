@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import List, Sequence
+from typing import List, Optional, Sequence
 
 from nssh.cli import typer
 
@@ -26,7 +26,7 @@ RECORDING_FILE_OPTION = typer.Option(
 RECORDING_DATE_OPTION = typer.Option(
     None,
     "--date",
-    help="Filter interactive picker by date (default: today)",
+    help="Filter interactive picker by date (default: recent sessions)",
 )
 
 DRY_RUN_OPTION = typer.Option(
@@ -81,9 +81,11 @@ def _session_duration_seconds(entry: recording.SessionRecord) -> int:
     return max(int(fallback_delta.total_seconds()), 0)
 
 
-def load_sessions() -> List[recording.SessionRecord]:
+def load_sessions(
+    settings: Optional[recording.RecordingSettings] = None,
+) -> List[recording.SessionRecord]:
     """Return all recorded sessions sorted by cast modification time."""
-    sessions = list(recording.iter_session_records())
+    sessions = list(recording.iter_session_records(settings=settings))
     sessions.sort(key=_session_updated_timestamp, reverse=True)
     return sessions
 
@@ -127,6 +129,49 @@ def print_sessions(rows: Sequence[recording.SessionRecord]) -> None:
     console.print(f"\n[dim]Total: {len(rows)} sessions[/dim]")
 
 
+def _format_duration(seconds: int) -> str:
+    """Return HH:MM:SS when long enough, otherwise MM:SS."""
+    minutes, rem = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{rem:02d}"
+    return f"{minutes:02d}:{rem:02d}"
+
+
+def _select_session_from_rows(
+    rows: Sequence[recording.SessionRecord], prompt: str
+) -> Path:
+    """Launch fzf to pick from provided session rows."""
+    options: List[str] = []
+    option_map: dict[str, Path] = {}
+    home = str(Path.home())
+
+    for idx, entry in enumerate(rows, 1):
+        seconds = _session_duration_seconds(entry)
+        duration_str = _format_duration(seconds)
+        started_local = entry.started_at.astimezone()
+        started_str = started_local.strftime("%Y-%m-%d %H:%M:%S")
+        label = entry.session_label or "-"
+        cast_display = str(entry.cast_path).replace(home, "~", 1)
+        option = (
+            f"[{idx:03}] {started_str} | {entry.host} | {label} | "
+            f"{duration_str} | {cast_display}"
+        )
+        options.append(option)
+        option_map[option] = entry.cast_path
+
+    try:
+        selected_line = select_via_fzf(options, prompt)
+    except typer.Exit as exc:  # pragma: no cover - depends on user cancellation
+        if exc.exit_code == 0:
+            typer.echo("Selection cancelled", err=True)
+        elif exc.exit_code == 1:
+            typer.echo("Install fzf (brew install fzf) or pass --file", err=True)
+        raise
+
+    return option_map[selected_line]
+
+
 def require_binary(name: str) -> str:
     """Ensure an external binary is present on PATH (asciinema, etc.)."""
     path = shutil.which(name)
@@ -137,43 +182,38 @@ def require_binary(name: str) -> str:
 
 
 def pick_recording_interactive(
-    date_str: str, settings: recording.RecordingSettings
+    date_str: str | None, settings: recording.RecordingSettings
 ) -> Path:
     """Launch fzf to select a recording file interactively."""
-    try:
-        datetime.strptime(date_str, "%Y-%m-%d")
-    except ValueError as exc:
-        raise typer.BadParameter("--date must be YYYY-MM-DD") from exc
-
+    sessions = load_sessions(settings)
     recordings_dir = settings.directory.expanduser()
-    pattern = f"*/{date_str}/session-*.cast"
-    cast_files = sorted(
-        recordings_dir.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True
-    )
 
-    if not cast_files:
-        typer.echo(
-            f"No recordings found for date {date_str} in {recordings_dir}", err=True
-        )
+    if not sessions:
+        typer.echo(f"No recordings found in {recordings_dir}", err=True)
         raise typer.Exit(code=1)
 
-    fzf_entries: List[str] = []
-    for cast_path in cast_files:
-        hostname = cast_path.parent.parent.name
-        date = cast_path.parent.name
-        session = cast_path.stem
-        fzf_entries.append(f"{hostname} | {date} | {session} | {cast_path}")
+    if date_str:
+        try:
+            datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError as exc:
+            raise typer.BadParameter("--date must be YYYY-MM-DD") from exc
 
-    try:
-        selected_line = select_via_fzf(fzf_entries, "Select recording:")
-    except typer.Exit as exc:  # pragma: no cover - depends on user cancellation
-        if exc.exit_code == 0:
-            typer.echo("Selection cancelled", err=True)
-        elif exc.exit_code == 1:
-            typer.echo("Install fzf (brew install fzf) or pass --file", err=True)
-        raise
+        filtered = [
+            entry
+            for entry in sessions
+            if entry.started_at.strftime("%Y-%m-%d") == date_str
+        ]
 
-    return Path(selected_line.split(" | ")[-1])
+        if not filtered:
+            typer.echo(
+                f"No recordings found for date {date_str} in {recordings_dir}", err=True
+            )
+            raise typer.Exit(code=1)
+
+        prompt = f"Select recording ({date_str}):"
+        return _select_session_from_rows(filtered, prompt)
+
+    return _select_session_from_rows(sessions, "Select recording:")
 
 
 def resolve_recording_path(
@@ -188,8 +228,7 @@ def resolve_recording_path(
             raise typer.BadParameter(f"File does not exist: {target}")
         return target
 
-    date_str = date or datetime.now().strftime("%Y-%m-%d")
-    return pick_recording_interactive(date_str, settings)
+    return pick_recording_interactive(date, settings)
 
 
 def default_export_destination(target: Path, extension: str) -> Path:

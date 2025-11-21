@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import shutil
 import statistics
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 from nssh.cli.common import ui
 from nssh.core.diag import timing as timing_core
@@ -19,53 +18,29 @@ console = get_console()
 APP_TITLE = "nssh benchmark"
 
 
-def resolve_nssh_binary() -> str:
-    """Return a resolvable path to the `nssh` executable."""
+def resolve_nssh_binary() -> str | List[str]:
+    """Return a resolvable path/command to execute nssh.
+
+    Returns either:
+    - str: path to nssh binary if found on PATH
+    - List[str]: command prefix for development mode (e.g., [sys.executable, "-m", "nssh.cli.main"])
+    """
     path = shutil.which("nssh")
     if path:
         return path
 
-    repo_wrapper = (
-        Path(__file__).resolve().parents[3] / "assets" / "scripts" / "nssh-wrapper.sh"
-    )
-    if repo_wrapper.exists():
-        return str(repo_wrapper)
-
-    raise FileNotFoundError("Unable to locate `nssh` binary on PATH or repo wrapper")
-
-
-def load_lines(source: Optional[Path]) -> List[str]:
-    """Load timing data from a file or stdin."""
-    if source:
-        expanded = source.expanduser()
-        if not expanded.exists():
-            raise FileNotFoundError(f"Timing file not found: {expanded}")
-        return expanded.read_text().splitlines()
-
-    if sys.stdin.isatty():
+    # Development mode: check if we're in a repo with nssh package
+    repo_root = Path(__file__).resolve().parents[3]
+    package_dir = repo_root / "src" / "nssh"
+    if package_dir.exists() and (package_dir / "cli" / "main.py").exists():
         console.print(
-            "[red]No input provided. Pass a log file or pipe data via stdin.[/red]"
+            "[yellow]![/yellow] nssh not on PATH, using development mode (python -m nssh.cli.main)"
         )
-        raise RuntimeError("stdin required")
+        return [sys.executable, "-m", "nssh.cli.main"]
 
-    return [line.rstrip("\n") for line in sys.stdin]
-
-
-def parse_stage_budget(raw_values: Optional[List[str]]) -> Dict[str, int]:
-    """Convert CLI key=value entries into a stage budget mapping."""
-    budgets: Dict[str, int] = {}
-    if not raw_values:
-        return budgets
-
-    for item in raw_values:
-        if "=" not in item:
-            raise ValueError("Stage budgets must use stage=MS notation")
-        stage, value = item.split("=", 1)
-        stage = stage.strip()
-        if not stage:
-            raise ValueError("Stage name cannot be empty")
-        budgets[stage] = int(value)
-    return budgets
+    raise FileNotFoundError(
+        "Unable to locate nssh binary. Install with 'uv tool install .'"
+    )
 
 
 def collect_timing_lines(
@@ -187,11 +162,3 @@ def render_benchmark_summary(summary: timing_core.BenchmarkSummary) -> None:
     headers, rows, footer = timing_core.summary_to_table(summary, include_footer=True)
     table = create_standard_table(headers, rows, footer=footer)
     console.print(table)
-
-
-def write_summary_json(path: Path, summary: timing_core.BenchmarkSummary) -> None:
-    """Persist summary JSON with pretty formatting."""
-    path = path.expanduser()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(timing_core.summary_to_dict(summary), indent=2) + "\n")
-    console.print(f"[green]Summary JSON written to[/green] {path}")

@@ -1,13 +1,15 @@
 function nssh --description "SSH to network equipment with password management"
-    # Resolve installed wrapper binary first so completion guards can defer cleanly
-    set -l nssh_cmd ""
-    if test -x "$HOME/.local/bin/nssh"
-        set nssh_cmd "$HOME/.local/bin/nssh"
-    else if test -x "$HOME/bin/nssh"
-        set nssh_cmd "$HOME/bin/nssh"
-    else
-        echo "Error: nssh wrapper not found in \$HOME/.local/bin or \$HOME/bin" >&2
-        return 1
+    # Resolve installed CLI (prefer PATH, fall back to common locations)
+    set -l nssh_cmd (type -P nssh ^/dev/null)
+    if test -z "$nssh_cmd"
+        if test -x "$HOME/.local/bin/nssh"
+            set nssh_cmd "$HOME/.local/bin/nssh"
+        else if test -x "$HOME/bin/nssh"
+            set nssh_cmd "$HOME/bin/nssh"
+        else
+            echo "Error: nssh binary not found in PATH or \$HOME/.local/bin" >&2
+            return 1
+        end
     end
 
     # Completion requests from Typer should bypass custom routing entirely
@@ -23,7 +25,7 @@ function nssh --description "SSH to network equipment with password management"
     end
 
     # Detect top-level subcommands (fall back to defaults if lookup fails)
-    set -l subcommands connect host cred log benchmark install-shell recording-check help version __list-subcommands
+    set -l subcommands host cred log benchmark bootstrap recording-check help version __list-subcommands
     set -l detected (command $nssh_cmd __list-subcommands 2>/dev/null)
     if test $status -eq 0 -a (count $detected) -gt 0
         set subcommands $detected

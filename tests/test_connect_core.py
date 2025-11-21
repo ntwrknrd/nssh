@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-import os
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
 from nssh.core import connect
+
+
+def _set_fake_home(monkeypatch, tmp_path):
+    monkeypatch.setattr(connect.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
 
 
 @pytest.fixture(autouse=True)
@@ -25,7 +29,7 @@ def test_find_host_match_prefers_index(tmp_path, monkeypatch):
     index = ssh_dir / ".nssh_host_index"
     index.write_text("router1|/tmp/work_hosts\n")
 
-    monkeypatch.setattr(connect.Path, "home", lambda: tmp_path)
+    _set_fake_home(monkeypatch, tmp_path)
 
     match = connect.find_host_match("router1")
     assert match.hostname == "router1"
@@ -33,7 +37,7 @@ def test_find_host_match_prefers_index(tmp_path, monkeypatch):
 
 
 def test_find_host_match_uses_partial_match_when_unique(tmp_path, monkeypatch):
-    monkeypatch.setattr(connect.Path, "home", lambda: tmp_path)
+    _set_fake_home(monkeypatch, tmp_path)
 
     config = tmp_path / "config"
     include = tmp_path / "work_hosts"
@@ -71,7 +75,7 @@ def test_find_host_match_uses_partial_match_when_unique(tmp_path, monkeypatch):
 
 
 def test_find_host_match_signals_missing_host(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(connect.Path, "home", lambda: tmp_path)
+    _set_fake_home(monkeypatch, tmp_path)
 
     class DummyParser:
         def __init__(self):
@@ -171,17 +175,86 @@ def test_resolve_credential_for_host_exits_when_password_expected(monkeypatch, c
     assert "No credential found" in str(exc.value)
 
 
-def test_emit_password_token_writes_to_fd(monkeypatch):
-    read_fd, write_fd = os.pipe()
-    try:
-        monkeypatch.setenv("NSSH_PASS_FD", str(write_fd))
-        token = connect._emit_password_token("supersecret")
-        assert token.startswith(connect.PASSWORD_FD_PREFIX)
+def test_split_extra_args_with_separator():
+    base, extra = connect._split_extra_args(
+        ["router1", "--", "-o", "StrictHostKeyChecking=accept-new"]
+    )
+    assert base == ["router1"]
+    assert extra == ["--", "-o", "StrictHostKeyChecking=accept-new"]
 
-        data = os.read(read_fd, 1024).decode().strip()
-        assert data == "supersecret"
-    finally:
-        try:
-            os.close(read_fd)
-        except OSError:
-            pass
+
+def test_split_extra_args_without_separator():
+    base, extra = connect._split_extra_args(["router1", "alice"])
+    assert base == ["router1", "alice"]
+    assert extra == []
+
+
+def test_split_connection_args_passes_flags_after_host():
+    base, ssh_args = connect._split_connection_args(["router1", "-L", "0:host:22"])
+    assert base == ["router1"]
+    assert ssh_args == ["-L", "0:host:22"]
+
+
+def test_split_connection_args_treats_all_args_after_host_as_ssh_args():
+    # After removing positional username, all args after hostname are SSH args
+    base, ssh_args = connect._split_connection_args(
+        [
+            "router1",
+            "-l",
+            "alice",
+            "-L",
+            "0:host:22",
+        ]
+    )
+    assert base == ["router1"]
+    assert ssh_args == ["-l", "alice", "-L", "0:host:22"]
+
+
+def test_split_connection_args_respects_remote_command_separator():
+    base, ssh_args = connect._split_connection_args(
+        ["router1", "-L", "0:host:22", "--", "uptime"]
+    )
+    assert base == ["router1"]
+    assert ssh_args == ["-L", "0:host:22", "--", "uptime"]
+
+
+def test_select_host_with_fzf_success(monkeypatch):
+    monkeypatch.setattr(connect.shutil, "which", lambda _name: "/usr/bin/fzf")
+
+    class DummyResult:
+        def __init__(self):
+            self.returncode = 0
+            self.stdout = "router-west\n"
+
+    monkeypatch.setattr(connect.subprocess, "run", lambda *_, **__: DummyResult())
+
+    match = connect._select_host_with_fzf(
+        {"router-east": "/tmp/a", "router-west": "/tmp/b"}
+    )
+    assert match.hostname == "router-west"
+    assert match.filepath == "/tmp/b"
+
+
+def test_select_host_with_fzf_requires_binary(monkeypatch):
+    monkeypatch.setattr(connect.shutil, "which", lambda _name: None)
+
+    with pytest.raises(connect.ConnectError) as exc:
+        connect._select_host_with_fzf({"router-west": "/tmp/b"})
+
+    assert "fzf" in str(exc.value)
+
+
+def test_select_host_with_fzf_cancel(monkeypatch):
+    monkeypatch.setattr(connect.shutil, "which", lambda _name: "/usr/bin/fzf")
+
+    class DummyResult:
+        def __init__(self):
+            self.returncode = 1
+            self.stdout = ""
+
+    monkeypatch.setattr(connect.subprocess, "run", lambda *_, **__: DummyResult())
+
+    with pytest.raises(connect.ConnectError) as exc:
+        connect._select_host_with_fzf({"router-west": "/tmp/b"})
+
+    assert "cancel" in str(exc.value).lower()

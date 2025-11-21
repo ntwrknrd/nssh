@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from nssh.cli.common.ui import show_panel
 from nssh.core.ui.console import get_console
@@ -23,7 +23,7 @@ def apply_and_display_compat_fixes(
     max_iterations: int = 5,
     show_header: bool = True,
     auth_changed: Optional[str] = None,
-) -> Tuple[bool, List[str]]:
+) -> Dict[str, Any]:
     if show_header:
         if auth_changed:
             title = f"Update SSH Host: {hostname}"
@@ -52,7 +52,17 @@ def apply_and_display_compat_fixes(
             console.print("\nCompatibility options added:")
             for compat_type in result["fixes_applied"]:
                 console.print(f"  • {COMPAT_CONFIGS[compat_type]['name']}")
-        return True, result["fixes_applied"]
+
+        # Add helpful message if test succeeded via KEX but failed auth
+        if result.get("stopped_reason") == "auth_failed_after_kex_success":
+            console.print(
+                "\n[dim]Note: Test connection failed at authentication (expected with password-only hosts)[/dim]"
+            )
+            console.print(
+                "[dim]Compatibility fix succeeded - nssh connections will work normally[/dim]"
+            )
+
+        return result
 
     console.print("\n[bold yellow]⚠ Partial success[/bold yellow]")
     if auth_changed:
@@ -86,4 +96,4 @@ def apply_and_display_compat_fixes(
     console.print(f"\n[dim]Debug info written to: {debug_file}[/dim]")
     console.print("[dim]Try: ssh -v {hostname}[/dim]")
 
-    return False, result["fixes_applied"]
+    return result

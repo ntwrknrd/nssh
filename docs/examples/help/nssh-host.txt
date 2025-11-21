@@ -5,44 +5,22 @@
 
 Commands:
   nssh host add [FQDN] [OPTIONS]
-    Add new SSH host to config file (interactive or with options)               
-    Example: nssh host add server.example.com --password                        
-  nssh host rm [HOSTNAME]
-    Remove host from config and optionally delete stored credentials            
-  nssh host list [SEARCH]
-    List all hosts from SSH configs (optionally filter by keyword)              
+    Add SSH host to config file                                                 
+  nssh host rm [HOSTNAME] [OPTIONS]
+    Remove host from config                                                     
+  nssh host list [OPTIONS]
+    List all hosts from SSH configs                                             
   nssh host sort [OPTIONS]
-    Sort hosts alphabetically and remove duplicates                             
-  nssh host update [HOSTNAME] [OPTIONS]
-    Update authentication and/or auto-fix compatibility issues                  
-    Example: nssh host update myhost --auth password --compat                   
+    Sort hosts alphabetically in config files                                   
+  nssh host update [HOSTNAME]
+    Auto-detect auth requirements and compatibility                             
 
-Add Options:
-  --hostname NAME
-    Custom SSH alias (default: first part of FQDN)                              
-  --user USERNAME
-    SSH username (default: context, $NSSH_DEFAULT_USER, or $USER)               
-  --port PORT
-    SSH port (default: 22)                                                      
-  --password / --key
-    Choose password auth (managed via nssh cred) or key-only auth               
-  --file NAME
-    Target SSH config file in ~/.ssh/ (skips interactive selection)             
-  --no-test
-    Skip connection test after adding host                                      
-  --skip-password-prompt
-    Skip password prompt and use context fallback credentials                   
-
-Sort Options:
-  --file NAME
-    Sort specific file in ~/.ssh/                                               
-  --all
-    Sort all Include files found in ~/.ssh/config                               
-
-Update Options:
-  --auth TYPE
-    Set authentication: password, keyboard-interactive, publickey               
-  --compat
-    Auto-detect and fix SSH compatibility issues                                
-  --max-iterations N
-    Maximum attempts for compatibility fixing (default: 5)                      
+Options:
+  --auth password|key
+    Authentication type (default: password)                                     
+  --context NAME
+    Specify context name (default: interactive selection)                       
+  --search TERM, -s
+    Filter by keyword (repeatable)                                              
+  --force, -f
+    Skip all prompts and use defaults                                           

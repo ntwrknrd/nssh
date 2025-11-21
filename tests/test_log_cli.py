@@ -236,7 +236,7 @@ def test_export_defaults_to_current_dir_txt(tmp_path, monkeypatch):
 
 
 def test_export_gif_format(tmp_path, monkeypatch):
-    """Test export command with --gif creates .gif in current directory."""
+    """Test export command with --format gif creates .gif in current directory."""
     base = tmp_path / "casts"
     cast_path = _make_session(base, "lab-sw1", "2025-11-14")
     monkeypatch.setenv("NSSH_RECORD_DIR", str(base))
@@ -259,7 +259,7 @@ def test_export_gif_format(tmp_path, monkeypatch):
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["export", "--file", str(cast_path), "--gif", "--dry-run"],
+        ["export", "--file", str(cast_path), "--format", "gif", "--dry-run"],
         env=env,
     )
     assert result.exit_code == 0
@@ -307,23 +307,6 @@ def test_export_custom_output(tmp_path, monkeypatch):
     assert str(custom_output) in result.stdout
 
 
-def test_export_txt_and_gif_exclusive(tmp_path, monkeypatch):
-    """Test export command rejects both --txt and --gif."""
-    base = tmp_path / "casts"
-    cast_path = _make_session(base, "lab-sw1", "2025-11-14")
-    monkeypatch.setenv("NSSH_RECORD_DIR", str(base))
-
-    runner = CliRunner()
-    result = runner.invoke(
-        app,
-        ["export", "--file", str(cast_path), "--txt", "--gif"],
-    )
-    assert result.exit_code != 0
-    # Error message may be in stdout or output
-    output = result.stdout + (result.output or "")
-    assert "Cannot specify both" in output
-
-
 def test_load_sessions_sorts_by_cast_mtime(tmp_path, monkeypatch):
     newer_cast = tmp_path / "host" / "2025-11-16" / "session-000.cast"
     newer_cast.parent.mkdir(parents=True)
@@ -358,7 +341,9 @@ def test_load_sessions_sorts_by_cast_mtime(tmp_path, monkeypatch):
     ]
 
     monkeypatch.setattr(
-        common.recording, "iter_session_records", lambda: iter(sessions)
+        common.recording,
+        "iter_session_records",
+        lambda *, settings=None: iter(sessions),
     )
 
     ordered = common.load_sessions()

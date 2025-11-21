@@ -79,7 +79,7 @@ def list_host_command(
     console.print(f"\n[dim]Total: {len(credentials)} credentials[/dim]")
 
 
-def delete_host_command(
+def rm_host_command(
     ctx: typer.Context,
     hostname: Optional[str] = typer.Argument(
         None, help="Hostname", autocompletion=complete_hostname
@@ -136,7 +136,7 @@ def delete_host_command(
         raise typer.Exit(1)
 
 
-def show_host_command(
+def get_host_command(
     ctx: typer.Context,
     hostname: Optional[str] = typer.Argument(
         None, help="Hostname", autocompletion=complete_hostname

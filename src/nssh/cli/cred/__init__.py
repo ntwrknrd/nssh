@@ -12,16 +12,15 @@ from nssh.core.auth.credentials import CredentialManager
 
 from .common import console
 from .contexts import (
-    add_context_cred_command,
-    create_context_command,
-    delete_context_command,
+    add_context_command,
     list_contexts_command,
+    rm_context_command,
+    update_context_command,
 )
 from .hosts import (
     add_host_command,
-    delete_host_command,
-    list_host_command,
-    show_host_command,
+    get_host_command,
+    rm_host_command,
 )
 from .listing import list_hosts_command
 
@@ -30,74 +29,72 @@ APP_SUBTITLE = "Manage age-encrypted credentials for nssh"
 
 app = typer.Typer(add_help_option=False, rich_markup_mode=None)
 
-app.command("create-context")(create_context_command)
-app.command("add-context-cred")(add_context_cred_command)
-app.command("list-contexts")(list_contexts_command)
-app.command("delete-context")(delete_context_command)
+# Context subcommands
+ctx_app = typer.Typer(add_help_option=False, rich_markup_mode=None)
+ctx_app.command("add")(add_context_command)
+ctx_app.command("update")(update_context_command)
+ctx_app.command("list")(list_contexts_command)
+ctx_app.command("rm")(rm_context_command)
+app.add_typer(ctx_app, name="ctx", help="Manage credential contexts")
 
+# Host commands (top-level)
+app.command("get")(get_host_command)
 app.command("add")(add_host_command)
-app.command("list-host")(list_host_command)
-app.command("delete")(delete_host_command)
-app.command("show")(show_host_command)
-
 app.command("list")(list_hosts_command)
+app.command("rm")(rm_host_command)
 
 
 def _usage_sections() -> list[UsageSection]:
     return [
         UsageSection(
-            "Context Management",
+            "Host Commands",
             rows=[
                 UsageRow(
-                    "nssh cred create-context NAME --file NAME",
-                    "Create credential context for SSH config file in ~/.ssh/ (scope for fallback credentials)",
+                    "nssh cred get HOST [--username USER]",
+                    "Show decrypted password for host",
                 ),
                 UsageRow(
-                    "nssh cred add-context-cred NAME --username USER",
-                    "Set or replace fallback credential for a context (use --overwrite to replace)",
+                    "nssh cred add HOST --username USER",
+                    "Add credential to host",
                 ),
                 UsageRow(
-                    "nssh cred list-contexts",
-                    "Show all contexts, their SSH config files, and fallback credential (if any)",
+                    "nssh cred list [HOST] [OPTIONS]",
+                    "List all hosts or credentials for specific host",
                 ),
                 UsageRow(
-                    "nssh cred delete-context NAME",
-                    "Remove context and its fallback credential",
+                    "nssh cred rm HOST [--username USER | --all]",
+                    "Remove credential(s) from host",
                 ),
             ],
         ),
         UsageSection(
-            "Host Credentials",
+            "Context Commands",
             rows=[
                 UsageRow(
-                    "nssh cred add HOSTNAME --username USER",
-                    "Add host-specific credential (overrides context fallback)",
+                    "nssh cred ctx add NAME --file FILE",
+                    "Create context for SSH config file",
                 ),
                 UsageRow(
-                    "nssh cred list-host HOSTNAME",
-                    "Show all credentials for a specific host",
+                    "nssh cred ctx update NAME --username USER",
+                    "Set fallback credential for context",
                 ),
                 UsageRow(
-                    "nssh cred delete HOSTNAME --username USER",
-                    "Remove specific credential from host",
+                    "nssh cred ctx list [OPTIONS]",
+                    "List all contexts",
                 ),
                 UsageRow(
-                    "nssh cred delete HOSTNAME --all",
-                    "Remove all credentials for host",
-                ),
-                UsageRow(
-                    "nssh cred show HOSTNAME [--username USER]",
-                    "Print decrypted password to stdout (use trusted terminals only)",
+                    "nssh cred ctx rm NAME",
+                    "Remove context",
                 ),
             ],
         ),
         UsageSection(
-            "Listing",
+            "Options",
             rows=[
                 UsageRow(
-                    "nssh cred list [SEARCH]",
-                    "Show host credentials (usernames only); SEARCH filters hosts/usernames. Use 'nssh cred show' for passwords.",
-                )
+                    "--search TERM, -s",
+                    "Filter by keyword (repeatable)",
+                ),
             ],
         ),
     ]

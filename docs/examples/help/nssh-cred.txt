@@ -3,31 +3,26 @@
 │ Manage age-encrypted credentials for nssh │
 ╰───────────────────────────────────────────╯
 
-Context Management:
-  nssh cred create-context NAME --file NAME
-    Create credential context for SSH config file in ~/.ssh/ (scope for fallback
-    credentials)                                                                
-  nssh cred add-context-cred NAME --username USER
-    Set or replace fallback credential for a context (use --overwrite to        
-    replace)                                                                    
-  nssh cred list-contexts
-    Show all contexts, their SSH config files, and fallback credential (if any) 
-  nssh cred delete-context NAME
-    Remove context and its fallback credential                                  
+Host Commands:
+  nssh cred get HOST [--username USER]
+    Show decrypted password for host                                            
+  nssh cred add HOST --username USER
+    Add credential to host                                                      
+  nssh cred list [HOST] [OPTIONS]
+    List all hosts or credentials for specific host                             
+  nssh cred rm HOST [--username USER | --all]
+    Remove credential(s) from host                                              
 
-Host Credentials:
-  nssh cred add HOSTNAME --username USER
-    Add host-specific credential (overrides context fallback)                   
-  nssh cred list-host HOSTNAME
-    Show all credentials for a specific host                                    
-  nssh cred delete HOSTNAME --username USER
-    Remove specific credential from host                                        
-  nssh cred delete HOSTNAME --all
-    Remove all credentials for host                                             
-  nssh cred show HOSTNAME [--username USER]
-    Print decrypted password to stdout (use trusted terminals only)             
+Context Commands:
+  nssh cred ctx add NAME --file FILE
+    Create context for SSH config file                                          
+  nssh cred ctx update NAME --username USER
+    Set fallback credential for context                                         
+  nssh cred ctx list [OPTIONS]
+    List all contexts                                                           
+  nssh cred ctx rm NAME
+    Remove context                                                              
 
-Listing:
-  nssh cred list [SEARCH]
-    Show host credentials (usernames only); SEARCH filters hosts/usernames. Use 
-    'nssh cred show' for passwords.                                             
+Options:
+  --search TERM, -s
+    Filter by keyword (repeatable)                                              

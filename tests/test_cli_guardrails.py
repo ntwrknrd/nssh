@@ -21,7 +21,7 @@ REQUIRED_HELPER_CALLS = {
     CLI_ROOT / "cred" / "__init__.py": ("render_usage(", "run_cli("),
     CLI_ROOT / "log" / "__init__.py": ("render_usage(", "run_cli("),
     CLI_ROOT / "benchmark" / "__init__.py": ("render_usage(", "run_cli("),
-    CLI_ROOT / "install_shell" / "__init__.py": ("render_usage(", "run_cli("),
+    CLI_ROOT / "self" / "__init__.py": ("render_usage(", "run_cli("),
 }
 
 

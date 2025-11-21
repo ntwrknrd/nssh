@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from nssh.cli import Syntax, typer
 from nssh.cli.common.prompt import (
@@ -10,18 +10,19 @@ from nssh.cli.common.prompt import (
     confirm,
     prompt_password_with_confirmation,
 )
-from nssh.cli.common.selectors import select_include_file, select_via_fzf
+from nssh.cli.common.selectors import select_include_file
 from nssh.cli.common.ui import show_panel
 from nssh.cli.common.workflows import choose_password_source, confirm_or_exit
 from nssh.core.ssh.fixer import (
     COMPAT_CONFIGS,
     generate_ssh_config,
     parse_ssh_compatibility_error,
-    test_ssh_connection_via_wrapper,
+    test_ssh_connection_via_cli,
 )
+from nssh.core.ssh.mutations import HostUpdateError, apply_host_update
 
 from .compat import apply_and_display_compat_fixes
-from .context import complete_config_file, console, get_manager, get_parser
+from .context import complete_context, console, get_manager, get_parser
 
 
 def add_command(
@@ -30,25 +31,27 @@ def add_command(
     hostname: Optional[str] = typer.Option(
         None, "--hostname", help="Custom hostname (default: first part of FQDN)"
     ),
-    user: Optional[str] = typer.Option(None, "--user", help="SSH username"),
-    port: int = typer.Option(22, "--port", help="SSH port"),
-    password: bool = typer.Option(False, "--password", help="Use password auth"),
-    key: bool = typer.Option(False, "--key", help="Use key-based auth"),
-    file: Optional[str] = typer.Option(
+    auth: str = typer.Option(
+        "password",
+        "--auth",
+        help="Authentication type: password (default, uses context creds if available) or key",
+    ),
+    context: Optional[str] = typer.Option(
         None,
-        "--file",
-        help="SSH config file name in ~/.ssh/ (skips selection)",
-        autocompletion=complete_config_file,
+        "--context",
+        help="Context name (skips selection)",
+        autocompletion=complete_context,
     ),
     no_test: bool = typer.Option(
         False,
         "--no-test",
         help="Skip connection test after adding host",
     ),
-    skip_password_prompt: bool = typer.Option(
+    force: bool = typer.Option(
         False,
-        "--skip-password-prompt",
-        help="Skip password prompt and use context fallback credentials",
+        "-f",
+        "--force",
+        help="Skip all prompts and use defaults",
     ),
 ) -> None:
     """Add SSH host to configuration"""
@@ -74,17 +77,22 @@ def add_command(
     console.print("\n[bold]Step 2: SSH Alias (hostname)[/bold]")
 
     default_hostname = hostname or final_fqdn.split(".")[0]
-    final_hostname = ask_text("[cyan]Enter hostname[/cyan]", default=default_hostname)
+    if force:
+        final_hostname = default_hostname
+    else:
+        final_hostname = ask_text(
+            "[cyan]Enter hostname[/cyan]", default=default_hostname
+        )
 
     console.print(f"[dim]Hostname: {final_hostname}[/dim]")
 
     # Step 3: Select target config file
     console.print("\n[bold]Step 3: Select target config file[/bold]")
 
-    target_selection = select_include_file(parser, file, "Select config file:")
+    target_selection = select_include_file(parser, context, "Select config file:")
     if isinstance(target_selection, list):
         console.print(
-            "[red]Error: Multiple files selected; --all not supported here[/red]"
+            "[red]Error: Multiple files selected; only one config file can be targeted here[/red]"
         )
         raise typer.Exit(1)
     target_file = target_selection
@@ -104,55 +112,49 @@ def add_command(
     # Step 5: Username
     console.print("\n[bold]Step 5: SSH Username[/bold]")
 
-    # Try to get default from context if available
+    # Compute default from context or environment
     default_user: Optional[str] = None
-    if user:
-        default_user = user
+    # Check if there's a context for this file
+    git_include_file = target_file.name
+    file_context: dict[str, Any] | None = cm.get_context(git_include_file)
+    if file_context and file_context.get("credential"):
+        default_user = file_context["credential"]["username"]
+        console.print(f"[dim]Using default from context '{file_context['name']}'[/dim]")
     else:
-        # Check if there's a context for this file
-        git_include_file = target_file.name
-        context = cm.get_context(git_include_file)
-        if context and context.get("credential"):
-            default_user = context["credential"]["username"]
-            console.print(f"[dim]Using default from context '{context['name']}'[/dim]")
-        else:
-            # Fall back to environment variables
-            default_user = os.getenv("NSSH_DEFAULT_USER", os.getenv("USER", "admin"))
+        # Fall back to environment variables
+        default_user = os.getenv("NSSH_DEFAULT_USER", os.getenv("USER", "admin"))
 
-    username = ask_text("[cyan]Enter username[/cyan]", default=default_user)
+    if force:
+        username = default_user
+    else:
+        username = ask_text("[cyan]Enter username[/cyan]", default=default_user)
 
     console.print(f"[dim]Username: {username}[/dim]")
 
     # Step 6: Port
     console.print("\n[bold]Step 6: SSH Port[/bold]")
 
-    final_port_input = ask_text("[cyan]Enter port[/cyan]", default=str(port))
+    if force:
+        final_port = 22
+    else:
+        final_port_input = ask_text("[cyan]Enter port[/cyan]", default="22")
 
-    try:
-        final_port = int(final_port_input)
-    except ValueError:
-        console.print("[red]Error: Invalid port number[/red]")
-        raise typer.Exit(1)
+        try:
+            final_port = int(final_port_input)
+        except ValueError:
+            console.print("[red]Error: Invalid port number[/red]")
+            raise typer.Exit(1)
 
     console.print(f"[dim]Port: {final_port}[/dim]")
 
     # Step 7: Authentication type
     console.print("\n[bold]Step 7: Authentication Type[/bold]")
 
-    auth_type = None
-    if password:
-        auth_type = "password"
-    elif key:
-        auth_type = "key"
-    else:
-        # Use fzf to select
-        auth_options = [
-            "password - Password-based authentication",
-            "key - Key-based authentication",
-        ]
-        selected = select_via_fzf(auth_options, "Select auth type:")
-
-        auth_type = selected.split(" - ")[0]
+    auth_type = auth.lower()
+    if auth_type not in {"password", "key"}:
+        console.print(f"[red]Error: Invalid auth type '{auth}'[/red]")
+        console.print("[dim]Valid values: password, key[/dim]")
+        raise typer.Exit(1)
 
     console.print(f"[dim]Auth type: {auth_type}[/dim]")
 
@@ -162,13 +164,13 @@ def add_command(
 
         # Check if context has credentials
         git_include_file = target_file.name
-        context = cm.get_context(git_include_file)
-        has_context_creds = bool(context and context.get("credential"))
+        pwd_context: dict[str, Any] | None = cm.get_context(git_include_file)
+        has_context_creds = bool(pwd_context and pwd_context.get("credential"))
 
         password_choice = choose_password_source(
-            context_name=context["name"] if context else None,
+            context_name=pwd_context["name"] if pwd_context else None,
             has_context_credentials=has_context_creds,
-            skip_prompt=skip_password_prompt,
+            skip_prompt=force,
         )
 
         if password_choice == "custom":
@@ -189,10 +191,10 @@ def add_command(
                 console.print(f"[red]Error storing password: {e}[/red]")
                 raise typer.Exit(1)
         elif password_choice == "context":
-            if has_context_creds and context:
-                extra = " (--skip-password-prompt)" if skip_password_prompt else ""
+            if has_context_creds and pwd_context:
+                extra = " (--force)" if force else ""
                 console.print(
-                    f"[dim]Will use context '{context['name']}' credentials{extra}[/dim]"
+                    f"[dim]Will use context '{pwd_context['name']}' credentials{extra}[/dim]"
                 )
             else:
                 console.print(
@@ -200,7 +202,7 @@ def add_command(
                 )
         else:
             console.print(
-                "[yellow]Warning: --skip-password-prompt specified but no context credentials found[/yellow]"
+                "[yellow]Warning: --force specified but no context credentials found[/yellow]"
             )
             console.print(
                 "[dim]No credentials stored (connection may fail without context)[/dim]"
@@ -242,7 +244,8 @@ def add_command(
     step_num += 1
     console.print(f"\n[bold]Step {step_num}: Confirm[/bold]")
 
-    confirm_or_exit("[cyan]Add this host to the config?[/cyan]")
+    if not force:
+        confirm_or_exit("[cyan]Add this host to the config?[/cyan]")
 
     # Step 12: Write config
     try:
@@ -273,11 +276,38 @@ def add_command(
             console.print(f"\n[bold]Step {step_num}: Testing Connection[/bold]")
             console.print("[dim]Testing SSH connection with verbose output...[/dim]")
 
-            test_result = test_ssh_connection_via_wrapper(final_hostname, timeout=10)
+            test_result = test_ssh_connection_via_cli(
+                final_hostname,
+                timeout=10,
+                parser=parser,
+            )
 
             if test_result["success"]:
                 console.print("[green]✓ Connection test passed![/green]")
                 test_passed = True
+                detected_method = test_result.get("auth_method")
+                if (
+                    auth_type == "password"
+                    and detected_method == "keyboard-interactive"
+                ):
+                    console.print(
+                        "[dim]Detected keyboard-interactive authentication during test; updating host config...[/dim]"
+                    )
+                    try:
+                        apply_host_update(
+                            parser,
+                            final_hostname,
+                            auth_type="keyboard-interactive",
+                            create_backup=False,
+                        )
+                        console.print(
+                            "[green]  • Host updated to keyboard-interactive authentication[/green]"
+                        )
+                        auth_type = "keyboard-interactive"
+                    except HostUpdateError as exc:
+                        console.print(
+                            f"[yellow]Warning: Failed to update host authentication automatically: {exc}[/yellow]"
+                        )
             else:
                 # Check if compatibility issues detected
                 console.print(
@@ -311,11 +341,9 @@ def add_command(
                             raw_part = parts[1].split("=== END RAW OUTPUT ===")[0]
                             raw_ssh_output = raw_part.strip()
 
-                    # Detect compatibility issues
-                    compat_types = (
-                        parse_ssh_compatibility_error(raw_ssh_output)
-                        if raw_ssh_output
-                        else []
+                    # Detect compatibility issues - check raw output, stderr, and stdout
+                    compat_types = parse_ssh_compatibility_error(
+                        raw_ssh_output or test_result["stderr"] or test_result["stdout"]
                     )
 
                     if compat_types:
@@ -326,10 +354,15 @@ def add_command(
                         for compat_type in compat_types:
                             console.print(f"  • {COMPAT_CONFIGS[compat_type]['name']}")
 
-                        # Extract error message
+                        # Extract error message from raw output, stderr, or stdout
                         error_line = ""
-                        if raw_ssh_output:
-                            for line in raw_ssh_output.split("\n"):
+                        error_source = (
+                            raw_ssh_output
+                            or test_result["stderr"]
+                            or test_result["stdout"]
+                        )
+                        if error_source:
+                            for line in error_source.split("\n"):
                                 if not line.startswith("debug") and (
                                     "Unable to negotiate" in line
                                     or "no matching" in line
@@ -349,18 +382,18 @@ def add_command(
                         if confirm(
                             "\n[cyan]Apply compatibility fix now?[/cyan]", default=True
                         ):
-                            success, _ = apply_and_display_compat_fixes(
+                            compat_result = apply_and_display_compat_fixes(
                                 parser,
                                 final_hostname,
                                 max_iterations=5,
                                 show_header=False,
                             )
-                            test_passed = success
+                            test_passed = compat_result["success"]
                         else:
                             # User declined - show auto-fix command
                             console.print("\n[dim]You can auto-fix with:[/dim]")
                             console.print(
-                                f"[dim]  nssh host update {final_hostname} --compat[/dim]"
+                                f"[dim]  nssh host update {final_hostname}[/dim]"
                             )
                     else:
                         # Exit code 255 but no compatibility patterns
@@ -371,7 +404,7 @@ def add_command(
                             f"[dim]Try running: ssh -v {final_hostname}[/dim]"
                         )
                         console.print(
-                            f"[dim]Or run: nssh host update {final_hostname} --compat[/dim]"
+                            f"[dim]Or run: nssh host update {final_hostname}[/dim]"
                         )
                 elif test_result["exit_code"] == 124:
                     # Timeout

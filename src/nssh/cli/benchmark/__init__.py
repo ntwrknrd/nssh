@@ -8,7 +8,6 @@ from nssh.cli import typer
 from nssh.cli.common.app import run_cli
 from nssh.cli.common.help import UsageRow, UsageSection, render_usage
 
-from .analyze import analyze_command
 from .capture import capture_command
 from .common import APP_TITLE
 
@@ -16,84 +15,39 @@ APP_SUBTITLE = "Measure nssh overhead on your system"
 
 app = typer.Typer(add_help_option=False, rich_markup_mode=None)
 
-app.command("capture")(capture_command)
-app.command("analyze")(analyze_command)
+# Register as a regular command with a short, intuitive name
+app.command("run")(capture_command)
 
 
 def _usage_sections() -> list[UsageSection]:
     return [
         UsageSection(
-            "Commands",
+            "Usage",
             rows=[
                 UsageRow(
-                    "nssh benchmark capture HOST [OPTIONS]",
-                    "Run nssh with NSSH_DEBUG timing enabled and save the log",
-                ),
-                UsageRow(
-                    "nssh benchmark analyze [LOG] [OPTIONS]",
-                    "Render or archive a saved timing log (defaults to stdin)",
+                    "nssh benchmark run HOST [OPTIONS]",
+                    "Measure timing and archive results in benchmark/{timestamp}/",
                 ),
             ],
         ),
         UsageSection(
-            "Capture Options",
+            "Options",
             rows=[
                 UsageRow(
-                    "-o, --output PATH",
-                    "Write raw timing log to PATH (default: timing.log)",
-                ),
-                UsageRow(
-                    "--dry-run",
-                    "Replace SSH dial with a ProxyCommand stub",
-                ),
-                UsageRow(
-                    "--no-session-exit",
-                    "Keep the SSH session open instead of auto 'exit'",
-                ),
-                UsageRow(
-                    "-a, --ssh-arg ARG",
-                    "Forward extra args to nssh (repeatable)",
-                ),
-                UsageRow(
                     "--warmups N",
-                    "Number of warmup runs ignored in summary",
+                    "Number of warmup runs ignored in summary (default: 1)",
                 ),
                 UsageRow(
                     "--samples N",
                     "Number of measured runs (default: 3)",
                 ),
                 UsageRow(
-                    "--json-output PATH",
-                    "Write benchmark summary JSON to PATH",
-                ),
-                UsageRow(
-                    "--stage-budget KEY=MS",
-                    "Enforce per-stage max (repeatable)",
-                ),
-                UsageRow(
-                    "--total-budget MS",
-                    "Enforce total max ms threshold",
-                ),
-                UsageRow(
-                    "--budget-metric M",
-                    "Metric for budgets: max, mean, median",
-                ),
-                UsageRow(
                     "--simple-only",
                     "Disable instrumentation; report totals only",
                 ),
-            ],
-        ),
-        UsageSection(
-            "Analyze Options",
-            rows=[
                 UsageRow(
-                    "--archive-dir DIR",
-                    "Persist raw log + JSON summary",
-                ),
-                UsageRow(
-                    "--label TEXT",
-                    "Tag archived artifacts for later comparison",
+                    "--no-record",
+                    "Force disable session recording (overrides env/config)",
                 ),
             ],
         ),

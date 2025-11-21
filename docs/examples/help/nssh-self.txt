@@ -1,0 +1,34 @@
+╭───────────────────────────────────────────╮
+│ nssh self                                 │
+│ Install nssh CLI + optional shell helpers │
+╰───────────────────────────────────────────╯
+
+Commands:
+  nssh self init [OPTIONS]
+    Initialize nssh with configuration and shell helpers                        
+  nssh self cleanup [OPTIONS]
+    Remove files installed by self                                              
+  nssh self status
+    Show installation status and discover existing files                        
+  nssh self reinstall [OPTIONS]
+    Clear cache, reinstall package, refresh files                               
+  nssh self version
+    Show installed CLI version                                                  
+
+Options:
+  --install-shell-helpers
+    Install optional bash/zsh/fish wrapper functions                            
+  --install-fish-completions
+    Install fish completion files                                               
+  --append-shell-snippet PATH
+    Append sourcing snippet to shell rc/profile                                 
+  --symlink
+    Symlink helpers instead of copying (default: copy)                          
+  --dry-run
+    Preview install actions without writing (default: write)                    
+  --skip-uv
+    Skip uv reinstall; only refresh managed files                               
+  --dev
+    Auto-bump pyproject patch version before reinstall                          
+  --force, -f
+    Overwrite without prompting                                                 

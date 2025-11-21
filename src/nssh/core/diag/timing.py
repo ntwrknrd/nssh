@@ -25,15 +25,21 @@ DurationUs = int
 
 TIMING_ENV_FLAG = "NSSH_DEBUG"
 RUN_ID_ENV_FLAG = "NSSH_BENCHMARK_RUN"
+
+# Stage ordering for benchmark display.
+# Note: When recording is enabled, ssh-connection is NESTED inside recording-session.
+# The relationship: recording-session = ssh-connection + asciinema overhead (~75ms)
+# The table renderer will indent nested stages to show this hierarchy.
 DEFAULT_STAGE_ORDER: Tuple[str, ...] = (
-    "wrapper-start",
+    "pty-start",
     "config-parse",
     "host-selection",
     "credential-vault",
     "connection-orchestration",
     "recording-setup",
-    "ssh-connection",
-    "wrapper-teardown",
+    "recording-session",  # Contains ssh-connection when recording is enabled
+    "ssh-connection",  # Nested inside recording-session (via FIFO timing markers)
+    "pty-teardown",
 )
 
 
@@ -528,12 +534,50 @@ def summary_to_table(
         ("Samples", "white"),
     ]
 
+    # Detect nested stages: ssh-connection is nested inside recording-session
+    has_recording_session = "recording-session" in summary.ordered_stages
+    has_ssh_connection = "ssh-connection" in summary.ordered_stages
+    is_nested_scenario = has_recording_session and has_ssh_connection
+
+    # Calculate asciinema overhead when both recording-session and ssh-connection exist
+    overhead_stats: Optional[StageStats] = None
+    if is_nested_scenario:
+        overhead_durations: List[float] = []
+        for sample in summary.samples:
+            # Find durations for recording-session and ssh-connection in this sample
+            recording_duration = None
+            ssh_duration = None
+            for stage_sample in sample.stages:
+                if stage_sample.stage == "recording-session":
+                    recording_duration = stage_sample.duration_ms
+                elif stage_sample.stage == "ssh-connection":
+                    ssh_duration = stage_sample.duration_ms
+
+            # Only calculate overhead if both stages are present in this sample
+            if recording_duration is not None and ssh_duration is not None:
+                overhead = recording_duration - ssh_duration
+                overhead_durations.append(overhead)
+
+        # Create stats for asciinema overhead if we have data
+        if overhead_durations:
+            overhead_stats = _compute_stage_stats(
+                "asciinema-overhead", overhead_durations
+            )
+
     rows: List[Tuple[str, ...]] = []
     for stage in summary.ordered_stages:
         stats = summary.stage_stats[stage]
+
+        # Indent ssh-connection when it's nested inside recording-session
+        stage_name = stage
+        if is_nested_scenario and stage == "ssh-connection":
+            stage_name = (
+                "  ssh-connection"  # Simple indent, nested under recording-session
+            )
+
         rows.append(
             (
-                stage,
+                stage_name,
                 format_duration_ms(stats.mean_ms),
                 format_duration_ms(stats.median_ms),
                 f"{format_duration_ms(stats.min_ms)} / {format_duration_ms(stats.max_ms)}",
@@ -541,6 +585,19 @@ def summary_to_table(
                 str(stats.count),
             )
         )
+
+        # Insert asciinema overhead row right after recording-session
+        if is_nested_scenario and stage == "recording-session" and overhead_stats:
+            rows.append(
+                (
+                    "  asciinema-overhead",
+                    format_duration_ms(overhead_stats.mean_ms),
+                    format_duration_ms(overhead_stats.median_ms),
+                    f"{format_duration_ms(overhead_stats.min_ms)} / {format_duration_ms(overhead_stats.max_ms)}",
+                    format_duration_ms(overhead_stats.stddev_ms),
+                    str(overhead_stats.count),
+                )
+            )
 
     footer = None
     if include_footer:
