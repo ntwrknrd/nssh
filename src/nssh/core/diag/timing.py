@@ -31,6 +31,7 @@ RUN_ID_ENV_FLAG = "NSSH_BENCHMARK_RUN"
 # The relationship: recording-session = ssh-connection + asciinema overhead (~75ms)
 # The table renderer will indent nested stages to show this hierarchy.
 DEFAULT_STAGE_ORDER: Tuple[str, ...] = (
+    "cli-startup",  # CLI initialization (imports, arg parsing, env setup)
     "pty-start",
     "config-parse",
     "host-selection",
@@ -40,7 +41,50 @@ DEFAULT_STAGE_ORDER: Tuple[str, ...] = (
     "recording-session",  # Contains ssh-connection when recording is enabled
     "ssh-connection",  # Nested inside recording-session (via FIFO timing markers)
     "pty-teardown",
+    "input-validation",  # SCP-specific: path and argument validation
+    "scp-spawn",  # SCP-specific: process initialization
+    "scp-transfer",  # SCP-specific: file transfer operation
 )
+
+# Known nested stage relationships where overlap is expected.
+# Format: (parent_stage, child_stage)
+# When both stages exist in a sample, the child duration is subtracted
+# from overlap calculations since it's already counted within the parent.
+NESTED_STAGE_PAIRS: Tuple[Tuple[str, str], ...] = (
+    ("recording-session", "ssh-connection"),
+)
+
+# Stage descriptions for documentation and help text
+STAGE_DESCRIPTIONS: Mapping[str, str] = {
+    "cli-startup": "CLI initialization (imports, argument parsing, env setup)",
+    "pty-start": "PTY initialization and SSH process spawn",
+    "config-parse": "SSH config file parsing (~/.ssh/config)",
+    "host-selection": "Host matching and resolution (includes index lookup)",
+    "credential-vault": "Credential decryption from encrypted vault (age)",
+    "connection-orchestration": "SSH command preparation and environment setup",
+    "recording-setup": "Recording system initialization (asciinema config)",
+    "recording-session": "Total session time including recording wrapper overhead",
+    "ssh-connection": "Actual SSH connection time (nested within recording-session)",
+    "pty-teardown": "PTY cleanup and process termination",
+    "scp-spawn": "SCP process initialization and authentication",
+    "scp-transfer": "File transfer operation (includes network I/O)",
+    "input-validation": "Path and argument validation (security checks)",
+    # Diagnostic stages
+    "asciinema-overhead": "Recording overhead (recording-session - ssh-connection)",
+    "unaccounted-time": "Gap between total and sum of stages (positive = missing instrumentation, negative = overlap)",
+}
+
+
+def get_stage_description(stage: str) -> Optional[str]:
+    """Get human-readable description for a timing stage.
+
+    Args:
+        stage: Stage name
+
+    Returns:
+        Description string if available, None otherwise
+    """
+    return STAGE_DESCRIPTIONS.get(stage)
 
 
 @dataclass(frozen=True)
@@ -450,6 +494,92 @@ def build_benchmark_samples(
     return samples
 
 
+@dataclass(frozen=True)
+class TimingValidationWarning:
+    """Warning about stage timing issues."""
+
+    run_id: int
+    warning_type: str  # "gap", "overlap", "negative_duration"
+    message: str
+    severity: str  # "info", "warning", "error"
+
+
+def validate_stage_timing(
+    samples: Sequence[BenchmarkSample],
+    *,
+    gap_threshold_ms: float = 10.0,
+    overlap_threshold_ms: float = 5.0,
+) -> List[TimingValidationWarning]:
+    """Validate stage timing consistency across benchmark samples.
+
+    Detects:
+    - Negative durations (instrumentation bug)
+    - Large gaps between consecutive stages (missing instrumentation)
+    - Stage overlaps (incorrect nesting, excluding known nested pairs)
+
+    Args:
+        samples: Benchmark samples to validate
+        gap_threshold_ms: Threshold for gap warnings (default: 10ms)
+        overlap_threshold_ms: Threshold for overlap warnings (default: 5ms)
+
+    Returns:
+        List of validation warnings sorted by severity
+    """
+    warnings: List[TimingValidationWarning] = []
+
+    for sample in samples:
+        # Check for negative durations
+        for stage in sample.stages:
+            if stage.duration_ms < 0:
+                warnings.append(
+                    TimingValidationWarning(
+                        run_id=sample.run_id,
+                        warning_type="negative_duration",
+                        message=f"Stage '{stage.stage}' has negative duration: {stage.duration_ms:.2f}ms",
+                        severity="error",
+                    )
+                )
+
+        # Build set of stage names for nested pair detection
+        stage_names = {s.stage for s in sample.stages}
+
+        # Calculate expected nested overlap from known nested stage pairs
+        # When both parent and child exist, the child duration is expected overlap
+        expected_nested_ms = 0.0
+        for parent, child in NESTED_STAGE_PAIRS:
+            if parent in stage_names and child in stage_names:
+                for s in sample.stages:
+                    if s.stage == child:
+                        expected_nested_ms += s.duration_ms
+                        break
+
+        # Validate total vs sum, accounting for expected nesting
+        stages_sum = sum(s.duration_ms for s in sample.stages)
+        diff = sample.total_ms - stages_sum + expected_nested_ms
+
+        if abs(diff) > gap_threshold_ms:
+            if diff > 0:
+                warnings.append(
+                    TimingValidationWarning(
+                        run_id=sample.run_id,
+                        warning_type="gap",
+                        message=f"Large gap detected: {diff:.2f}ms unaccounted time",
+                        severity="warning",
+                    )
+                )
+            else:
+                warnings.append(
+                    TimingValidationWarning(
+                        run_id=sample.run_id,
+                        warning_type="overlap",
+                        message=f"Stage overlap detected: {abs(diff):.2f}ms double-counted",
+                        severity="info",
+                    )
+                )
+
+    return warnings
+
+
 def _compute_stage_stats(stage: str, durations: Sequence[float]) -> StageStats:
     import math
     import statistics
@@ -564,6 +694,32 @@ def summary_to_table(
                 "asciinema-overhead", overhead_durations
             )
 
+    # Calculate unaccounted time for all samples
+    unaccounted_stats: Optional[StageStats] = None
+    unaccounted_durations: List[float] = []
+
+    for sample in summary.samples:
+        # Sum all non-nested stages to avoid double-counting
+        stages_sum = 0.0
+        for stage_sample in sample.stages:
+            # Skip nested ssh-connection when recording is enabled
+            # (it's already counted within recording-session)
+            if is_nested_scenario and stage_sample.stage == "ssh-connection":
+                continue
+            stages_sum += stage_sample.duration_ms
+
+        # Calculate gap: total - sum of stages
+        # Positive = missing instrumentation
+        # Negative = overlapping stages
+        unaccounted = sample.total_ms - stages_sum
+        unaccounted_durations.append(unaccounted)
+
+    # Create stats if we have data (always show, even if < 0.5ms)
+    if unaccounted_durations:
+        unaccounted_stats = _compute_stage_stats(
+            "unaccounted-time", unaccounted_durations
+        )
+
     rows: List[Tuple[str, ...]] = []
     for stage in summary.ordered_stages:
         stats = summary.stage_stats[stage]
@@ -598,6 +754,25 @@ def summary_to_table(
                     str(overhead_stats.count),
                 )
             )
+
+    # Add unaccounted-time diagnostic row after all stages
+    if unaccounted_stats:
+        label = "  unaccounted-time"
+        if unaccounted_stats.mean_ms < -0.5:
+            label = "  unaccounted-time (overlap)"
+        elif abs(unaccounted_stats.mean_ms) < 0.5:
+            label = "  unaccounted-time (~0)"
+
+        rows.append(
+            (
+                label,
+                format_duration_ms(unaccounted_stats.mean_ms),
+                format_duration_ms(unaccounted_stats.median_ms),
+                f"{format_duration_ms(unaccounted_stats.min_ms)} / {format_duration_ms(unaccounted_stats.max_ms)}",
+                format_duration_ms(unaccounted_stats.stddev_ms),
+                str(unaccounted_stats.count),
+            )
+        )
 
     footer = None
     if include_footer:

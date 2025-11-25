@@ -356,23 +356,25 @@ def main(argv: Sequence[str] | None = None):
     args, ssh_passthrough_args = _split_connection_args(raw_args)
 
     with timing_core.run_span("connect-workflow"):
-        if not args:
-            print(
-                "Usage: nssh [USER@]HOST [SSH_ARGS...]",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+        # CLI initialization: argument parsing and validation
+        with timing_core.stage("cli-startup", detail="ssh"):
+            if not args:
+                print(
+                    "Usage: nssh [USER@]HOST [SSH_ARGS...]",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
-        search_term = args[0]
-        username = None
+            search_term = args[0]
+            username = None
 
-        # Strip user@ prefix if present (for consistency with nssh-select)
-        if "@" in search_term and not search_term.startswith("@"):
-            parts = search_term.split("@", 1)
-            if len(parts) == 2 and parts[1]:
-                # user@hostname format
-                username = parts[0]
-                search_term = parts[1]
+            # Strip user@ prefix if present (for consistency with nssh-select)
+            if "@" in search_term and not search_term.startswith("@"):
+                parts = search_term.split("@", 1)
+                if len(parts) == 2 and parts[1]:
+                    # user@hostname format
+                    username = parts[0]
+                    search_term = parts[1]
 
         # Find hostname (exact or fuzzy)
         try:

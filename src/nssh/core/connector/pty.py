@@ -37,6 +37,8 @@ if TYPE_CHECKING:
     from nssh.core.recording.manager import RecordingPlan
 
 from nssh.core.diag import timing as timing_core
+from nssh.core.security.password import SecurePassword
+from nssh.core.security.validation import validate_ssh_args
 
 PASSWORD_PATTERNS = (
     re.compile(rb"password:\s*$", re.IGNORECASE),
@@ -168,10 +170,16 @@ class PtyConnector:
         stdout: BinaryIO | io.TextIOBase | None = None,
         attach_stdin: bool = True,
     ) -> None:
+        # Validate SSH arguments for security
+        with timing_core.stage("input-validation", detail="ssh-args"):
+            validated_args = validate_ssh_args(ssh_args) if ssh_args else []
+
         self.hostname = hostname
         self.username = username
-        self.password = password
-        self.ssh_args = list(ssh_args or [])
+        self.password: SecurePassword | None = (
+            SecurePassword(password) if password else None
+        )
+        self.ssh_args = validated_args
         self.env = env or os.environ.copy()
         self.recording_plan = recording_plan
         self._selector = selectors.DefaultSelector()
@@ -523,8 +531,12 @@ class PtyConnector:
                 prompt_len = len(match.group(0))
                 self._pending_prompt_trim += prompt_len
                 del self._buffer[len(self._buffer) - prompt_len :]
-                os.write(master_fd, self.password.encode("utf-8") + b"\n")
+                # Use SecurePassword to get bytes and clear memory after use
+                password_bytes = self.password.get_bytes()
+                os.write(master_fd, password_bytes + b"\n")
                 self._password_sent = True
+                # Clear password from memory after use
+                self.password.clear()
                 break
 
     def _filter_outgoing_bytes(self, data: bytes) -> bytes:

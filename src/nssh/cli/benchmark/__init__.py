@@ -8,30 +8,36 @@ from nssh.cli import typer
 from nssh.cli.common.app import run_cli
 from nssh.cli.common.help import UsageRow, UsageSection, render_usage
 
-from .capture import capture_command
+from .capture import capture_command as capture_ssh_command
+from .capture_scp import capture_scp_command
 from .common import APP_TITLE
 
 APP_SUBTITLE = "Measure nssh overhead on your system"
 
 app = typer.Typer(add_help_option=False, rich_markup_mode=None)
 
-# Register as a regular command with a short, intuitive name
-app.command("run")(capture_command)
+# Register SSH and SCP benchmark commands
+app.command("ssh")(capture_ssh_command)
+app.command("scp")(capture_scp_command)
 
 
 def _usage_sections() -> list[UsageSection]:
     return [
         UsageSection(
-            "Usage",
+            "Commands",
             rows=[
                 UsageRow(
-                    "nssh benchmark run HOST [OPTIONS]",
-                    "Measure timing and archive results in benchmark/{timestamp}/",
+                    "nssh benchmark ssh HOST",
+                    "Benchmark SSH connection overhead",
+                ),
+                UsageRow(
+                    "nssh benchmark scp HOST",
+                    "Benchmark SCP file transfer performance",
                 ),
             ],
         ),
         UsageSection(
-            "Options",
+            "Common Options",
             rows=[
                 UsageRow(
                     "--warmups N",
@@ -45,9 +51,53 @@ def _usage_sections() -> list[UsageSection]:
                     "--simple-only",
                     "Disable instrumentation; report totals only",
                 ),
+            ],
+        ),
+        UsageSection(
+            "Command-Specific Options",
+            rows=[
                 UsageRow(
-                    "--no-record",
-                    "Force disable session recording (overrides env/config)",
+                    "ssh: --no-record",
+                    "Force disable session recording",
+                ),
+                UsageRow(
+                    "scp: --size KB",
+                    "Test file size in KB (default: 100)",
+                ),
+            ],
+        ),
+        UsageSection(
+            "Timing Stages",
+            rows=[
+                UsageRow("cli-startup", "CLI init (imports, parsing)"),
+                UsageRow("config-parse", "SSH config parsing"),
+                UsageRow("host-selection", "Host matching and resolution"),
+                UsageRow("credential-vault", "Credential decryption"),
+                UsageRow("ssh-connection", "Actual SSH connection time"),
+                UsageRow("scp-transfer", "File transfer with network I/O"),
+            ],
+        ),
+        UsageSection(
+            "Diagnostic Metrics",
+            rows=[
+                UsageRow("asciinema-overhead", "Recording wrapper overhead"),
+                UsageRow("unaccounted-time", "Gap: total - sum(stages)"),
+            ],
+        ),
+        UsageSection(
+            "Performance Profiling",
+            rows=[
+                UsageRow(
+                    "python -X importtime -m nssh.cli.main HOST",
+                    "Profile Python import overhead",
+                ),
+                UsageRow(
+                    "NSSH_DEBUG=1 nssh cp HOST:file ./",
+                    "Enable timing instrumentation",
+                ),
+                UsageRow(
+                    "time nssh --help",
+                    "Measure cold-start overhead",
                 ),
             ],
         ),

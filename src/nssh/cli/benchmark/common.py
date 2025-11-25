@@ -162,3 +162,19 @@ def render_benchmark_summary(summary: timing_core.BenchmarkSummary) -> None:
     headers, rows, footer = timing_core.summary_to_table(summary, include_footer=True)
     table = create_standard_table(headers, rows, footer=footer)
     console.print(table)
+
+    # Validate timing and display warnings
+    validation_warnings = timing_core.validate_stage_timing(
+        summary.samples,
+        gap_threshold_ms=10.0,
+        overlap_threshold_ms=5.0,
+    )
+
+    if validation_warnings:
+        console.print("\n[yellow]Timing Validation:[/yellow]")
+        for warning in validation_warnings:
+            severity_colors = {"info": "dim", "warning": "yellow", "error": "red"}
+            color = severity_colors.get(warning.severity, "white")
+
+            # Group warnings by run if multiple runs have issues
+            console.print(f"  [{color}]Run {warning.run_id}: {warning.message}[/{color}]")
