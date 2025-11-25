@@ -36,7 +36,6 @@ def _make_settings(tmp_path: Path) -> recording.RecordingSettings:
         include_patterns=(),
         exclude_patterns=(),
         directory=tmp_path,
-        max_age_days=None,
         asciinema_server_url=None,
         window_size=None,
     )
@@ -96,3 +95,105 @@ def test_pick_recording_interactive_exits_when_no_sessions(monkeypatch, tmp_path
         common.pick_recording_interactive(None, settings)
 
     assert exc.value.exit_code == 1
+
+
+def test_filter_sessions_by_host_exact_date(tmp_path):
+    sessions = [
+        _make_session(tmp_path, "alpha", "2025-11-18", 12),
+        _make_session(tmp_path, "beta", "2025-11-18", 5),
+        _make_session(tmp_path, "alpha", "2025-11-17", 10),
+    ]
+
+    result = common.filter_sessions_by_host(sessions, "alpha", "2025-11-18")
+    assert len(result) == 1
+    assert result[0].host == "alpha"
+    assert result[0].started_at.strftime("%Y-%m-%d") == "2025-11-18"
+
+
+def test_filter_sessions_by_host_wildcard_date(tmp_path):
+    sessions = [
+        _make_session(tmp_path, "alpha", "2025-11-18", 12),
+        _make_session(tmp_path, "beta", "2025-11-18", 5),
+        _make_session(tmp_path, "alpha", "2025-11-17", 10),
+    ]
+
+    result = common.filter_sessions_by_host(sessions, "alpha", "*")
+    assert len(result) == 2
+    assert all(s.host == "alpha" for s in result)
+
+
+def test_filter_sessions_by_host_case_insensitive(tmp_path):
+    sessions = [
+        _make_session(tmp_path, "Alpha", "2025-11-18", 12),
+    ]
+
+    result = common.filter_sessions_by_host(sessions, "ALPHA", "*")
+    assert len(result) == 1
+
+
+def test_filter_sessions_by_host_substring_match(tmp_path):
+    sessions = [
+        _make_session(tmp_path, "prod-server-01", "2025-11-18", 12),
+        _make_session(tmp_path, "dev-server-01", "2025-11-18", 5),
+    ]
+
+    result = common.filter_sessions_by_host(sessions, "prod", "*")
+    assert len(result) == 1
+    assert result[0].host == "prod-server-01"
+
+
+def test_delete_recording_removes_cast_and_index(tmp_path):
+    cast_path = tmp_path / "host" / "2025-11-18" / "session-001.cast"
+    cast_path.parent.mkdir(parents=True, exist_ok=True)
+    cast_path.write_text("{}", encoding="utf-8")
+
+    index_path = cast_path.with_suffix(".index.json")
+    index_path.write_text("{}", encoding="utf-8")
+
+    class FakeConsole:
+        def __init__(self):
+            self.messages = []
+
+        def print(self, msg):
+            self.messages.append(msg)
+
+    console = FakeConsole()
+    common.delete_recording(cast_path, tmp_path, dry_run=False, console=console)
+
+    assert not cast_path.exists()
+    assert not index_path.exists()
+    assert any("Deleted" in m for m in console.messages)
+
+
+def test_delete_recording_dry_run_does_not_delete(tmp_path):
+    cast_path = tmp_path / "host" / "2025-11-18" / "session-001.cast"
+    cast_path.parent.mkdir(parents=True, exist_ok=True)
+    cast_path.write_text("{}", encoding="utf-8")
+
+    class FakeConsole:
+        def __init__(self):
+            self.messages = []
+
+        def print(self, msg):
+            self.messages.append(msg)
+
+    console = FakeConsole()
+    common.delete_recording(cast_path, tmp_path, dry_run=True, console=console)
+
+    assert cast_path.exists()
+    assert any("Would delete" in m for m in console.messages)
+
+
+def test_delete_recording_cleans_empty_directories(tmp_path):
+    cast_path = tmp_path / "host" / "2025-11-18" / "session-001.cast"
+    cast_path.parent.mkdir(parents=True, exist_ok=True)
+    cast_path.write_text("{}", encoding="utf-8")
+
+    class FakeConsole:
+        def print(self, msg):
+            pass
+
+    common.delete_recording(cast_path, tmp_path, dry_run=False, console=FakeConsole())
+
+    assert not cast_path.parent.exists()  # date dir removed
+    assert not cast_path.parent.parent.exists()  # host dir removed

@@ -9,9 +9,7 @@ from pathlib import Path
 from nssh.core.recording import manager as recording
 
 
-def _settings(
-    tmp_path: Path, max_age_days: int | None = None
-) -> recording.RecordingSettings:
+def _settings(tmp_path: Path) -> recording.RecordingSettings:
     return recording.RecordingSettings(
         enabled=True,
         force=False,
@@ -19,7 +17,6 @@ def _settings(
         include_patterns=(),
         exclude_patterns=(),
         directory=tmp_path,
-        max_age_days=max_age_days,
         asciinema_server_url=None,
         window_size=None,
     )
@@ -42,7 +39,6 @@ def test_should_record_supports_globs_and_regex(tmp_path):
         include_patterns=include,
         exclude_patterns=exclude,
         directory=tmp_path,
-        max_age_days=None,
         asciinema_server_url=None,
         window_size=None,
     )
@@ -53,7 +49,7 @@ def test_should_record_supports_globs_and_regex(tmp_path):
 
 
 def test_cleanup_old_recordings_removes_expired(tmp_path, monkeypatch):
-    settings = _settings(tmp_path, max_age_days=1)
+    settings = _settings(tmp_path)
     host_dir = tmp_path / "lab-sw1"
     (host_dir / "2025-11-13").mkdir(parents=True, exist_ok=True)
     (host_dir / "2025-11-14").mkdir(parents=True, exist_ok=True)
@@ -69,6 +65,7 @@ def test_cleanup_old_recordings_removes_expired(tmp_path, monkeypatch):
     os.utime(old_cast, (ts, ts))
 
     summary = recording.cleanup_old_recordings(
+        max_age_days=1,
         settings=settings,
         now=datetime.now(timezone.utc),
         dry_run=False,

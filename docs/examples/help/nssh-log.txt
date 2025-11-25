@@ -8,18 +8,22 @@ Commands:
     List recorded sessions                                                      
   nssh log play [OPTIONS]
     Play a recorded session                                                     
+  nssh log delete [OPTIONS]
+    Delete recorded sessions                                                    
   nssh log upload [OPTIONS]
     Upload recording to asciinema server                                        
   nssh log export [OPTIONS]
     Export to text or GIF format                                                
-  nssh log cleanup [OPTIONS]
-    Remove old recordings                                                       
 
 Options:
   --file FILE, -f
     Path to recording file                                                      
+  --host HOST, -h
+    Filter/delete by hostname                                                   
   --date YYYY-MM-DD
-    Filter by date                                                              
+    Filter by date ('*' for all)                                                
+  --older-than DAYS
+    Delete recordings older than N days                                         
   --search TERM, -s
     Filter by keyword                                                           
   --output FILE, -o

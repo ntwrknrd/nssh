@@ -246,3 +246,100 @@ def run_command(cmd: Sequence[str], dry_run: bool) -> None:
         typer.echo("[dry-run] " + " ".join(cmd))
         return
     subprocess.run(cmd, check=True)
+
+
+def filter_sessions_by_host(
+    sessions: List[recording.SessionRecord],
+    host: str,
+    date_filter: str,
+) -> List[recording.SessionRecord]:
+    """Filter sessions by hostname and optional date.
+
+    Args:
+        sessions: List of session records to filter.
+        host: Hostname to match (case-insensitive substring match).
+        date_filter: Date string (YYYY-MM-DD) or '*' for all dates.
+
+    Returns:
+        Filtered list of session records.
+    """
+    result = []
+    host_lower = host.lower()
+
+    for session in sessions:
+        if host_lower not in session.host.lower():
+            continue
+
+        if date_filter != "*":
+            session_date = session.started_at.strftime("%Y-%m-%d")
+            if session_date != date_filter:
+                continue
+
+        result.append(session)
+
+    return result
+
+
+def _cleanup_empty_dirs(cast_path: Path, base_dir: Path) -> None:
+    """Remove empty date and host directories after deletion."""
+    date_dir = cast_path.parent
+    host_dir = date_dir.parent
+
+    # Remove empty date directory
+    try:
+        if date_dir.exists() and not any(date_dir.iterdir()):
+            date_dir.rmdir()
+    except OSError:
+        pass
+
+    # Remove empty host directory
+    try:
+        if host_dir.exists() and host_dir != base_dir and not any(host_dir.iterdir()):
+            host_dir.rmdir()
+    except OSError:
+        pass
+
+
+def delete_recording(
+    cast_path: Path,
+    base_dir: Path,
+    dry_run: bool,
+    console,
+) -> None:
+    """Delete a recording file and its sidecar index, then cleanup empty dirs.
+
+    Args:
+        cast_path: Path to the .cast file.
+        base_dir: Base recording directory (for empty dir cleanup boundary).
+        dry_run: If True, only print what would be deleted.
+        console: Rich console for output.
+    """
+    index_path = cast_path.with_suffix(".index.json")
+    home = str(Path.home())
+
+    cast_display = str(cast_path).replace(home, "~", 1)
+
+    if dry_run:
+        console.print(f"[yellow]Would delete:[/yellow] {cast_display}")
+        if index_path.exists():
+            index_display = str(index_path).replace(home, "~", 1)
+            console.print(f"[yellow]Would delete:[/yellow] {index_display}")
+        return
+
+    # Delete cast file
+    try:
+        cast_path.unlink()
+        console.print(f"[green]Deleted:[/green] {cast_display}")
+    except OSError as exc:
+        console.print(f"[red]Failed to delete {cast_display}: {exc}[/red]")
+        return
+
+    # Delete sidecar index if it exists
+    if index_path.exists():
+        try:
+            index_path.unlink()
+        except OSError:
+            pass
+
+    # Cleanup empty directories
+    _cleanup_empty_dirs(cast_path, base_dir.expanduser())

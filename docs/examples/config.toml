@@ -75,13 +75,6 @@ append_mode = true
 # - Recommended: "100x30" for readable documentation/demos
 # window_size = "100x30"
 
-# Maximum age for recordings in days
-# - Recordings older than this will be removed by 'nssh log cleanup'
-# - Set to 0 or omit to disable automatic cleanup
-# - Default: None (cleanup disabled)
-# - Example: max_age_days = 30 (remove recordings older than 30 days)
-# max_age_days = 30
-
 # Include patterns: Only record hosts matching these patterns
 # - Glob patterns (default): "lab-*", "*-switch", "db-0[1-3]"
 # - Regex patterns: Prefix with "regex:" like "regex:^dev-\w+$"

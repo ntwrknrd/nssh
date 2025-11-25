@@ -96,40 +96,10 @@ def test_play_with_file_option(tmp_path, monkeypatch):
     assert "session-001.cast" in result.stdout
 
 
-def test_cleanup_without_max_age_configured(tmp_path, monkeypatch):
-    """Test cleanup command when max_age_days is not configured."""
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    config_file = config_dir / "config.toml"
-
-    # Create config without max_age_days
-    config_file.write_text(
-        "[recording]\n" "enabled = true\n" f'dir = "{tmp_path / "casts"}"\n'
-    )
-
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    monkeypatch.setenv("NSSH_CONFIG", str(config_file))
-
-    runner = CliRunner()
-    result = runner.invoke(app, ["cleanup"])
-
-    assert result.exit_code == 1
-    assert "max_age_days not configured" in result.stdout
-
-
-def test_cleanup_dry_run(tmp_path, monkeypatch):
-    """Test cleanup command in dry-run mode."""
-    config_dir = tmp_path / "config" / "nssh"
-    config_dir.mkdir(parents=True)
-    config_file = config_dir / "config.toml"
-
+def test_delete_older_than_dry_run(tmp_path, monkeypatch):
+    """Test delete --older-than in dry-run mode."""
     base = tmp_path / "casts"
     base.mkdir()
-
-    # Create config with max_age_days
-    config_file.write_text(
-        "[recording]\n" "enabled = true\n" f'dir = "{base}"\n' "max_age_days = 1\n"
-    )
 
     # Create old recording
     host_dir = base / "lab-sw1" / "2025-11-13"
@@ -142,29 +112,20 @@ def test_cleanup_dry_run(tmp_path, monkeypatch):
     ts = past_time.timestamp()
     os.utime(old_cast, (ts, ts))
 
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("NSSH_RECORD_DIR", str(base))
 
     runner = CliRunner()
-    result = runner.invoke(app, ["cleanup", "--dry-run"])
+    result = runner.invoke(app, ["delete", "--older-than", "1", "--dry-run"])
 
     assert result.exit_code == 0
     assert "DRY RUN" in result.stdout
     assert old_cast.exists()  # Should not be deleted in dry-run
 
 
-def test_cleanup_removes_old_recordings(tmp_path, monkeypatch):
-    """Test cleanup command actually removes old recordings."""
-    config_dir = tmp_path / "config" / "nssh"
-    config_dir.mkdir(parents=True)
-    config_file = config_dir / "config.toml"
-
+def test_delete_older_than_removes_old_recordings(tmp_path, monkeypatch):
+    """Test delete --older-than actually removes old recordings."""
     base = tmp_path / "casts"
     base.mkdir()
-
-    # Create config with max_age_days
-    config_file.write_text(
-        "[recording]\n" "enabled = true\n" f'dir = "{base}"\n' "max_age_days = 1\n"
-    )
 
     # Create old and new recordings
     host_dir = base / "lab-sw1"
@@ -187,13 +148,13 @@ def test_cleanup_removes_old_recordings(tmp_path, monkeypatch):
     os.utime(old_cast, (ts, ts))
     os.utime(old_index, (ts, ts))
 
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("NSSH_RECORD_DIR", str(base))
 
     runner = CliRunner()
-    result = runner.invoke(app, ["cleanup"])
+    result = runner.invoke(app, ["delete", "--older-than", "1"])
 
     assert result.exit_code == 0
-    assert "CLEANUP" in result.stdout
+    assert "DELETED" in result.stdout
     assert not old_cast.exists()
     assert not old_index.exists()
     assert new_cast.exists()

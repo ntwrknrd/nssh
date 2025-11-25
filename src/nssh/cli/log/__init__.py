@@ -8,7 +8,7 @@ from nssh.cli import typer
 from nssh.cli.common.app import run_cli
 from nssh.cli.common.help import UsageRow, UsageSection, render_usage
 
-from .cleanup import cleanup_command
+from .delete import delete_command
 from .export import export_command
 from .listing import list_sessions
 from .play import play_command
@@ -25,9 +25,9 @@ app = typer.Typer(
 
 app.command("list")(list_sessions)
 app.command("play")(play_command)
+app.command("delete")(delete_command)
 app.command("upload")(upload_command)
 app.command("export")(export_command)
-app.command("cleanup")(cleanup_command)
 
 
 def _usage_sections() -> list[UsageSection]:
@@ -44,6 +44,10 @@ def _usage_sections() -> list[UsageSection]:
                     "Play a recorded session",
                 ),
                 UsageRow(
+                    "nssh log [bold]delete[/bold] [OPTIONS]",
+                    "Delete recorded sessions",
+                ),
+                UsageRow(
                     "nssh log [bold]upload[/bold] [OPTIONS]",
                     "Upload recording to asciinema server",
                 ),
@@ -51,17 +55,15 @@ def _usage_sections() -> list[UsageSection]:
                     "nssh log [bold]export[/bold] [OPTIONS]",
                     "Export to text or GIF format",
                 ),
-                UsageRow(
-                    "nssh log [bold]cleanup[/bold] [OPTIONS]",
-                    "Remove old recordings",
-                ),
             ],
         ),
         UsageSection(
             "Options",
             rows=[
                 UsageRow("--file FILE, -f", "Path to recording file"),
-                UsageRow("--date YYYY-MM-DD", "Filter by date"),
+                UsageRow("--host HOST, -h", "Filter/delete by hostname"),
+                UsageRow("--date YYYY-MM-DD", "Filter by date ('*' for all)"),
+                UsageRow("--older-than DAYS", "Delete recordings older than N days"),
                 UsageRow("--search TERM, -s", "Filter by keyword"),
                 UsageRow("--output FILE, -o", "Output path for export"),
                 UsageRow("--format txt|gif", "Export format (default: txt)"),

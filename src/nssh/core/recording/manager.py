@@ -132,7 +132,6 @@ class RecordingSettings:
     include_patterns: Sequence[HostPattern]
     exclude_patterns: Sequence[HostPattern]
     directory: Path
-    max_age_days: Optional[int]
     asciinema_server_url: Optional[str]
     window_size: Optional[str]
 
@@ -174,13 +173,6 @@ def load_recording_settings() -> RecordingSettings:
         _parse_list(recording_cfg.get("exclude_hosts"))
     )
 
-    max_age = recording_cfg.get("max_age_days")
-    max_age_days = None
-    if isinstance(max_age, (int, float)):
-        max_age_days = int(max_age)
-    elif isinstance(max_age, str) and max_age.isdigit():
-        max_age_days = int(max_age)
-
     asciinema_server_url = recording_cfg.get("asciinema_server_url")
     if asciinema_server_url is not None and not isinstance(asciinema_server_url, str):
         asciinema_server_url = str(asciinema_server_url)
@@ -196,7 +188,6 @@ def load_recording_settings() -> RecordingSettings:
         include_patterns=include_patterns,
         exclude_patterns=exclude_patterns,
         directory=directory_path,
-        max_age_days=max_age_days,
         asciinema_server_url=asciinema_server_url,
         window_size=window_size,
     )
@@ -609,16 +600,28 @@ def _index_payload_path(cast_path: Path) -> Path:
 
 
 def cleanup_old_recordings(
+    max_age_days: int,
     settings: Optional[RecordingSettings] = None,
     *,
     now: Optional[datetime] = None,
     dry_run: bool = False,
 ) -> Optional[CleanupSummary]:
-    cfg = settings or load_recording_settings()
-    if cfg.max_age_days is None or cfg.max_age_days <= 0:
+    """Delete recordings older than max_age_days.
+
+    Args:
+        max_age_days: Delete recordings older than this many days.
+        settings: Recording settings (uses defaults if not provided).
+        now: Reference time for age calculation (defaults to now).
+        dry_run: If True, return what would be deleted without deleting.
+
+    Returns:
+        CleanupSummary with details of removed files, or None if nothing to clean.
+    """
+    if max_age_days <= 0:
         return None
+    cfg = settings or load_recording_settings()
     reference = now or datetime.now().astimezone()
-    cutoff = reference - timedelta(days=cfg.max_age_days)
+    cutoff = reference - timedelta(days=max_age_days)
     removed_casts: List[Path] = []
     removed_indexes: List[Path] = []
     removed_host_dirs: List[Path] = []
@@ -712,9 +715,6 @@ def validate_configuration(
         existing = next_parent
     if existing and not os.access(existing, os.W_OK):
         issues.append(f"Directory '{directory}' is not writable")
-
-    if cfg.max_age_days is not None and cfg.max_age_days <= 0:
-        issues.append("recording.max_age_days must be positive when set")
 
     if cfg.enabled and check_asciinema and not shutil.which("asciinema"):
         issues.append("asciinema binary not found in PATH")
