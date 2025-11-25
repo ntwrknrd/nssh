@@ -15,6 +15,7 @@ from nssh.cli.common.prompt import (
     ask_text,
     prompt_password_with_confirmation,
 )
+from nssh.cli.common.ssh_include import ensure_conf_d_include
 from nssh.core.env.paths import age_key_path as get_age_key_path
 from nssh.core.env.paths import credential_file_path as get_credential_file_path
 from nssh.core.env.paths import ssh_config_path, ssh_include_dir
@@ -117,6 +118,13 @@ def validate_ssh_config(manifest: InstallManifest, dry_run: bool) -> bool:
     # Check for existing config
     if ssh_config.exists():
         console.print(f"[green]✓[/green] SSH config: {ssh_config}")
+
+        ensure_conf_d_include(
+            dry_run=dry_run,
+            create_if_missing=False,
+            preview_title="SSH config change preview",
+        )
+
         if not dry_run:
             manifest.add_reference_file(ssh_config, "ssh_config")
         return True

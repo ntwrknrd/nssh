@@ -20,6 +20,8 @@ def _settings(
         exclude_patterns=(),
         directory=tmp_path,
         max_age_days=max_age_days,
+        asciinema_server_url=None,
+        window_size=None,
     )
 
 
@@ -41,6 +43,8 @@ def test_should_record_supports_globs_and_regex(tmp_path):
         exclude_patterns=exclude,
         directory=tmp_path,
         max_age_days=None,
+        asciinema_server_url=None,
+        window_size=None,
     )
 
     assert recording.should_record("lab-sw1", settings)

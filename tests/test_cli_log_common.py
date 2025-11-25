@@ -37,6 +37,8 @@ def _make_settings(tmp_path: Path) -> recording.RecordingSettings:
         exclude_patterns=(),
         directory=tmp_path,
         max_age_days=None,
+        asciinema_server_url=None,
+        window_size=None,
     )
 
 

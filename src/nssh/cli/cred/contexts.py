@@ -11,6 +11,7 @@ from nssh.cli.common.prompt import (
     prompt_password_with_confirmation,
     prompt_required,
 )
+from nssh.cli.common.ssh_include import ensure_conf_d_include
 from nssh.cli.common.workflows import confirm_or_exit
 from nssh.core.env.paths import ssh_include_dir
 from nssh.core.ssh.config import SSHConfigParser
@@ -77,19 +78,44 @@ def add_context_command(
     file: Optional[str] = typer.Option(
         None, "--file", help="SSH config file name (in ~/.ssh/)"
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Preview actions without writing (includes SSH config changes)",
+    ),
 ) -> None:
     """Create a new credential context."""
 
     cm = get_manager(ctx)
 
+    # Ensure the include wiring exists so the context file will be loaded
+    ensure_conf_d_include(
+        create_if_missing=True,
+        abort_on_decline=True,
+        preview_title="SSH config change preview",
+        dry_run=dry_run,
+    )
+
     ui.show_panel(
         "Create Context", "Create a new credential context for SSH config file"
     )
 
-    final_name = prompt_required("Context name", name)
-    git_include_file = prompt_required(
-        "SSH config file (in ~/.ssh/)", file, "File name required"
-    )
+    # In dry-run, avoid prompting if values are missing; use placeholders instead
+    if dry_run:
+        final_name = name or "<dry-run-context>"
+        git_include_file = file or "<dry-run-file>"
+    else:
+        final_name = prompt_required("Context name", name)
+        git_include_file = prompt_required(
+            "SSH config file (in ~/.ssh/)", file, "File name required"
+        )
+
+    if dry_run:
+        console.print(
+            f"[dim]Would create context '{final_name}' for file '{git_include_file}'[/dim]"
+        )
+        console.print("[dim]Dry-run: no changes written[/dim]")
+        return
 
     try:
         cm.create_context(final_name, git_include_file)

@@ -67,6 +67,14 @@ dir = "~/.local/state/nssh/casts"
 # Default: true
 append_mode = true
 
+# Window size for asciinema recordings (cols x rows)
+# - Sets fixed terminal dimensions for consistent playback
+# - Format: "WIDTHxHEIGHT" (e.g., "100x30", "120x30", "80x24")
+# - Smaller dimensions result in larger fonts when played back
+# - Default: unset (uses terminal's actual size)
+# - Recommended: "100x30" for readable documentation/demos
+# window_size = "100x30"
+
 # Maximum age for recordings in days
 # - Recordings older than this will be removed by 'nssh log cleanup'
 # - Set to 0 or omit to disable automatic cleanup

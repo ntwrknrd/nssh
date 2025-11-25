@@ -133,6 +133,8 @@ class RecordingSettings:
     exclude_patterns: Sequence[HostPattern]
     directory: Path
     max_age_days: Optional[int]
+    asciinema_server_url: Optional[str]
+    window_size: Optional[str]
 
 
 def load_recording_settings() -> RecordingSettings:
@@ -179,6 +181,14 @@ def load_recording_settings() -> RecordingSettings:
     elif isinstance(max_age, str) and max_age.isdigit():
         max_age_days = int(max_age)
 
+    asciinema_server_url = recording_cfg.get("asciinema_server_url")
+    if asciinema_server_url is not None and not isinstance(asciinema_server_url, str):
+        asciinema_server_url = str(asciinema_server_url)
+
+    window_size = recording_cfg.get("window_size")
+    if window_size is not None and not isinstance(window_size, str):
+        window_size = str(window_size)
+
     return RecordingSettings(
         enabled=enabled,
         force=force,
@@ -187,6 +197,8 @@ def load_recording_settings() -> RecordingSettings:
         exclude_patterns=exclude_patterns,
         directory=directory_path,
         max_age_days=max_age_days,
+        asciinema_server_url=asciinema_server_url,
+        window_size=window_size,
     )
 
 
@@ -226,6 +238,7 @@ class RecordingPlan:
     lock_directory: Optional[Path] = None
     sequence: Optional[int] = None
     session_label: Optional[str] = None
+    window_size: Optional[str] = None
 
 
 def _session_directory(
@@ -427,6 +440,7 @@ def _compute_plan(
         lock_directory=lock_directory,
         sequence=sequence,
         session_label=session_label,
+        window_size=settings.window_size,
     )
 
 
@@ -541,6 +555,10 @@ def build_asciinema_command(plan: RecordingPlan, ssh_cmd: Sequence[str]) -> List
     # Use headless mode if requested (disables terminal capability detection)
     if os.getenv("NSSH_RECORD_HEADLESS") in ("1", "true", "True"):
         command.append("--headless")
+
+    # Set window dimensions if configured (e.g., "100x30")
+    if plan.window_size:
+        command.extend(["--window-size", plan.window_size])
 
     if plan.append:
         command.append("--append")
