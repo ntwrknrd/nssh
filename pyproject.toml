@@ -1,6 +1,6 @@
 [project]
 name = "nssh"
-version = "1.6.6"
+version = "1.8.13"
 description = "SSH host and password management tools for nssh"
 requires-python = ">=3.14"
 readme = "README.md"

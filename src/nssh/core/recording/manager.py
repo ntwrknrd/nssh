@@ -519,6 +519,41 @@ def acquire_session_lock(lock_directory: Path | None) -> Iterator[None]:
             pass
 
 
+def cleanup_stale_locks(settings: Optional[RecordingSettings] = None) -> int:
+    """Remove stale lock directories from the recording directory.
+
+    Scans for .lock directories and removes any that are not held by a live
+    process (detected via PID checking). This is useful to call before
+    benchmark runs to prevent hangs from stale locks left by crashed processes.
+
+    Args:
+        settings: Optional recording settings. If not provided, loads from config.
+
+    Returns:
+        Number of stale locks removed.
+    """
+    cfg = settings or load_recording_settings()
+    base = cfg.directory
+    if not base.exists():
+        return 0
+
+    removed = 0
+    # Find all .lock directories (format: .session-NNN.lock/)
+    for lock_dir in base.rglob("*.lock"):
+        if not lock_dir.is_dir():
+            continue
+        if not _is_session_locked(lock_dir):
+            # Stale lock - remove it
+            try:
+                shutil.rmtree(lock_dir)
+                removed += 1
+                LOGGER.emit_log(f"recording.py - Removed stale lock: {lock_dir}")
+            except OSError:
+                pass
+
+    return removed
+
+
 def _lock_handle(handle) -> None:
     if os.name == "posix":
         import fcntl

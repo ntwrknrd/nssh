@@ -18,6 +18,7 @@ TOP_LEVEL_COMMANDS = [
     "log",
     "benchmark",
     "self",
+    "cp",
     "version",
     "help",
     "__list-subcommands",
@@ -70,6 +71,10 @@ def _usage_sections():
                     examples=["('nssh -- host' if name == subcommand)"],
                     example_prefix="",
                 ),
+                UsageRow(
+                    "nssh cp [USER@]HOST:PATH LOCAL",
+                    "Copy files to/from SSH hosts",
+                ),
                 UsageRow("nssh host [subcommand]", "Manage SSH config entries"),
                 UsageRow("nssh cred [subcommand]", "Manage encrypted credentials"),
                 UsageRow("nssh log [subcommand]", "Manage recordings"),
@@ -105,6 +110,7 @@ def _build_cli_bundle() -> _CliBundle:
         app as self_app,
         print_usage as self_print_usage,
     )
+    from nssh.cli.cp import app as cp_app, print_usage as cp_print_usage
     from nssh.cli.cred import app as cred_app, print_usage as cred_print_usage
     from nssh.cli.host import app as host_app, print_usage as host_print_usage
     from nssh.cli.log import app as log_app, print_usage as log_print_usage
@@ -130,6 +136,7 @@ def _build_cli_bundle() -> _CliBundle:
     app.add_typer(log_app, name="log")
     app.add_typer(benchmark_app, name="benchmark")
     app.add_typer(self_app, name="self")
+    app.add_typer(cp_app, name="cp")
 
     @app.command("__list-subcommands", hidden=True)
     def list_subcommands_command() -> None:
@@ -141,6 +148,7 @@ def _build_cli_bundle() -> _CliBundle:
         "log": log_print_usage,
         "benchmark": benchmark_print_usage,
         "self": self_print_usage,
+        "cp": cp_print_usage,
     }
 
     return _CliBundle(app=app, subcommand_usage=subcommand_usage)

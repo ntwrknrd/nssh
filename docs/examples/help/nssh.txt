@@ -6,6 +6,8 @@
   nssh [USER@]HOST [SSH_ARGS...]
     Connect to host                                                             
     ('nssh -- host' if name == subcommand)                                      
+  nssh cp [USER@]HOST:PATH LOCAL
+    Copy files to/from SSH hosts                                                
   nssh host 
     Manage SSH config entries                                                   
   nssh cred 
