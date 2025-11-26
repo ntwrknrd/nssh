@@ -84,7 +84,11 @@ def run_cli(
 
     console = get_console()
     try:
-        app()
+        # Pass args explicitly so Typer doesn't use sys.argv
+        if argv is not None:
+            app(args=args, standalone_mode=False)
+        else:
+            app()
     except KeyboardInterrupt:
         console.print("\n[yellow]Cancelled by user[/yellow]")
         raise SystemExit(0)

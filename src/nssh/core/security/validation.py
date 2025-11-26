@@ -196,12 +196,15 @@ SAFE_SSH_OPTIONS = {
     "-m",  # MAC spec (takes argument)
     # Logging/debug options
     "-E",  # Log file (takes argument)
-    "-v",  # Verbose (can be repeated)
+    "-v",  # Verbose
+    "-vv",  # More verbose
+    "-vvv",  # Most verbose
     "-q",  # Quiet mode
     "-y",  # Send logs via syslog
     # Terminal options
     "-T",  # Disable pseudo-terminal
-    "-t",  # Force pseudo-terminal (can be repeated)
+    "-t",  # Force pseudo-terminal
+    "-tt",  # Force pseudo-terminal (stronger)
     "-e",  # Escape character (takes argument)
     # Session control
     "-N",  # No remote command execution

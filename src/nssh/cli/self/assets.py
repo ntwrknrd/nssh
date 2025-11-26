@@ -153,9 +153,22 @@ def append_profile_snippet(
         dry_run: Preview mode (don't modify files)
         manifest: Optional manifest to track modification
     """
-    shell_helper = share_dir / "nssh-shell-integration.sh"
-    helper_text = rel_home(shell_helper)
-    snippet = f"""
+    is_fish = profile.name.endswith(".fish") or "fish" in profile.parts
+
+    if is_fish:
+        shell_helper = share_dir / "nssh-shell-integration.fish"
+        helper_text = rel_home(shell_helper)
+        snippet = f"""
+{PROFILE_MARKER}
+if test -f {helper_text}
+    source {helper_text}
+end
+# <<< nssh integration <<<
+""".strip()
+    else:
+        shell_helper = share_dir / "nssh-shell-integration.sh"
+        helper_text = rel_home(shell_helper)
+        snippet = f"""
 {PROFILE_MARKER}
 if [ -f "{helper_text}" ]; then
     . "{helper_text}"

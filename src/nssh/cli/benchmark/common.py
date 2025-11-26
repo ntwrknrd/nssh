@@ -177,4 +177,6 @@ def render_benchmark_summary(summary: timing_core.BenchmarkSummary) -> None:
             color = severity_colors.get(warning.severity, "white")
 
             # Group warnings by run if multiple runs have issues
-            console.print(f"  [{color}]Run {warning.run_id}: {warning.message}[/{color}]")
+            console.print(
+                f"  [{color}]Run {warning.run_id}: {warning.message}[/{color}]"
+            )

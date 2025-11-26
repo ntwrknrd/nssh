@@ -1,6 +1,6 @@
 function nssh --description "SSH to network equipment with password management"
     # Resolve installed CLI (prefer PATH, fall back to common locations)
-    set -l nssh_cmd (type -P nssh ^/dev/null)
+    set -l nssh_cmd (type -P nssh 2>/dev/null)
     if test -z "$nssh_cmd"
         if test -x "$HOME/.local/bin/nssh"
             set nssh_cmd "$HOME/.local/bin/nssh"

@@ -131,7 +131,9 @@ def capture_command(
 
     stale_count = recording.cleanup_stale_locks()
     if stale_count > 0:
-        common.console.print(f"[dim]Cleaned {stale_count} stale recording lock(s)[/dim]")
+        common.console.print(
+            f"[dim]Cleaned {stale_count} stale recording lock(s)[/dim]"
+        )
 
     # Create timestamped archive directory
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

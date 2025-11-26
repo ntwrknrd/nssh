@@ -126,8 +126,8 @@ def init_command(
     console.print()  # Blank line for readability
 
     # Auto-detect shell and offer integration if not explicitly specified
+    shell_name, rc_file = detect_user_shell()
     if not install_shell_helpers and append_shell_snippet is None and not force:
-        shell_name, rc_file = detect_user_shell()
         console.print(f"[dim]Detected shell: {shell_name}[/dim]")
 
         if shell_name != "unknown":
@@ -145,10 +145,15 @@ def init_command(
             f"→ [green]{share_dir}[/green]",
             style="cyan",
         )
-        for helper in [
-            "nssh-shell-integration.sh",
-            "nssh-shell-integration.fish",
-        ]:
+
+        # Only install helpers for the detected shell
+        if shell_name == "fish":
+            helpers = ["nssh-shell-integration.fish"]
+        else:
+            # bash, zsh, or unknown all use the .sh helper
+            helpers = ["nssh-shell-integration.sh"]
+
+        for helper in helpers:
             install_resource(
                 "scripts",
                 helper,
@@ -160,17 +165,18 @@ def init_command(
                 manifest=manifest,
             )
 
-        # Install Fish function if shell helpers enabled
-        install_resource(
-            "scripts",
-            "nssh-shell-integration.fish",
-            fish_functions_dir / "nssh.fish",
-            executable=True,
-            symlink=symlink,
-            dry_run=dry_run,
-            force=force,
-            manifest=manifest,
-        )
+        # Install Fish function only if fish shell detected
+        if shell_name == "fish":
+            install_resource(
+                "scripts",
+                "nssh-shell-integration.fish",
+                fish_functions_dir / "nssh.fish",
+                executable=True,
+                symlink=symlink,
+                dry_run=dry_run,
+                force=force,
+                manifest=manifest,
+            )
 
     # Install fish completions if requested
     if install_fish_completions:

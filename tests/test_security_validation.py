@@ -200,6 +200,15 @@ class TestValidateSshArgs:
         result = validate_ssh_args(["-v", "-v", "-v"])
         assert result == ["-v", "-v", "-v"]
 
+    def test_combined_verbose_options(self):
+        """SSH allows combined verbose flags like -vv and -vvv."""
+        assert validate_ssh_args(["-vv"]) == ["-vv"]
+        assert validate_ssh_args(["-vvv"]) == ["-vvv"]
+
+    def test_combined_tty_options(self):
+        """SSH allows -tt for forcing tty allocation."""
+        assert validate_ssh_args(["-tt"]) == ["-tt"]
+
     def test_port_option(self):
         result = validate_ssh_args(["-p", "2222"])
         assert result == ["-p", "2222"]
