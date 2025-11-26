@@ -24,6 +24,7 @@ _Coming soon: asciinema embed highlighting fuzzy host search + credential resolu
 - **Shell integration** - History tracking (Bash/Zsh/Fish/Atuin) and tab completion for hostnames, contexts, and commands
 - **Performance telemetry** - Built-in benchmarking with stage-level timing and regression detection; see [Performance Analysis](docs/USER_GUIDE.md#nssh-benchmark-performance-analysis)
 - **Session recording & playback** - Automatic asciinema integration with host-based filtering, append mode for concurrent sessions, automatic cleanup, and comprehensive session management via `nssh log` CLI (list/play/upload/export with pattern matching and interactive selection)
+- **File transfers** - Standard SCP CLI with credential vault integration (see [File Transfer](docs/USER_GUIDE.md#nssh-cp-file-transfer))
 
 ## Installation
 

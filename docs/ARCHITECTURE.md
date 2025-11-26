@@ -21,6 +21,7 @@ This document covers:
 ## Table of Contents
 
 - [Connection Architecture](#connection-architecture) - Python CLI, core modules, PTY connector
+- [SCP Connector Architecture](#scp-connector-architecture) - File transfer integration
 - [Connection Flow](#connection-flow) - Host resolution, credential lookup, SSH execution
 - [SSH Compatibility Detection](#ssh-compatibility-detection-and-remediation)
 - [Credential Resolution Algorithm](#credential-resolution-algorithm) - Five-step flow, priority order
@@ -160,6 +161,25 @@ asciinema rec --command "ssh ..." --append → pty.fork() → ssh
 - SIGWINCH (terminal resize) forwarded to SSH subprocess
 - SIGINT/SIGTERM propagated for clean shutdown
 - Child process waited via os.waitpid()
+
+## SCP Connector Architecture
+
+The SCP connector (`src/nssh/core/connector/scp.py`) wraps OpenSSH's `scp` command with PTY-based password injection, maintaining standard SCP CLI syntax while integrating with nssh's credential vault.
+
+### Implementation
+
+**Entry point:** `run_scp(source, dest, password, scp_args)`
+
+Spawns `scp` via PTY fork and injects password when prompted, identical to the interactive connector flow. The CLI layer (`src/nssh/cli/cp/`) handles hostname resolution and credential lookup; the connector layer only manages the PTY wrapper.
+
+**Safety:** Requires exact hostname match (no fuzzy matching) to prevent accidental file transfers to wrong hosts.
+
+**Credential flow:**
+1. CLI resolves hostname via `find_host_match()`
+2. CLI resolves credentials via `resolve_credential_for_host()`
+3. Connector spawns `scp` and injects password via PTY
+
+Uses same PTY password injection mechanism as interactive SSH connector.
 
 ## Connection Flow
 
@@ -317,7 +337,7 @@ Recording configuration is loaded from `~/.config/nssh/config.toml` with pattern
 
 ### Cleanup Policy Implementation
 
-The `cleanup_old_recordings()` function exists but is not currently called automatically. Users must manually manage old recordings with `rm -rf` or `find ... -mtime +N -delete` commands.
+Old recordings can be cleaned up using the `nssh log delete` command, which removes recording sessions older than a specified number of days (default: 30). The command supports dry-run mode (`--dry-run`) to preview deletions before execution. See [USER_GUIDE.md - Managing Recordings](USER_GUIDE.md#managing-recordings) for usage details.
 
 ### Security Considerations
 

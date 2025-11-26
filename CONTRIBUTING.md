@@ -6,7 +6,6 @@ Thanks for helping improve nssh. This guide captures the contributor-focused det
 - [Getting Started](#getting-started)
 - [Developer Notes](#developer-notes)
 - [Development Workflow](#development-workflow)
-  - [Setup](#setup)
   - [Making Changes](#making-changes)
 - [Testing Expectations](#testing-expectations)
   - [Manual Smoke Tests](#manual-smoke-tests)
@@ -18,7 +17,6 @@ Thanks for helping improve nssh. This guide captures the contributor-focused det
 - [Code Quality Tools](#code-quality-tools)
 - [Commit and PR Guidelines](#commit-and-pr-guidelines)
 - [Security and Configuration](#security-and-configuration)
-- [Additional References](#additional-references)
 
 ## Getting Started
 

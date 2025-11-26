@@ -16,6 +16,7 @@ This guide covers the full CLI usage, credential workflows, configuration detail
   - [Configuration File](#configuration-file)
 - [CLI Usage](#cli-usage)
 - [nssh (Interactive Connector)](#nssh-interactive-connector)
+  - [nssh cp (File Transfer)](#nssh-cp-file-transfer)
   - [nssh cred (Credential Management)](#nssh-cred-credential-management)
   - [nssh host (SSH Config Management)](#nssh-host-ssh-config-management)
   - [nssh log (Session Recording)](#nssh-log-session-recording)
@@ -343,6 +344,8 @@ See the sections below for detailed CLI usage and advanced features.
 ```bash
 nssh core-switch                           # Connect (fuzzy search)
 nssh admin@firewall                        # Connect as different user
+nssh cp hostname:~/file.txt ./             # Pull file from remote
+nssh cp ./file.txt hostname:~/             # Push file to remote
 nssh host list                             # List hosts
 nssh host add switch.example.com --user admin
 ```
@@ -423,6 +426,34 @@ nssh hostname -vvv       # Pass raw ssh options through
 
 nssh uses an in-process PTY connector for password injection during SSH connections. For technical details, see [ARCHITECTURE.md - PTY Connector Architecture](ARCHITECTURE.md#pty-connector-architecture).
 
+### nssh cp (File Transfer)
+
+Standard SCP file transfer with automatic password injection from nssh's credential vault.
+
+```bash
+# Pull file from remote host
+nssh cp hostname:~/file.txt ./
+
+# Push file to remote host
+nssh cp ./file.txt hostname:~/
+
+# Transfer directory recursively
+nssh cp -r hostname:~/dir ./local/
+
+# Connect as specific user
+nssh cp admin@hostname:/var/log/app.log ./
+```
+
+Maintains standard SCP CLI syntax while using nssh's credential resolution. Requires exact hostname match for safety.
+
+**Common options:**
+- `-r` - Copy directories recursively
+- `-p` - Preserve modification times and modes
+- `-q` - Quiet mode (disable progress meter)
+- `-v` - Verbose mode
+
+For complete options, see [docs/examples/help/nssh.txt](examples/help/nssh.txt).
+
 ### nssh cred (Credential Management)
 
 Contexts organize credentials around SSH config files (e.g., `work_hosts`).
@@ -498,9 +529,23 @@ nssh log export --gif                # Pick and export to ./hostname_YYYY-MM-DD_
 nssh log export --output demo.txt    # Custom output path
 nssh log export --file session.cast --output demo.gif --gif
 
-# Clean up old recordings
-nssh log cleanup --dry-run  # Preview what would be deleted
-nssh log cleanup            # Actually delete old recordings
+# Delete old recordings (interactive picker)
+nssh log delete
+
+# Delete recordings older than N days
+nssh log delete --older-than 30
+
+# Delete specific host's recordings
+nssh log delete --host hostname
+
+# Delete recordings from specific date
+nssh log delete --date 2025-11-14
+
+# Delete specific file
+nssh log delete --file session-001.cast
+
+# Preview deletion (dry-run)
+nssh log delete --older-than 30 --dry-run
 ```
 
 **Interactive Mode**: Commands without `--file` launch an fzf picker showing available recordings sorted by modification time. Use arrow keys and fuzzy search to select a recording. The `--date` option filters picker results (defaults to recent sessions).
