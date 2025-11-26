@@ -87,7 +87,7 @@ uv run pytest -k "credential"              # Pattern match
 Include benchmark results if you modified credential resolution, config parsing, host indexing, or connection flow:
 
 ```bash
-uv run nssh benchmark run hostname --warmups 1 --samples 3
+uv run nssh benchmark ssh hostname --warmups 1 --samples 3
 ```
 
 

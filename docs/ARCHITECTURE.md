@@ -627,9 +627,10 @@ See [benchmark-run-example.txt](examples/benchmark-run-example.txt) for example 
 
 **Benchmark Options:**
 
-- Use `nssh benchmark HOST` for detailed stage-by-stage timing breakdown
-- Use `nssh benchmark --simple-only HOST` for end-to-end "hit Enter" latency only
-- Use `nssh benchmark --no-record HOST` to measure SSH overhead without recording influence
+- Use `nssh benchmark ssh HOST` for detailed stage-by-stage timing breakdown
+- Use `nssh benchmark ssh --simple-only HOST` for end-to-end "hit Enter" latency only
+- Use `nssh benchmark ssh --no-record HOST` to measure SSH overhead without recording influence
+- Use `nssh benchmark scp HOST` to benchmark SCP file transfer performance (accepts `--size KB` option)
 
 
 ### Credential Decryption Testing

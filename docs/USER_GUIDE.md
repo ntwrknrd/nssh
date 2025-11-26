@@ -326,7 +326,7 @@ nssh admin@switch.example.com
 - View your hosts: `nssh host list`
 - Manage credentials: `nssh cred list`
 - View recordings (if enabled): `nssh log list`
-- Benchmark performance: `nssh benchmark run switch.example.com`
+- Benchmark performance: `nssh benchmark ssh switch.example.com`
 
 **Common First-Time Issues**
 
@@ -554,14 +554,21 @@ See [docs/examples/help/nssh-log.txt](examples/help/nssh-log.txt) for complete c
 
 ### nssh benchmark (Performance Analysis)
 
-The `nssh benchmark run` command provides structured performance analysis with warmup runs, multiple samples, and statistical summaries. Use `NSSH_DEBUG=1 nssh hostname` to see timing breakdown for connection stages during normal usage. For detailed performance analysis, timing stages explanation, and benchmarking tools, see [ARCHITECTURE.md - Debugging and Profiling](ARCHITECTURE.md#debugging-and-profiling) and [docs/examples/help/nssh-benchmark.txt](examples/help/nssh-benchmark.txt).
+The `nssh benchmark` command provides structured performance analysis with warmup runs, multiple samples, and statistical summaries. Use `NSSH_DEBUG=1 nssh hostname` to see timing breakdown for connection stages during normal usage. For detailed performance analysis, timing stages explanation, and benchmarking tools, see [ARCHITECTURE.md - Debugging and Profiling](ARCHITECTURE.md#debugging-and-profiling) and [docs/examples/help/nssh-benchmark.txt](examples/help/nssh-benchmark.txt).
 
-`nssh benchmark run` has two useful modes:
+**Available subcommands:**
+
+- `nssh benchmark ssh HOST` - Benchmark SSH connection overhead
+- `nssh benchmark scp HOST` - Benchmark SCP file transfer performance
+
+`nssh benchmark ssh` has two useful modes:
 
 - **Structured (default):** Enables instrumentation and reports each stage (pty-start, host-selection, credential-vault, ssh-connection, recording-session, pty-teardown, etc.). Measures timing from within the Python CLI process. Use this to identify stage-level regressions.
 - **Simple-only (`--simple-only`):** Disables instrumentation and times the entire binary invocation (shell → interpreter startup → connect workflow). This measures what you experience: "how long from pressing Enter to getting a shell prompt."
 
-By default, the benchmark command respects your recording configuration (from `NSSH_RECORD` env var or `config.toml`), so you can measure the real user experience with recording enabled or disabled. Use `--no-record` to force disable recording and measure pure SSH connection overhead without recording influence.
+By default, `nssh benchmark ssh` respects your recording configuration (from `NSSH_RECORD` env var or `config.toml`), so you can measure the real user experience with recording enabled or disabled. Use `--no-record` to force disable recording and measure pure SSH connection overhead without recording influence.
+
+`nssh benchmark scp` accepts a `--size` option to control the test file size in KB (default: 100KB).
 
 For a complete list of timing stages and their meanings (including nested stages like ssh-connection within recording-session), see the Timing Stages table in [ARCHITECTURE.md](ARCHITECTURE.md#debugging-and-profiling).
 
