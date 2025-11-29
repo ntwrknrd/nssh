@@ -131,7 +131,13 @@ def print_usage() -> None:
 
 
 def _build_completion_app():
-    """Build full Click app for shell completion only."""
+    """Build full Click app for shell completion only.
+
+    Note: This eagerly imports all subcommands because shell completion
+    requires knowledge of the full command tree. The performance cost
+    is acceptable since completion is invoked infrequently (typically
+    once per shell session for caching).
+    """
     import importlib
 
     from nssh.cli import click as _click
@@ -169,7 +175,14 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     # Handle completion requests (requires full app)
     # Click uses _{PROG_NAME}_COMPLETE env var
-    if os.getenv("_NSSH_COMPLETE"):
+    complete_env = os.getenv("_NSSH_COMPLETE")
+    if complete_env:
+        # Fish completion requires COMP_WORDS/COMP_CWORD; older helper scripts may omit them entirely
+        if complete_env == "fish_complete" and (
+            os.getenv("COMP_WORDS") is None or os.getenv("COMP_CWORD") is None
+        ):
+            # Avoid raising KeyError inside click when legacy completion invocation is used
+            return
         _build_completion_app()(prog_name="nssh")
         return
 

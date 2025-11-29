@@ -80,18 +80,26 @@ def select_include_file(
     prompt: str = "Select config file:",
     *,
     allow_all: bool = False,
+    credential_manager: CredentialManager | None = None,
 ) -> Path | List[Path]:
     """Select an Include file using context-aware fzf selection.
 
     Prioritizes files in the configured include_dir, showing context names.
     Allows creating new context files.
+
+    Args:
+        parser: SSHConfigParser instance.
+        context_arg: Optional context name to resolve directly.
+        prompt: Prompt text for fzf selection.
+        allow_all: If True, include "[All files]" option.
+        credential_manager: Optional CredentialManager instance (created if not provided).
     """
 
     console = get_console()
 
     if context_arg:
         # Resolve context name to SSH config file
-        cm = CredentialManager()
+        cm = credential_manager or CredentialManager()
         contexts = cm.list_contexts()
 
         # Find context by name

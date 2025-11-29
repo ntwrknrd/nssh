@@ -87,6 +87,12 @@ def ask_with_fzf(
     if not is_interactive():
         return default or ""
 
+    # Tab-browsing requires Unix TTY (tty/termios) - fall back on Windows
+    import platform
+
+    if platform.system() == "Windows":
+        return ask_text(message, default=default)
+
     import tty
     import termios
 

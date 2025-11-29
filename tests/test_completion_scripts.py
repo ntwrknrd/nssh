@@ -45,17 +45,15 @@ def test_fish_completion_syntax():
     )
 
 
-def test_completion_delegates_to_typer():
+def test_completion_delegates_to_click():
     text = COMPLETION_FILE.read_text()
-    assert "_NSSH_COMPLETE" in text, "Fish completion no longer calls Typer"
-    # Typer uses long-form: complete --command nssh
+    assert "_NSSH_COMPLETE" in text, "Fish completion no longer calls Click"
+    # Click uses: complete --command nssh or complete -c nssh
     assert (
         "complete --command nssh" in text or "complete -c nssh" in text
     ), "Fish completion missing top-level registration"
-    # Verify it uses Typer's Fish completion protocol
-    assert (
-        "_TYPER_COMPLETE_FISH_ACTION" in text
-    ), "Missing Typer Fish completion protocol"
+    # Verify it uses Click's Fish completion protocol
+    assert "fish_complete" in text, "Missing Click Fish completion protocol"
 
 
 def test_no_extra_completion_files():

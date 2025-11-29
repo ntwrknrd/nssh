@@ -587,22 +587,28 @@ def _interactive_add(
                         cm.delete_host_all_credentials(final_hostname)
                     except Exception:
                         pass
-                    # Save debug file
+                    # Save debug file with restrictive permissions
+                    import stat
                     import tempfile
                     from pathlib import Path
 
                     debug_dir = Path("/tmp/nssh")
                     debug_dir.mkdir(exist_ok=True)
-                    debug_file = tempfile.mktemp(
-                        suffix=".txt", prefix="nssh-debug-", dir=str(debug_dir)
-                    )
-                    with open(debug_file, "w") as handle:
+                    with tempfile.NamedTemporaryFile(
+                        mode="w",
+                        suffix=".txt",
+                        prefix="nssh-debug-",
+                        dir=str(debug_dir),
+                        delete=False,
+                    ) as handle:
                         handle.write(f"Hostname: {final_hostname}\n")
                         handle.write(f"Exit code: {test_result['exit_code']}\n\n")
                         handle.write("STDERR:\n")
                         handle.write(test_result.get("stderr", "") or "")
                         handle.write("\n\nSTDOUT:\n")
                         handle.write(test_result.get("stdout", "") or "")
+                        debug_file = handle.name
+                    os.chmod(debug_file, stat.S_IRUSR | stat.S_IWUSR)
                     console.print(f"[yellow]![/yellow] Debug info: {debug_file}")
                     console.print(
                         "[yellow]![/yellow] Use --force to add without testing"

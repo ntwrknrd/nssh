@@ -109,6 +109,8 @@ def test_rebuild_index_collects_hosts_from_all_files(tmp_path, monkeypatch) -> N
     config.write_text(f"Host main\n  HostName main.example\nInclude {include}\n")
     include.write_text("Host backup\n  HostName backup.example\n")
 
+    # Isolate index to temp path to avoid polluting user's real index
+    monkeypatch.setenv("NSSH_HOST_INDEX", str(tmp_path / "host_index"))
     monkeypatch.setattr("nssh.core.ssh.config.Path.home", lambda: tmp_path)
     calls: list[str] = []
     monkeypatch.setattr(
@@ -131,6 +133,8 @@ def test_rebuild_index_emits_all_aliases(tmp_path, monkeypatch) -> None:
     config = ssh_dir / "config"
     config.write_text("Host edge switch-edge\n  HostName edge\n")
 
+    # Isolate index to temp path to avoid polluting user's real index
+    monkeypatch.setenv("NSSH_HOST_INDEX", str(tmp_path / "host_index"))
     monkeypatch.setattr("nssh.core.ssh.config.Path.home", lambda: tmp_path)
     monkeypatch.setattr(
         "nssh.core.ssh.config.set_secure_permissions", lambda _path: None

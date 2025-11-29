@@ -14,6 +14,9 @@ console = get_console()
 
 T = TypeVar("T")
 
+# Security: Maximum batch file size to prevent memory exhaustion
+MAX_BATCH_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
 
 @dataclass
 class BatchResult:
@@ -27,6 +30,11 @@ class BatchResult:
     @property
     def total_processed(self) -> int:
         return self.added + self.skipped + self.failed
+
+    @property
+    def removed(self) -> int:
+        """Alias for added - used in removal operations for semantic clarity."""
+        return self.added
 
     def has_failures(self) -> bool:
         return self.failed > 0
@@ -180,6 +188,14 @@ def parse_batch_file(
 
     if not file_path.exists():
         raise FileNotFoundError(f"Batch file not found: {path}")
+
+    # Security: Limit file size to prevent memory exhaustion
+    file_size = file_path.stat().st_size
+    if file_size > MAX_BATCH_FILE_SIZE:
+        raise ValueError(
+            f"Batch file too large ({file_size / 1024 / 1024:.1f} MB). "
+            f"Maximum allowed: {MAX_BATCH_FILE_SIZE / 1024 / 1024:.0f} MB"
+        )
 
     ext = file_path.suffix.lower()
 

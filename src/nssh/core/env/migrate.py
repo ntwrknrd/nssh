@@ -91,7 +91,7 @@ def _get_size_str(path: Path) -> str:
         return _format_bytes(path.stat().st_size)
 
 
-def _format_bytes(size: int) -> str:
+def _format_bytes(size: int | float) -> str:
     """Format bytes as human-readable string."""
     for unit in ["B", "KB", "MB", "GB"]:
         if size < 1024:

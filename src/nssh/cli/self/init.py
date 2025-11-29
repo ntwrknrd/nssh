@@ -33,10 +33,24 @@ console = get_console()
 def detect_user_shell() -> tuple[str, Path]:
     """Detect user's shell and suggest rc file.
 
+    Uses $SHELL environment variable, with fallback to parent process detection
+    via psutil if $SHELL is not set or empty.
+
     Returns:
         Tuple of (shell_name, rc_file_path)
     """
     shell = os.environ.get("SHELL", "")
+
+    # Fallback: detect shell from parent process if $SHELL is not set
+    if not shell:
+        try:
+            import psutil
+
+            parent = psutil.Process().parent()
+            if parent:
+                shell = parent.name()
+        except Exception:
+            pass
 
     if "fish" in shell:
         return "fish", Path.home() / ".config/fish/config.fish"

@@ -45,6 +45,9 @@ def list_hosts_command(ctx: click.Context, select: Optional[str]) -> None:
 
 def _list_hosts(parser, cm, select: Optional[str], set_outcome) -> None:
     """Internal implementation for listing hosts."""
+    # Rebuild index opportunistically (we're parsing all hosts anyway)
+    parser.rebuild_index()
+
     # List all Include files
     files_to_list = parser.find_include_files()
 

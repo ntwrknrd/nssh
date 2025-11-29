@@ -1,12 +1,12 @@
 [project]
 name = "nssh"
-version = "1.10.119"
-description = "SSH host and password management tools for nssh"
+version = "1.9.3"
+description = "SSH management tooling"
 requires-python = ">=3.14"
 readme = "README.md"
 license = {text = "GPL-3.0-or-later"}
 authors = [
-    {name = "Christopher Jones", email = "cj@encapsulated.io"},
+    {name = "Christopher Jones", email = "cj@ntwrknrd.io"},
 ]
 keywords = [
     "ssh",
@@ -34,6 +34,7 @@ classifiers = [
 dependencies = [
     "rich>=13.0.0",
     "click>=8.0.0",
+    "psutil>=5.9.0",
     "tomli>=2.0.1; python_version < '3.11'",
 ]
 
@@ -68,6 +69,7 @@ dev = [
     "ruff>=0.14.5",
     "pytest>=8.0.0",
     "black>=25.11.0",
+    "types-psutil>=5.9.0",
 ]
 
 [tool.mypy]
