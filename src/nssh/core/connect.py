@@ -359,6 +359,31 @@ def main(argv: Sequence[str] | None = None):
             except ConnectError as fzf_exc:
                 # User cancelled fzf - exit silently
                 sys.exit(fzf_exc.exit_code)
+        except NoMatchesError:
+            # No hosts found - offer to add
+            from rich.console import Console
+            import subprocess
+
+            console = Console()
+            console.print(f"[yellow]![/yellow] No hosts matching '{search_term}'")
+            console.print()
+
+            # Spawn interactive host add with search term as FQDN
+            try:
+                result = subprocess.run(["nssh", "host", "add", search_term])
+            except KeyboardInterrupt:
+                # User cancelled - subprocess already showed ABORT banner
+                sys.exit(130)
+            if result.returncode != 0:
+                sys.exit(result.returncode)
+
+            # Retry connection after successful add
+            console.print()
+            try:
+                host_match = find_host_match(search_term)
+            except ConnectError as retry_exc:
+                print(f"Error: {retry_exc}", file=sys.stderr)
+                sys.exit(retry_exc.exit_code)
         except ConnectError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(exc.exit_code)

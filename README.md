@@ -83,7 +83,7 @@ nssh is built on the shoulders of exceptional open-source tools and communities.
 **Python Ecosystem:**
 
 - [Python](https://www.python.org/) (PSF License) - The Python Software Foundation and core development team
-- [Typer](https://github.com/fastapi/typer) (MIT) - CLI framework by Sebastián Ramírez (tiangolo) and contributors
+- [Click](https://github.com/pallets/click) (BSD-3-Clause) - CLI framework by Pallets
 - [Rich](https://github.com/Textualize/rich) (MIT) - Terminal formatting library by Will McGugan and the Textualize team
 
 **License Compatibility:**

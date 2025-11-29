@@ -17,7 +17,7 @@ This guide covers the full CLI usage, credential workflows, configuration detail
 - [CLI Usage](#cli-usage)
 - [nssh (Interactive Connector)](#nssh-interactive-connector)
   - [nssh cp (File Transfer)](#nssh-cp-file-transfer)
-  - [nssh cred (Credential Management)](#nssh-cred-credential-management)
+  - [nssh ctx (Context Management)](#nssh-ctx-context-management)
   - [nssh host (SSH Config Management)](#nssh-host-ssh-config-management)
   - [nssh log (Session Recording)](#nssh-log-session-recording)
   - [nssh benchmark (Performance Analysis)](#nssh-benchmark-performance-analysis)
@@ -114,14 +114,11 @@ This command will guide you through:
 
 If you prefer to skip interactive prompts:
 ```bash
-# Non-interactive with defaults
-nssh self init --yes
-
 # Preview without making changes
 nssh self init --dry-run
 
-# Manual shell integration (skip auto-detection)
-nssh self init --install-shell-helpers --append-shell-snippet ~/.bashrc
+# Skip shell integration setup
+nssh self init --skip-shell
 ```
 
 After running `init`, reload your shell:
@@ -191,14 +188,13 @@ The `nssh self init` command is an interactive setup wizard that automates the e
 
 **Interactive vs. Non-Interactive:**
 - **Default mode**: Prompts for each step with sensible defaults
-- **`--yes` flag**: Uses defaults, no prompts (except for passwords)
 - **`--dry-run` flag**: Shows what would be done without making changes
-- **Manual flags**: Can specify `--install-shell-helpers`, `--append-shell-snippet`, etc.
+- **`--skip-shell` flag**: Skips shell integration setup
 
 **After init completes:**
 - Run `nssh self status` to see what was configured
 - Get actionable next steps (e.g., "Add first host: nssh host add")
-- All changes tracked in manifest for clean uninstall via `nssh self cleanup`
+- All changes tracked in manifest for clean uninstall via `nssh self uninstall`
 
 ### SSH Include Files and Context Credentials
 
@@ -235,24 +231,24 @@ Include homelab_hosts
 A context credential provides default authentication for all hosts in an Include file:
 
 ```bash
-# Create a context named "work" that references the work_hosts file
-nssh cred ctx add work --file work_hosts --username alice
+# Create a context named "work" (interactive - prompts for SSH config file and credentials)
+nssh ctx add work
 
-# You'll be prompted to enter the password (twice for safety)
-# This password will be used for any host in work_hosts that doesn't have its own credential
+# Or use flags to set specific properties after creation
+nssh ctx edit work --ssh-config work_hosts --username alice --password
 ```
 
 **Why does this matter?**
 
 When you connect to a host, nssh uses this five-step credential resolution:
 
-1. **Host-specific credential** (if you added one with `nssh cred add hostname`)
+1. **Host-specific credential** (if you added one with `nssh host edit hostname`)
 2. **Context fallback credential** (the credential you just created above)
 3. **SSH keys** (if no password credential found)
 
 This means:
 - Add 20 switches to `work_hosts` → only set the password once in the context credential
-- Override specific devices → use `nssh cred add special-switch --username admin`
+- Override specific devices → use `nssh host edit special-switch` to add credentials
 - No credential needed → nssh falls back to SSH key authentication
 
 For detailed credential resolution behavior and examples, see [Core Concepts - Credential Resolution](#credential-resolution).
@@ -261,11 +257,11 @@ For detailed credential resolution behavior and examples, see [Core Concepts - C
 
 **Option 1: Add host to an Include file with context credential**
 
-If you set up a context credential above, add hosts to that Include file without re-entering passwords:
+If you set up a context credential above, add hosts to that Include file. The interactive flow will prompt you to select which context/Include file to use:
 
 ```bash
-# Add to work context - will use the context credential you created
-nssh host add switch.example.com --context work
+# Interactive flow - select the work context when prompted
+nssh host add switch.example.com
 
 # The context provides username and password automatically
 ```
@@ -289,7 +285,7 @@ nssh host add admin@switch.example.com
 This does three things:
 1. Adds the host to your SSH config (`~/.ssh/config`)
 2. Stores the encrypted password in `~/.local/share/nssh/credentials.age`
-3. Tests the connection automatically (use `--no-test` to skip)
+3. Tests the connection automatically (use `--force` to skip)
 
 **Option 3: Add host with SSH key authentication**
 
@@ -323,7 +319,7 @@ nssh admin@switch.example.com
 **Next Steps**
 
 - View your hosts: `nssh host list`
-- Manage credentials: `nssh cred list`
+- Manage contexts: `nssh ctx list`
 - View recordings (if enabled): `nssh log list`
 - Benchmark performance: `nssh benchmark ssh switch.example.com`
 
@@ -334,7 +330,7 @@ nssh admin@switch.example.com
 | `nssh: command not found` | Ensure `~/.local/bin` is in your PATH: `export PATH="$HOME/.local/bin:$PATH"` |
 | `Failed to decrypt credentials` | Verify age key exists: `ls ~/.config/age/keys.txt` |
 | `age-keygen: command not found` | Install age: `brew install age` (macOS) or download from [age releases](https://github.com/FiloSottile/age/releases) |
-| Connection test fails | Check credentials are correct, or skip test with `--no-test` flag |
+| Connection test fails | Check credentials are correct, or skip test with `--force` flag |
 
 See the sections below for detailed CLI usage and advanced features.
 
@@ -454,27 +450,25 @@ Maintains standard SCP CLI syntax while using nssh's credential resolution. Requ
 
 For complete options, see [examples/help/nssh.txt](examples/help/nssh.txt).
 
-### nssh cred (Credential Management)
+### nssh ctx (Context Management)
 
 Contexts organize credentials around SSH config files (e.g., `work_hosts`).
 
 ```bash
-nssh cred ctx add work --file work_hosts
-nssh cred ctx update work --username alice
-nssh cred ctx list
-nssh cred ctx rm work
+nssh ctx add work                                    # Interactive setup
+nssh ctx edit work --ssh-config work_hosts --username alice
+nssh ctx list
+nssh ctx rm work
 ```
 
-Host-specific overrides allow fine-grained control:
+Host-specific credentials are managed through `nssh host edit`:
 
 ```bash
-nssh cred add special-switch --username netadmin
-nssh cred add firewall --username readonly
-nssh cred list firewall
-nssh cred rm firewall --username readonly
+nssh host edit special-switch    # Add/modify credentials for existing host
+nssh host get firewall           # View host details including credentials
 ```
 
-See [examples/help/ctx.txt](examples/help/ctx.txt) for the exhaustive command list and option descriptions.
+See [examples/help/ctx.txt](examples/help/ctx.txt) for the context command list and [examples/help/host.txt](examples/help/host.txt) for host commands.
 
 ### nssh host (SSH Config Management)
 
@@ -483,12 +477,11 @@ Add hosts interactively or via flags:
 ```bash
 nssh host add                           # Guided flow with previews (includes connection test)
 nssh host add admin@switch.example.com  # password auth (default)
-nssh host add device.local --context homelab --auth key
-nssh host add legacy-server --auth password --no-test  # Skip connection test
+nssh host add device.local --auth key
+nssh host add legacy-server --auth password --force  # Skip connection test
 nssh host rm old-server
-nssh host list 192.168
-nssh host sort --context homelab
-nssh host update hostname                            # Auto-detect auth + legacy compat
+nssh host list --select 192.168
+nssh host sort --select homelab
 ```
 
 For detailed information about SSH compatibility detection and troubleshooting for legacy devices, see [ARCHITECTURE.md - SSH Compatibility Detection and Remediation](ARCHITECTURE.md#ssh-compatibility-detection-and-remediation). Use `nssh host add --help` or see [examples/help/host.txt](examples/help/host.txt) for command options.
@@ -565,52 +558,31 @@ Manage recorded sessions:
 
 ```bash
 # List recordings (filter by regex pattern)
+nssh log list
 nssh log list --select lab-switch-01
 nssh log list --select "2025-11-14"
 nssh log list --select "lab.*2025-11-15"  # Regex pattern matching
 
 # Play sessions (interactive picker)
-nssh log play                    # Pick from most recent recordings
-nssh log play --date 2025-11-14  # Pick from specific date
-nssh log play --file session-001.cast  # Play specific file
+nssh log play                    # Pick from recordings via fzf
 
 # Upload to asciinema server (requires server configuration)
 # Configure asciinema server (add to ~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish, etc.)
 export ASCIINEMA_SERVER_URL=https://asciinema.example.com
 
 nssh log upload                  # Pick recording to upload
-nssh log upload --date 2025-11-14
-
-# Or specify server for one-off upload
-nssh log upload --server https://asciinema.example.com
 
 # Export recordings (saves to current directory by default)
-nssh log export                      # Pick and export to ./hostname_YYYY-MM-DD_session-NNN.txt
-nssh log export --format txt         # Explicit text format (default)
-nssh log export --format gif         # Pick and export to ./hostname_YYYY-MM-DD_session-NNN.gif
-nssh log export --output demo.txt    # Custom output path
-nssh log export --file session.cast --output demo.gif --format gif
+nssh log export                  # Pick and export via fzf
 
-# Delete old recordings (interactive picker)
-nssh log delete
-
-# Delete recordings older than N days
-nssh log delete --older-than 30
-
-# Delete specific host's recordings
-nssh log delete --host hostname
-
-# Delete recordings from specific date
-nssh log delete --date 2025-11-14
-
-# Delete specific file
-nssh log delete --file session-001.cast
-
-# Preview deletion (dry-run)
-nssh log delete --older-than 30 --dry-run
+# Delete old recordings
+nssh log delete                          # Interactive picker
+nssh log delete --older-than 30          # Delete recordings older than N days
+nssh log delete --select hostname        # Delete by regex pattern
+nssh log delete --older-than 30 --dry-run  # Preview deletion
 ```
 
-**Interactive Mode**: Commands without `--file` launch an fzf picker showing available recordings sorted by modification time. Use arrow keys and fuzzy search to select a recording. The `--date` option filters picker results (defaults to recent sessions).
+**Interactive Mode**: Commands launch an fzf picker showing available recordings sorted by modification time. Use arrow keys and fuzzy search to select a recording.
 
 See [examples/help/log.txt](examples/help/log.txt) for complete command reference. For privacy considerations when recording is enabled by default, see [Security Best Practices](#recording-privacy).
 
@@ -639,14 +611,17 @@ For a complete list of timing stages and their meanings (including nested stages
 Optional shell integration for Fish, Bash, Zsh with history tracking and tab completion.
 
 ```bash
-# Install shell helpers + completions
-nssh self init --install-shell-helpers --append-shell-snippet ~/.bashrc
+# Install shell helpers + completions (interactive)
+nssh self init
 
 # Preview changes
 nssh self init --dry-run
 
-# Remove shell helpers (keeps CLI binary)
-nssh self cleanup
+# Skip shell integration
+nssh self init --skip-shell
+
+# Uninstall (removes shell helpers and CLI)
+nssh self uninstall
 ```
 
 **Shell history:** Tracks both search term (`nssh core`) and resolved hostname (`nssh core-switch-01`). Atuin compatible.
@@ -690,7 +665,7 @@ Generate age key during initial setup: `mkdir -p ~/.config/age && age-keygen -o 
 
 ### Safe Debugging
 
-`NSSH_DEBUG=1` logs timing only, never credentials. View passwords: `nssh cred get`. List without passwords: `nssh cred list`.
+`NSSH_DEBUG=1` logs timing only, never credentials. View host details: `nssh host get hostname`. List contexts: `nssh ctx list`.
 
 ### Key Rotation
 
@@ -704,26 +679,26 @@ If compromised: decrypt with old key, generate new key, re-encrypt, verify, secu
 |---------|-------------|-------------------|
 | "No hosts found" | `nssh host list` | [Host not found](#host-not-found-errors) |
 | "Failed to decrypt credentials" | `ls ~/.config/age/keys.txt` | [No credential found](#no-credential-found-but-one-should-exist) |
-| "Command not found: nssh cred" | `which nssh` | Install nssh |
+| "Command not found: nssh" | `which nssh` | Install nssh |
 | Connection hangs | `nssh hostname -vvv` | [Connection hangs](#connection-hangs-or-times-out) |
-| Wrong auth method | `nssh host list hostname` | [Password auth not working](#password-authentication-not-working) |
+| Wrong auth method | `nssh host list --select hostname` | [Password auth not working](#password-authentication-not-working) |
 | Stale SSH session | See error message | [Authorization denied](#authorization-denied-cannot-authorize-shell-for-unknown-sessionid) |
 
 ### "No credential found" but one should exist
 
 Verify credential configuration:
 ```bash
-nssh cred ctx list            # Check context mappings
-nssh cred list hostname       # Check host-specific credentials
+nssh ctx list                 # Check context mappings
+nssh host get hostname        # Check host-specific credentials
 ```
 
-If credentials exist but aren't matching, check that your SSH config file is mapped to the correct context with `nssh cred ctx list`.
+If credentials exist but aren't matching, check that your SSH config file is mapped to the correct context with `nssh ctx list`.
 
 ### "Host not found" errors
 
 Check SSH config parsing:
 ```bash
-nssh host list hostname         # See if host is recognized
+nssh host list --select hostname    # See if host is recognized
 cat ~/.local/state/nssh/host_index | grep hostname  # Check index directly
 ```
 
@@ -742,10 +717,10 @@ This shows authentication attempts, key exchanges, and where the connection stal
 
 Verify the SSH config has password auth enabled:
 ```bash
-nssh host list hostname         # Check Auth column shows "passwd"
+nssh host list --select hostname    # Check Auth column shows "passwd"
 ```
 
-If it shows "key", run `nssh host update hostname` to realign authentication automatically.
+If it shows "key", remove and re-add the host with `--auth password` to fix the configuration.
 
 ### Performance debugging
 

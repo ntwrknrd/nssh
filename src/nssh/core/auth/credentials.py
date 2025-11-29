@@ -240,6 +240,7 @@ class CredentialManager:
                 error_context="Failed to encrypt credentials",
             )
             self._backup_credentials()
+            self.credential_file.parent.mkdir(parents=True, exist_ok=True)
             os.replace(tmp_path, self.credential_file)
             set_secure_permissions(self.credential_file)
             self._cache_data = data

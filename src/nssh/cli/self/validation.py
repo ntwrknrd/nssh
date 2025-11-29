@@ -334,7 +334,7 @@ def guided_context_setup(
 
         if not confirm("Create context credential now?", default=True):
             console.print(
-                f"[dim]Skipped. Create later with: nssh cred ctx add <name> --file {include_file.name}[/dim]"
+                f"[dim]Skipped. Create later with: nssh ctx add <name> --file {include_file.name}[/dim]"
             )
             return False
 

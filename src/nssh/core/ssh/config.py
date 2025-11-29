@@ -495,6 +495,9 @@ class SSHConfigParser:
             config_files = [self.config_file]
             config_files.extend(self.find_include_files())
 
+            # Ensure index directory exists
+            index_path.parent.mkdir(parents=True, exist_ok=True)
+
             # Open index file for writing
             with open(index_path, "w") as index_file:
                 # Parse each config file and write hosts to index

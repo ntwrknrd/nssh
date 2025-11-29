@@ -82,7 +82,7 @@ def show_next_steps() -> None:
         console.print("  1. [cyan]Run: nssh self init[/cyan] (to set up SSH config)")
     elif not has_contexts:
         console.print(
-            "  1. [cyan]Create first context:[/cyan] nssh cred ctx add <name> --file <file>"
+            "  1. [cyan]Create first context:[/cyan] nssh ctx add <name> --file <file>"
         )
         console.print(
             "     [dim]or run:[/dim] nssh self init [dim](guided setup)[/dim]"

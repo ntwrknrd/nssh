@@ -342,6 +342,7 @@ def _interactive_add(
     yes: bool,
     dry_run: bool,
     force: bool,
+    auth: Optional[str],
     set_outcome,
 ) -> None:
     """Interactive flow for adding a single host."""
@@ -352,14 +353,22 @@ def _interactive_add(
     # FQDN (re-prompt until valid)
     final_fqdn = fqdn
     while True:
-        if not final_fqdn:
-            final_fqdn = ask_text("FQDN")
+        if not final_fqdn or "." not in final_fqdn:
+            if final_fqdn:
+                # Invalid FQDN provided - show error and use as default
+                console.print("[red]Invalid FQDN (must contain at least one '.')[/red]")
+            final_fqdn = ask_text("FQDN", default=final_fqdn)
 
         if final_fqdn and "." in final_fqdn:
             break
 
-        console.print("[red]Invalid FQDN (must contain at least one '.')[/red]")
-        final_fqdn = None  # Reset to re-prompt
+    # Parse user@host format if present
+    parsed_username = None
+    if "@" in final_fqdn and not final_fqdn.startswith("@"):
+        parts = final_fqdn.split("@", 1)
+        if len(parts) == 2 and parts[1]:
+            parsed_username = parts[0]
+            final_fqdn = parts[1]  # Strip username from FQDN
 
     # Alias (derived from FQDN)
     default_alias = final_fqdn.split(".")[0]
@@ -407,8 +416,12 @@ def _interactive_add(
     if yes and matched_context_name:
         selected_context: str | None = matched_context_name
     elif context_choices:
+        # Add TAB hint when no context was auto-detected
+        context_prompt = (
+            "Context (TAB to search)" if not matched_context_name else "Context"
+        )
         selected_context = ask_with_fzf(
-            "Context",
+            context_prompt,
             default=default_context,
             fzf_choices=context_choices,
             fzf_prompt="Select context:",
@@ -446,8 +459,8 @@ def _interactive_add(
         )
         raise SystemExit(1)
 
-    # Username
-    default_user = config.get_default_user()
+    # Username (prefer parsed from user@host, then config, then context, then env)
+    default_user = parsed_username or config.get_default_user()
     if not default_user:
         git_include_file = target_file.name
         file_context: dict[str, Any] | None = cm.get_context(git_include_file)
@@ -465,13 +478,20 @@ def _interactive_add(
     git_include_file = target_file.name
     pwd_context: dict[str, Any] | None = cm.get_context(git_include_file)
     has_context_creds = bool(pwd_context and pwd_context.get("credential"))
-    auth_type = "password"
 
     password_choice = choose_password_source(
         context_name=pwd_context["name"] if pwd_context else None,
         has_context_credentials=has_context_creds,
         skip_prompt=yes,
     )
+
+    # Determine auth type: CLI option overrides, else derive from password choice
+    if auth:
+        auth_type = "publickey" if auth.lower() == "key" else "password"
+    elif password_choice == "skip":
+        auth_type = "publickey"
+    else:
+        auth_type = "password"
 
     if password_choice == "custom":
         try:
@@ -673,6 +693,12 @@ def _handle_test_failure(
 @click.option("-y", "--yes", is_flag=True, default=False, help="Accept defaults")
 @click.option("--dry-run", is_flag=True, default=False, help="Preview only")
 @click.option("-f", "--force", is_flag=True, default=False, help="Skip connection test")
+@click.option(
+    "--auth",
+    type=click.Choice(["password", "key"], case_sensitive=False),
+    default=None,
+    help="Auth type: password or key (default: derived from password choice)",
+)
 @click.pass_context
 def add_command(
     ctx: click.Context,
@@ -680,6 +706,7 @@ def add_command(
     yes: bool,
     dry_run: bool,
     force: bool,
+    auth: Optional[str],
 ) -> None:
     """Add SSH host(s) to configuration.
 
@@ -700,7 +727,7 @@ def add_command(
     else:
         # Interactive/single-host mode
         with banner("ADD SSH HOST", OK) as set_outcome:
-            _interactive_add(ctx, host_or_file, yes, dry_run, force, set_outcome)
+            _interactive_add(ctx, host_or_file, yes, dry_run, force, auth, set_outcome)
 
 
 def _batch_add_mode(ctx, host_or_file, dry_run, set_outcome) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -41,7 +42,7 @@ def _prepare_ssh_config(tmp_path, monkeypatch, payload: str) -> Path:
     return include_file
 
 
-def test_test_connection_uses_stored_credentials(tmp_path, monkeypatch):
+def test_test_connection_uses_stored_credentials(tmp_path, monkeypatch) -> None:
     _prepare_ssh_config(tmp_path, monkeypatch, PASSWORD_HOST)
 
     class DummyManager:
@@ -51,7 +52,7 @@ def test_test_connection_uses_stored_credentials(tmp_path, monkeypatch):
             assert username == "ops"
             return ("ops", "s3cret")
 
-    events: dict[str, object] = {}
+    events: dict[str, Any] = {}
 
     class DummyConnector:
         def __init__(
@@ -96,7 +97,7 @@ def test_test_connection_uses_stored_credentials(tmp_path, monkeypatch):
     )
 
 
-def test_test_connection_errors_without_credentials(tmp_path, monkeypatch):
+def test_test_connection_errors_without_credentials(tmp_path, monkeypatch) -> None:
     _prepare_ssh_config(tmp_path, monkeypatch, PASSWORD_HOST)
 
     class DummyManager:
@@ -105,7 +106,7 @@ def test_test_connection_errors_without_credentials(tmp_path, monkeypatch):
 
     monkeypatch.setattr(fixer, "CredentialManager", lambda: DummyManager())
 
-    events: dict[str, object] = {}
+    events: dict[str, Any] = {}
 
     class BatchConnector:
         def __init__(self, *, ssh_args, stdout, **_):

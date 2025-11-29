@@ -37,4 +37,7 @@ def choose_password_source(
             return "context"
         return "custom"
 
-    return "custom"
+    # No context credentials - ask if user wants to enter password or skip
+    if confirm("Store password? (no = key-based auth)", default=True):
+        return "custom"
+    return "skip"

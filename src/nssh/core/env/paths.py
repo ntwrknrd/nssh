@@ -56,7 +56,8 @@ def credential_file_path() -> Path:
     Priority:
     1. NSSH_CRED_FILE environment variable
     2. [encryption] credential_file in config.toml
-    3. Default: ~/.local/share/nssh/credentials.age
+    3. Legacy: ~/.ssh/nssh_credentials.age (if exists and new path doesn't)
+    4. Default: ~/.local/share/nssh/credentials.age
     """
     explicit = os.getenv("NSSH_CRED_FILE")
     if explicit:
@@ -64,7 +65,14 @@ def credential_file_path() -> Path:
     config_value = _encryption_config().get("credential_file")
     if config_value:
         return Path(config_value).expanduser()
-    return default_data_root() / "credentials.age"
+
+    # Check for legacy credential file and use it if new location doesn't exist
+    new_path = default_data_root() / "credentials.age"
+    legacy_path = Path("~/.ssh/nssh_credentials.age").expanduser()
+    if legacy_path.exists() and not new_path.exists():
+        return legacy_path
+
+    return new_path
 
 
 def age_key_path() -> Path:

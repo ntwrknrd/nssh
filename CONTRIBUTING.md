@@ -35,7 +35,7 @@ uv tool install --force --reinstall .      # Test installed entry points
 
 ## Development Workflow
 
-- Repo layout: Shell helpers live under `src/nssh/assets/`; Python modules live under `src/nssh/` (`core/` for shared logic, `cli/` for Typer entry points).
+- Repo layout: Shell helpers live under `src/nssh/assets/`; Python modules live under `src/nssh/` (`core/` for shared logic, `cli/` for Click commands).
 - Work in feature branches, keep changes scoped, and stash experimental helpers inside `src/nssh/assets/completions/` or `build/` so the root stays tidy.
 - Iterate with `uv run ...` for quick tests; reinstall via `uv tool install --force --reinstall .` only when verifying installed entry points.
 
@@ -65,7 +65,7 @@ uv tool install --force --reinstall .      # Test installed entry points
 ### Manual Smoke Tests
 
 ```bash
-uv run nssh cred ctx list
+uv run nssh ctx list
 uv run nssh host list
 uv run nssh test-host
 ```
@@ -98,7 +98,7 @@ For common user-facing issues (host not found, credential failures, connection p
 For developer-specific debugging:
 - **Testing Python modules directly**: `uv run python -m nssh.cli.host list`
 - **Inspecting host index**: See [ARCHITECTURE.md - Debugging and Profiling](docs/ARCHITECTURE.md#debugging-and-profiling)
-- **Testing changes before reinstalling**: Use `uv run nssh host`, `uv run nssh cred` commands
+- **Testing changes before reinstalling**: Use `uv run nssh host`, `uv run nssh ctx` commands
 - **Performance profiling**: See [Performance Benchmarking](#performance-benchmarking)
 
 ## Coding Standards
@@ -109,8 +109,8 @@ For developer-specific debugging:
 - Maintain context-aware credential defaults: route new logic through the shared analyzers in `src/nssh/core/` instead of bespoke scripts.
 
 ## Adding CLI Commands
-- Mirror the existing layout: each CLI lives in `src/nssh/cli/<command>/` with an `__main__.py` (or Typer `app`) plus per-command modules (e.g., `add.py`, `update.py`).
-- Import Typer primitives from `nssh.cli`, but route all Rich prompts/panels/selectors through `cli/common/` (`prompt.py`, `ui.py`, `selectors.py`, `help.py`, `app.py`, `workflows.py`). Never import `rich.prompt.Prompt`, `rich.prompt.Confirm`, `rich.panel.Panel`, or `nssh.core.fzf.fzf_select` directly from a command module.
+- Mirror the existing layout: each CLI lives in `src/nssh/cli/<command>/` with an `__main__.py` (or Click `group`) plus per-command modules (e.g., `add.py`, `edit.py`).
+- Import Click primitives from `nssh.cli`, but route all Rich prompts/panels/selectors through `cli/common/` (`prompt.py`, `ui.py`, `selectors.py`, `help.py`, `app.py`, `workflows.py`). Never import `rich.prompt.Prompt`, `rich.prompt.Confirm`, `rich.panel.Panel`, or `nssh.core.fzf.fzf_select` directly from a command module.
 - If a command needs a new UI primitive or workflow (credential confirmation flows, password sourcing, etc.), add it to `cli/common/` and reuse it everywhere—avoid inline prompt logic.
 - Guardrails enforce this convention: `tests/test_cli_guardrails.py` fails if a CLI module bypasses the shared helpers. Update/extend that test if you add new shared primitives or new modules that need exemptions.
 

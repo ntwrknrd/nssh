@@ -1,13 +1,14 @@
 $ nssh host add --help
 
-╭─ Usage ───────────────────────────────────────────────────────────╮
-│   nssh host add [FQDN|FILE]           Add host(s)                 │
-╰───────────────────────────────────────────────────────────────────╯
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh host add [FQDN|FILE]           Add host(s)                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
 
-╭─ Options ─────────────────────────────────────────────────────────╮
-│   --yes, -y                           Accept defaults             │
-│   --dry-run                           Preview only                │
-│   --force, -f                         Skip connection test        │
-│   --help, -h                          Print command-specific help │
-╰───────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│   --yes, -y                           Accept defaults                        │
+│   --dry-run                           Preview only                           │
+│   --force, -f                         Skip connection test                   │
+│   --auth CHOICE                       Auth type: password or key (default: … │
+│   --help, -h                          Print command-specific help            │
+╰──────────────────────────────────────────────────────────────────────────────╯
 

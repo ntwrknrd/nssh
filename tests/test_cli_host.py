@@ -286,10 +286,11 @@ def test_host_add_custom_password_stores_credentials(
     mock_config = NsshConfig(host_add=HostAddConfig(test_connection=False))
     monkeypatch.setattr("nssh.cli.host.add.get_config", lambda: mock_config)
 
-    # Mock confirm to return False so user chooses "custom" password path
+    # Mock confirm to return True so user chooses "custom" password path
+    # (the prompt is "Store password? (no = key-based auth)" where True = store password)
     monkeypatch.setattr(
         "nssh.cli.common.workflows.confirm",
-        lambda msg, default=True: False,
+        lambda msg, default=True: True,
     )
     monkeypatch.setattr(
         "nssh.cli.host.add.prompt_password_with_confirmation",

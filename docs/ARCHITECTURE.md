@@ -36,7 +36,7 @@ This document covers:
 
 The `nssh` command is a pure Python entry point (`src/nssh/cli/main.py`) that:
 
-- Parses `[user@]<search-term>` arguments (fast path avoids importing Typer when possible)
+- Parses `[user@]<search-term>` arguments (fast path avoids importing Click when possible)
 - Resolves hosts + credentials inside `nssh.core.connect`
 - Handles fuzzy selection internally (`fzf` is called from Python when multiple hosts match)
 - Integrates with shell history via the optional shell functions
@@ -220,13 +220,13 @@ When the pre-compiled index (`~/.local/state/nssh/host_index`) is missing or doe
 4. Performs fuzzy matching against the search term
 5. Results are identical to index-based lookup, just slower 
 
-The index is automatically rebuilt by `nssh host` commands (`add`, `remove`, `sort`, `update`), so this fallback is rare in normal usage.
+The index is automatically rebuilt by `nssh host` commands (`add`, `rm`, `sort`), so this fallback is rare in normal usage.
 
 ## SSH Compatibility Detection and Remediation
 
 nssh automatically detects and fixes SSH compatibility issues with legacy network equipment by monitoring SSH stderr for error patterns (kex, macs, ciphers, hostkey mismatches). When `nssh host add` tests a connection and detects an issue, it prompts to apply the appropriate fix and retests iteratively (up to 5 iterations).
 
-Legacy algorithms are appended to modern defaults using the `+` prefix (e.g., `KexAlgorithms +diffie-hellman-group1-sha1`) to maintain security for modern hosts while enabling compatibility for legacy devices. Users can trigger the automated remediation workflow with `nssh host update hostname`.
+Legacy algorithms are appended to modern defaults using the `+` prefix (e.g., `KexAlgorithms +diffie-hellman-group1-sha1`) to maintain security for modern hosts while enabling compatibility for legacy devices.
 
 Implementation details in `src/nssh/core/ssh/fixer.py`. For user-facing documentation, see [USER_GUIDE.md - SSH Config Management](USER_GUIDE.md#nssh-host).
 
@@ -390,36 +390,25 @@ The `nssh log` CLI provides a management interface to the recording system:
 
 | Command | Implementation |
 |---------|---------------|
-| `nssh log list` | Scans recording directory, parses metadata, filters by keyword search |
-| `nssh log play` | Locates `.cast` file, invokes `asciinema play` |
-| `nssh log upload` | Locates `.cast` file, invokes `asciinema upload --server-url` with ASCIINEMA_SERVER_URL or --server option |
-| `nssh log export` | Locates `.cast` file, invokes `asciinema convert` or `asciicast2gif`, saves to current directory |
+| `nssh log list` | Scans recording directory, parses metadata, filters by `--select` regex |
+| `nssh log play` | Interactive fzf picker, invokes `asciinema play` |
+| `nssh log upload` | Interactive fzf picker, invokes `asciinema upload` with `ASCIINEMA_SERVER_URL` |
+| `nssh log export` | Interactive fzf picker, invokes `asciinema convert`, saves to current directory |
+| `nssh log delete` | Interactive fzf picker or `--older-than N` days, `--select` regex filtering |
 
-**Export behavior notes:**
+**File selection:**
 
-- By default, exports to the current working directory (where user is working)
-- Uses descriptive filename format: `{hostname}_{date}_{session}.{format}` (e.g., `acm-lab-agg-sw1_2025-11-15_session-000.txt`)
-- Avoids cluttering recording storage directory with export artifacts
-- Supports both text (default, via `asciinema convert`) and GIF (via `asciicast2gif`) formats
-
-**File selection methods:**
-
-1. **Direct file path** (via `--file`):
-   - User provides full or relative path to `.cast` file
-   - File existence is validated before proceeding
-
-2. **Interactive picker** (default when `--file` not provided):
-   - Scans `recording_dir/*/{date}/session-*.cast` for all recordings on the specified date
-   - Sorts results by modification time (newest first)
-   - Launches fzf with formatted entries: `hostname | date | session | full_path`
-   - User selects via fuzzy search and arrow keys
-   - Selected file path is extracted and used
+All log commands (except `list`) use an interactive fzf picker:
+- Scans `recording_dir/*/session-*.cast` for all recordings
+- Sorts results by modification time (newest first)
+- Launches fzf with formatted entries: `hostname | date | session | full_path`
+- User selects via fuzzy search and arrow keys
 
 Implementation in `src/nssh/cli/log.py::pick_recording_interactive()`.
 
 ## API Reference
 
-This section documents the programmatic APIs and data formats for developers integrating `nssh` into their tools or scripts. The CLI commands (`nssh`, `nssh cred`, `nssh host`) are built on these Python APIs. For end-user CLI usage, see the [User Guide](USER_GUIDE.md).
+This section documents the programmatic APIs and data formats for developers integrating `nssh` into their tools or scripts. The CLI commands (`nssh`, `nssh ctx`, `nssh host`) are built on these Python APIs. For end-user CLI usage, see the [User Guide](USER_GUIDE.md).
 
 ### Python API
 
@@ -474,9 +463,9 @@ parser = SSHConfigParser()
 
 #### Credential File Format
 
-File: `~/.local/share/nssh/credentials.age` (age-encrypted JSON containing contexts and host-specific credentials). Passwords are plaintext in decrypted JSON (encrypted in `.age` file). Edit via `nssh cred` commands, not manually.
+File: `~/.local/share/nssh/credentials.age` (age-encrypted JSON containing contexts and host-specific credentials). Passwords are plaintext in decrypted JSON (encrypted in `.age` file). Edit via `nssh ctx` and `nssh host edit` commands, not manually.
 
-See [examples/nssh_credentials.json](examples/nssh_credentials.json) for complete format and examples.
+See [examples/config/nssh_credentials.json](examples/config/nssh_credentials.json) for complete format and examples.
 
 #### Host Index Format
 
@@ -488,7 +477,7 @@ See [examples/state/.nssh_host_index](examples/state/.nssh_host_index) for forma
 
 Output format when `NSSH_DEBUG=1` or via `nssh benchmark`: `[timestamp] TIMING: stage-name - XXXms`
 
-See [benchmark-run-example.txt](examples/benchmark-run-example.txt) for example benchmark output.
+See [benchmark-run.txt](examples/output/benchmark-run.txt) for example benchmark output.
 
 ### Exit Codes
 
@@ -525,7 +514,6 @@ The index is automatically rebuilt after these operations:
 - `nssh host add` - New host entry added
 - `nssh host rm` - Host entry removed
 - `nssh host sort` - Config file alphabetically sorted
-- `nssh host update` - Host authentication type or compatibility options changed
 
 **Implementation:** Each CLI command calls `SSHConfigParser.rebuild_index()` after successful modification.
 
@@ -618,7 +606,7 @@ The benchmark renderer calculates and displays `asciinema-overhead` as a derived
 
 **Example Output:**
 
-See [benchmark-run-example.txt](examples/benchmark-run-example.txt) for example benchmark output. Note: the example shows recording disabled mode (`NSSH_RECORD=0`), so only `config-parse` and `host-selection` stages appear. The `config-parse` stage only appears when the host index cache misses.
+See [benchmark-run.txt](examples/output/benchmark-run.txt) for example benchmark output. Note: the example shows recording disabled mode (`NSSH_RECORD=0`), so only `config-parse` and `host-selection` stages appear. The `config-parse` stage only appears when the host index cache misses.
 
 **Recording Mode Behavior:**
 

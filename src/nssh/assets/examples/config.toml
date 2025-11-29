@@ -1,9 +1,49 @@
 # nssh Configuration File
 #
 # Location: ~/.config/nssh/config.toml
+# Environment override: NSSH_CONFIG=/path/to/config.toml
 #
-# This file configures encryption and session recording behavior for nssh.
+# This file configures nssh behavior, encryption, and session recording.
 # All settings are optional - nssh works without this file.
+
+# ============================================================================
+# DEFAULTS
+# ============================================================================
+
+[defaults]
+# Default context for new hosts (used by `nssh host add`)
+# Environment override: NSSH_DEFAULT_CONTEXT=work
+# context = "work"
+
+# Default SSH username for new hosts
+# Environment override: NSSH_DEFAULT_USER=admin
+# user = "admin"
+
+# ============================================================================
+# HOST MANAGEMENT
+# ============================================================================
+
+[host.add]
+# Run SSH connectivity test after adding a host
+# Default: true
+test_connection = true
+
+# Prompt to store credentials after adding a host
+# Default: false (skip the prompt)
+prompt_for_credential = false
+
+# ============================================================================
+# BATCH OPERATIONS
+# ============================================================================
+
+[batch]
+# Continue processing remaining hosts if one fails during batch import
+# Default: true
+continue_on_error = true
+
+# ============================================================================
+# ENCRYPTION
+# ============================================================================
 
 [encryption]
 # Age encryption key file path
@@ -17,6 +57,10 @@ age_key = "~/.config/age/keys.txt"
 # Environment override: NSSH_CRED_FILE=/path/to/credentials.age
 # Tilde (~) expansion is supported
 credential_file = "~/.local/share/nssh/credentials.age"
+
+# ============================================================================
+# SSH CONFIGURATION
+# ============================================================================
 
 [ssh]
 # Main SSH config file location
@@ -37,6 +81,23 @@ include_dir = "~/.ssh/conf.d"
 # Environment override: NSSH_HOST_INDEX=/custom/index
 host_index = "~/.local/state/nssh/host_index"
 
+# ============================================================================
+# BACKUP SETTINGS
+# ============================================================================
+
+[backup]
+# Maximum number of backup files to retain per source file
+# Applies to both SSH config backups (~/.local/share/nssh/backups/)
+# and credential file backups (alongside credentials.age)
+# Set to 0 to disable pruning (keep all backups)
+# Default: 10
+# Environment override: NSSH_BACKUP_DIR=/path/to/backups (directory only)
+max_files = 10
+
+# ============================================================================
+# SHELL INTEGRATION
+# ============================================================================
+
 [self]
 # Directory that stores installed shell helpers / manifests
 # Default: ~/.local/share/nssh
@@ -48,6 +109,10 @@ share_dir = "~/.local/share/nssh"
 # Environment overrides: NSSH_FISH_FUNCTIONS_DIR / NSSH_FISH_COMPLETIONS_DIR
 fish_functions_dir = "~/.config/fish/functions"
 fish_completions_dir = "~/.config/fish/completions"
+
+# ============================================================================
+# SESSION RECORDING
+# ============================================================================
 
 [recording]
 # Enable or disable automatic session recording
@@ -75,6 +140,12 @@ append_mode = true
 # - Recommended: "100x30" for readable documentation/demos
 # window_size = "100x30"
 
+# Custom asciinema server URL for self-hosted instances
+# Used by `nssh log upload` command
+# Environment override: ASCIINEMA_SERVER_URL=https://...
+# Default: https://asciinema.org (public server)
+# asciinema_server_url = "https://asciinema.example.com"
+
 # Include patterns: Only record hosts matching these patterns
 # - Glob patterns (default): "lab-*", "*-switch", "db-0[1-3]"
 # - Regex patterns: Prefix with "regex:" like "regex:^dev-\w+$"
@@ -100,53 +171,69 @@ include_hosts = [
 # ]
 
 # ============================================================================
+# PER-CONTEXT CONFIGURATION
+# ============================================================================
+#
+# Override settings for specific contexts. Useful for separate encryption
+# keys per environment (work vs personal) or different test behaviors.
+#
+# [contexts.work]
+# key_file = "~/.config/age/work-keys.txt"
+# test_connection = false  # Skip connectivity tests for work hosts
+#
+# [contexts.homelab]
+# key_file = "~/.config/age/homelab-keys.txt"
+# test_connection = true
+
+# ============================================================================
+# ENVIRONMENT VARIABLES
+# ============================================================================
+#
+# Environment variables override config.toml settings.
+# See env.example for the full reference.
+
+# ============================================================================
 # EXAMPLE CONFIGURATIONS
 # ============================================================================
 
-# Example 1: Record everything
+# Example 1: Minimal config - just set defaults
+# [defaults]
+# context = "homelab"
+# user = "admin"
+
+# Example 2: Record everything
 # [recording]
 # enabled = true
 
-# Example 2: Only record lab environment
+# Example 3: Only record lab environment
 # [recording]
 # enabled = true
 # include_hosts = ["lab-*"]
 
-# Example 3: Record everything except production
+# Example 4: Record everything except production
 # [recording]
 # enabled = true
 # exclude_hosts = ["prod-*", "*.production.com"]
 
-# Example 4: Custom storage location with regex patterns
+# Example 5: Custom storage location with regex patterns
 # [recording]
 # enabled = true
 # dir = "/mnt/recordings/nssh"
 # include_hosts = ["regex:^(dev|test|staging)-.*"]
 
-# Example 5: Separate session files (no append mode)
+# Example 6: Separate session files (no append mode)
 # [recording]
 # enabled = true
 # append_mode = false
 # include_hosts = ["demo-*"]
 
-# ============================================================================
-# ENVIRONMENT VARIABLE OVERRIDES
-# ============================================================================
-#
-# The following environment variables override config file settings:
-#
-# NSSH_RECORD=0       - Disable recording for single connection
-# NSSH_RECORD=1       - Enable recording for single connection
-# NSSH_RECORD=force   - Fail if asciinema is not installed (for CI/CD)
-# NSSH_RECORD_DIR=... - Override storage directory
-#
-# Examples:
-#   NSSH_RECORD=0 nssh prod-server        # Don't record this session
-#   NSSH_RECORD=1 nssh test-server        # Force recording this session
-#   NSSH_RECORD_DIR=/tmp nssh lab-switch  # Save to /tmp for this session
+# Example 7: Self-hosted asciinema server
+# [recording]
+# enabled = true
+# asciinema_server_url = "https://asciinema.internal.example.com"
 
 # ============================================================================
-# PATTERN MATCHING EXAMPLES
+# PATTERN MATCHING REFERENCE
 # ============================================================================
 #
 # Glob patterns (default):
