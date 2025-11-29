@@ -32,3 +32,30 @@ def fzf_select(options: List[str], prompt: str = "Select:") -> Optional[str]:
     if result.returncode == 0:
         return result.stdout.strip()
     return None
+
+
+def fzf_select_multi(options: List[str], prompt: str = "Select:") -> List[str]:
+    """Launch ``fzf`` with multi-select and return selected options."""
+
+    try:
+        result = subprocess.run(
+            [
+                "fzf",
+                "--prompt",
+                f"{prompt} ",
+                "--height",
+                "40%",
+                "--reverse",
+                "--multi",
+            ],
+            input="\n".join(options),
+            text=True,
+            capture_output=True,
+        )
+    except Exception as exc:  # pragma: no cover - subprocess creation edge cases
+        print(f"Error running fzf: {exc}", file=sys.stderr)
+        return []
+
+    if result.returncode == 0:
+        return [line for line in result.stdout.strip().split("\n") if line]
+    return []

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from nssh.cli.common import ui
-from nssh.cli.common.prompt import confirm
+from nssh.cli.common.prompt import confirm, is_interactive
 from nssh.cli.common.workflows import confirm_or_exit
 from nssh.core.env.paths import ssh_config_path, ssh_include_dir
 from nssh.core.ssh.config import SSHConfigParser
@@ -22,6 +22,7 @@ def ensure_conf_d_include(
     create_if_missing: bool = False,
     preview_title: str = "SSH config change preview",
     abort_on_decline: bool = False,
+    yes: bool = False,
 ) -> bool:
     """
     Ensure ~/.ssh/config contains `Include ~/.ssh/conf.d/*`.
@@ -31,6 +32,7 @@ def ensure_conf_d_include(
         create_if_missing: Create a minimal config if none exists.
         preview_title: Panel title for the preview display.
         abort_on_decline: Exit the command when the user declines a change (instead of continuing).
+        yes: Auto-accept prompts (for non-interactive mode).
 
     Returns:
         True if include already existed or was added/created, False otherwise.
@@ -80,10 +82,18 @@ def ensure_conf_d_include(
         if plan.created
         else f"[cyan]Add Include {include_pattern} to ~/.ssh/config?[/cyan]"
     )
-    if abort_on_decline:
-        confirm_or_exit(prompt, default=True)
-    else:
-        if not confirm(prompt, default=True):
+
+    # Auto-accept if --yes flag provided or skip prompt in non-interactive mode
+    if not yes:
+        if not is_interactive():
+            # Non-interactive without --yes: skip this optional change
+            console.print(
+                "[dim]Skipping Include directive (non-interactive mode)[/dim]"
+            )
+            return False
+        if abort_on_decline:
+            confirm_or_exit(prompt, default=True)
+        elif not confirm(prompt, default=True):
             console.print("[dim]Skipped adding Include directive[/dim]")
             return False
 
@@ -98,5 +108,5 @@ def ensure_conf_d_include(
         plan, ssh_config, backup_func=None  # backup already handled above if needed
     )
 
-    console.print(f"[green]✓[/green] Added Include directive for {ssh_conf_d}/")
+    console.print(f"[green]+[/green] Added Include directive for {ssh_conf_d}/")
     return True

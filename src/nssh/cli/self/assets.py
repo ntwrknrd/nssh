@@ -24,7 +24,7 @@ else:  # pragma: no cover - runtime compatibility shim
             def open(self, *args: Any, **kwargs: Any): ...
 
 
-from nssh.cli import typer
+from nssh.cli import click
 from nssh.cli.self.manifest import InstallManifest
 from nssh.cli.self.system import rel_home
 from nssh.cli.common import ui
@@ -79,8 +79,9 @@ def install_resource(
     executable: bool,
     symlink: bool,
     dry_run: bool,
-    force: bool,
+    yes: bool,
     manifest: Optional[InstallManifest] = None,
+    quiet: bool = False,
 ) -> bool:
     """Install a resource and optionally track it in manifest.
 
@@ -91,8 +92,9 @@ def install_resource(
         executable: Whether to make file executable
         symlink: Whether to symlink instead of copy
         dry_run: Preview mode (don't write files)
-        force: Overwrite without prompting
+        yes: Auto-accept prompts (overwrite without prompting)
         manifest: Optional manifest to track installation
+        quiet: Suppress output messages
 
     Returns:
         True if installed, False if skipped.
@@ -101,20 +103,24 @@ def install_resource(
     action = "Symlink" if symlink else "Copy"
 
     if dest.exists() or dest.is_symlink():
-        if not force:
+        if not yes:
             overwrite = confirm(
                 f"[dim]{dest} already exists[/dim]. [yellow]Overwrite?[/yellow] [yellow][y/n][/yellow]",
                 default=False,
             )
             if not overwrite:
-                console.print(f"[yellow]Skipping[/yellow] [dim]{dest}[/dim]")
+                if not quiet:
+                    console.print(f"[yellow]Skipping[/yellow] [dim]{dest}[/dim]")
                 return False
         if not dry_run:
             if dest.is_dir():
-                raise typer.BadParameter(f"Cannot overwrite directory: {dest}")
+                raise click.BadParameter(f"Cannot overwrite directory: {dest}")
             dest.unlink()
 
-    console.print(f"{action} [cyan]{name}[/cyan] -> [green]{dest}[/green]")
+    if not quiet:
+        console.print(
+            f"{action} [cyan]{name}[/cyan] -> [cyan underline]{dest}[/cyan underline]"
+        )
     if dry_run:
         return True
 
@@ -124,7 +130,7 @@ def install_resource(
             src_candidate = cast(os.PathLike[str], asset_ref)
             src_path = Path(os.fspath(src_candidate))
         except TypeError as exc:  # pragma: no cover - zip import edge
-            raise typer.BadParameter(
+            raise click.BadParameter(
                 "Cannot create symlinks when assets are loaded from a zip archive"
             ) from exc
         dest.symlink_to(src_path)
@@ -144,7 +150,8 @@ def append_profile_snippet(
     share_dir: Path,
     dry_run: bool,
     manifest: Optional[InstallManifest] = None,
-) -> None:
+    quiet: bool = False,
+) -> str:
     """Append shell integration snippet to a profile file.
 
     Args:
@@ -152,6 +159,10 @@ def append_profile_snippet(
         share_dir: Directory containing shell integration script
         dry_run: Preview mode (don't modify files)
         manifest: Optional manifest to track modification
+        quiet: Suppress output messages
+
+    Returns:
+        Status string: "added", "exists", or "dry-run"
     """
     is_fish = profile.name.endswith(".fish") or "fish" in profile.parts
 
@@ -179,18 +190,12 @@ fi
     if profile.exists():
         content = profile.read_text()
         if PROFILE_MARKER in content:
-            console.print(f"[green]Shell snippet already present in {profile}[/green]")
-            return
+            return "exists"
 
-    ui.show_panel(
-        "Append Shell Snippet",
-        "Appending shell integration block",
-        style="cyan",
-        subtitle=str(profile),
-    )
     if dry_run:
-        ui.show_panel("Shell Snippet Preview", snippet, style="yellow")
-        return
+        if not quiet:
+            ui.show_panel("Shell Snippet Preview", snippet, style="yellow")
+        return "dry-run"
 
     profile.parent.mkdir(parents=True, exist_ok=True)
 
@@ -204,3 +209,5 @@ fi
 
     if manifest:
         manifest.add_profile_modification(profile, PROFILE_MARKER, line_start, line_end)
+
+    return "added"

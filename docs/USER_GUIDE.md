@@ -115,7 +115,7 @@ This command will guide you through:
 If you prefer to skip interactive prompts:
 ```bash
 # Non-interactive with defaults
-nssh self init --force
+nssh self init --yes
 
 # Preview without making changes
 nssh self init --dry-run
@@ -143,9 +143,9 @@ After initialization, you'll have:
 - `~/.ssh/conf.d/` - Directory for include files (if created)
 
 The following files are created automatically as you use nssh:
-- `~/.ssh/nssh_credentials.age` - Encrypted password storage (when you add credentials)
-- `~/.ssh/.nssh_host_index` - Fast host lookup index (when you add hosts)
-- `~/.ssh/backups/` - SSH config backups (timestamped, when you modify config)
+- `~/.local/share/nssh/credentials.age` - Encrypted password storage (when you add credentials)
+- `~/.local/state/nssh/host_index` - Fast host lookup index (when you add hosts)
+- `~/.local/share/nssh/backups/` - SSH config backups (timestamped, when you modify config)
 
 ### What `nssh self init` Does
 
@@ -191,7 +191,7 @@ The `nssh self init` command is an interactive setup wizard that automates the e
 
 **Interactive vs. Non-Interactive:**
 - **Default mode**: Prompts for each step with sensible defaults
-- **`--force` flag**: Uses defaults, no prompts (except for passwords)
+- **`--yes` flag**: Uses defaults, no prompts (except for passwords)
 - **`--dry-run` flag**: Shows what would be done without making changes
 - **Manual flags**: Can specify `--install-shell-helpers`, `--append-shell-snippet`, etc.
 
@@ -264,11 +264,10 @@ For detailed credential resolution behavior and examples, see [Core Concepts - C
 If you set up a context credential above, add hosts to that Include file without re-entering passwords:
 
 ```bash
-# Add to work_hosts - will use the context credential you created
-nssh host add switch.example.com --file work_hosts --user alice
+# Add to work context - will use the context credential you created
+nssh host add switch.example.com --context work
 
-# Or let it infer the username from the context
-nssh host add switch.example.com --file work_hosts
+# The context provides username and password automatically
 ```
 
 The host will automatically use the context credential for authentication.
@@ -282,14 +281,14 @@ For hosts that need different credentials, create a host-specific credential:
 nssh host add
 
 # Or specify details directly
-nssh host add switch.example.com --user admin
+nssh host add admin@switch.example.com
 
 # You'll be prompted for the password (entered twice for safety)
 ```
 
 This does three things:
 1. Adds the host to your SSH config (`~/.ssh/config`)
-2. Stores the encrypted password in `~/.ssh/nssh_credentials.age`
+2. Stores the encrypted password in `~/.local/share/nssh/credentials.age`
 3. Tests the connection automatically (use `--no-test` to skip)
 
 **Option 3: Add host with SSH key authentication**
@@ -297,7 +296,7 @@ This does three things:
 If you prefer SSH keys:
 
 ```bash
-nssh host add server.example.com --user myuser --auth key
+nssh host add myuser@server.example.com --auth key
 ```
 
 **Connect to your host**
@@ -347,7 +346,7 @@ nssh admin@firewall                        # Connect as different user
 nssh cp hostname:~/file.txt ./             # Pull file from remote
 nssh cp ./file.txt hostname:~/             # Push file to remote
 nssh host list                             # List hosts
-nssh host add switch.example.com --user admin
+nssh host add admin@switch.example.com
 ```
 
 ## Core Concepts
@@ -377,10 +376,11 @@ For the complete five-step resolution algorithm, context definitions, and detail
 | `NSSH_DEFAULT_USER` | Default username when adding hosts | `$USER` |
 | `NSSH_USERNAME` | Set internally when using `user@host` (don't override) | - |
 | `NSSH_AGE_KEY` | Override age encryption key file path | `~/.config/age/keys.txt` |
-| `NSSH_CRED_FILE` | Override encrypted credentials file path | `~/.ssh/nssh_credentials.age` |
-| `NSSH_BACKUP_DIR` | Override SSH config backup directory | `~/.ssh/backups` |
+| `NSSH_CRED_FILE` | Override encrypted credentials file path | `~/.local/share/nssh/credentials.age` |
+| `NSSH_BACKUP_DIR` | Override SSH config backup directory | `~/.local/share/nssh/backups` |
 | `NSSH_DEBUG` | Enable detailed timing logs | (disabled) |
 | `NSSH_RECORD` | Override recording setting (`0`, `1`, `force`) | (from config) |
+| `NSSH_RECORD_HEADLESS` | Enable headless recording mode (`1`) | (disabled) |
 | `NSSH_RECORD_DIR` | Override recording storage directory | `~/.local/state/nssh/casts` |
 | `NSSH_CONFIG` | Override config file path | `~/.config/nssh/config.toml` |
 | `ASCIINEMA_SERVER_URL` | Server URL for `nssh log upload` | (none) |
@@ -389,19 +389,19 @@ For the complete five-step resolution algorithm, context definitions, and detail
 | `XDG_CONFIG_HOME` | Base directory for configuration files | `~/.config` |
 | `XDG_STATE_HOME` | Base directory for state data | `~/.local/state` |
 
-For recording configuration details, see [examples/config.toml](examples/config.toml).
+For recording configuration details, see [examples/config/config.toml](examples/config/config.toml).
 
 ### Configuration File
 
-Optional config via `~/.config/nssh/config.toml` for encryption paths, recording settings, host filters. Environment variables override config. See [examples/config.toml](examples/config.toml).
+Optional config via `~/.config/nssh/config.toml` for encryption paths, recording settings, host filters. Environment variables override config. See [examples/config/config.toml](examples/config/config.toml).
 
 ### Data Files
 
 | File | Purpose |
 |------|---------|
 | `~/.ssh/config` | Main SSH config with Include directives |
-| `~/.ssh/.nssh_host_index` | Pre-compiled host index for fast lookups |
-| `~/.ssh/nssh_credentials.age` | Age-encrypted credential store |
+| `~/.local/state/nssh/host_index` | Pre-compiled host index for fast lookups |
+| `~/.local/share/nssh/credentials.age` | Age-encrypted credential store |
 | `~/.config/age/keys.txt` | Age encryption key |
 | `~/.config/nssh/config.toml` | Recording & encryption config (optional) |
 | `~/.local/state/nssh/casts/` | Session recordings (if enabled) |
@@ -420,7 +420,7 @@ nssh -V hostname         # Enable verbose SSH output for debugging
 nssh hostname -vvv       # Pass raw ssh options through
 ```
 
-`nssh` preserves any `user@` prefix throughout fuzzy selection. When multiple candidates match, it launches `fzf` so you can choose interactively; single matches connect automatically. For all command options, run `nssh --help` or see [docs/examples/help/nssh.txt](examples/help/nssh.txt).
+`nssh` preserves any `user@` prefix throughout fuzzy selection. When multiple candidates match, it launches `fzf` so you can choose interactively; single matches connect automatically. For all command options, run `nssh --help` or see [examples/help/nssh.txt](examples/help/nssh.txt).
 
 #### How nssh Works
 
@@ -452,7 +452,7 @@ Maintains standard SCP CLI syntax while using nssh's credential resolution. Requ
 - `-q` - Quiet mode (disable progress meter)
 - `-v` - Verbose mode
 
-For complete options, see [docs/examples/help/nssh.txt](examples/help/nssh.txt).
+For complete options, see [examples/help/nssh.txt](examples/help/nssh.txt).
 
 ### nssh cred (Credential Management)
 
@@ -474,7 +474,7 @@ nssh cred list firewall
 nssh cred rm firewall --username readonly
 ```
 
-See [docs/examples/help/nssh-cred.txt](examples/help/nssh-cred.txt) for the exhaustive command list and option descriptions.
+See [examples/help/ctx.txt](examples/help/ctx.txt) for the exhaustive command list and option descriptions.
 
 ### nssh host (SSH Config Management)
 
@@ -482,16 +482,78 @@ Add hosts interactively or via flags:
 
 ```bash
 nssh host add                           # Guided flow with previews (includes connection test)
-nssh host add switch.example.com --user admin            # password auth (default)
-nssh host add device.local --file homelab_hosts --auth key
+nssh host add admin@switch.example.com  # password auth (default)
+nssh host add device.local --context homelab --auth key
 nssh host add legacy-server --auth password --no-test  # Skip connection test
 nssh host rm old-server
 nssh host list 192.168
-nssh host sort --file homelab_hosts
+nssh host sort --context homelab
 nssh host update hostname                            # Auto-detect auth + legacy compat
 ```
 
-For detailed information about SSH compatibility detection and troubleshooting for legacy devices, see [ARCHITECTURE.md - SSH Compatibility Detection and Remediation](ARCHITECTURE.md#ssh-compatibility-detection-and-remediation). Use `nssh host add --help` or see [docs/examples/help/nssh-host.txt](examples/help/nssh-host.txt) for command options.
+For detailed information about SSH compatibility detection and troubleshooting for legacy devices, see [ARCHITECTURE.md - SSH Compatibility Detection and Remediation](ARCHITECTURE.md#ssh-compatibility-detection-and-remediation). Use `nssh host add --help` or see [examples/help/host.txt](examples/help/host.txt) for command options.
+
+#### Batch Operations
+
+Both `nssh host add` and `nssh host rm` support batch operations from `.txt`, `.csv`, or `.json` files:
+
+```bash
+# Add multiple hosts from file
+nssh host add ./hosts.csv --dry-run    # Preview first
+nssh host add ./hosts.csv
+
+# Remove multiple hosts from file
+nssh host rm ./hosts.csv --dry-run
+nssh host rm ./hosts.csv
+```
+
+**CSV Format:**
+
+```csv
+hostname,user,port,context,password,host
+switch-01.example.com,admin,22,work,,
+switch-02.example.com,admin,22,work,,
+rpi-a.home.arpa,root,22,homelab,,rpi-a
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `hostname` | Yes | FQDN (e.g., `switch.example.com`) |
+| `host` | No | SSH alias. If omitted, derived from hostname by splitting on first dot (e.g., `switch.example.com` -> `switch`) |
+| `user` | No | SSH username (defaults to context or `$USER`) |
+| `port` | No | SSH port (defaults to 22) |
+| `context` | No | Target context/include file |
+| `password` | No | Host-specific password |
+
+**Alias Derivation:**
+
+When the `host` field is omitted, the SSH alias is derived from the `hostname` by taking the first segment before the first dot:
+
+- `switch-01.example.com` -> `switch-01`
+- `rpi-b.home.arpa` -> `rpi-b`
+- `firewall.prod.internal` -> `firewall`
+
+This allows you to use the same CSV file for both add and remove operations. If you need a different alias (e.g., the hostname doesn't contain dots), specify it explicitly in the `host` column.
+
+**Text Format (`.txt`):**
+
+One hostname per line, comments with `#`:
+
+```
+switch-01.example.com
+switch-02.example.com
+# This is a comment
+rpi-a.home.arpa
+```
+
+**JSON Format:**
+
+```json
+[
+  {"hostname": "switch-01.example.com", "user": "admin", "context": "work"},
+  {"hostname": "rpi-a.home.arpa", "host": "rpi-a", "context": "homelab"}
+]
+```
 
 ### nssh log (Session Recording)
 
@@ -502,10 +564,10 @@ For configuration details, see [Configuration File](#configuration-file).
 Manage recorded sessions:
 
 ```bash
-# List recordings (filter by keyword, repeatable for AND logic)
-nssh log list --search lab-switch-01
-nssh log list --search 2025-11-14
-nssh log list --search lab --search 2025-11-15  # AND logic
+# List recordings (filter by regex pattern)
+nssh log list --select lab-switch-01
+nssh log list --select "2025-11-14"
+nssh log list --select "lab.*2025-11-15"  # Regex pattern matching
 
 # Play sessions (interactive picker)
 nssh log play                    # Pick from most recent recordings
@@ -524,10 +586,10 @@ nssh log upload --server https://asciinema.example.com
 
 # Export recordings (saves to current directory by default)
 nssh log export                      # Pick and export to ./hostname_YYYY-MM-DD_session-NNN.txt
-nssh log export --txt                # Explicit text format
-nssh log export --gif                # Pick and export to ./hostname_YYYY-MM-DD_session-NNN.gif
+nssh log export --format txt         # Explicit text format (default)
+nssh log export --format gif         # Pick and export to ./hostname_YYYY-MM-DD_session-NNN.gif
 nssh log export --output demo.txt    # Custom output path
-nssh log export --file session.cast --output demo.gif --gif
+nssh log export --file session.cast --output demo.gif --format gif
 
 # Delete old recordings (interactive picker)
 nssh log delete
@@ -550,11 +612,11 @@ nssh log delete --older-than 30 --dry-run
 
 **Interactive Mode**: Commands without `--file` launch an fzf picker showing available recordings sorted by modification time. Use arrow keys and fuzzy search to select a recording. The `--date` option filters picker results (defaults to recent sessions).
 
-See [docs/examples/help/nssh-log.txt](examples/help/nssh-log.txt) for complete command reference. For privacy considerations when recording is enabled by default, see [Security Best Practices](#recording-privacy).
+See [examples/help/log.txt](examples/help/log.txt) for complete command reference. For privacy considerations when recording is enabled by default, see [Security Best Practices](#recording-privacy).
 
 ### nssh benchmark (Performance Analysis)
 
-The `nssh benchmark` command provides structured performance analysis with warmup runs, multiple samples, and statistical summaries. Use `NSSH_DEBUG=1 nssh hostname` to see timing breakdown for connection stages during normal usage. For detailed performance analysis, timing stages explanation, and benchmarking tools, see [ARCHITECTURE.md - Debugging and Profiling](ARCHITECTURE.md#debugging-and-profiling) and [docs/examples/help/nssh-benchmark.txt](examples/help/nssh-benchmark.txt).
+The `nssh benchmark` command provides structured performance analysis with warmup runs, multiple samples, and statistical summaries. Use `NSSH_DEBUG=1 nssh hostname` to see timing breakdown for connection stages during normal usage. For detailed performance analysis, timing stages explanation, and benchmarking tools, see [ARCHITECTURE.md - Debugging and Profiling](ARCHITECTURE.md#debugging-and-profiling).
 
 **Available subcommands:**
 
@@ -570,7 +632,7 @@ By default, `nssh benchmark ssh` respects your recording configuration (from `NS
 
 `nssh benchmark scp` accepts a `--size` option to control the test file size in KB (default: 100KB).
 
-For a complete list of timing stages and their meanings (including nested stages like ssh-connection within recording-session), see the Timing Stages table in [ARCHITECTURE.md](ARCHITECTURE.md#debugging-and-profiling).
+For a complete list of timing stages and their meanings (including nested stages like ssh-connection within recording-session), see the Timing Stages table in [ARCHITECTURE.md](ARCHITECTURE.md#debugging-and-profiling). For command options, see [examples/help/benchmark.txt](examples/help/benchmark.txt).
 
 ### nssh self (CLI & Shell Management)
 
@@ -589,7 +651,7 @@ nssh self cleanup
 
 **Shell history:** Tracks both search term (`nssh core`) and resolved hostname (`nssh core-switch-01`). Atuin compatible.
 
-For complete command reference and options, see [docs/examples/help/nssh-self.txt](examples/help/nssh-self.txt).
+For complete command reference and options, see [examples/help/self.txt](examples/help/self.txt).
 
 ## Security Best Practices
 
@@ -597,7 +659,7 @@ nssh implements multiple security layers to protect credentials and minimize att
 
 ### Credential Protection
 
-Credentials in `~/.ssh/nssh_credentials.age` are encrypted using [age](https://github.com/FiloSottile/age) (ChaCha20-Poly1305 + X25519). Passwords are never written to plaintext, never appear in shell history or process listings, and are streamed directly into the PTY. Interactive prompts only (no CLI args); double-prompted to prevent typos.
+Credentials in `~/.local/share/nssh/credentials.age` are encrypted using [age](https://github.com/FiloSottile/age) (ChaCha20-Poly1305 + X25519). Passwords are never written to plaintext, never appear in shell history or process listings, and are streamed directly into the PTY. Interactive prompts only (no CLI args); double-prompted to prevent typos.
 
 ### Recording Privacy
 
@@ -620,7 +682,7 @@ NSSH_RECORD=0 nssh prod-db-01  # Disable recording for this session
 
 ### File Permissions
 
-nssh enforces secure file permissions automatically. Sensitive files (credentials, age keys, backups) are `600`; configs/indexes are `644`. Verify: `ls -la ~/.ssh/nssh_credentials.age ~/.config/age/keys.txt`
+nssh enforces secure file permissions automatically. Sensitive files (credentials, age keys, backups) are `600`; configs/indexes are `644`. Verify: `ls -la ~/.local/share/nssh/credentials.age ~/.config/age/keys.txt`
 
 ### Key Management
 
@@ -632,7 +694,7 @@ Generate age key during initial setup: `mkdir -p ~/.config/age && age-keygen -o 
 
 ### Key Rotation
 
-If compromised: decrypt with old key, generate new key, re-encrypt, verify, securely delete temp files. See [examples/nssh_credentials.json](examples/nssh_credentials.json) for manual editing format.
+If compromised: decrypt with old key, generate new key, re-encrypt, verify, securely delete temp files. See [examples/config/nssh_credentials.json](examples/config/nssh_credentials.json) for manual editing format.
 
 ## Troubleshooting
 
@@ -662,7 +724,7 @@ If credentials exist but aren't matching, check that your SSH config file is map
 Check SSH config parsing:
 ```bash
 nssh host list hostname         # See if host is recognized
-cat ~/.ssh/.nssh_host_index | grep hostname  # Check index directly
+cat ~/.local/state/nssh/host_index | grep hostname  # Check index directly
 ```
 
 If the host exists in your SSH config but isn't showing up, the index may be stale. It auto-rebuilds when using `nssh host` commands, but you can rebuild manually with [CONTRIBUTING.md](../CONTRIBUTING.md) instructions.

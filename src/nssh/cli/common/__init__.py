@@ -5,7 +5,16 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
-_SUBMODULES = ["ui", "prompt", "selectors", "help", "app", "workflows"]
+_SUBMODULES = [
+    "app",
+    "banner",
+    "credentials",
+    "help",
+    "prompt",
+    "selectors",
+    "ui",
+    "workflows",
+]
 __all__ = list(_SUBMODULES)
 
 

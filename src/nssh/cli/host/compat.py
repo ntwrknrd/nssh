@@ -37,21 +37,17 @@ def apply_and_display_compat_fixes(
         parser, hostname, max_iterations=max_iterations, verbose=True
     )
 
-    console.print("\n" + "=" * 60)
-    console.print("[bold]Results[/bold]")
-    console.print("=" * 60)
-
+    console.print()
     if result["success"]:
-        console.print("\n[bold green]✓ Success![/bold green]")
-        if auth_changed:
-            console.print(f"Authentication changed to: {auth_changed}")
+        iterations = result["iterations"]
         console.print(
-            f"Compatibility fixes applied in {result['iterations']} iteration(s)"
+            f"[green]✓[/green] Compatibility fixes applied ({iterations} iteration{'s' if iterations != 1 else ''})"
         )
+        if auth_changed:
+            console.print(f"  [dim]Authentication: {auth_changed}[/dim]")
         if result["fixes_applied"]:
-            console.print("\nCompatibility options added:")
             for compat_type in result["fixes_applied"]:
-                console.print(f"  • {COMPAT_CONFIGS[compat_type]['name']}")
+                console.print(f"  [dim]- {COMPAT_CONFIGS[compat_type]['name']}[/dim]")
 
         # Add helpful message if test succeeded via KEX but failed auth
         if result.get("stopped_reason") == "auth_failed_after_kex_success":
@@ -64,17 +60,16 @@ def apply_and_display_compat_fixes(
 
         return result
 
-    console.print("\n[bold yellow]⚠ Partial success[/bold yellow]")
-    if auth_changed:
-        console.print(f"Authentication changed to: {auth_changed}")
+    iterations = result["iterations"]
+    reason = result["stopped_reason"].replace("_", " ")
     console.print(
-        f"Compatibility fixing stopped after {result['iterations']} iteration(s): {result['stopped_reason'].replace('_', ' ')}"
+        f"[yellow]![/yellow] Compatibility fixes incomplete ({iterations} iteration{'s' if iterations != 1 else ''}): {reason}"
     )
-
+    if auth_changed:
+        console.print(f"  [dim]Authentication: {auth_changed}[/dim]")
     if result["fixes_applied"]:
-        console.print("\nCompatibility options attempted:")
         for compat_type in result["fixes_applied"]:
-            console.print(f"  • {COMPAT_CONFIGS[compat_type]['name']}")
+            console.print(f"  [dim]- {COMPAT_CONFIGS[compat_type]['name']}[/dim]")
 
     test_result = result["final_test_result"]
     debug_dir = Path("/tmp/nssh")
@@ -93,7 +88,7 @@ def apply_and_display_compat_fixes(
         handle.write("\n\nSTDOUT:\n")
         handle.write(test_result["stdout"])
 
-    console.print(f"\n[dim]Debug info written to: {debug_file}[/dim]")
-    console.print("[dim]Try: ssh -v {hostname}[/dim]")
+    console.print(f"\n[yellow]![/yellow] Debug info: {debug_file}")
+    console.print(f"[yellow]![/yellow] Try: ssh -v {hostname}")
 
     return result

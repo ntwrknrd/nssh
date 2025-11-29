@@ -1,6 +1,6 @@
 [project]
 name = "nssh"
-version = "1.8.19"
+version = "1.10.119"
 description = "SSH host and password management tools for nssh"
 requires-python = ">=3.14"
 readme = "README.md"
@@ -33,7 +33,7 @@ classifiers = [
 ]
 dependencies = [
     "rich>=13.0.0",
-    "typer>=0.9.0",
+    "click>=8.0.0",
     "tomli>=2.0.1; python_version < '3.11'",
 ]
 
@@ -58,6 +58,7 @@ include-package-data = true
 "nssh" = [
     "assets/scripts/*",
     "assets/completions/*",
+    "assets/examples/*",
     "py.typed",
 ]
 

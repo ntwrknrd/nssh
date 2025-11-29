@@ -5,12 +5,16 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from nssh.cli import typer
+from nssh.cli import click
 from nssh.cli.common.app import run_cli
-from nssh.cli.common.help import UsageRow, UsageSection, render_usage
-from nssh import __version__
+from nssh.cli.common.help import (
+    build_options_panel,
+    build_usage_sections,
+    render_usage,
+    styled_group,
+)
 
-from .cleanup import cleanup_command
+from .cleanup import cleanup_command as uninstall_command
 from .init import init_command
 from .reinstall import reinstall_command
 from .status import status_command
@@ -18,86 +22,37 @@ from .status import status_command
 APP_TITLE = "nssh self"
 APP_SUBTITLE = "Install nssh CLI + optional shell helpers"
 
-app = typer.Typer(add_help_option=False, rich_markup_mode=None)
 
-app.command("init")(init_command)
-app.command("cleanup")(cleanup_command)
-app.command("status")(status_command)
-app.command("reinstall")(reinstall_command)
-
-
-@app.command("version")
-def version_command() -> None:
-    typer.echo(f"nssh {__version__}")
-
-
-def _usage_sections() -> list[UsageSection]:
-    return [
-        UsageSection(
-            "Commands",
-            rows=[
-                UsageRow(
-                    "nssh self init [OPTIONS]",
-                    "Initialize nssh with configuration and shell helpers",
-                ),
-                UsageRow(
-                    "nssh self cleanup [OPTIONS]",
-                    "Remove files installed by self",
-                ),
-                UsageRow(
-                    "nssh self status",
-                    "Show installation status and discover existing files",
-                ),
-                UsageRow(
-                    "nssh self reinstall [OPTIONS]",
-                    "Clear cache, reinstall package, refresh files",
-                ),
-                UsageRow(
-                    "nssh self version",
-                    "Show installed CLI version",
-                ),
-            ],
-        ),
-        UsageSection(
-            "Options",
-            rows=[
-                UsageRow(
-                    "--install-shell-helpers",
-                    "Install optional bash/zsh/fish wrapper functions",
-                ),
-                UsageRow(
-                    "--install-fish-completions",
-                    "Install fish completion files",
-                ),
-                UsageRow(
-                    "--append-shell-snippet PATH",
-                    "Append sourcing snippet to shell rc/profile",
-                ),
-                UsageRow(
-                    "--symlink",
-                    "Symlink helpers instead of copying (default: copy)",
-                ),
-                UsageRow(
-                    "--dry-run",
-                    "Preview install actions without writing (default: write)",
-                ),
-                UsageRow(
-                    "--skip-uv",
-                    "Skip uv reinstall; only refresh managed files",
-                ),
-                UsageRow(
-                    "--dev",
-                    "Auto-bump pyproject patch version before reinstall",
-                ),
-                UsageRow("--force, -f", "Overwrite without prompting"),
-            ],
-        ),
-    ]
+@styled_group(
+    invoke_without_command=True,
+    styled_title=APP_TITLE,
+    styled_subtitle=APP_SUBTITLE,
+)
+@click.pass_context
+def app(ctx: click.Context) -> None:
+    """Install nssh CLI + optional shell helpers."""
+    ctx.ensure_object(dict)
 
 
-def print_usage():
+app.add_command(init_command, name="init")
+app.add_command(status_command, name="status")
+app.add_command(reinstall_command, name="reinstall")
+app.add_command(uninstall_command, name="uninstall")
+
+
+def _usage_sections():
+    return build_usage_sections(app, "nssh self")
+
+
+def print_usage() -> None:
     """Print usage information"""
-    render_usage(APP_TITLE, APP_SUBTITLE, _usage_sections())
+    render_usage(
+        APP_TITLE,
+        APP_SUBTITLE,
+        _usage_sections(),
+        options_panel=build_options_panel(app),
+        show_banner=False,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -105,9 +60,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         app,
         cli_name=APP_TITLE,
         usage_cb=print_usage,
-        completion_prefix="SELF",
         argv=argv,
-        show_usage_if_no_args=False,
     )
 
 

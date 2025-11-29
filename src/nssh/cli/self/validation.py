@@ -13,6 +13,7 @@ from nssh.cli.self.manifest import InstallManifest
 from nssh.cli.common.prompt import (
     confirm,
     ask_text,
+    is_interactive,
     prompt_password_with_confirmation,
 )
 from nssh.cli.common.ssh_include import ensure_conf_d_include
@@ -59,18 +60,21 @@ def validate_in_nssh_directory() -> Path:
     return cwd
 
 
-def validate_age_key(manifest: InstallManifest, dry_run: bool) -> bool:
+def validate_age_key(
+    manifest: InstallManifest, dry_run: bool, yes: bool = False
+) -> bool:
     """Validate age key exists or offer to create it.
 
     Args:
         manifest: Install manifest to track files
         dry_run: Preview mode (don't create files)
+        yes: Auto-accept prompts (for non-interactive mode)
 
     Returns:
         True if age key exists or was created, False otherwise
 
     Raises:
-        SystemExit: If user declines to create age key
+        SystemExit: If user declines to create age key or non-interactive without --yes
     """
     age_key_path = get_age_key_path()
 
@@ -88,19 +92,28 @@ def validate_age_key(manifest: InstallManifest, dry_run: bool) -> bool:
         console.print(f"[dim]Would run: age-keygen -o {age_key_path}[/dim]")
         return True
 
-    if not confirm("Generate age key now?", default=True):
+    # In non-interactive mode without --yes, we cannot prompt
+    if not is_interactive() and not yes:
+        console.print("[red]Error: Non-interactive mode requires --yes flag[/red]")
+        console.print("[dim]Run with --yes to auto-generate age key[/dim]")
+        sys.exit(1)
+
+    # Auto-accept if --yes flag provided
+    if not yes and not confirm("Generate age key now?", default=True):
         console.print("[red]Age key required for credential encryption[/red]")
         sys.exit(1)
 
     age_key_path.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["age-keygen", "-o", str(age_key_path)], check=True)
     age_key_path.chmod(0o600)
-    console.print(f"[green]✓[/green] Age key created: {age_key_path}")
+    console.print(f"[green]+[/green] Age key created: {age_key_path}")
     manifest.add_file(age_key_path, "file", "generated/age_key")
     return True
 
 
-def validate_ssh_config(manifest: InstallManifest, dry_run: bool) -> bool:
+def validate_ssh_config(
+    manifest: InstallManifest, dry_run: bool, yes: bool = False
+) -> bool:
     """Validate SSH config exists or offer to create it.
 
     Prefers ~/.ssh/conf.d/ structure for new installations.
@@ -108,6 +121,7 @@ def validate_ssh_config(manifest: InstallManifest, dry_run: bool) -> bool:
     Args:
         manifest: Install manifest to track files
         dry_run: Preview mode (don't create files)
+        yes: Auto-accept prompts (for non-interactive mode)
 
     Returns:
         True if SSH config exists or was created
@@ -123,6 +137,7 @@ def validate_ssh_config(manifest: InstallManifest, dry_run: bool) -> bool:
             dry_run=dry_run,
             create_if_missing=False,
             preview_title="SSH config change preview",
+            yes=yes,
         )
 
         if not dry_run:
@@ -147,7 +162,16 @@ def validate_ssh_config(manifest: InstallManifest, dry_run: bool) -> bool:
         console.print(f"[dim]Would create: {ssh_conf_d}/[/dim]")
         return True
 
-    if not confirm("Create SSH config with conf.d/ structure?", default=True):
+    # In non-interactive mode without --yes, we cannot prompt
+    if not is_interactive() and not yes:
+        console.print("[red]Error: Non-interactive mode requires --yes flag[/red]")
+        console.print("[dim]Run with --yes to auto-create SSH config[/dim]")
+        sys.exit(1)
+
+    # Auto-accept if --yes flag provided
+    if not yes and not confirm(
+        "Create SSH config with conf.d/ structure?", default=True
+    ):
         console.print(
             "[yellow]Warning: SSH config required for host management[/yellow]"
         )
@@ -168,12 +192,12 @@ Host *
 """
     ssh_config.write_text(ssh_config_content)
     ssh_config.chmod(0o644)
-    console.print(f"[green]✓[/green] Created: {ssh_config}")
+    console.print(f"[green]+[/green] Created: {ssh_config}")
     manifest.add_file(ssh_config, "file", "generated/ssh_config")
 
     # Create include directory
     ssh_conf_d.mkdir(parents=True, exist_ok=True)
-    console.print(f"[green]✓[/green] Created: {ssh_conf_d}/")
+    console.print(f"[green]+[/green] Created: {ssh_conf_d}/")
     manifest.add_file(ssh_conf_d, "directory", "generated/ssh_conf_d")
     return True
 
@@ -181,14 +205,14 @@ Host *
 def create_first_include_file(
     manifest: InstallManifest,
     dry_run: bool,
-    force: bool = False,
+    yes: bool = False,
 ) -> Path | None:
     """Offer to create first include file in conf.d structure.
 
     Args:
         manifest: Install manifest to track files
         dry_run: Preview mode (don't create files)
-        force: Skip prompts and use defaults
+        yes: Auto-accept prompts (for non-interactive mode)
 
     Returns:
         Path to created include file, or None if skipped
@@ -210,8 +234,15 @@ def create_first_include_file(
         )
         return None
 
+    # In non-interactive mode without --yes, skip this optional step
+    if not is_interactive() and not yes:
+        console.print(
+            "[dim]Skipping include file creation (non-interactive mode)[/dim]"
+        )
+        return None
+
     # Offer to create first include file
-    if not force:
+    if not yes:
         console.print()
         console.print("[cyan]Create first include file?[/cyan]")
         console.print(
@@ -254,7 +285,7 @@ def create_first_include_file(
     include_file.touch()
     include_file.chmod(0o644)
     manifest.add_file(include_file, "file", "generated/include_file")
-    console.print(f"[green]✓[/green] Created: {include_file}")
+    console.print(f"[green]+[/green] Created: {include_file}")
 
     return include_file
 
@@ -262,14 +293,14 @@ def create_first_include_file(
 def guided_context_setup(
     include_file: Path | None,
     dry_run: bool,
-    force: bool = False,
+    yes: bool = False,
 ) -> bool:
     """Guide user through creating first context credential.
 
     Args:
         include_file: Path to include file (if created), or None
         dry_run: Preview mode (don't create credentials)
-        force: Skip prompts and use defaults
+        yes: Auto-accept prompts (for non-interactive mode)
 
     Returns:
         True if context was created, False otherwise
@@ -286,8 +317,15 @@ def guided_context_setup(
         )
         return False
 
+    # In non-interactive mode, skip context setup (requires password input)
+    if not is_interactive() and not yes:
+        console.print(
+            "[dim]Skipping context setup (requires interactive password input)[/dim]"
+        )
+        return False
+
     # Offer to create context credential
-    if not force:
+    if not yes:
         console.print()
         console.print("[cyan]Set up context credential?[/cyan]")
         console.print(
@@ -349,12 +387,12 @@ def guided_context_setup(
 
         # Create context
         cm.create_context(context_name, include_file.name)
-        console.print(f"[green]✓[/green] Context '{context_name}' created")
+        console.print(f"[green]+[/green] Context '{context_name}' created")
 
         # Add credential
         cm.add_context_credential(context_name, username, password, overwrite=True)
         console.print(
-            f"[green]✓[/green] Fallback credential set for context '{context_name}'"
+            f"[green]+[/green] Fallback credential set for context '{context_name}'"
         )
 
         console.print()
@@ -371,14 +409,14 @@ def guided_context_setup(
 def offer_config_template(
     manifest: InstallManifest,
     dry_run: bool,
-    force: bool = False,
+    yes: bool = False,
 ) -> bool:
     """Offer to create config.toml from example template.
 
     Args:
         manifest: Install manifest to track files
         dry_run: Preview mode (don't create files)
-        force: Skip prompts and use defaults
+        yes: Auto-accept prompts (for non-interactive mode)
 
     Returns:
         True if config file was created, False otherwise
@@ -391,8 +429,13 @@ def offer_config_template(
             manifest.add_reference_file(config_path, "config")
         return False
 
+    # In non-interactive mode without --yes, skip this optional step
+    if not is_interactive() and not yes:
+        console.print("[dim]Skipping config file creation (non-interactive mode)[/dim]")
+        return False
+
     # Offer to create config file
-    if not force:
+    if not yes:
         console.print()
         console.print("[cyan]Create config file from template?[/cyan]")
         console.print(
@@ -407,7 +450,7 @@ def offer_config_template(
 
     if dry_run:
         console.print(f"[dim]Would create: {config_path}[/dim]")
-        console.print("[dim]Would copy from: docs/examples/config.toml[/dim]")
+        console.print("[dim]Would copy from: docs/examples/config/config.toml[/dim]")
         return True
 
     # Copy example config
@@ -421,18 +464,18 @@ def offer_config_template(
             config_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(example_config, config_path)
             config_path.chmod(0o644)
-            console.print(f"[green]✓[/green] Created: {config_path}")
+            console.print(f"[green]+[/green] Created: {config_path}")
             console.print("[dim]Edit this file to customize nssh behavior[/dim]")
             manifest.add_file(config_path, "file", "generated/config")
             return True
     except (ImportError, FileNotFoundError):
         # Fallback: try to find example in docs (development mode)
-        docs_example = Path("docs/examples/config.toml")
+        docs_example = Path("docs/examples/config/config.toml")
         if docs_example.exists():
             config_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(docs_example, config_path)
             config_path.chmod(0o644)
-            console.print(f"[green]✓[/green] Created: {config_path}")
+            console.print(f"[green]+[/green] Created: {config_path}")
             console.print("[dim]Edit this file to customize nssh behavior[/dim]")
             manifest.add_file(config_path, "file", "generated/config")
             return True
@@ -472,6 +515,7 @@ def check_credentials_file(manifest: InstallManifest, dry_run: bool) -> None:
 def validate_and_setup_configuration(
     manifest: InstallManifest,
     dry_run: bool = False,
+    yes: bool = False,
 ) -> None:
     """Validate configuration files and offer to create missing ones interactively.
 
@@ -481,12 +525,13 @@ def validate_and_setup_configuration(
     Args:
         manifest: Install manifest to track files
         dry_run: Preview mode (don't create files)
+        yes: Auto-accept prompts (for non-interactive mode)
     """
     # Validate age key
-    validate_age_key(manifest, dry_run)
+    validate_age_key(manifest, dry_run, yes=yes)
 
     # Validate SSH config
-    validate_ssh_config(manifest, dry_run)
+    validate_ssh_config(manifest, dry_run, yes=yes)
 
     # Check credentials file (informational only)
     check_credentials_file(manifest, dry_run)

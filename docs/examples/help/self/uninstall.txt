@@ -1,0 +1,13 @@
+$ nssh self uninstall --help
+
+╭─ Usage ───────────────────────────────────────────────────────────╮
+│   nssh self uninstall                 Uninstall nssh              │
+╰───────────────────────────────────────────────────────────────────╯
+
+╭─ Options ─────────────────────────────────────────────────────────╮
+│   --keep-config                       Keep config files           │
+│   --keep-recordings                   Keep recordings             │
+│   --dry-run                           Preview only                │
+│   --help, -h                          Print command-specific help │
+╰───────────────────────────────────────────────────────────────────╯
+

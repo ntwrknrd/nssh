@@ -2,8 +2,6 @@
 """Connect helper that streams credentials through inherited file descriptors."""
 
 import os
-import shutil
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,10 +38,6 @@ class MultipleMatchesError(ConnectError):
 
 class NoMatchesError(ConnectError):
     exit_code = 3
-
-
-class CredentialExpectationError(ConnectError):
-    exit_code = 1
 
 
 @dataclass(frozen=True)
@@ -202,7 +196,7 @@ def resolve_credential_for_host(
             if result:
                 return CredentialResult(*result)
             else:
-                # No credential found - check if one was expected
+                # No credential found - warn if one was expected but don't fail
                 log_debug("START: check auth type")
                 parser = SSHConfigParser()
                 host_info = parser.find_host_in_files(hostname)
@@ -212,19 +206,19 @@ def resolve_credential_for_host(
                     auth_type = detect_auth_type(host_lines)
                     log_debug(f"END: check auth type (type={auth_type})")
 
-                    # If password or keyboard-interactive auth, credential was expected
+                    # If password or keyboard-interactive auth, warn that credential was expected
                     if auth_type in ["password", "keyboard-interactive"]:
                         if username:
                             message = (
-                                f"No credential found for user '{username}' on host '{hostname}'. "
-                                f"Host is configured for {auth_type} authentication."
+                                f"Warning: No credential found for user '{username}' on host '{hostname}'. "
+                                f"SSH may prompt for password."
                             )
                         else:
                             message = (
-                                f"No credential found for host '{hostname}'. "
-                                f"Host is configured for {auth_type} authentication."
+                                f"Warning: No credential found for host '{hostname}'. "
+                                f"SSH may prompt for password."
                             )
-                        raise CredentialExpectationError(message)
+                        print(message, file=sys.stderr)
 
                 return CredentialResult(None, None)
 
@@ -239,40 +233,20 @@ def _normalize_args(argv: Sequence[str] | None = None) -> List[str]:
 
 
 def _select_host_with_fzf(matches: Dict[str, str]) -> HostMatch:
+    from nssh.cli.common.selectors import FzfCancelled, fzf_select
+
     if not matches:
         raise ConnectError("No matches available for selection")
 
-    if shutil.which("fzf") is None:
-        raise ConnectError("Multiple matches found but 'fzf' is not installed")
-
     hostnames = sorted(matches.keys())
-    candidates = "\n".join(hostnames)
 
     try:
-        result = subprocess.run(
-            [
-                "fzf",
-                "--prompt",
-                "Select host: ",
-                "--height",
-                "40%",
-                "--layout",
-                "reverse",
-            ],
-            input=candidates,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-    except OSError as exc:  # pragma: no cover - system call failure
-        raise ConnectError(f"Failed to launch fzf: {exc}") from exc
-
-    if result.returncode != 0:
+        [selection] = fzf_select(hostnames, "Select host:", exit_on_cancel=False)
+    except FzfCancelled:
         raise ConnectError("Host selection cancelled", exit_code=1)
-
-    selection = result.stdout.strip()
-    if not selection:
-        raise ConnectError("Host selection cancelled", exit_code=1)
+    except SystemExit as exc:
+        # fzf not installed (exit code 1)
+        raise ConnectError("Multiple matches found but 'fzf' is not installed") from exc
 
     filepath = matches.get(selection)
     if filepath is None:
@@ -282,12 +256,12 @@ def _select_host_with_fzf(matches: Dict[str, str]) -> HostMatch:
 
 
 def _split_extra_args(args: List[str]) -> Tuple[List[str], List[str]]:
-    if "--" not in args:
+    if "+" not in args:
         return args, []
 
-    idx = args.index("--")
-    # Include the -- separator in the ssh_args for PTY connector
-    return args[:idx], args[idx:]
+    idx = args.index("+")
+    # Return args before + and args after + (excluding the + itself)
+    return args[:idx], args[idx + 1 :]
 
 
 def _split_connection_args(args: List[str]) -> Tuple[List[str], List[str]]:
@@ -380,7 +354,11 @@ def main(argv: Sequence[str] | None = None):
         try:
             host_match = find_host_match(search_term)
         except MultipleMatchesError as exc:
-            host_match = _select_host_with_fzf(exc.matches)
+            try:
+                host_match = _select_host_with_fzf(exc.matches)
+            except ConnectError as fzf_exc:
+                # User cancelled fzf - exit silently
+                sys.exit(fzf_exc.exit_code)
         except ConnectError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(exc.exit_code)

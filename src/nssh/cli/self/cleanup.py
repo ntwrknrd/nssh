@@ -5,11 +5,10 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Annotated
 
-from nssh.cli import typer
+from nssh.cli import click
 from nssh.cli.self.manifest import delete_manifest, read_manifest
-from nssh.cli.common import ui
+from nssh.cli.common.banner import FAIL, NOOP, OK, banner
 from nssh.core.env.paths import (
     credential_file_path,
     host_index_path,
@@ -22,35 +21,27 @@ from nssh.core.ui.console import get_console
 console = get_console()
 
 
-def cleanup_command(
-    keep_config: Annotated[
-        bool,
-        typer.Option("--keep-config", help="Keep credentials and config files"),
-    ] = False,
-    keep_recordings: Annotated[
-        bool,
-        typer.Option("--keep-recordings", help="Keep recording data"),
-    ] = False,
-    dry_run: Annotated[
-        bool,
-        typer.Option("--dry-run/--no-dry-run", help="Preview actions without removing"),
-    ] = False,
-):
+@click.command(short_help="Uninstall nssh")
+@click.option("--keep-config", is_flag=True, default=False, help="Keep config files")
+@click.option("--keep-recordings", is_flag=True, default=False, help="Keep recordings")
+@click.option("--dry-run/--no-dry-run", default=False, help="Preview only")
+def cleanup_command(keep_config: bool, keep_recordings: bool, dry_run: bool) -> None:
     """Remove nssh files tracked by self (cleanup installation)."""
 
     share_dir = share_assets_dir()
 
-    ui.show_panel(
-        "nssh self cleanup",
-        "Remove files installed by self",
-        style="yellow",
-    )
+    with banner("UNINSTALL NSSH", OK) as set_outcome:
+        _cleanup(share_dir, keep_config, keep_recordings, dry_run, set_outcome)
 
+
+def _cleanup(share_dir, keep_config, keep_recordings, dry_run, set_outcome) -> None:
+    """Internal implementation for cleanup."""
     manifest = read_manifest(share_dir)
     if manifest is None:
         console.print("[red]Error:[/red] No manifest found - nothing to uninstall")
         console.print(f"[dim]Expected manifest at: {share_dir / 'manifest.json'}[/dim]")
-        raise typer.Exit(1)
+        set_outcome(FAIL)
+        raise SystemExit(1)
 
     console.print(f"[cyan]Found manifest with {len(manifest.files)} files[/cyan]")
 
@@ -61,7 +52,7 @@ def cleanup_command(
             console.print(f"[yellow]![/yellow] Profile file not found: {profile_path}")
             continue
 
-        console.print(f"[yellow]Removing[/yellow] profile snippet from {profile_path}")
+        console.print(f"[red]-[/red] Removing profile snippet from {profile_path}")
         if not dry_run:
             lines = profile_path.read_text().splitlines()
             # Find marker and remove block
@@ -92,7 +83,7 @@ def cleanup_command(
             console.print(f"[dim]Already removed: {file_path}[/dim]")
             continue
 
-        console.print(f"[yellow]Removing[/yellow] {file_path}")
+        console.print(f"[red]-[/red] Removing {file_path}")
         if not dry_run:
             if file_entry.type == "directory":
                 # Only remove directory if empty
@@ -130,9 +121,5 @@ def cleanup_command(
     if not dry_run:
         delete_manifest(share_dir)
         console.print("[green]✓[/green] Manifest removed")
-
-    ui.show_panel(
-        "Cleanup Complete",
-        "nssh has been removed from your system",
-        style="green",
-    )
+    else:
+        set_outcome(NOOP)

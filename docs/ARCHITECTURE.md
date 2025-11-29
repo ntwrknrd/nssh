@@ -189,7 +189,7 @@ Uses same PTY password injection mechanism as interactive SSH connector.
 1. User runs: nssh [user@]<search>
    └─> CLI fast-path extracts optional user@ prefix
 
-2. `connect.py` checks `~/.ssh/.nssh_host_index` for exact match
+2. `connect.py` checks `~/.local/state/nssh/host_index` for exact match
    ├─> Index hit: proceeds immediately
    └─> Index miss: parses SSH configs and Include directives
 
@@ -198,7 +198,7 @@ Uses same PTY password injection mechanism as interactive SSH connector.
    └─> Multiple matches: launches in-process `fzf` for interactive selection
 
 4. Credential resolution:
-   ├─> Loads `~/.ssh/nssh_credentials.age`
+   ├─> Loads `~/.local/share/nssh/credentials.age`
    ├─> Prefers host-specific credentials (respecting requested username)
    ├─> Falls back to the context credential referenced by the Include file
    └─> Returns `(username, password)` tuple or `None`
@@ -212,7 +212,7 @@ Uses same PTY password injection mechanism as interactive SSH connector.
 
 ### Fallback Behavior
 
-When the pre-compiled index (`~/.ssh/.nssh_host_index`) is missing or doesn't contain a match:
+When the pre-compiled index (`~/.local/state/nssh/host_index`) is missing or doesn't contain a match:
 
 1. `connect.py` falls back to full SSH config parsing
 2. Reads `~/.ssh/config` and follows all `Include` directives
@@ -224,7 +224,7 @@ The index is automatically rebuilt by `nssh host` commands (`add`, `remove`, `so
 
 ## SSH Compatibility Detection and Remediation
 
-nssh automatically detects and fixes SSH compatibility issues with legacy network equipment by monitoring SSH stderr for error patterns (kex, macs, ciphers, hostkey mismatches). When `nssh host add` tests a connection and detects an issue, it prompts to apply the appropriate fix and retests iteratively (default: 3 iterations, configurable with `--max-iterations`).
+nssh automatically detects and fixes SSH compatibility issues with legacy network equipment by monitoring SSH stderr for error patterns (kex, macs, ciphers, hostkey mismatches). When `nssh host add` tests a connection and detects an issue, it prompts to apply the appropriate fix and retests iteratively (up to 5 iterations).
 
 Legacy algorithms are appended to modern defaults using the `+` prefix (e.g., `KexAlgorithms +diffie-hellman-group1-sha1`) to maintain security for modern hosts while enabling compatibility for legacy devices. Users can trigger the automated remediation workflow with `nssh host update hostname`.
 
@@ -337,7 +337,7 @@ Recording configuration is loaded from `~/.config/nssh/config.toml` with pattern
 
 ### Cleanup Policy Implementation
 
-Old recordings can be cleaned up using the `nssh log delete` command, which removes recording sessions older than a specified number of days (default: 30). The command supports dry-run mode (`--dry-run`) to preview deletions before execution. See [USER_GUIDE.md - Managing Recordings](USER_GUIDE.md#managing-recordings) for usage details.
+Old recordings can be cleaned up using the `nssh log delete` command, which can remove recording sessions older than a specified number of days (using `--older-than N`). The command supports dry-run mode (`--dry-run`) to preview deletions before execution. See [USER_GUIDE.md - nssh log (Session Recording)](USER_GUIDE.md#nssh-log-session-recording) for usage details.
 
 ### Security Considerations
 
@@ -466,7 +466,7 @@ parser = SSHConfigParser()
 | `parse_ssh_config(file_path)` | `file_path: Path` | `Tuple[List[str], List[Tuple]]` | Parse config into header and hosts |
 | `write_ssh_config(file_path, header, hosts)` | `file_path: Path`, `header: List[str]`, `hosts: List[Tuple]` | `None` | Write config file |
 | `create_backup(file_path)` | `file_path: Path` | `None` | Create timestamped backup |
-| `rebuild_index()` | - | `None` | Rebuild `~/.ssh/.nssh_host_index` |
+| `rebuild_index()` | - | `None` | Rebuild `~/.local/state/nssh/host_index` |
 | `host_exists(file_path, hostname, hosts)` | `file_path: Path`, `hostname: str`, `hosts: Optional[List]` | `bool` | Check if host exists in file |
 | `find_host_in_files(hostname, files)` | `hostname: str`, `files: List[Path]` | `Tuple[Path, List[str]]` or `None` | Locate host across multiple config files |
 
@@ -474,15 +474,15 @@ parser = SSHConfigParser()
 
 #### Credential File Format
 
-File: `~/.ssh/nssh_credentials.age` (age-encrypted JSON containing contexts and host-specific credentials). Passwords are plaintext in decrypted JSON (encrypted in `.age` file). Edit via `nssh cred` commands, not manually.
+File: `~/.local/share/nssh/credentials.age` (age-encrypted JSON containing contexts and host-specific credentials). Passwords are plaintext in decrypted JSON (encrypted in `.age` file). Edit via `nssh cred` commands, not manually.
 
-See [docs/examples/nssh_credentials.json](examples/nssh_credentials.json) for complete format and examples.
+See [examples/nssh_credentials.json](examples/nssh_credentials.json) for complete format and examples.
 
 #### Host Index Format
 
-File: `~/.ssh/.nssh_host_index` (plaintext, auto-generated). Format: `hostname|filepath` pairs (one per line). Automatically rebuilt by `nssh host` commands. Used for fast exact-match lookups (fast vs slower full parse).
+File: `~/.local/state/nssh/host_index` (plaintext, auto-generated). Format: `hostname|filepath` pairs (one per line). Automatically rebuilt by `nssh host` commands. Used for fast exact-match lookups (fast vs slower full parse).
 
-See [docs/examples/.nssh_host_index](examples/.nssh_host_index) for format example.
+See [examples/state/.nssh_host_index](examples/state/.nssh_host_index) for format example.
 
 #### Timing Log Format
 
@@ -507,7 +507,7 @@ See [benchmark-run-example.txt](examples/benchmark-run-example.txt) for example 
 
 ### Index File Format
 
-Location: `~/.ssh/.nssh_host_index`
+Location: `~/.local/state/nssh/host_index`
 
 Format: Plain text, one line per host
 
@@ -542,7 +542,7 @@ def rebuild_index():
             hosts.append(f"{host_entry.alias}|{file.absolute_path}")
 
     # Write to index file
-    write_file("~/.ssh/.nssh_host_index", "\n".join(hosts))
+    write_file("~/.local/state/nssh/host_index", "\n".join(hosts))
 ```
 
 ### Lookup Performance
@@ -550,7 +550,7 @@ def rebuild_index():
 **Index-based lookup (exact match):**
 
 ```bash
-grep "^hostname|" ~/.ssh/.nssh_host_index
+grep "^hostname|" ~/.local/state/nssh/host_index
 # Result: fast (single grep operation)
 ```
 
@@ -640,7 +640,7 @@ Test age decryption:
 ```bash
 # Manually decrypt credentials
 
-age -d -i ~/.config/age/keys.txt ~/.ssh/nssh_credentials.age | python3 -m json.tool
+age -d -i ~/.config/age/keys.txt ~/.local/share/nssh/credentials.age | python3 -m json.tool
 
 # If decryption fails:
 # - Check file permissions (should be 600)

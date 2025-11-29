@@ -105,7 +105,7 @@ For developer-specific debugging:
 - Target Python 3.14+ with full type hints on new public functions. Keep to PEP 8 spacing (4-space indents, ~100 character lines).
 - CLI command names use simple verbs (e.g., `add`, `get`, `list`, `rm`); internal helpers use descriptive snake_case like `prompt_required`.
 - Prefer Rich panels/tables for human-facing output, and keep docstrings short and action-oriented.
-- Use the shared CLI toolkit in `src/nssh/cli/common/`: `ui.show_panel`/`print_table` for Rich output, `prompt.ask_text`/`confirm` for questions, `selectors.select_via_fzf` for `fzf` prompts, `help.render_usage` for `--help`, `app.run_cli` for startup/KeyboardInterrupt handling, and `workflows.*` for multi-step confirmations. Adding new helpers there keeps styles consistent across commands.
+- Use the shared CLI toolkit in `src/nssh/cli/common/`: `ui.show_panel`/`print_table` for Rich output, `prompt.ask_text`/`confirm` for questions, `selectors.fzf_select` for `fzf` prompts (supports `multi=True` for multi-select), `help.render_usage` for `--help`, `app.run_cli` for startup/KeyboardInterrupt handling, and `workflows.*` for multi-step confirmations. Adding new helpers there keeps styles consistent across commands.
 - Maintain context-aware credential defaults: route new logic through the shared analyzers in `src/nssh/core/` instead of bespoke scripts.
 
 ## Adding CLI Commands

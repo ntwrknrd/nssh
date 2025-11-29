@@ -1,0 +1,14 @@
+$ nssh benchmark ssh --help
+
+╭─ Usage ──────────────────────────────────────────────────────────────╮
+│   nssh benchmark ssh HOST             SSH connection overhead        │
+╰──────────────────────────────────────────────────────────────────────╯
+
+╭─ Options ────────────────────────────────────────────────────────────╮
+│   --warmups INTEGER                   Warmup runs ignored in summary │
+│   --samples INTEGER                   Measured runs captured         │
+│   --simple-only                       Report only total durations    │
+│   --no-record                         Disable session recording      │
+│   --help, -h                          Print command-specific help    │
+╰──────────────────────────────────────────────────────────────────────╯
+

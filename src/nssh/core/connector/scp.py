@@ -131,6 +131,7 @@ class ScpConnector:
 
         self._password_sent = False
         self._buffer = bytearray()
+        self._user_interrupted = False  # Track if user sent ^C
 
         # Selector for event-driven I/O
         self._selector: selectors.DefaultSelector | None = None
@@ -168,6 +169,10 @@ class ScpConnector:
 
         if not data:
             return False
+
+        # Detect ^C (0x03) - user interrupt in raw mode
+        if b"\x03" in data:
+            self._user_interrupted = True
 
         os.write(master_fd, data)
         return True
@@ -416,6 +421,12 @@ class ScpConnector:
                 console.print(f"[red]INTERRUPTED[/red] {current_file}")
             else:
                 console.print("[red]INTERRUPTED[/red] transfer failed")
+
+            # Propagate as KeyboardInterrupt if user interrupted (^C in raw mode
+            # or child killed by SIGINT) so banner shows ABORT instead of FAIL
+            if self._user_interrupted or child_exit_code == -2:
+                raise KeyboardInterrupt
+
         return child_exit_code
 
     def _print_completion_summary(

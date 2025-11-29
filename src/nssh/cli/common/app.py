@@ -1,4 +1,4 @@
-"""Shared Typer application bootstrapping helpers."""
+"""Shared Click application bootstrapping helpers."""
 
 from __future__ import annotations
 
@@ -7,12 +7,9 @@ import sys
 import traceback
 from typing import Callable, Sequence
 
-from typing import TYPE_CHECKING
+from click.exceptions import Abort, ClickException
 
 from nssh.core.ui.console import get_console
-
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    pass
 
 
 def _first_positional_index(args: list[str]) -> int | None:
@@ -42,20 +39,26 @@ def _is_global_help_request(args: list[str]) -> bool:
     return any(idx < first_positional for idx in help_indices)
 
 
-def _should_handle_completion(prefix: str, cli_name: str | None) -> bool:
-    env_keys: list[str] = []
-    if prefix:
-        env_keys.append(f"_NSSH_{prefix.upper()}_COMPLETE")
+def _get_completion_prog_name(cli_name: str) -> str:
+    """Derive the prog_name used for Click's completion env var.
 
-    if cli_name:
-        canonical = cli_name.upper().replace("-", "_")
-        env_keys.append(f"_{canonical}_COMPLETE")
+    Click uses _{PROG_NAME}_COMPLETE where PROG_NAME is the uppercase
+    program name with spaces/dashes replaced by underscores.
+    """
+    return cli_name.lower().replace(" ", "-")
 
-    env_keys.append("_TYPER_COMPLETE")
 
-    return any(
-        any(key.startswith(candidate) for key in os.environ) for candidate in env_keys
-    )
+def _should_handle_completion(cli_name: str) -> bool:
+    """Check if shell completion is being requested.
+
+    Click uses _{PROG_NAME}_COMPLETE environment variables for completion.
+    The prog_name is derived from cli_name (e.g., "nssh benchmark" -> "nssh-benchmark").
+    """
+    prog_name = _get_completion_prog_name(cli_name)
+    canonical = prog_name.upper().replace("-", "_")
+    env_prefix = f"_{canonical}_COMPLETE"
+
+    return any(key.startswith(env_prefix) for key in os.environ)
 
 
 def run_cli(
@@ -63,14 +66,23 @@ def run_cli(
     *,
     cli_name: str,
     usage_cb: Callable[[], None],
-    completion_prefix: str,
     show_usage_if_no_args: bool = True,
     argv: Sequence[str] | None = None,
 ) -> None:
-    """Execute a Typer CLI with shared completion/help/version handling."""
+    """Execute a Click CLI with shared completion/help/version handling.
 
-    if _should_handle_completion(completion_prefix, cli_name):
-        app()
+    Args:
+        app: Click group/command to execute
+        cli_name: Display name (e.g., "nssh benchmark") - also used to derive
+                  the prog_name for shell completion (e.g., "nssh-benchmark")
+        usage_cb: Callback to display custom help/usage
+        show_usage_if_no_args: Show usage when no args provided
+        argv: Override sys.argv[1:] for testing
+    """
+    # Handle completion
+    if _should_handle_completion(cli_name):
+        prog_name = _get_completion_prog_name(cli_name)
+        app(prog_name=prog_name, standalone_mode=True)
         return
 
     args = list(sys.argv[1:] if argv is None else argv)
@@ -82,17 +94,17 @@ def run_cli(
         usage_cb()
         raise SystemExit(1)
 
-    console = get_console()
     try:
-        # Pass args explicitly so Typer doesn't use sys.argv
-        if argv is not None:
-            app(args=args, standalone_mode=False)
-        else:
-            app()
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Cancelled by user[/yellow]")
-        raise SystemExit(0)
+        prog_name = _get_completion_prog_name(cli_name)
+        app(args=args, prog_name=prog_name, standalone_mode=False)
+    except (KeyboardInterrupt, Abort):
+        raise SystemExit(130)
+    except SystemExit:
+        raise
+    except ClickException as exc:
+        get_console().print(f"\n[red]Error: {exc.format_message()}[/red]")
+        raise SystemExit(exc.exit_code)
     except Exception as exc:  # pragma: no cover - defensive
-        console.print(f"\n[red]Error: {exc}[/red]")
+        get_console().print(f"\n[red]Error: {exc}[/red]")
         traceback.print_exc()
         raise SystemExit(1)

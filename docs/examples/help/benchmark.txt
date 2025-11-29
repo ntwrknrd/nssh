@@ -1,0 +1,10 @@
+$ nssh benchmark --help
+
+╭─ Usage ───────────────────────────────────────────────────────────╮
+│   nssh benchmark scp HOST             SCP file transfer overhead  │
+│   nssh benchmark ssh HOST             SSH connection overhead     │
+╰───────────────────────────────────────────────────────────────────╯
+
+╭─ Options ─────────────────────────────────────────────────────────╮
+│   --help, -h                          Print command-specific help │
+╰───────────────────────────────────────────────────────────────────╯

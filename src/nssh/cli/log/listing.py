@@ -2,43 +2,62 @@
 
 from __future__ import annotations
 
-from typing import List
+import re
+from typing import Optional
 
-from nssh.cli import typer
+from nssh.cli import click
+from nssh.cli.common.banner import FAIL, OK, banner
 
 from nssh.core.ui.console import get_console
 
 from . import common
 
 
-def list_sessions(
-    search: List[str] = typer.Option(
-        [],
-        "--search",
-        "-s",
-        help="Filter results by keyword (repeatable for AND logic)",
-    ),
-) -> None:
-    """Render recorded sessions, optionally filtering by keywords."""
+def _matches_pattern(pattern: re.Pattern, *fields: str) -> bool:
+    """Return True if pattern matches any of the fields."""
+    return any(pattern.search(f) for f in fields if f)
+
+
+@click.command(short_help="List recorded sessions")
+@click.option(
+    "--select",
+    "-s",
+    default=None,
+    help="Filter by regex pattern",
+)
+def list_sessions(select: Optional[str]) -> None:
+    """Render recorded sessions, optionally filtering by regex pattern."""
+    with banner("LIST RECORDED SESSIONS", OK) as set_outcome:
+        _list_sessions(select, set_outcome)
+
+
+def _list_sessions(select: Optional[str], set_outcome) -> None:
+    """Internal implementation for listing sessions."""
     sessions = common.load_sessions()
     rows = list(sessions)
 
-    if search:
+    if select:
         console = get_console()
-        for term in search:
-            term_lower = term.lower()
-            rows = [
-                r
-                for r in rows
-                if term_lower in r.host.lower()
-                or (r.session_label and term_lower in r.session_label.lower())
-                or term_lower in r.started_at.strftime("%Y-%m-%d").lower()
-            ]
+        try:
+            pattern = re.compile(select, re.IGNORECASE)
+        except re.error as e:
+            console.print(f"[red]Invalid regex pattern: {e}[/red]")
+            set_outcome(FAIL)
+            raise SystemExit(1)
+
+        rows = [
+            r
+            for r in rows
+            if _matches_pattern(
+                pattern,
+                r.host,
+                r.session_label or "",
+                r.started_at.strftime("%Y-%m-%d"),
+            )
+        ]
 
         if not rows:
-            console.print(
-                f"\n[yellow]No sessions found matching all terms: {' '.join(search)}[/yellow]"
-            )
-            raise typer.Exit(0)
+            console.print(f"\n[yellow]No sessions matching pattern: {select}[/yellow]")
+            raise SystemExit(0)
 
     common.print_sessions(rows)

@@ -1,0 +1,14 @@
+$ nssh cp --help
+
+╭─ Usage ────────────────────────────────────────────────────╮
+│   nssh cp [HOST]:src local            Pull from remote     │
+│   nssh cp local [HOST]:dest           Push to remote       │
+╰────────────────────────────────────────────────────────────╯
+
+╭─ Options ──────────────────────────────────────────────────╮
+│   --recursive, -r                     Copy directories     │
+│   --preserve, -p                      Preserve times/modes │
+│   --quiet, -q                         Disable progress     │
+│   --verbose, -v                       Verbose output       │
+│   + [SCP_ARGS]                        Pass args to scp     │
+╰────────────────────────────────────────────────────────────╯

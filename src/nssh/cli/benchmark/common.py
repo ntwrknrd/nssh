@@ -117,7 +117,7 @@ def run_simple_capture(
         f"Max: {timing_core.format_duration_ms(max_ms)}  |  "
         f"Std Dev: {timing_core.format_duration_ms(std_ms)}  |  Samples: {len(totals)}"
     )
-    ui.show_panel("Simple nssh benchmark", summary_body, style="cyan")
+    ui.show_panel("nssh benchmark", summary_body, style="cyan")
 
     table = create_standard_table(
         [("Statistic", "cyan"), ("Value", "green")],
@@ -141,8 +141,8 @@ def run_simple_capture(
 def render_event_summary(summary: timing_core.TimingSummary) -> None:
     """Pretty-print legacy timing summaries."""
     ui.show_panel(
-        "Timing Summary",
-        f"Total nssh overhead: {summary.total_ms}ms",
+        "nssh benchmark",
+        f"Timing summary (total overhead: {summary.total_ms}ms)",
         style="cyan",
     )
 

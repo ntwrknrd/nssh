@@ -6,15 +6,17 @@ import os
 from pathlib import Path
 from typing import Dict
 
-from nssh.core.env.settings import default_config_path, load_toml_config
+from nssh.core.env.settings import (
+    default_config_path,
+    default_data_root,
+    default_state_root,
+    load_toml_config,
+)
 
-_DEFAULT_CREDENTIAL_FILE = "~/.ssh/nssh_credentials.age"
+# XDG-compliant defaults (credentials, backups, host_index use functions below)
 _DEFAULT_AGE_KEY = "~/.config/age/keys.txt"
-_DEFAULT_BACKUP_DIR = "~/.ssh/backups"
 _DEFAULT_SSH_CONFIG = "~/.ssh/config"
 _DEFAULT_SSH_INCLUDE_DIR = "~/.ssh/conf.d"
-_DEFAULT_HOST_INDEX = "~/.ssh/.nssh_host_index"
-_DEFAULT_SHARE_DIR = "~/.local/share/nssh"
 _DEFAULT_FISH_FUNCTIONS_DIR = "~/.config/fish/functions"
 _DEFAULT_FISH_COMPLETIONS_DIR = "~/.config/fish/completions"
 
@@ -49,11 +51,20 @@ def _self_config() -> Dict[str, str]:
 
 
 def credential_file_path() -> Path:
+    """Return path to age-encrypted credentials file.
+
+    Priority:
+    1. NSSH_CRED_FILE environment variable
+    2. [encryption] credential_file in config.toml
+    3. Default: ~/.local/share/nssh/credentials.age
+    """
     explicit = os.getenv("NSSH_CRED_FILE")
     if explicit:
         return Path(explicit).expanduser()
-    config_value = _encryption_config().get("credential_file", _DEFAULT_CREDENTIAL_FILE)
-    return Path(config_value).expanduser()
+    config_value = _encryption_config().get("credential_file")
+    if config_value:
+        return Path(config_value).expanduser()
+    return default_data_root() / "credentials.age"
 
 
 def age_key_path() -> Path:
@@ -65,7 +76,16 @@ def age_key_path() -> Path:
 
 
 def backup_directory() -> Path:
-    return Path(os.getenv("NSSH_BACKUP_DIR", _DEFAULT_BACKUP_DIR)).expanduser()
+    """Return path to backup directory.
+
+    Priority:
+    1. NSSH_BACKUP_DIR environment variable
+    2. Default: ~/.local/share/nssh/backups
+    """
+    explicit = os.getenv("NSSH_BACKUP_DIR")
+    if explicit:
+        return Path(explicit).expanduser()
+    return default_data_root() / "backups"
 
 
 def ssh_config_path() -> Path:
@@ -99,19 +119,37 @@ def ssh_include_dir() -> Path:
 
 
 def host_index_path() -> Path:
+    """Return path to host index file.
+
+    Priority:
+    1. NSSH_HOST_INDEX environment variable
+    2. [ssh] host_index in config.toml
+    3. Default: ~/.local/state/nssh/host_index
+    """
     explicit = os.getenv("NSSH_HOST_INDEX")
     if explicit:
         return Path(explicit).expanduser()
-    config_value = _ssh_config().get("host_index", _DEFAULT_HOST_INDEX)
-    return Path(config_value).expanduser()
+    config_value = _ssh_config().get("host_index")
+    if config_value:
+        return Path(config_value).expanduser()
+    return default_state_root() / "host_index"
 
 
 def share_assets_dir() -> Path:
+    """Return path to shared assets directory.
+
+    Priority:
+    1. NSSH_SHARE_DIR environment variable
+    2. [self] share_dir in config.toml
+    3. Default: ~/.local/share/nssh
+    """
     explicit = os.getenv("NSSH_SHARE_DIR")
     if explicit:
         return Path(explicit).expanduser()
-    config_value = _self_config().get("share_dir", _DEFAULT_SHARE_DIR)
-    return Path(config_value).expanduser()
+    config_value = _self_config().get("share_dir")
+    if config_value:
+        return Path(config_value).expanduser()
+    return default_data_root()
 
 
 def fish_functions_dir() -> Path:

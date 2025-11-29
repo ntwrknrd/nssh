@@ -1,7 +1,7 @@
 """nssh CLI package bootstrap helpers.
 
-We expose Typer and selected Rich classes but only import them on demand so the
-bare ``nssh <host>`` fast-path avoids paying for Click/Typer startup.
+We expose Click and selected Rich classes but only import them on demand
+so the bare ``nssh <host>`` fast-path avoids paying for CLI framework startup.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
-    "typer",
+    "click",
     "Console",
     "Prompt",
     "Confirm",
@@ -21,7 +21,7 @@ __all__ = [
 
 def _fail_missing_dependency(exc: Exception) -> None:
     print(f"Error: Required library not found. {exc}")
-    print("Install with: pip install rich typer")
+    print("Install with: pip install rich click")
     raise SystemExit(1)
 
 
@@ -49,13 +49,13 @@ def _load_rich_attribute(name: str) -> Any:
 
 
 def __getattr__(name: str) -> Any:  # pragma: no cover - import indirection
-    if name == "typer":
+    if name == "click":
         try:
-            import typer as _typer
+            import click as _click
         except ImportError as exc:
             _fail_missing_dependency(exc)
-        globals()["typer"] = _typer
-        return _typer
+        globals()["click"] = _click
+        return _click
 
     if name in {"Console", "Prompt", "Confirm", "Panel", "Table", "Syntax"}:
         return _load_rich_attribute(name)

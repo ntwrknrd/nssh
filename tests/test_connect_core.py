@@ -9,7 +9,9 @@ from nssh.core import connect
 
 
 def _set_fake_home(monkeypatch, tmp_path):
-    monkeypatch.setattr(connect.Path, "home", lambda: tmp_path)
+    import pathlib
+
+    monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
 
 
@@ -24,12 +26,12 @@ def disable_timing(monkeypatch):
 
 
 def test_find_host_match_prefers_index(tmp_path, monkeypatch):
-    ssh_dir = tmp_path / ".ssh"
-    ssh_dir.mkdir()
-    index = ssh_dir / ".nssh_host_index"
+    # Create index file in tmp location
+    index = tmp_path / "host_index"
     index.write_text("router1|/tmp/work_hosts\n")
 
-    _set_fake_home(monkeypatch, tmp_path)
+    # Patch host_index_path to return our test index
+    monkeypatch.setattr(connect, "host_index_path", lambda: index)
 
     match = connect.find_host_match("router1")
     assert match.hostname == "router1"
@@ -157,7 +159,7 @@ def test_resolve_credential_for_host_returns_secret(monkeypatch):
     assert result.password == "pw"
 
 
-def test_resolve_credential_for_host_exits_when_password_expected(monkeypatch, capsys):
+def test_resolve_credential_for_host_warns_when_password_expected(monkeypatch, capsys):
     class DummyManager:
         def resolve_credential(self, **_):
             return None
@@ -170,17 +172,21 @@ def test_resolve_credential_for_host_exits_when_password_expected(monkeypatch, c
     monkeypatch.setattr(connect, "SSHConfigParser", lambda: DummyParser())
     monkeypatch.setattr(connect, "detect_auth_type", lambda _lines: "password")
 
-    with pytest.raises(connect.CredentialExpectationError) as exc:
-        connect.resolve_credential_for_host("router1", "/tmp/work_hosts")
-    assert "No credential found" in str(exc.value)
+    result = connect.resolve_credential_for_host("router1", "/tmp/work_hosts")
+    assert result.username is None
+    assert result.password is None
+
+    captured = capsys.readouterr()
+    assert "Warning: No credential found" in captured.err
+    assert "SSH may prompt for password" in captured.err
 
 
 def test_split_extra_args_with_separator():
     base, extra = connect._split_extra_args(
-        ["router1", "--", "-o", "StrictHostKeyChecking=accept-new"]
+        ["router1", "+", "-o", "StrictHostKeyChecking=accept-new"]
     )
     assert base == ["router1"]
-    assert extra == ["--", "-o", "StrictHostKeyChecking=accept-new"]
+    assert extra == ["-o", "StrictHostKeyChecking=accept-new"]
 
 
 def test_split_extra_args_without_separator():
@@ -219,14 +225,11 @@ def test_split_connection_args_respects_remote_command_separator():
 
 
 def test_select_host_with_fzf_success(monkeypatch):
-    monkeypatch.setattr(connect.shutil, "which", lambda _name: "/usr/bin/fzf")
+    from nssh.cli.common import selectors
 
-    class DummyResult:
-        def __init__(self):
-            self.returncode = 0
-            self.stdout = "router-west\n"
-
-    monkeypatch.setattr(connect.subprocess, "run", lambda *_, **__: DummyResult())
+    monkeypatch.setattr(
+        selectors, "fzf_select", lambda opts, prompt, **kw: ["router-west"]
+    )
 
     match = connect._select_host_with_fzf(
         {"router-east": "/tmp/a", "router-west": "/tmp/b"}
@@ -236,7 +239,12 @@ def test_select_host_with_fzf_success(monkeypatch):
 
 
 def test_select_host_with_fzf_requires_binary(monkeypatch):
-    monkeypatch.setattr(connect.shutil, "which", lambda _name: None)
+    from nssh.cli.common import selectors
+
+    def fake_fzf_select(opts, prompt, **kw):
+        raise SystemExit(1)
+
+    monkeypatch.setattr(selectors, "fzf_select", fake_fzf_select)
 
     with pytest.raises(connect.ConnectError) as exc:
         connect._select_host_with_fzf({"router-west": "/tmp/b"})
@@ -245,14 +253,12 @@ def test_select_host_with_fzf_requires_binary(monkeypatch):
 
 
 def test_select_host_with_fzf_cancel(monkeypatch):
-    monkeypatch.setattr(connect.shutil, "which", lambda _name: "/usr/bin/fzf")
+    from nssh.cli.common import selectors
 
-    class DummyResult:
-        def __init__(self):
-            self.returncode = 1
-            self.stdout = ""
+    def fake_fzf_select(opts, prompt, **kw):
+        raise selectors.FzfCancelled()
 
-    monkeypatch.setattr(connect.subprocess, "run", lambda *_, **__: DummyResult())
+    monkeypatch.setattr(selectors, "fzf_select", fake_fzf_select)
 
     with pytest.raises(connect.ConnectError) as exc:
         connect._select_host_with_fzf({"router-west": "/tmp/b"})

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typer.testing import CliRunner
+from click.testing import CliRunner
 
 from nssh import __version__
 from nssh.cli.self import app as self_app
@@ -51,10 +51,19 @@ def test_delete_manifest(tmp_path):
     assert not (tmp_path / "manifest.json").exists()
 
 
-def test_self_version_command_reports_package_version():
-    """Version command surfaces the installed nssh version string."""
+def test_self_status_shows_version(tmp_path, monkeypatch):
+    """Status command shows the installed nssh version string."""
+    share_dir = tmp_path / "share"
+    share_dir.mkdir(parents=True)
 
-    result = runner.invoke(self_app, ["version"])
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[self]\n")
+
+    monkeypatch.setenv("NSSH_SHARE_DIR", str(share_dir))
+    monkeypatch.setenv("NSSH_CONFIG", str(config_path))
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+    result = runner.invoke(self_app, ["status"])
 
     assert result.exit_code == 0
     assert __version__ in result.stdout
@@ -77,7 +86,7 @@ def test_self_status_command_runs_in_isolated_env(tmp_path, monkeypatch):
     result = runner.invoke(self_app, ["status"])
 
     assert result.exit_code == 0
-    assert "nssh self status" in result.stdout
+    assert "NSSH STATUS" in result.stdout
 
 
 def test_self_init_command_dry_run(tmp_path, monkeypatch):
@@ -94,7 +103,7 @@ def test_self_init_command_dry_run(tmp_path, monkeypatch):
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     monkeypatch.setattr("nssh.cli.self.init.check_nssh_on_path", lambda: True)
 
-    result = runner.invoke(self_app, ["init", "--dry-run", "--force"])
+    result = runner.invoke(self_app, ["init", "--dry-run", "--skip-shell"])
 
     assert result.exit_code == 0
-    assert "nssh self init" in result.stdout
+    assert "INSTALL NSSH" in result.stdout

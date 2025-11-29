@@ -39,6 +39,27 @@ def show_panel(
             subtitle=subtitle,
         )
     console.print(panel)
+    console.print()
+
+
+def show_banner(title: str, *, style: str = "cyan", is_footer: bool = False) -> None:
+    """Render a horizontal rule banner with centered title.
+
+    Args:
+        title: The text to display centered in the banner.
+        style: Color/style for the title text (default: cyan for headers,
+               use green for completion banners).
+        is_footer: If True, omit trailing blank line (for footer banners).
+
+    Example:
+        >>> show_banner("CREATE SSH HOST")                          # header
+        >>> show_banner("OK", style="green", is_footer=True)        # footer
+    """
+    console = get_console()
+    console.print()
+    console.rule(f"[{style}]{title}[/{style}]", style="dim")
+    if not is_footer:
+        console.print()
 
 
 def print_table(
@@ -73,3 +94,85 @@ def warning(message: str) -> None:
 def error(message: str) -> None:
     """Print error text in red."""
     get_console().print(Text(message, style="red"))
+
+
+def render_insertion_preview(
+    new_config_block: str,
+    before_host_lines: list[str] | None,
+    after_host_lines: list[str] | None,
+    target_filepath: str,
+    *,
+    max_context_lines: int = 3,
+) -> None:
+    """Render a diff-style preview panel showing host insertion context.
+
+    Shows:
+    - Previous host (truncated to max_context_lines)
+    - New host config with green '+' prefix on each line
+    - Next host (truncated to max_context_lines)
+
+    Args:
+        new_config_block: The SSH config block being added.
+        before_host_lines: Config lines for the previous host (or None).
+        after_host_lines: Config lines for the next host (or None).
+        target_filepath: Path to the target config file.
+        max_context_lines: Max lines to show for before/after hosts.
+    """
+    console = get_console()
+
+    # Show filepath before panel
+    console.print(f"[dim]Planning host entry addition to {target_filepath}...[/dim]")
+
+    lines: list[str] = []
+
+    # Before host (truncated)
+    if before_host_lines:
+        for i, line in enumerate(before_host_lines[:max_context_lines]):
+            lines.append(f"[dim]{line.rstrip()}[/dim]")
+        if len(before_host_lines) > max_context_lines:
+            lines.append("[dim]  ...[/dim]")
+        lines.append("")  # blank line
+
+    # New host with green + prefix
+    for line in new_config_block.split("\n"):
+        if line.strip():
+            lines.append(f"[green]+[/green] {line}")
+
+    # After host (truncated)
+    if after_host_lines:
+        lines.append("")  # blank line
+        for i, line in enumerate(after_host_lines[:max_context_lines]):
+            lines.append(f"[dim]{line.rstrip()}[/dim]")
+        if len(after_host_lines) > max_context_lines:
+            lines.append("[dim]  ...[/dim]")
+
+    # Build panel content
+    content = "\n".join(lines)
+    panel = Panel.fit(
+        content,
+        border_style="cyan",
+        title="[bold]Host File Configuration[/bold]",
+        title_align="left",
+    )
+    console.print(panel)
+
+
+def render_removal_preview(host_lines: list[str]) -> None:
+    """Render a diff-style preview panel for host removal.
+
+    Shows the host config with red '-' prefix on each line.
+
+    Args:
+        host_lines: The SSH config lines for the host being removed.
+    """
+    console = get_console()
+
+    config_lines = [line.rstrip() for line in host_lines if line.strip()]
+    config_text = "\n".join(f"[red]-[/red] {line}" for line in config_lines)
+    panel = Panel.fit(
+        config_text,
+        border_style="red",
+        title="[bold]Host File Configuration[/bold]",
+        title_align="left",
+    )
+    console.print(panel)

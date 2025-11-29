@@ -4,9 +4,14 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from nssh.cli import typer
+from nssh.cli import click
 from nssh.cli.common.app import run_cli
-from nssh.cli.common.help import UsageRow, UsageSection, render_usage
+from nssh.cli.common.help import (
+    build_options_panel,
+    build_usage_sections,
+    render_usage,
+    styled_group,
+)
 
 from .delete import delete_command
 from .export import export_command
@@ -17,64 +22,37 @@ from .upload import upload_command
 APP_TITLE = "nssh log"
 APP_SUBTITLE = "Inspect, play, and manage nssh recording files"
 
-app = typer.Typer(
-    help=APP_SUBTITLE,
-    add_help_option=False,
-    rich_markup_mode=None,
+
+@styled_group(
+    invoke_without_command=True,
+    styled_title=APP_TITLE,
+    styled_subtitle=APP_SUBTITLE,
 )
-
-app.command("list")(list_sessions)
-app.command("play")(play_command)
-app.command("delete")(delete_command)
-app.command("upload")(upload_command)
-app.command("export")(export_command)
+@click.pass_context
+def app(ctx: click.Context) -> None:
+    """Log CLI group."""
+    pass
 
 
-def _usage_sections() -> list[UsageSection]:
-    return [
-        UsageSection(
-            "Commands",
-            rows=[
-                UsageRow(
-                    "nssh log [bold]list[/bold] [OPTIONS]",
-                    "List recorded sessions",
-                ),
-                UsageRow(
-                    "nssh log [bold]play[/bold] [OPTIONS]",
-                    "Play a recorded session",
-                ),
-                UsageRow(
-                    "nssh log [bold]delete[/bold] [OPTIONS]",
-                    "Delete recorded sessions",
-                ),
-                UsageRow(
-                    "nssh log [bold]upload[/bold] [OPTIONS]",
-                    "Upload recording to asciinema server",
-                ),
-                UsageRow(
-                    "nssh log [bold]export[/bold] [OPTIONS]",
-                    "Export to text or GIF format",
-                ),
-            ],
-        ),
-        UsageSection(
-            "Options",
-            rows=[
-                UsageRow("--file FILE, -f", "Path to recording file"),
-                UsageRow("--host HOST, -h", "Filter/delete by hostname"),
-                UsageRow("--date YYYY-MM-DD", "Filter by date ('*' for all)"),
-                UsageRow("--older-than DAYS", "Delete recordings older than N days"),
-                UsageRow("--search TERM, -s", "Filter by keyword"),
-                UsageRow("--output FILE, -o", "Output path for export"),
-                UsageRow("--format txt|gif", "Export format (default: txt)"),
-                UsageRow("--dry-run", "Preview without executing"),
-            ],
-        ),
-    ]
+app.add_command(list_sessions, name="list")
+app.add_command(play_command, name="play")
+app.add_command(delete_command, name="delete")
+app.add_command(upload_command, name="upload")
+app.add_command(export_command, name="export")
+
+
+def _usage_sections():
+    return build_usage_sections(app, "nssh log")
 
 
 def print_usage() -> None:
-    render_usage(APP_TITLE, APP_SUBTITLE, _usage_sections())
+    render_usage(
+        APP_TITLE,
+        APP_SUBTITLE,
+        _usage_sections(),
+        options_panel=build_options_panel(app),
+        show_banner=False,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -82,7 +60,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         app,
         cli_name=APP_TITLE,
         usage_cb=print_usage,
-        completion_prefix="LOG",
         argv=argv,
     )
 

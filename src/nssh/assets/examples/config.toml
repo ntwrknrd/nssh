@@ -1,0 +1,162 @@
+# nssh Configuration File
+#
+# Location: ~/.config/nssh/config.toml
+#
+# This file configures encryption and session recording behavior for nssh.
+# All settings are optional - nssh works without this file.
+
+[encryption]
+# Age encryption key file path
+# Default: ~/.config/age/keys.txt
+# Environment override: NSSH_AGE_KEY=/path/to/keys.txt
+# Tilde (~) expansion is supported
+age_key = "~/.config/age/keys.txt"
+
+# Encrypted credentials file path
+# Default: ~/.local/share/nssh/credentials.age
+# Environment override: NSSH_CRED_FILE=/path/to/credentials.age
+# Tilde (~) expansion is supported
+credential_file = "~/.local/share/nssh/credentials.age"
+
+[ssh]
+# Main SSH config file location
+# Default: ~/.ssh/config
+# Environment override: NSSH_SSH_CONFIG=/path/to/config
+# Tilde (~) expansion is supported
+config_file = "~/.ssh/config"
+
+# Include directory for context-specific SSH config files
+# When adding hosts with 'nssh host add', context files are created here
+# Default: ~/.ssh/conf.d
+# Environment override: NSSH_SSH_CONF_INCLUDE=/path/to/conf.d
+# Tilde (~) expansion is supported
+include_dir = "~/.ssh/conf.d"
+
+# Host index file for fast lookups
+# Default: ~/.local/state/nssh/host_index
+# Environment override: NSSH_HOST_INDEX=/custom/index
+host_index = "~/.local/state/nssh/host_index"
+
+[self]
+# Directory that stores installed shell helpers / manifests
+# Default: ~/.local/share/nssh
+# Environment override: NSSH_SHARE_DIR=/custom/share
+share_dir = "~/.local/share/nssh"
+
+# Fish integration directories
+# Defaults leverage XDG_CONFIG_HOME (e.g. ~/.config/fish/...)
+# Environment overrides: NSSH_FISH_FUNCTIONS_DIR / NSSH_FISH_COMPLETIONS_DIR
+fish_functions_dir = "~/.config/fish/functions"
+fish_completions_dir = "~/.config/fish/completions"
+
+[recording]
+# Enable or disable automatic session recording
+# Default: false
+# Environment override: NSSH_RECORD=0|1|force
+enabled = true
+
+# Recording storage directory
+# Default: ~/.local/state/nssh/casts
+# Environment override: NSSH_RECORD_DIR=/custom/path
+# Tilde (~) expansion is supported
+dir = "~/.local/state/nssh/casts"
+
+# Append mode: append to daily session file vs creating separate files
+# - true: All sessions for a host on the same day append to session-000.cast
+# - false: Each session creates a new file (session-000.cast, session-001.cast, etc.)
+# Default: true
+append_mode = true
+
+# Window size for asciinema recordings (cols x rows)
+# - Sets fixed terminal dimensions for consistent playback
+# - Format: "WIDTHxHEIGHT" (e.g., "100x30", "120x30", "80x24")
+# - Smaller dimensions result in larger fonts when played back
+# - Default: unset (uses terminal's actual size)
+# - Recommended: "100x30" for readable documentation/demos
+# window_size = "100x30"
+
+# Include patterns: Only record hosts matching these patterns
+# - Glob patterns (default): "lab-*", "*-switch", "db-0[1-3]"
+# - Regex patterns: Prefix with "regex:" like "regex:^dev-\w+$"
+# - If defined, ONLY matching hosts are recorded
+# - Mutually exclusive with exclude_hosts (include_hosts takes precedence)
+# Default: [] (empty list means record all hosts if enabled=true)
+include_hosts = [
+    "lab-*",              # All hosts starting with "lab-"
+    "dev-*",              # All hosts starting with "dev-"
+    "test-*",             # All hosts starting with "test-"
+    "regex:^staging-.*",  # Regex: all hosts starting with "staging-"
+]
+
+# Exclude patterns: Never record hosts matching these patterns
+# - Same pattern syntax as include_hosts (glob or regex:...)
+# - If defined, matching hosts are NOT recorded
+# - Only used if include_hosts is empty
+# Default: [] (empty list means no exclusions)
+# exclude_hosts = [
+#     "prod-*",            # Skip all production hosts
+#     "*.production.com",  # Skip production domain
+#     "regex:.*-mgmt$",    # Regex: skip management interfaces
+# ]
+
+# ============================================================================
+# EXAMPLE CONFIGURATIONS
+# ============================================================================
+
+# Example 1: Record everything
+# [recording]
+# enabled = true
+
+# Example 2: Only record lab environment
+# [recording]
+# enabled = true
+# include_hosts = ["lab-*"]
+
+# Example 3: Record everything except production
+# [recording]
+# enabled = true
+# exclude_hosts = ["prod-*", "*.production.com"]
+
+# Example 4: Custom storage location with regex patterns
+# [recording]
+# enabled = true
+# dir = "/mnt/recordings/nssh"
+# include_hosts = ["regex:^(dev|test|staging)-.*"]
+
+# Example 5: Separate session files (no append mode)
+# [recording]
+# enabled = true
+# append_mode = false
+# include_hosts = ["demo-*"]
+
+# ============================================================================
+# ENVIRONMENT VARIABLE OVERRIDES
+# ============================================================================
+#
+# The following environment variables override config file settings:
+#
+# NSSH_RECORD=0       - Disable recording for single connection
+# NSSH_RECORD=1       - Enable recording for single connection
+# NSSH_RECORD=force   - Fail if asciinema is not installed (for CI/CD)
+# NSSH_RECORD_DIR=... - Override storage directory
+#
+# Examples:
+#   NSSH_RECORD=0 nssh prod-server        # Don't record this session
+#   NSSH_RECORD=1 nssh test-server        # Force recording this session
+#   NSSH_RECORD_DIR=/tmp nssh lab-switch  # Save to /tmp for this session
+
+# ============================================================================
+# PATTERN MATCHING EXAMPLES
+# ============================================================================
+#
+# Glob patterns (default):
+#   "lab-*"           - Matches: lab-switch-01, lab-router-02
+#   "*-switch"        - Matches: core-switch, lab-switch
+#   "db-0[1-3]"       - Matches: db-01, db-02, db-03
+#   "*.example.com"   - Matches: host1.example.com, host2.example.com
+#
+# Regex patterns (prefix with "regex:"):
+#   "regex:^dev-.*"      - Matches: dev-server, dev-switch-01
+#   "regex:.*-mgmt$"     - Matches: switch-mgmt, router-mgmt
+#   "regex:^prod-db-\d+$" - Matches: prod-db-01, prod-db-02 (digits only)
+#   "regex:^(test|qa)-.*" - Matches: test-server, qa-server

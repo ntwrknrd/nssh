@@ -17,6 +17,7 @@ from nssh.core.env.paths import (
     host_index_path,
     ssh_config_path,
 )
+from nssh.core.env.settings import get_config
 from nssh.core.env.system import set_secure_permissions
 
 
@@ -256,7 +257,32 @@ class SSHConfigParser:
         shutil.copy2(file_path, backup_path)
         set_secure_permissions(backup_path)
 
+        self._prune_backups(file_path.name)
         return backup_path
+
+    def _prune_backups(self, source_name: str) -> None:
+        """Remove old backups exceeding the configured limit.
+
+        Args:
+            source_name: Original filename (e.g., 'config' or 'homelab')
+        """
+        max_files = get_config().backup.max_files
+        if max_files <= 0:
+            return  # No limit configured
+
+        # Find all backups for this source file: {source_name}.*.bak
+        pattern = f"{source_name}.*.bak"
+        backups = list(self.backup_dir.glob(pattern))
+
+        if len(backups) <= max_files:
+            return
+
+        # Sort by modification time, newest first
+        backups.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+        # Remove oldest backups beyond the limit
+        for stale in backups[max_files:]:
+            stale.unlink(missing_ok=True)
 
     def find_host_in_files(
         self, hostname: str, include_files: Optional[List[Path]] = None
@@ -283,6 +309,117 @@ class SSHConfigParser:
                     return file_path, host_lines
 
         return None
+
+    def find_host_by_hostname(
+        self, target_hostname: str, include_files: Optional[List[Path]] = None
+    ) -> Optional[Tuple[Path, str, List[str]]]:
+        """
+        Find a host entry by its Hostname directive value.
+
+        This searches for hosts where the Hostname directive matches the target,
+        useful when batch files contain FQDNs but SSH config uses short aliases.
+
+        Args:
+            target_hostname: The Hostname value to search for (e.g., 'k3s-d.home.arpa')
+            include_files: Optional list of files to search (defaults to all Include files)
+
+        Returns:
+            Tuple of (file_path, host_alias, host_lines) if found, None otherwise
+        """
+        if include_files is None:
+            include_files = self.find_include_files()
+
+        hostname_pattern = re.compile(r"^\s*hostname\s+(.+)$", re.IGNORECASE)
+
+        for file_path in include_files:
+            _, hosts = self.parse_ssh_config(file_path)
+
+            for host_alias, host_lines in hosts:
+                for line in host_lines:
+                    match = hostname_pattern.match(line)
+                    if match:
+                        configured_hostname = match.group(1).strip()
+                        if configured_hostname == target_hostname:
+                            return file_path, host_alias, host_lines
+
+        return None
+
+    def find_all_hosts_by_hostname(
+        self, target_hostname: str, include_files: Optional[List[Path]] = None
+    ) -> List[Tuple[Path, str, List[str]]]:
+        """
+        Find all host entries matching a Hostname directive across all config files.
+
+        Unlike find_host_by_hostname which returns the first match, this returns
+        all matches for removing hosts that appear in multiple contexts.
+
+        Args:
+            target_hostname: The Hostname value to search for (e.g., 'test.domain.local')
+            include_files: Optional list of files to search (defaults to all Include files)
+
+        Returns:
+            List of (file_path, host_alias, host_lines) tuples.
+        """
+        if include_files is None:
+            include_files = self.find_include_files()
+
+        hostname_pattern = re.compile(r"^\s*hostname\s+(.+)$", re.IGNORECASE)
+        matches: List[Tuple[Path, str, List[str]]] = []
+
+        for file_path in include_files:
+            _, hosts = self.parse_ssh_config(file_path)
+
+            for host_alias, host_lines in hosts:
+                for line in host_lines:
+                    match = hostname_pattern.match(line)
+                    if match:
+                        configured_hostname = match.group(1).strip()
+                        if configured_hostname == target_hostname:
+                            matches.append((file_path, host_alias, host_lines))
+                            break  # Found hostname in this host block
+
+        return matches
+
+    def find_all_hosts_by_alias(
+        self, alias: str, include_files: Optional[List[Path]] = None
+    ) -> List[Tuple[Path, str, List[str], str]]:
+        """
+        Find all host entries matching a given alias across all config files.
+
+        Unlike find_host_in_files which returns the first match, this returns
+        all matches to detect ambiguous cases where multiple hosts share the
+        same short name.
+
+        Args:
+            alias: Host alias to find (e.g., 'test-host')
+            include_files: Optional list of files to search (defaults to all Include files)
+
+        Returns:
+            List of (file_path, host_alias, host_lines, hostname_fqdn) tuples.
+            hostname_fqdn is extracted from the Hostname directive if present.
+        """
+        if include_files is None:
+            include_files = self.find_include_files()
+
+        hostname_pattern = re.compile(r"^\s*hostname\s+(.+)$", re.IGNORECASE)
+        matches: List[Tuple[Path, str, List[str], str]] = []
+
+        for file_path in include_files:
+            _, hosts = self.parse_ssh_config(file_path)
+
+            for host_alias, host_lines in hosts:
+                aliases = self.extract_aliases(host_lines)
+                if alias in aliases:
+                    # Extract Hostname directive if present
+                    hostname_fqdn = ""
+                    for line in host_lines:
+                        match = hostname_pattern.match(line)
+                        if match:
+                            hostname_fqdn = match.group(1).strip()
+                            break
+                    matches.append((file_path, host_alias, host_lines, hostname_fqdn))
+
+        return matches
 
     def host_exists(
         self,

@@ -2,24 +2,41 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from nssh.cli import typer
 from nssh.cli.common import ui
+from nssh.cli.common.banner import FAIL, NOOP, OK, banner
 from nssh.cli.common.prompt import confirm
-from nssh.cli.common.selectors import select_include_file
 from nssh.core.ssh.config import SSHConfigParser
-from nssh.core.ui.console import create_standard_table, get_console
+from nssh.core.ui.console import get_console
 
 console = get_console()
+
+
+@dataclass
+class FileAnalysis:
+    """Analysis results for a single config file."""
+
+    path: Path
+    hosts: List[Tuple[str, List[str]]]
+    duplicates: Dict[str, List[int]]
+    misplaced: List[Tuple[int, str, int]]
+
+    @property
+    def host_count(self) -> int:
+        return len(self.hosts)
+
+    @property
+    def has_issues(self) -> bool:
+        return bool(self.duplicates or self.misplaced)
 
 
 def _find_misplaced_hosts(
     hosts: List[Tuple[str, List[str]]],
 ) -> List[Tuple[int, str, int]]:
     """Return hosts that are out of alphabetical order."""
-
     misplaced = []
     sorted_hosts = sorted(hosts, key=lambda x: x[0].lower())
 
@@ -33,7 +50,6 @@ def _find_misplaced_hosts(
 
 def _find_duplicate_hosts(hosts: List[Tuple[str, List[str]]]) -> Dict[str, List[int]]:
     """Map hostnames to duplicate positions."""
-
     seen: Dict[str, int] = {}
     duplicates: Dict[str, List[int]] = {}
 
@@ -52,7 +68,6 @@ def _remove_duplicates(
     keep: str = "first",
 ) -> List[Tuple[str, List[str]]]:
     """Remove duplicates, keeping first or last occurrence."""
-
     indices_to_remove = set()
 
     for indices in duplicates.values():
@@ -64,149 +79,221 @@ def _remove_duplicates(
     return [host for idx, host in enumerate(hosts) if idx not in indices_to_remove]
 
 
-def _sort_config_file(
-    parser: SSHConfigParser,
-    file_path: Path,
-) -> Tuple[int, int]:
-    """Sort a single SSH config file alphabetically and remove duplicates."""
-
-    console.print(f"\n[bold]Analyzing {file_path.name}...[/bold]")
-
+def _analyze_file(parser: SSHConfigParser, file_path: Path) -> FileAnalysis:
+    """Analyze a config file for duplicates and misplaced hosts."""
     header_lines, hosts = parser.parse_ssh_config(file_path)
-    total_hosts = len(hosts)
-    if total_hosts == 0:
-        console.print("[dim]No hosts found in file[/dim]")
-        return 0, 0
-
-    console.print(f"[dim]Found {total_hosts} host entries[/dim]")
-
     duplicates = _find_duplicate_hosts(hosts)
-    if duplicates:
-        console.print(f"\n[yellow]Found {len(duplicates)} duplicate hosts:[/yellow]")
-        duplicate_rows = [
-            (hostname, str(len(indices)), ", ".join(str(i + 1) for i in indices))
-            for hostname, indices in list(duplicates.items())[:10]
-        ]
-        dup_table = create_standard_table(
-            [("Host", "yellow"), ("Occurrences", ""), ("Positions", "dim")],
-            duplicate_rows,
-        )
-        console.print(dup_table)
-        if len(duplicates) > 10:
-            console.print(f"[dim]... and {len(duplicates) - 10} more[/dim]")
-    else:
-        console.print("[green]✓ No duplicates found[/green]")
-
     misplaced = _find_misplaced_hosts(hosts)
-    if not misplaced and not duplicates:
-        console.print(
-            "[green]✓ File is already perfectly sorted with no duplicates[/green]"
-        )
-        return 0, 0
-
-    if misplaced:
-        console.print(f"\n[yellow]Found {len(misplaced)} misplaced entries:[/yellow]")
-        misplaced_rows = [
-            (
-                hostname,
-                str(current_idx + 1),
-                "→",
-                str(correct_idx + 1),
-                f"{abs(correct_idx - current_idx)} positions",
-            )
-            for current_idx, hostname, correct_idx in misplaced[:10]
-        ]
-        table = create_standard_table(
-            [
-                ("Host", "yellow"),
-                ("Current Position", ""),
-                ("→", ""),
-                ("Correct Position", ""),
-                ("Distance", ""),
-            ],
-            misplaced_rows,
-        )
-        console.print(table)
-        if len(misplaced) > 10:
-            console.print(f"[dim]... and {len(misplaced) - 10} more[/dim]")
-    else:
-        console.print("[green]✓ File is properly sorted[/green]")
-
-    console.print("\n[bold]Ready to apply changes[/bold]")
-    console.print("[dim]This will:[/dim]")
-    console.print("[dim]  • Create a backup[/dim]")
-    if duplicates:
-        console.print("[dim]  • Remove duplicate entries (keep first occurrence)[/dim]")
-    if misplaced:
-        console.print("[dim]  • Sort all host entries alphabetically[/dim]")
-    console.print("[dim]  • Preserve header comments and wildcards[/dim]")
-    console.print("[dim]  • Keep host configurations intact[/dim]")
-
-    if not confirm("\n[cyan]Proceed with sorting?[/cyan]", default=True):
-        console.print("[yellow]Skipped[/yellow]")
-        return 0, 0
-
-    backup_path = parser.create_backup(file_path)
-    console.print(f"[dim]Backup created: {backup_path}[/dim]")
-
-    if duplicates:
-        hosts = _remove_duplicates(hosts, duplicates, keep="first")
-        console.print(f"[dim]Removed {len(duplicates)} duplicate entries[/dim]")
-
-    sorted_hosts = sorted(hosts, key=lambda x: x[0].lower())
-    parser.write_ssh_config(file_path, header_lines, sorted_hosts)
-
-    console.print("\n[bold green]✓ Success![/bold green]")
-    final_host_count = len(sorted_hosts)
-    console.print(f"Final: {final_host_count} hosts (was {total_hosts})")
-    if duplicates:
-        console.print(f"Removed: {len(duplicates)} duplicates")
-    if misplaced:
-        console.print(f"Fixed: {len(misplaced)} misplacements")
-
-    return len(misplaced), len(duplicates)
-
-
-def cmd_sort(parser: SSHConfigParser, context_arg: Optional[str] = None) -> None:
-    """Sort SSH config file(s)."""
-
-    ui.show_panel(
-        "Sort SSH Config Files",
-        "Sort hosts alphabetically and remove duplicates",
-        style="cyan",
+    return FileAnalysis(
+        path=file_path,
+        hosts=hosts,
+        duplicates=duplicates,
+        misplaced=misplaced,
     )
 
-    if context_arg:
-        selection = select_include_file(
-            parser, context_arg, "Select config file to sort:"
-        )
-        # select_include_file returns Path when allow_all=False (default)
-        files_to_sort = [selection] if isinstance(selection, Path) else selection
-    else:
-        files_to_sort = parser.find_include_files()
+
+def _apply_fixes(parser: SSHConfigParser, analysis: FileAnalysis) -> Tuple[int, int]:
+    """Apply sorting and deduplication fixes to a file."""
+    header_lines, hosts = parser.parse_ssh_config(analysis.path)
+
+    backup_path = parser.create_backup(analysis.path)
+    console.print(f"[dim]Backup: {backup_path}[/dim]")
+
+    dup_count = len(analysis.duplicates)
+    if analysis.duplicates:
+        hosts = _remove_duplicates(hosts, analysis.duplicates, keep="first")
+
+    sorted_hosts = sorted(hosts, key=lambda x: x[0].lower())
+    parser.write_ssh_config(analysis.path, header_lines, sorted_hosts)
+
+    return len(analysis.misplaced), dup_count
+
+
+def _format_count(count: int, warn_style: bool = True) -> str:
+    """Format a count, optionally with yellow styling if non-zero."""
+    if count > 0 and warn_style:
+        return f"[yellow]{count}[/yellow]"
+    return str(count)
+
+
+def _show_reorder_preview(
+    hosts: List[Tuple[str, List[str]]],
+    misplaced: List[Tuple[int, str, int]],
+    max_display: int = 8,
+) -> None:
+    """Show a before/after preview of host reordering."""
+    hostnames = [h[0] for h in hosts]
+    sorted_names = sorted(hostnames, key=str.lower)
+
+    # Find the range of indices that are affected
+    misplaced_indices = {m[0] for m in misplaced}
+
+    if not misplaced_indices:
+        return
+
+    min_idx = max(0, min(misplaced_indices) - 1)
+    max_idx = min(len(hostnames), max(misplaced_indices) + 2)
+
+    # Limit display range
+    if max_idx - min_idx > max_display:
+        max_idx = min_idx + max_display
+
+    # Build table rows showing before -> after
+    rows = []
+    if min_idx > 0:
+        rows.append(("...", "", "..."))
+
+    for i in range(min_idx, max_idx):
+        current = hostnames[i]
+        sorted_name = sorted_names[i]
+
+        # Format current (highlight if misplaced)
+        if i in misplaced_indices:
+            current_fmt = f"[yellow]{current}[/yellow]"
+        else:
+            current_fmt = f"[dim]{current}[/dim]"
+
+        # Format sorted (highlight if different)
+        if sorted_name != hostnames[i]:
+            sorted_fmt = f"[green]{sorted_name}[/green]"
+        else:
+            sorted_fmt = f"[dim]{sorted_name}[/dim]"
+
+        rows.append((current_fmt, "->", sorted_fmt))
+
+    if max_idx < len(hostnames):
+        rows.append(("...", "", "..."))
+
+    console.print("[dim]Previewing changes...[/dim]")
+    ui.print_table(
+        (("Current", ""), ("", "dim"), ("Sorted", "")),
+        rows,
+    )
+    console.print()
+
+
+def cmd_sort(parser: SSHConfigParser, select_pattern: Optional[str] = None) -> None:
+    """Sort SSH config file(s)."""
+    with banner("SORT SSH HOSTS", OK) as set_outcome:
+        _cmd_sort_impl(parser, select_pattern, set_outcome)
+
+
+def _cmd_sort_impl(
+    parser: SSHConfigParser, select_pattern: Optional[str], set_outcome
+) -> None:
+    """Internal implementation for sorting."""
+    import re
+
+    all_files = parser.find_include_files()
+    if not all_files:
+        console.print("[red]Error: No Include files found in ~/.ssh/config[/red]")
+        set_outcome(FAIL)
+        raise SystemExit(1)
+
+    if select_pattern:
+        try:
+            pattern = re.compile(select_pattern, re.IGNORECASE)
+        except re.error as e:
+            console.print(f"[red]Invalid regex pattern: {e}[/red]")
+            set_outcome(FAIL)
+            raise SystemExit(1)
+        files_to_sort = [f for f in all_files if pattern.search(f.stem)]
         if not files_to_sort:
-            console.print("[red]Error: No Include files found in ~/.ssh/config[/red]")
-            raise typer.Exit(1)
+            console.print(
+                f"[yellow]No config files match pattern: {select_pattern}[/yellow]"
+            )
+            raise SystemExit(0)
+    else:
+        files_to_sort = all_files
 
-    total_misplaced = 0
-    total_duplicates = 0
-
+    # Phase 1: Analyze all files
+    analyses: List[FileAnalysis] = []
     for file_path in files_to_sort:
         try:
-            misplaced, duplicates = _sort_config_file(parser, file_path)
-            total_misplaced += misplaced
-            total_duplicates += duplicates
+            analyses.append(_analyze_file(parser, file_path))
         except Exception as exc:  # pragma: no cover - defensive logging
-            console.print(f"\n[red]Error sorting {file_path.name}: {exc}[/red]")
-            import traceback
-
-            traceback.print_exc()
+            console.print(f"[red]Error analyzing {file_path.name}: {exc}[/red]")
             continue
+
+    if not analyses:
+        set_outcome(FAIL)
+        raise SystemExit(1)
+
+    # Phase 2: Display summary table
+    total_hosts = sum(a.host_count for a in analyses)
+    total_dups = sum(len(a.duplicates) for a in analyses)
+    total_misplaced = sum(len(a.misplaced) for a in analyses)
+
+    rows = [
+        (
+            a.path.name,
+            str(a.host_count),
+            _format_count(len(a.duplicates)),
+            _format_count(len(a.misplaced)),
+        )
+        for a in analyses
+    ]
+
+    ui.print_table(
+        (
+            ("Include File", "cyan"),
+            ("Hosts", "dim"),
+            ("Duplicates", ""),
+            ("Misplaced", ""),
+        ),
+        rows,
+        footer=("Total", str(total_hosts), str(total_dups), str(total_misplaced)),
+    )
+
+    # Phase 3: Apply fixes if needed
+    files_with_issues = [a for a in analyses if a.has_issues]
+
+    if not files_with_issues:
+        console.print("\n[green]✓[/green] All files sorted, no issues found")
+        set_outcome(NOOP)
+        return
+
+    console.print()
+    fixed_misplaced = 0
+    fixed_dups = 0
+
+    for analysis in files_with_issues:
+        dup_count = len(analysis.duplicates)
+        mis_count = len(analysis.misplaced)
+
+        # Show duplicates if any
+        if analysis.duplicates:
+            dup_names = ", ".join(sorted(analysis.duplicates.keys())[:5])
+            if len(analysis.duplicates) > 5:
+                dup_names += f" (+{len(analysis.duplicates) - 5} more)"
+            console.print(f"[dim]Duplicates: {dup_names}[/dim]")
+
+        # Show reorder preview if misplaced
+        if analysis.misplaced:
+            _show_reorder_preview(analysis.hosts, analysis.misplaced)
+
+        # Build description of what will be fixed
+        parts = []
+        if dup_count:
+            parts.append(f"{dup_count} duplicate{'s' if dup_count != 1 else ''}")
+        if mis_count:
+            parts.append(f"{mis_count} misplaced")
+
+        if not confirm(f"Fix {analysis.path.name} ({', '.join(parts)})?", default=True):
+            console.print(f"[yellow]![/yellow] Skipped {analysis.path.name}")
+            continue
+
+        try:
+            m, d = _apply_fixes(parser, analysis)
+            fixed_misplaced += m
+            fixed_dups += d
+            console.print(
+                f"[green]✓[/green] Fixed {analysis.path.name} ({', '.join(parts)})"
+            )
+        except Exception as exc:  # pragma: no cover
+            console.print(f"[red]✗[/red] Error fixing {analysis.path.name}: {exc}")
 
     parser.rebuild_index()
 
-    if len(files_to_sort) > 1:
-        console.print("\n[bold]Summary:[/bold]")
-        console.print(f"Sorted {len(files_to_sort)} files")
-        console.print(f"Total misplacements fixed: {total_misplaced}")
-        console.print(f"Total duplicates removed: {total_duplicates}")
+    if fixed_misplaced == 0 and fixed_dups == 0:
+        set_outcome(NOOP)

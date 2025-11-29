@@ -5,13 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, List
 
-from typer import Exit
-
 from nssh.core.auth.credentials import CredentialManager
 from nssh.core.env.paths import ssh_include_dir
 from nssh.core.ssh.config import SSHConfigParser
 from nssh.core.ui.console import get_console
-from nssh.core.ui.fzf import check_fzf, fzf_select
+from nssh.core.ui.fzf import check_fzf
+from nssh.core.ui.fzf import fzf_select as _fzf_select_single
+from nssh.core.ui.fzf import fzf_select_multi as _fzf_select_multi
+
+
+class FzfCancelled(Exception):
+    """Raised when user cancels fzf selection (Escape/Ctrl-C)."""
+
+    pass
 
 
 def require_fzf() -> None:
@@ -21,20 +27,50 @@ def require_fzf() -> None:
         console.print(
             "[red]Error: 'fzf' not found. Install with: brew install fzf[/red]"
         )
-        raise Exit(1)
+        raise SystemExit(1)
 
 
-def select_via_fzf(options: Iterable[str], prompt: str) -> str:
-    """Launch ``fzf`` with ``options`` and return the selected string.
+def fzf_select(
+    options: Iterable[str],
+    prompt: str = "Select:",
+    *,
+    multi: bool = False,
+    exit_on_cancel: bool = True,
+) -> List[str]:
+    """Launch fzf and return selected options.
+
+    Args:
+        options: Items to display in fzf.
+        prompt: Prompt text shown in fzf.
+        multi: Enable multi-select mode (Tab to toggle selections).
+        exit_on_cancel: If True (default), exit(0) on cancel; else raise FzfCancelled.
+
+    Returns:
+        List of selected strings. Single-select returns ``[item]``.
+
+    Raises:
+        SystemExit(1): If fzf is not installed.
+        SystemExit(0): If cancelled and ``exit_on_cancel=True``.
+        FzfCancelled: If cancelled and ``exit_on_cancel=False``.
 
     Example:
-        >>> hostname = select_via_fzf(sorted(hosts), "Select host:")
+        >>> [host] = fzf_select(sorted(hosts), "Select host:")
+        >>> paths = fzf_select(files, "Select files:", multi=True)
     """
     require_fzf()
     values: List[str] = list(options)
-    result = fzf_select(values, prompt)
+
+    if multi:
+        result = _fzf_select_multi(values, prompt)
+    else:
+        single = _fzf_select_single(values, prompt)
+        result = [single] if single else []
+
     if not result:
-        raise Exit(0)
+        if exit_on_cancel:
+            raise SystemExit(0)
+        raise FzfCancelled()
+
     return result
 
 
@@ -67,19 +103,19 @@ def select_include_file(
 
         if not context:
             console.print(f"[red]Error: Context '{context_arg}' not found[/red]")
-            raise Exit(1)
+            raise SystemExit(1)
 
         git_include_file = context.get("git_include_file")
         if not git_include_file:
             console.print(
                 f"[red]Error: Context '{context_arg}' has no git_include_file[/red]"
             )
-            raise Exit(1)
+            raise SystemExit(1)
 
-        file_path = Path.home() / ".ssh" / git_include_file
+        file_path = ssh_include_dir() / git_include_file
         if not file_path.exists():
             console.print(f"[red]Error: File not found: {file_path}[/red]")
-            raise Exit(1)
+            raise SystemExit(1)
         return [file_path] if allow_all else file_path
 
     include_files = parser.find_include_files()
@@ -99,37 +135,36 @@ def select_include_file(
             other_files.append((file_path.name, file_path))
 
     # Build fzf options
-    require_fzf()
-
     options_map: dict[str, Path] = {}
-    options: List[str] = []
+    fzf_options: List[str] = []
 
     if allow_all and include_files:
-        options.append("[All files]")
+        fzf_options.append("[All files]")
 
     # Add context files first with "(context)" label
     for context_name, file_path in context_files:
         option_str = f"{context_name} (context)"
-        options.append(option_str)
+        fzf_options.append(option_str)
         options_map[option_str] = file_path
 
     # Add other files
     for filename, file_path in other_files:
-        options.append(filename)
+        fzf_options.append(filename)
         options_map[filename] = file_path
 
     # Add option to create new context file
     if not allow_all:
-        options.append("+ Create new context file")
+        fzf_options.append("+ Create new context file")
 
-    if not options:
+    if not fzf_options:
         console.print("[red]Error: No Include files found in SSH config[/red]")
-        raise Exit(1)
+        raise SystemExit(1)
 
-    selected = fzf_select(options, prompt)
-    if not selected:
+    try:
+        [selected] = fzf_select(fzf_options, prompt, exit_on_cancel=False)
+    except FzfCancelled:
         console.print("[yellow]Cancelled[/yellow]")
-        raise Exit(0)
+        raise SystemExit(0)
 
     if allow_all and selected == "[All files]":
         return include_files
@@ -137,13 +172,13 @@ def select_include_file(
     if selected == "+ Create new context file":
         from nssh.cli.common.prompt import ask_text
 
-        context_name = ask_text("[cyan]Context name (e.g., 'work', 'homelab')[/cyan]:")
+        context_name = ask_text("Context name (e.g., 'work', 'homelab')")
         new_file = include_dir / f"{context_name}_hosts"
         return new_file
 
     chosen_path = options_map.get(selected)
     if not chosen_path:
         console.print(f"[red]Error: Invalid selection: {selected}[/red]")
-        raise Exit(1)
+        raise SystemExit(1)
 
     return [chosen_path] if allow_all else chosen_path

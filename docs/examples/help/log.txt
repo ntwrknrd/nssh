@@ -1,0 +1,13 @@
+$ nssh log --help
+
+╭─ Usage ───────────────────────────────────────────────────────────╮
+│   nssh log delete                     Delete recorded sessions    │
+│   nssh log export                     Export to text or GIF       │
+│   nssh log list                       List recorded sessions      │
+│   nssh log play                       Play a recorded session     │
+│   nssh log upload                     Upload to asciinema server  │
+╰───────────────────────────────────────────────────────────────────╯
+
+╭─ Options ─────────────────────────────────────────────────────────╮
+│   --help, -h                          Print command-specific help │
+╰───────────────────────────────────────────────────────────────────╯

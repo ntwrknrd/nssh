@@ -7,29 +7,27 @@ from types import ModuleType
 from typing import Dict, Generator, List, Tuple
 
 import pytest
-from typer.testing import CliRunner
+from click.testing import CliRunner
 
 import nssh.core.connect as connect_module
 import nssh.cli.main as main_module
-from nssh.cli import typer
+from nssh.cli import click
 
 StubbedCli = Tuple[CliRunner, ModuleType, List[List[str]]]
 
 
-def _build_stub_app(commands: Dict[str, str]) -> typer.Typer:
-    # Typer needs multiple commands to create a Click Group, otherwise it
-    # returns the single command directly and routing breaks
-    app = typer.Typer(invoke_without_command=False)
+def _build_stub_app(commands: Dict[str, str]) -> click.Group:
+    """Build a stub Click group with the given commands."""
+
+    @click.group()
+    def app():
+        pass
+
     for name, label in commands.items():
 
         @app.command(name=name)
         def _cmd(label: str = label) -> None:
-            typer.echo(label)
-
-    # Add a hidden dummy command to ensure Typer creates a Group
-    @app.command(name="__dummy", hidden=True)
-    def _dummy() -> None:
-        pass
+            click.echo(label)
 
     return app
 
@@ -59,7 +57,7 @@ def stubbed_cli(monkeypatch: pytest.MonkeyPatch) -> Generator[StubbedCli, None, 
         stub_module.app = stub_app  # type: ignore[attr-defined]
 
         def _usage(label: str = usage_label) -> None:
-            typer.echo(label)
+            click.echo(label)
 
         stub_module.print_usage = _usage  # type: ignore[attr-defined]
 
@@ -71,7 +69,6 @@ def stubbed_cli(monkeypatch: pytest.MonkeyPatch) -> Generator[StubbedCli, None, 
                 app,
                 cli_name="stub",
                 usage_cb=lambda: None,
-                completion_prefix="STUB",
                 argv=argv,
             )
 
@@ -116,32 +113,39 @@ def test_bare_connect_passes_options(stubbed_cli: StubbedCli) -> None:
     assert calls[-1] == ["myrouter", "-p", "2200"]
 
 
-def test_escape_hatch_allows_reserved_names(stubbed_cli: StubbedCli) -> None:
+def test_subcommand_name_without_args_shows_help(stubbed_cli: StubbedCli) -> None:
+    """When a subcommand name is used alone, show subcommand help."""
+    _, main, calls = stubbed_cli
+    # 'nssh host' with no args should invoke the host subcommand (which shows help)
+    # This will raise SystemExit(1) from run_cli when no args are passed
+    with pytest.raises(SystemExit):
+        main.main(["host"])
+    # connect should NOT have been called
+    assert calls == []
+
+
+def test_subcommand_name_with_explicit_hostname_marker(stubbed_cli: StubbedCli) -> None:
+    """nssh -- host should connect to 'host' (explicit hostname marker)."""
     _, main, calls = stubbed_cli
     main.main(["--", "host"])
     assert calls[-1] == ["host"]
 
 
-def test_subcommand_help_short_flag(
-    stubbed_cli: StubbedCli, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_subcommand_name_with_ssh_args(stubbed_cli: StubbedCli) -> None:
+    """nssh -- host + -v passes args to connect (connect.py handles + splitting)."""
+    _, main, calls = stubbed_cli
+    main.main(["--", "host", "+", "-v"])
+    # main.py passes all args to connect; connect.py's _split_extra_args handles +
+    assert calls[-1] == ["host", "+", "-v"]
+
+
+def test_subcommand_help_flag_runs_subcommand(stubbed_cli: StubbedCli) -> None:
+    """nssh host -h should run the host subcommand (which handles -h)."""
     _, main, _ = stubbed_cli
+    # -h is a flag, so it's treated as subcommand invocation
     with pytest.raises(SystemExit) as exc:
         main.main(["host", "-h"])
     assert exc.value.code == 0
-    captured = capsys.readouterr()
-    assert "HOST HELP" in captured.out
-
-
-def test_subcommand_without_args_shows_usage(
-    stubbed_cli: StubbedCli, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _, main, _ = stubbed_cli
-    with pytest.raises(SystemExit) as exc:
-        main.main(["host"])
-    assert exc.value.code == 1
-    captured = capsys.readouterr()
-    assert "HOST HELP" in captured.out
 
 
 def test_top_level_command_list_matches_subcommands() -> None:

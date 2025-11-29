@@ -6,9 +6,11 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from nssh import __version__
+from nssh.cli import click
 from nssh.cli.self.manifest import InstallManifest, read_manifest, write_manifest
 from nssh.cli.self.system import check_nssh_on_path
-from nssh.cli.common import ui
+from nssh.cli.common.banner import OK, banner
 from nssh.core.env.paths import (
     age_key_path as get_age_key_path,
     credential_file_path as get_credential_file_path,
@@ -91,23 +93,26 @@ def show_next_steps() -> None:
         console.print(
             "  [green]✓ Ready to connect![/green] Try: [cyan]nssh <hostname>[/cyan]"
         )
-        console.print()
-        console.print("[dim]Additional commands:[/dim]")
-        console.print("  [dim]• nssh host list - Show all configured hosts[/dim]")
-        console.print("  [dim]• nssh cred ctx list - Show all contexts[/dim]")
-        console.print("  [dim]• nssh log list - Show recorded sessions[/dim]")
+        console.print(
+            "  [dim]• Run[/dim] [cyan]nssh <command> --help[/cyan] [dim]to explore options[/dim]"
+        )
 
 
-def status_command():
+@click.command(short_help="Show status")
+def status_command() -> None:
     """Show self installation status and discover existing files."""
 
     share_dir = share_assets_dir()
 
-    ui.show_panel(
-        "nssh self status",
-        "Current installation status",
-        style="cyan",
-    )
+    with banner("NSSH STATUS", OK):
+        _show_status(share_dir)
+
+
+def _show_status(share_dir) -> None:
+    """Internal implementation for showing status."""
+    # Show version
+    console.print(f"[bold]Version:[/bold] {__version__}")
+    console.print()
 
     # Check CLI availability
     nssh_on_path = check_nssh_on_path()

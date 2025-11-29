@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import sys
-from typing import List, Optional, Sequence
+from typing import Sequence, Tuple
 
-from nssh.cli import typer
+from nssh.cli import click
 from nssh.cli.common.app import run_cli
-from nssh.cli.common.help import UsageRow, UsageSection, render_usage
+from nssh.cli.common.banner import FAIL, OK, banner
+from nssh.cli.common.help import (
+    OptionRow,
+    OptionsPanel,
+    UsageRow,
+    UsageSection,
+    render_usage,
+)
 from nssh.core.connect import (
     ConnectError,
     MultipleMatchesError,
@@ -16,11 +23,12 @@ from nssh.core.connect import (
 )
 from nssh.core.connector.scp import run_scp
 from nssh.core.diag import timing as timing_core
+from nssh.core.ui.console import get_console
+
+console = get_console()
 
 APP_TITLE = "nssh cp"
 APP_SUBTITLE = "Copy files to/from SSH hosts"
-
-app = typer.Typer(add_help_option=False, rich_markup_mode=None)
 
 
 def _parse_remote_spec(spec: str) -> tuple[str | None, str, str]:
@@ -49,9 +57,9 @@ def _detect_direction(source: str, dest: str) -> tuple[str | None, str, str, str
     dest_is_remote = ":" in dest
 
     if source_is_remote and dest_is_remote:
-        raise typer.BadParameter("Cannot copy between two remote hosts")
+        raise click.BadParameter("Cannot copy between two remote hosts")
     if not source_is_remote and not dest_is_remote:
-        raise typer.BadParameter("One path must be remote (host:path format)")
+        raise click.BadParameter("One path must be remote (host:path format)")
 
     if source_is_remote:
         user, host, remote_path = _parse_remote_spec(source)
@@ -61,22 +69,24 @@ def _detect_direction(source: str, dest: str) -> tuple[str | None, str, str, str
         return user, host, remote_path, source, "push"
 
 
-@app.callback(invoke_without_command=True)
-def cp_command(
-    ctx: typer.Context,
-    source: str = typer.Argument(..., help="Source path (local or host:path)"),
-    dest: str = typer.Argument(..., help="Destination path (local or host:path)"),
-    recursive: bool = typer.Option(
-        False, "-r", "--recursive", help="Copy directories recursively"
-    ),
-    preserve: bool = typer.Option(
-        False, "-p", "--preserve", help="Preserve modification times and modes"
-    ),
-    quiet: bool = typer.Option(False, "-q", "--quiet", help="Disable progress meter"),
-    verbose: bool = typer.Option(False, "-v", "--verbose", help="Verbose mode"),
-    scp_args: Optional[List[str]] = typer.Argument(
-        None, help="Additional scp arguments (after --)"
-    ),
+@click.command()
+@click.argument("source", required=True)
+@click.argument("dest", required=True)
+@click.option("-r", "--recursive", is_flag=True, default=False, help="Copy directories")
+@click.option(
+    "-p", "--preserve", is_flag=True, default=False, help="Preserve times/modes"
+)
+@click.option("-q", "--quiet", is_flag=True, default=False, help="Disable progress")
+@click.option("-v", "--verbose", is_flag=True, default=False, help="Verbose output")
+@click.argument("scp_args", nargs=-1)
+def app(
+    source: str,
+    dest: str,
+    recursive: bool,
+    preserve: bool,
+    quiet: bool,
+    verbose: bool,
+    scp_args: Tuple[str, ...],
 ) -> None:
     """Copy files to/from SSH hosts.
 
@@ -87,37 +97,56 @@ def cp_command(
         nssh cp ./file.txt myhost:~/           # push to remote
         nssh cp -r myhost:~/dir ./local/       # recursive pull
     """
+    with banner("COPY FILES", OK) as set_outcome:
+        _app_impl(
+            source, dest, recursive, preserve, quiet, verbose, scp_args, set_outcome
+        )
+
+
+def _app_impl(
+    source: str,
+    dest: str,
+    recursive: bool,
+    preserve: bool,
+    quiet: bool,
+    verbose: bool,
+    scp_args: Tuple[str, ...],
+    set_outcome,
+) -> None:
+    """Internal implementation for cp command."""
     # Detect direction and parse paths (with cli-startup timing)
     with timing_core.stage("cli-startup", detail="cp"):
         try:
             username, host_search, remote_path, local_path, direction = (
                 _detect_direction(source, dest)
             )
-        except typer.BadParameter:
+        except click.BadParameter:
             raise
         except ValueError as exc:
-            raise typer.BadParameter(str(exc))
+            raise click.BadParameter(str(exc))
 
     # Resolve host - require exact match for safety
     try:
         host_match = find_host_match(host_search)
     except MultipleMatchesError as exc:
-        print(f"Error: '{host_search}' matches multiple hosts:", file=sys.stderr)
+        console.print(f"[red]Error:[/red] '{host_search}' matches multiple hosts:")
         for match in exc.matches:
-            print(f"  - {match}", file=sys.stderr)
-        raise typer.Exit(1)
+            console.print(f"  [dim]- {match}[/dim]")
+        set_outcome(FAIL)
+        raise SystemExit(1)
     except ConnectError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        raise typer.Exit(exc.exit_code)
+        console.print(f"[red]Error:[/red] {exc}")
+        set_outcome(FAIL)
+        raise SystemExit(exc.exit_code)
 
     # Require exact hostname match for file transfers
     if host_match.hostname != host_search:
-        print(
-            f"Error: '{host_search}' is not an exact match. Did you mean:",
-            file=sys.stderr,
+        console.print(
+            f"[red]Error:[/red] '{host_search}' is not an exact match. Did you mean:"
         )
-        print(f"  - {host_match.hostname}", file=sys.stderr)
-        raise typer.Exit(1)
+        console.print(f"  [dim]- {host_match.hostname}[/dim]")
+        set_outcome(FAIL)
+        raise SystemExit(1)
 
     # Resolve credentials
     try:
@@ -125,8 +154,9 @@ def cp_command(
             host_match.hostname, host_match.filepath, username
         )
     except ConnectError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        raise typer.Exit(exc.exit_code)
+        console.print(f"[red]Error:[/red] {exc}")
+        set_outcome(FAIL)
+        raise SystemExit(exc.exit_code)
 
     # Build scp paths - use username from credential resolution or explicit
     scp_user = username or creds.username
@@ -163,7 +193,10 @@ def cp_command(
         scp_args=args if args else None,
     )
 
-    raise typer.Exit(exit_code)
+    if exit_code != 0:
+        set_outcome(FAIL)
+
+    raise SystemExit(exit_code)
 
 
 def _usage_sections() -> list[UsageSection]:
@@ -172,47 +205,48 @@ def _usage_sections() -> list[UsageSection]:
             "Usage",
             rows=[
                 UsageRow(
-                    "nssh cp [bold][USER@]HOST:PATH[/bold] [bold]LOCAL[/bold]",
-                    "Pull file from remote host",
+                    "nssh cp [HOST]:src local",
+                    "Pull from remote",
                 ),
                 UsageRow(
-                    "nssh cp [bold]LOCAL[/bold] [bold][USER@]HOST:PATH[/bold]",
-                    "Push file to remote host",
-                ),
-            ],
-        ),
-        UsageSection(
-            "Options",
-            rows=[
-                UsageRow("-r, --recursive", "Copy directories recursively"),
-                UsageRow("-p, --preserve", "Preserve modification times and modes"),
-                UsageRow("-q, --quiet", "Disable progress meter"),
-                UsageRow("-v, --verbose", "Verbose mode"),
-                UsageRow("-- [SCP_ARGS]", "Pass additional arguments to scp"),
-            ],
-        ),
-        UsageSection(
-            "Examples",
-            rows=[
-                UsageRow(
-                    "nssh cp myhost:~/config.txt ./",
-                    "Pull single file",
-                ),
-                UsageRow(
-                    "nssh cp -r myhost:~/logs ./backup/",
-                    "Pull directory recursively",
-                ),
-                UsageRow(
-                    "nssh cp ./script.sh admin@myhost:~/",
-                    "Push file as specific user",
+                    "nssh cp local [HOST]:dest",
+                    "Push to remote",
                 ),
             ],
         ),
     ]
 
 
+def _options_panel():
+    # cp is a single command - manually define concise options
+    return OptionsPanel(
+        options=[
+            OptionRow("--recursive, -r", "Copy directories"),
+            OptionRow("--preserve, -p", "Preserve times/modes"),
+            OptionRow("--quiet, -q", "Disable progress"),
+            OptionRow("--verbose, -v", "Verbose output"),
+            OptionRow("+ [SCP_ARGS]", "Pass args to scp"),
+        ]
+    )
+
+
 def print_usage() -> None:
-    render_usage(APP_TITLE, APP_SUBTITLE, _usage_sections())
+    render_usage(
+        APP_TITLE,
+        APP_SUBTITLE,
+        _usage_sections(),
+        options_panel=_options_panel(),
+        show_banner=False,
+    )
+
+
+def _preprocess_args(argv: Sequence[str] | None) -> list[str]:
+    """Convert + separator to -- for Click compatibility."""
+    args = list(argv) if argv is not None else sys.argv[1:]
+    if "+" in args:
+        idx = args.index("+")
+        args[idx] = "--"
+    return args
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -221,8 +255,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         app,
         cli_name=APP_TITLE,
         usage_cb=print_usage,
-        completion_prefix="CP",
-        argv=argv,
+        argv=_preprocess_args(argv),
     )
 
 

@@ -10,8 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
-from nssh.cli import typer
-
+from nssh.cli import click
+from nssh.cli.common.banner import FAIL, OK, banner
 from nssh.core.diag import timing as timing_core
 from nssh.core.env.paths import project_root
 
@@ -132,27 +132,46 @@ def _save_scp_benchmark_archive(
     )
 
 
+@click.command(short_help="SCP file transfer overhead")
+@click.argument("host")
+@click.option("--size", "file_size_kb", default=100, help="Test file size in KB")
+@click.option("--warmups", default=1, help="Warmup runs ignored in summary")
+@click.option("--samples", default=3, help="Measured runs captured")
+@click.option(
+    "--simple-only/--structured",
+    default=False,
+    help="Report only total durations",
+)
 def capture_scp_command(
-    host: str = typer.Argument(..., help="Host alias passed to nssh cp"),
-    file_size_kb: int = typer.Option(
-        100, "--size", help="Test file size in KB (default: 100)"
-    ),
-    warmups: int = typer.Option(1, "--warmups", help="Warmup runs ignored in summary"),
-    samples: int = typer.Option(3, "--samples", help="Measured runs captured"),
-    simple_only: bool = typer.Option(
-        False,
-        "--simple-only/--structured",
-        help="Disable instrumentation and report only total wall-clock durations",
-    ),
+    host: str,
+    file_size_kb: int,
+    warmups: int,
+    samples: int,
+    simple_only: bool,
 ) -> None:
     """Capture SCP timing data and archive results in benchmark/{timestamp}/ directory."""
     if samples < 1:
-        raise typer.BadParameter("--samples must be at least 1")
+        raise click.BadParameter("--samples must be at least 1")
     if warmups < 0:
-        raise typer.BadParameter("--warmups must be >= 0")
+        raise click.BadParameter("--warmups must be >= 0")
     if file_size_kb < 1:
-        raise typer.BadParameter("--size must be at least 1KB")
+        raise click.BadParameter("--size must be at least 1KB")
 
+    with banner("SCP BENCHMARK", OK) as set_outcome:
+        _capture_scp_impl(
+            host, file_size_kb, warmups, samples, simple_only, set_outcome
+        )
+
+
+def _capture_scp_impl(
+    host: str,
+    file_size_kb: int,
+    warmups: int,
+    samples: int,
+    simple_only: bool,
+    set_outcome,
+) -> None:
+    """Internal implementation for SCP benchmark capture."""
     # Clean up stale recording locks before starting benchmark
     from nssh.core.recording import manager as recording
 
@@ -177,7 +196,8 @@ def capture_scp_command(
         nssh_binary = common.resolve_nssh_binary()
     except FileNotFoundError as exc:
         common.console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        set_outcome(FAIL)
+        raise SystemExit(1)
 
     # Create test file
     common.console.print(f"[dim]Creating {file_size_kb}KB test file...[/dim]")
@@ -204,19 +224,14 @@ def capture_scp_command(
         if not simple_only:
             env_base["NSSH_DEBUG"] = "1"
 
-        total_runs = warmups + samples
-        common.ui.show_panel(
-            "Capturing SCP timing data",
-            f"File size: {file_size_kb}KB  |  Warmups: {warmups}  |  Samples: {samples}",
-            style="cyan",
-        )
         common.console.print("[dim]Command:[/dim] " + " ".join(base_cmd))
 
         if simple_only:
             try:
                 common.run_simple_capture(base_cmd, env_base, warmups, samples)
             except RuntimeError:
-                raise typer.Exit(1) from None
+                set_outcome(FAIL)
+                raise SystemExit(1) from None
 
             # For simple mode, save minimal metadata and output
             timing_log_path.write_text(
@@ -240,7 +255,7 @@ def capture_scp_command(
         aggregated_lines: List[str] = []
         last_entries: List[timing_core.TimingEntry] = []
 
-        for idx in range(1, total_runs + 1):
+        for idx in range(1, warmups + samples + 1):
             cmd = list(base_cmd)
             env = env_base.copy()
             env["NSSH_BENCHMARK_RUN"] = str(idx)
@@ -252,7 +267,8 @@ def capture_scp_command(
                 common.console.print(
                     "[yellow]No timing lines captured. Ensure NSSH_DEBUG is honored.[/yellow]"
                 )
-                raise typer.Exit(1)
+                set_outcome(FAIL)
+                raise SystemExit(1)
 
             entries = timing_core.parse_timing_lines(raw_lines)
             last_entries = entries
@@ -303,13 +319,15 @@ def capture_scp_command(
 
         if not last_entries:
             common.console.print("[red]No timing entries were captured.[/red]")
-            raise typer.Exit(1)
+            set_outcome(FAIL)
+            raise SystemExit(1)
 
         try:
             legacy_summary = timing_core.build_summary(last_entries)
         except timing_core.TimingDataError as exc:
             common.console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            set_outcome(FAIL)
+            raise SystemExit(1)
 
         common.render_event_summary(legacy_summary)
         _save_scp_benchmark_archive(

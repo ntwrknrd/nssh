@@ -3,49 +3,39 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
-from typing import Optional
 
-from nssh.cli import typer
-
+from nssh.cli import click
+from nssh.cli.common.banner import NOOP, OK, banner
 from nssh.core.recording import manager as recording
 
 from . import common
 
+DEFAULT_SERVER = "https://asciinema.org"
 
-def upload_command(
-    file: Optional[Path] = common.RECORDING_FILE_OPTION,
-    date: Optional[str] = common.RECORDING_DATE_OPTION,
-    server: Optional[str] = typer.Option(
-        None,
-        "--server",
-        help="Asciinema server URL (overrides env and config settings)",
-    ),
-    dry_run: bool = common.DRY_RUN_OPTION,
-) -> None:
+
+@click.command(short_help="Upload to asciinema server")
+@click.option("-y", "--yes", is_flag=True, default=False, help="Skip confirmation")
+@common.dry_run_option
+def upload_command(yes: bool, dry_run: bool) -> None:
     """Upload a recording to an asciinema server."""
-    settings = recording.load_recording_settings()
-    target = common.resolve_recording_path(file, date, settings)
+    with banner("UPLOAD RECORDING", OK) as set_outcome:
+        settings = recording.load_recording_settings()
+        target = common.resolve_recording_path(settings)
 
-    server_url = (
-        server
-        or os.environ.get("ASCIINEMA_SERVER_URL")
-        or settings.asciinema_server_url
-    )
-    if not server_url:
-        typer.echo(
-            "Error: No asciinema server configured.\n\n"
-            "Configure in ~/.config/nssh/config.toml:\n"
-            "  [recording]\n"
-            '  asciinema_server_url = "https://asciinema.example.com"\n\n'
-            "Or set ASCIINEMA_SERVER_URL environment variable:\n"
-            "  export ASCIINEMA_SERVER_URL=https://asciinema.example.com\n\n"
-            "Or use --server option:\n"
-            "  nssh log upload --server https://asciinema.example.com",
-            err=True,
+        # Get server URL from config/env or prompt
+        configured_url = (
+            os.environ.get("ASCIINEMA_SERVER_URL") or settings.asciinema_server_url
         )
-        raise typer.Exit(code=1)
+        default_url = configured_url or DEFAULT_SERVER
 
-    asciinema_bin = common.require_binary("asciinema")
-    cmd = [asciinema_bin, "upload", "--server-url", server_url, str(target)]
-    common.run_command(cmd, dry_run)
+        if yes:
+            server_url = default_url
+        else:
+            server_url = click.prompt("Server URL", default=default_url)
+
+        asciinema_bin = common.require_binary("asciinema")
+        cmd = [asciinema_bin, "upload", "--server-url", server_url, str(target)]
+        common.run_command(cmd, dry_run)
+
+        if dry_run:
+            set_outcome(NOOP)

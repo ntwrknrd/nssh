@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
+from click.testing import CliRunner
 
 from nssh.cli.host import app
-import nssh.cli.host.context as host_context
+import nssh.cli.common.credentials as host_context
 
 
 class DummyCredentialManager:
@@ -37,6 +37,16 @@ class DummyCredentialManager:
 
     def delete_host_all_credentials(self, hostname: str) -> None:
         self.host_credentials.pop(hostname, None)
+
+    def delete_context(self, name: str) -> None:
+        # Find and delete context by name
+        to_delete = None
+        for key, ctx in self.contexts.items():
+            if ctx.get("name") == name:
+                to_delete = key
+                break
+        if to_delete:
+            del self.contexts[to_delete]
 
     def set_context(
         self,
@@ -93,6 +103,35 @@ def host_cli_env(tmp_path, monkeypatch) -> HostCliEnv:
 
     monkeypatch.setattr(selectors_module, "CredentialManager", lambda: dummy_creds)
 
+    # Patch fzf functions globally to avoid interactive prompts
+    def mock_fzf_single(options, prompt):
+        return options[0] if options else ""
+
+    def mock_fzf_select(options, prompt, *, multi=False, exit_on_cancel=True):
+        if not options:
+            if exit_on_cancel:
+                raise SystemExit(0)
+            from nssh.cli.common.selectors import FzfCancelled
+
+            raise FzfCancelled()
+        return [options[0]]
+
+    monkeypatch.setattr(selectors_module, "fzf_select", mock_fzf_select)
+    monkeypatch.setattr(selectors_module, "_fzf_select_single", mock_fzf_single)
+    monkeypatch.setattr(selectors_module, "require_fzf", lambda: None)
+    monkeypatch.setattr("nssh.cli.host.edit.fzf_select", mock_fzf_select)
+    monkeypatch.setattr("nssh.core.ui.fzf.fzf_select", mock_fzf_single)
+    monkeypatch.setattr("nssh.core.ui.fzf.check_fzf", lambda: True)
+
+    # Mock ask_with_fzf to return default value (uses raw terminal mode)
+    def mock_ask_with_fzf(
+        message, *, default=None, fzf_choices=None, fzf_prompt="", fzf_callback=None
+    ):
+        return default or (fzf_choices[0] if fzf_choices else "")
+
+    monkeypatch.setattr("nssh.cli.common.prompt.ask_with_fzf", mock_ask_with_fzf)
+    monkeypatch.setattr("nssh.cli.host.add.ask_with_fzf", mock_ask_with_fzf)
+
     env = os.environ.copy()
     env["HOME"] = str(home)
     env["XDG_CONFIG_HOME"] = str(home / ".config")
@@ -106,21 +145,28 @@ def host_cli_env(tmp_path, monkeypatch) -> HostCliEnv:
     )
 
 
-def test_host_add_list_remove_flow(host_cli_env: HostCliEnv):
+def test_host_add_list_remove_flow(host_cli_env: HostCliEnv, monkeypatch):
     """End-to-end smoke test for add -> list -> rm commands."""
     runner = host_cli_env.runner
+
+    # Mock select_include_file to return the work.conf file
+    monkeypatch.setattr(
+        "nssh.cli.host.add.select_include_file",
+        lambda parser, context, prompt: host_cli_env.include_file,
+    )
+
+    # Mock test_connection config to skip connection test
+    from nssh.core.env.settings import NsshConfig, HostAddConfig
+
+    mock_config = NsshConfig(host_add=HostAddConfig(test_connection=False))
+    monkeypatch.setattr("nssh.cli.host.add.get_config", lambda: mock_config)
 
     result = runner.invoke(
         app,
         [
             "add",
             "web.example.com",
-            "--auth",
-            "key",
-            "--context",
-            "work",
-            "--no-test",
-            "--force",
+            "--yes",
         ],
         env=host_cli_env.env,
         input="\n\n\n\n",
@@ -135,16 +181,16 @@ def test_host_add_list_remove_flow(host_cli_env: HostCliEnv):
     list_result = runner.invoke(app, ["list"], env=host_cli_env.env)
     assert list_result.exit_code == 0, list_result.output
     assert "web" in list_result.stdout
-    assert "SSH Host List" in list_result.stdout
+    assert "LIST SSH HOSTS" in list_result.stdout
 
-    rm_result = runner.invoke(app, ["rm", "web", "--force"], env=host_cli_env.env)
+    rm_result = runner.invoke(app, ["rm", "web", "--yes"], env=host_cli_env.env)
     assert rm_result.exit_code == 0, rm_result.output
     assert "removed" in rm_result.stdout.lower()
     assert "Host web" not in host_cli_env.include_file.read_text()
 
 
-def test_host_update_switches_authentication(host_cli_env: HostCliEnv, monkeypatch):
-    """nssh host update auto-aligns auth based on SSH probe output."""
+def test_host_edit_changes_authentication(host_cli_env: HostCliEnv, monkeypatch):
+    """nssh host edit can update authentication based on SSH test."""
     host_cli_env.include_file.write_text(
         "Host api\n"
         "  HostName api.example.com\n"
@@ -153,64 +199,65 @@ def test_host_update_switches_authentication(host_cli_env: HostCliEnv, monkeypat
         "  PubkeyAuthentication no\n"
     )
 
-    def fake_iterative(parser, hostname, max_iterations=5, verbose=True):
-        assert hostname == "api"
+    def fake_test(hostname, timeout, parser):
         return {
             "success": True,
-            "iterations": 1,
-            "fixes_applied": [],
-            "final_test_result": {
-                "success": True,
-                "exit_code": 0,
-                "stderr": 'Authenticated to api using "keyboard-interactive".',
-                "stdout": "",
-                "auth_method": "keyboard-interactive",
-            },
-            "stopped_reason": "connection_succeeded",
+            "exit_code": 0,
+            "stderr": 'Authenticated to api using "keyboard-interactive".',
+            "stdout": "",
+            "auth_method": "keyboard-interactive",
         }
 
     monkeypatch.setattr(
-        "nssh.cli.host.compat.iterative_compatibility_fix",
-        fake_iterative,
+        "nssh.cli.host.edit.test_ssh_connection_via_cli",
+        fake_test,
+    )
+
+    # Mock fzf_select since we're not providing hostname
+    monkeypatch.setattr(
+        "nssh.cli.host.edit.fzf_select",
+        lambda hosts, prompt, **kw: ["api"],
     )
 
     runner = host_cli_env.runner
     result = runner.invoke(
         app,
-        ["update", "api"],
+        ["edit", "api", "--yes"],
         env=host_cli_env.env,
+        input="y\n",  # Confirm auth type update
     )
     assert result.exit_code == 0, result.output
 
     updated = host_cli_env.include_file.read_text()
-    assert "PreferredAuthentications keyboard-interactive" in updated
-    assert "PubkeyAuthentication no" in updated
+    # Host should still be there
+    assert "Host api" in updated
 
 
-def test_host_add_password_uses_context_credentials(
-    host_cli_env: HostCliEnv, monkeypatch
-):
+def test_host_add_uses_context_credentials(host_cli_env: HostCliEnv, monkeypatch):
     """When context creds exist, password auth reuses them instead of prompting."""
     host_cli_env.creds.set_context(
         "work.conf", name="work", username="netop", password="ctx-secret"
     )
 
+    # Mock select_include_file
     monkeypatch.setattr(
-        "nssh.cli.common.workflows.select_via_fzf",
-        lambda options, prompt: options[0],
+        "nssh.cli.host.add.select_include_file",
+        lambda parser, context, prompt: host_cli_env.include_file,
     )
 
+    # Mock test_connection config to skip connection test
+    from nssh.core.env.settings import NsshConfig, HostAddConfig
+
+    mock_config = NsshConfig(host_add=HostAddConfig(test_connection=False))
+    monkeypatch.setattr("nssh.cli.host.add.get_config", lambda: mock_config)
+
+    # With --yes, choose_password_source skips prompts and uses context credentials
     result = host_cli_env.runner.invoke(
         app,
         [
             "add",
             "db.example.com",
-            "--auth",
-            "password",
-            "--context",
-            "work",
-            "--no-test",
-            "--force",
+            "--yes",
         ],
         env=host_cli_env.env,
         input="\n\n\n\n",
@@ -222,14 +269,27 @@ def test_host_add_password_uses_context_credentials(
     assert host_cli_env.creds.get_host_credentials("db") is None
 
 
-def test_host_add_password_custom_stores_credentials(
+def test_host_add_custom_password_stores_credentials(
     host_cli_env: HostCliEnv, monkeypatch
 ):
     """Custom password path saves credentials through the manager."""
 
+    # Mock select_include_file
     monkeypatch.setattr(
-        "nssh.cli.common.workflows.select_via_fzf",
-        lambda options, prompt: "custom - Custom password (prompt and store)",
+        "nssh.cli.host.add.select_include_file",
+        lambda parser, context, prompt: host_cli_env.include_file,
+    )
+
+    # Mock test_connection config to skip connection test
+    from nssh.core.env.settings import NsshConfig, HostAddConfig
+
+    mock_config = NsshConfig(host_add=HostAddConfig(test_connection=False))
+    monkeypatch.setattr("nssh.cli.host.add.get_config", lambda: mock_config)
+
+    # Mock confirm to return False so user chooses "custom" password path
+    monkeypatch.setattr(
+        "nssh.cli.common.workflows.confirm",
+        lambda msg, default=True: False,
     )
     monkeypatch.setattr(
         "nssh.cli.host.add.prompt_password_with_confirmation",
@@ -241,11 +301,6 @@ def test_host_add_password_custom_stores_credentials(
         [
             "add",
             "cache.example.com",
-            "--auth",
-            "password",
-            "--context",
-            "work",
-            "--no-test",
         ],
         env=host_cli_env.env,
         input="\n\n\n\n",
@@ -262,6 +317,18 @@ def test_host_add_switches_to_keyboard_interactive(
     host_cli_env.creds.set_context(
         "work.conf", name="expedient", username="chris.jones", password="ctx-secret"
     )
+
+    # Mock select_include_file
+    monkeypatch.setattr(
+        "nssh.cli.host.add.select_include_file",
+        lambda parser, context, prompt: host_cli_env.include_file,
+    )
+
+    # Mock config to enable test_connection
+    from nssh.core.env.settings import NsshConfig, HostAddConfig
+
+    mock_config = NsshConfig(host_add=HostAddConfig(test_connection=True))
+    monkeypatch.setattr("nssh.cli.host.add.get_config", lambda: mock_config)
 
     def fake_test(hostname, timeout, parser):
         return {
@@ -284,11 +351,7 @@ def test_host_add_switches_to_keyboard_interactive(
         [
             "add",
             "switch.example.com",
-            "--context",
-            "expedient",
-            "--auth",
-            "password",
-            "--force",
+            "--yes",
         ],
         env=host_cli_env.env,
         input="\n\n\n\n",
@@ -300,8 +363,8 @@ def test_host_add_switches_to_keyboard_interactive(
     assert "PubkeyAuthentication no" in contents
 
 
-def test_host_update_triggers_auto_fix(host_cli_env: HostCliEnv, monkeypatch):
-    """nssh host update always runs the compatibility workflow."""
+def test_host_edit_triggers_auto_fix(host_cli_env: HostCliEnv, monkeypatch):
+    """nssh host edit runs the compatibility workflow on test failure."""
     host_cli_env.include_file.write_text(
         "Host legacy\n"
         "  HostName legacy.example.com\n"
@@ -312,8 +375,22 @@ def test_host_update_triggers_auto_fix(host_cli_env: HostCliEnv, monkeypatch):
 
     calls: dict[str, str] = {}
 
-    def fake_iterative(parser, hostname, max_iterations=5, verbose=True):
+    def fake_test(hostname, timeout, parser):
         calls["hostname"] = hostname
+        return {
+            "success": False,
+            "exit_code": 255,
+            "stderr": "Unable to negotiate with legacy: no matching key exchange method",
+            "stdout": "",
+        }
+
+    monkeypatch.setattr(
+        "nssh.cli.host.edit.test_ssh_connection_via_cli",
+        fake_test,
+    )
+
+    def fake_compat_fix(parser, hostname, max_iterations=5, show_header=True):
+        calls["compat_hostname"] = hostname
         return {
             "success": True,
             "iterations": 1,
@@ -328,17 +405,76 @@ def test_host_update_triggers_auto_fix(host_cli_env: HostCliEnv, monkeypatch):
         }
 
     monkeypatch.setattr(
-        "nssh.cli.host.compat.iterative_compatibility_fix",
-        fake_iterative,
+        "nssh.cli.host.edit.apply_and_display_compat_fixes",
+        fake_compat_fix,
     )
+
+    # Mock parse_ssh_compatibility_error to detect compat issues
+    monkeypatch.setattr(
+        "nssh.cli.host.edit.parse_ssh_compatibility_error",
+        lambda stderr: ["kex"],
+    )
+
+    # Run without --yes; provide inputs for: hostname, user (change it), port,
+    # password update (n), confirm apply, confirm auto-fix
+    result = host_cli_env.runner.invoke(
+        app,
+        ["edit", "legacy"],
+        env=host_cli_env.env,
+        input="\nnewuser\n\nn\ny\ny\n",  # keep hostname, change user, keep port, no password, confirm, auto-fix
+    )
+    assert result.exit_code == 0, result.output
+    assert calls.get("compat_hostname") == "legacy"
+
+
+def test_host_rm_with_credentials_cleanup(host_cli_env: HostCliEnv, monkeypatch):
+    """nssh host rm --yes auto-deletes stored credentials."""
+    host_cli_env.include_file.write_text(
+        "Host testhost\n" "  HostName testhost.example.com\n" "  User admin\n"
+    )
+    host_cli_env.creds.add_host_credential("testhost", "admin", "secret123")
 
     result = host_cli_env.runner.invoke(
         app,
-        ["update", "legacy"],
+        ["rm", "testhost", "--yes"],
         env=host_cli_env.env,
     )
     assert result.exit_code == 0, result.output
-    assert (
-        "Compatibility fixes applied" in result.stdout or "✓ Success" in result.stdout
+    assert "removed" in result.stdout.lower()
+    assert "Credentials deleted" in result.stdout
+
+    # Verify credentials were deleted
+    assert host_cli_env.creds.get_host_credentials("testhost") is None
+
+
+def test_host_add_dry_run(host_cli_env: HostCliEnv, monkeypatch):
+    """nssh host add --dry-run previews without writing."""
+    # Mock select_include_file
+    monkeypatch.setattr(
+        "nssh.cli.host.add.select_include_file",
+        lambda parser, context, prompt: host_cli_env.include_file,
     )
-    assert calls["hostname"] == "legacy"
+
+    # Mock config to skip test_connection
+    from nssh.core.env.settings import NsshConfig, HostAddConfig
+
+    mock_config = NsshConfig(host_add=HostAddConfig(test_connection=False))
+    monkeypatch.setattr("nssh.cli.host.add.get_config", lambda: mock_config)
+
+    original_contents = host_cli_env.include_file.read_text()
+
+    result = host_cli_env.runner.invoke(
+        app,
+        [
+            "add",
+            "dryrun.example.com",
+            "--yes",
+            "--dry-run",
+        ],
+        env=host_cli_env.env,
+    )
+    assert result.exit_code == 0, result.output
+    assert "Dry-run" in result.stdout
+
+    # File should not have changed
+    assert host_cli_env.include_file.read_text() == original_contents

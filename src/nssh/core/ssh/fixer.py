@@ -306,11 +306,6 @@ def iterative_compatibility_fix(
     all_fixes_applied: List[str] = []
 
     for iteration in range(1, max_iterations + 1):
-        if verbose and console:
-            console.print(
-                f"\n[dim]Iteration {iteration}/{max_iterations}: Testing connection...[/dim]"
-            )
-
         test_result = test_ssh_connection_via_cli(
             hostname,
             timeout=10,
@@ -318,6 +313,8 @@ def iterative_compatibility_fix(
         )
 
         if test_result["success"]:
+            if verbose and console and all_fixes_applied:
+                console.print("[dim]Testing... success[/dim]")
             return {
                 "success": True,
                 "iterations": iteration,
@@ -337,7 +334,7 @@ def iterative_compatibility_fix(
             ):
                 if verbose and console:
                     console.print(
-                        "[dim]Key exchange successful, authentication failed (expected with BatchMode)[/dim]"
+                        "[dim]Testing... success (KEX ok, auth skipped)[/dim]"
                     )
                 return {
                     "success": True,
@@ -371,7 +368,7 @@ def iterative_compatibility_fix(
         if not new_fixes:
             if verbose and console:
                 console.print(
-                    f"[yellow]⚠ Same compatibility issues persist: {', '.join(compat_types)}[/yellow]"
+                    f"[yellow]![/yellow] Same compatibility issues persist: {', '.join(compat_types)}"
                 )
             return {
                 "success": False,
@@ -383,7 +380,7 @@ def iterative_compatibility_fix(
 
         if verbose and console:
             compat_names = [COMPAT_CONFIGS[fix]["name"] for fix in new_fixes]
-            console.print(f"[dim]Applying fixes: {', '.join(compat_names)}[/dim]")
+            console.print(f"[dim]Testing... applying {', '.join(compat_names)}[/dim]")
 
         try:
             apply_host_update(

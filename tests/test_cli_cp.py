@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from typer.testing import CliRunner
+from click.testing import CliRunner
 
 from nssh.cli.cp import (
     _detect_direction,
@@ -88,15 +88,17 @@ class TestDetectDirection:
         assert direction == "push"
 
     def test_both_remote_raises(self):
-        from typer import BadParameter
+        import click
 
-        with pytest.raises(BadParameter, match="Cannot copy between two remote hosts"):
+        with pytest.raises(
+            click.BadParameter, match="Cannot copy between two remote hosts"
+        ):
             _detect_direction("host1:~/a", "host2:~/b")
 
     def test_neither_remote_raises(self):
-        from typer import BadParameter
+        import click
 
-        with pytest.raises(BadParameter, match="One path must be remote"):
+        with pytest.raises(click.BadParameter, match="One path must be remote"):
             _detect_direction("./local1", "./local2")
 
 

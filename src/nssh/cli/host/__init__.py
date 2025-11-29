@@ -7,17 +7,22 @@ from __future__ import annotations
 
 from typing import Optional, Sequence
 
-from nssh.cli import typer
+from nssh.cli import click
 from nssh.cli.common.app import run_cli
-from nssh.cli.common.help import UsageRow, UsageSection, render_usage
+from nssh.cli.common.help import (
+    build_options_panel,
+    build_usage_sections,
+    render_usage,
+    styled_group,
+)
 from nssh.core.ui.console import get_console
 from nssh.core.ssh.config import SSHConfigParser
 from .add import add_command
-from .listing import list_hosts_command
+from .edit import edit_command
+from .get import get_command
+from .list import list_hosts_command
 from .remove import remove_command
-from .update import update_command
-from .context import (
-    complete_context,
+from nssh.cli.common.credentials import (
     get_parser as _get_parser,
 )
 from .sort import cmd_sort
@@ -26,91 +31,67 @@ console = get_console()
 APP_TITLE = "nssh host"
 APP_SUBTITLE = "Manage SSH hosts in configuration files"
 
-app = typer.Typer(add_help_option=False, rich_markup_mode=None)
 
-app.command("add")(add_command)
-app.command("list")(list_hosts_command)
-app.command("rm")(remove_command)
-app.command("update")(update_command)
+@styled_group(
+    invoke_without_command=True,
+    styled_title=APP_TITLE,
+    styled_subtitle=APP_SUBTITLE,
+)
+@click.option(
+    "--select",
+    "-s",
+    default=None,
+    help="Match by regex pattern",
+)
+@click.pass_context
+def app(ctx: click.Context, select: Optional[str]) -> None:
+    """Manage SSH hosts in configuration files."""
+    ctx.ensure_object(dict)
+    ctx.obj["cm"] = None
+    ctx.obj["parser"] = SSHConfigParser()
+
+    # If --select provided without subcommand, forward to list
+    if select and ctx.invoked_subcommand is None:
+        ctx.invoke(list_hosts_command, select=select)
+        raise SystemExit(0)
 
 
-@app.command("sort")
-def sort(
-    ctx: typer.Context,
-    context: Optional[str] = typer.Option(
-        None,
-        "--context",
-        help="Context name (default: sort all Include files)",
-        autocompletion=complete_context,
-    ),
-):
+app.add_command(add_command, name="add")
+app.add_command(edit_command, name="edit")
+app.add_command(get_command, name="get")
+app.add_command(list_hosts_command, name="list")
+app.add_command(remove_command, name="rm")
+
+
+@app.command("sort", short_help="Sort hosts alphabetically")
+@click.option("--select", "-s", default=None, help="Filter by regex pattern")
+@click.pass_context
+def sort(ctx: click.Context, select: Optional[str]) -> None:
     """Sort SSH config files alphabetically"""
     parser = _get_parser(ctx)
-    cmd_sort(parser, context_arg=context)
+    cmd_sort(parser, select_pattern=select)
 
 
-def _usage_sections() -> list[UsageSection]:
-    return [
-        UsageSection(
-            "Commands",
-            rows=[
-                UsageRow(
-                    "nssh host [bold]add[/bold] [FQDN] [OPTIONS]",
-                    "Add SSH host to config file",
-                ),
-                UsageRow(
-                    "nssh host [bold]rm[/bold] [HOSTNAME] [OPTIONS]",
-                    "Remove host from config",
-                ),
-                UsageRow(
-                    "nssh host [bold]list[/bold] [OPTIONS]",
-                    "List all hosts from SSH configs",
-                ),
-                UsageRow(
-                    "nssh host [bold]sort[/bold] [OPTIONS]",
-                    "Sort hosts alphabetically in config files",
-                ),
-                UsageRow(
-                    "nssh host [bold]update[/bold] [HOSTNAME]",
-                    "Auto-detect auth requirements and compatibility",
-                ),
-            ],
-        ),
-        UsageSection(
-            "Options",
-            rows=[
-                UsageRow(
-                    "--auth password|key",
-                    "Authentication type (default: password)",
-                ),
-                UsageRow(
-                    "--context NAME",
-                    "Specify context name (default: interactive selection)",
-                ),
-                UsageRow("--search TERM, -s", "Filter by keyword (repeatable)"),
-                UsageRow("--force, -f", "Skip all prompts and use defaults"),
-            ],
-        ),
-    ]
+def _usage_sections():
+    return build_usage_sections(app, "nssh host")
 
 
-def print_usage():
-    render_usage(APP_TITLE, APP_SUBTITLE, _usage_sections())
+def print_usage() -> None:
+    render_usage(
+        APP_TITLE,
+        APP_SUBTITLE,
+        _usage_sections(),
+        options_panel=build_options_panel(app),
+        show_banner=False,
+    )
 
 
-@app.callback()
-def setup_context(ctx: typer.Context):
-    """Initialize shared managers"""
-    ctx.obj = {"cm": None, "parser": SSHConfigParser()}
-
-
-def main(argv: Sequence[str] | None = None):
+def main(argv: Sequence[str] | None = None) -> None:
     """Main entry point"""
     run_cli(
         app,
         cli_name=APP_TITLE,
         usage_cb=print_usage,
-        completion_prefix="HOST",
         argv=argv,
     )
 

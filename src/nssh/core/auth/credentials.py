@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple, Iterator
 
 from nssh.core.env.paths import age_key_path, credential_file_path
+from nssh.core.env.settings import get_config
 from nssh.core.env.system import check_command, run_command, set_secure_permissions
 
 
-_BACKUP_LIMIT = 5
 _LOCK_TIMEOUT_SECONDS = 5.0
 
 
@@ -122,6 +122,10 @@ class CredentialManager:
         self._prune_backups()
 
     def _prune_backups(self) -> None:
+        max_files = get_config().backup.max_files
+        if max_files <= 0:
+            return  # No limit configured
+
         pattern = f"{self.credential_file.name}.bak."
         backups = [
             path
@@ -130,8 +134,11 @@ class CredentialManager:
             )
             if path.name.startswith(pattern)
         ]
+        if len(backups) <= max_files:
+            return
+
         backups.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        for stale in backups[_BACKUP_LIMIT:]:
+        for stale in backups[max_files:]:
             stale.unlink(missing_ok=True)
 
     def _load_fresh_credentials(self) -> Dict:
@@ -369,13 +376,16 @@ class CredentialManager:
     # Context Management Methods
     # ============================================
 
-    def create_context(self, name: str, git_include_file: str) -> bool:
+    def create_context(
+        self, name: str, git_include_file: str, domain: Optional[str] = None
+    ) -> bool:
         """
         Create a new context
 
         Args:
             name: Context name
             git_include_file: SSH config include file name
+            domain: Optional domain suffix for auto-selection (e.g., "example.com")
 
         Returns:
             bool: True if successful
@@ -392,6 +402,7 @@ class CredentialManager:
             data["contexts"][name] = {
                 "git_include_file": stored_include,
                 "credential": None,
+                "domain": domain or "",
             }
 
             return self._write_credentials_locked(data)
@@ -446,12 +457,53 @@ class CredentialManager:
             self._write_credentials_locked(data)
             return True
 
+    def update_context_domain(self, name: str, domain: Optional[str]) -> bool:
+        """
+        Update the domain pattern for a context.
+
+        Args:
+            name: Context name
+            domain: Domain suffix for auto-selection (e.g., "example.com"), or None to clear
+
+        Returns:
+            bool: True if successful
+        """
+        with self._exclusive_lock():
+            data = self._load_fresh_credentials()
+
+            if name not in data["contexts"]:
+                raise ValueError(f"Context '{name}' does not exist")
+
+            data["contexts"][name]["domain"] = domain or ""
+            return self._write_credentials_locked(data)
+
+    def update_context_include_file(self, name: str, git_include_file: str) -> bool:
+        """
+        Update the SSH config include file for a context.
+
+        Args:
+            name: Context name
+            git_include_file: SSH config include file name
+
+        Returns:
+            bool: True if successful
+        """
+        with self._exclusive_lock():
+            data = self._load_fresh_credentials()
+
+            if name not in data["contexts"]:
+                raise ValueError(f"Context '{name}' does not exist")
+
+            normalized = self._normalize_git_include_file(git_include_file)
+            data["contexts"][name]["git_include_file"] = normalized or git_include_file
+            return self._write_credentials_locked(data)
+
     def list_contexts(self) -> List[Dict]:
         """
         List all contexts with their details
 
         Returns:
-            list[dict]: List of contexts with name, git_include_file, credential count
+            list[dict]: List of contexts with name, git_include_file, domain, credential count
         """
         data = self.decrypt_credentials()
 
@@ -461,12 +513,14 @@ class CredentialManager:
                 continue
 
             git_include_file = ctx_data.get("git_include_file", "")
+            domain = ctx_data.get("domain", "")
             credential = self._extract_context_credential(ctx_data)
 
             contexts.append(
                 {
                     "name": name,
                     "git_include_file": git_include_file,
+                    "domain": domain,
                     "credential_count": 1 if credential else 0,
                     "credential": credential,
                 }

@@ -3,37 +3,29 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from nssh.cli import typer
+from nssh.cli import click
 
 from nssh.cli.common import ui
-from nssh.cli.common.selectors import select_via_fzf
+from nssh.cli.common.selectors import FzfCancelled, fzf_select
 from nssh.core.recording import manager as recording
 from nssh.core.ui.console import get_console
 
-RECORDING_FILE_OPTION = typer.Option(
-    None,
-    "--file",
-    "-f",
-    help="Direct path to recording file",
-)
 
-RECORDING_DATE_OPTION = typer.Option(
-    None,
-    "--date",
-    help="Filter interactive picker by date (default: recent sessions)",
-)
-
-DRY_RUN_OPTION = typer.Option(
-    False,
-    "--dry-run",
-    help="Preview actions without executing",
-)
+def dry_run_option(func):
+    """Decorator to add --dry-run option to a Click command."""
+    return click.option(
+        "--dry-run",
+        is_flag=True,
+        default=False,
+        help="Preview actions without executing",
+    )(func)
 
 
 def _session_updated_timestamp(entry: recording.SessionRecord) -> float:
@@ -98,8 +90,6 @@ def print_sessions(rows: Sequence[recording.SessionRecord]) -> None:
         console.print("[dim]No sessions found.[/dim]")
         return
 
-    ui.show_panel("SSH Session Log", "Recorded SSH sessions with playback")
-
     home = str(Path.home())
     local_tz = datetime.now().astimezone().tzinfo
     table_rows = []
@@ -138,10 +128,10 @@ def _format_duration(seconds: int) -> str:
     return f"{minutes:02d}:{rem:02d}"
 
 
-def _select_session_from_rows(
-    rows: Sequence[recording.SessionRecord], prompt: str
-) -> Path:
-    """Launch fzf to pick from provided session rows."""
+def _build_session_options(
+    rows: Sequence[recording.SessionRecord],
+) -> tuple[List[str], dict[str, Path]]:
+    """Build fzf option strings and mapping from session rows."""
     options: List[str] = []
     option_map: dict[str, Path] = {}
     home = str(Path.home())
@@ -160,75 +150,76 @@ def _select_session_from_rows(
         options.append(option)
         option_map[option] = entry.cast_path
 
+    return options, option_map
+
+
+def _select_session_from_rows(
+    rows: Sequence[recording.SessionRecord], prompt: str
+) -> Path:
+    """Launch fzf to pick from provided session rows."""
+    options, option_map = _build_session_options(rows)
+
     try:
-        selected_line = select_via_fzf(options, prompt)
-    except typer.Exit as exc:  # pragma: no cover - depends on user cancellation
-        if exc.exit_code == 0:
-            typer.echo("Selection cancelled", err=True)
-        elif exc.exit_code == 1:
-            typer.echo("Install fzf (brew install fzf) or pass --file", err=True)
+        [selected_line] = fzf_select(options, prompt, exit_on_cancel=False)
+    except FzfCancelled:
+        click.echo("Selection cancelled", err=True)
+        raise SystemExit(0)
+    except SystemExit as exc:  # pragma: no cover - fzf not installed
+        if exc.code == 1:
+            click.echo("Install fzf (brew install fzf)", err=True)
         raise
 
     return option_map[selected_line]
+
+
+def _select_sessions_from_rows_multi(
+    rows: Sequence[recording.SessionRecord], prompt: str
+) -> List[Path]:
+    """Launch fzf multi-select to pick from provided session rows."""
+    options, option_map = _build_session_options(rows)
+
+    try:
+        selected_lines = fzf_select(options, prompt, multi=True, exit_on_cancel=False)
+    except FzfCancelled:
+        click.echo("Selection cancelled", err=True)
+        raise SystemExit(0)
+
+    return [option_map[line] for line in selected_lines]
 
 
 def require_binary(name: str) -> str:
     """Ensure an external binary is present on PATH (asciinema, etc.)."""
     path = shutil.which(name)
     if not path:
-        typer.echo(f"Error: '{name}' not found in PATH", err=True)
-        raise typer.Exit(code=1)
+        click.echo(f"Error: '{name}' not found in PATH", err=True)
+        raise SystemExit(1)
     return path
 
 
-def pick_recording_interactive(
-    date_str: str | None, settings: recording.RecordingSettings
-) -> Path:
+def resolve_recording_path(settings: recording.RecordingSettings) -> Path:
     """Launch fzf to select a recording file interactively."""
     sessions = load_sessions(settings)
     recordings_dir = settings.directory.expanduser()
 
     if not sessions:
-        typer.echo(f"No recordings found in {recordings_dir}", err=True)
-        raise typer.Exit(code=1)
-
-    if date_str:
-        try:
-            datetime.strptime(date_str, "%Y-%m-%d")
-        except ValueError as exc:
-            raise typer.BadParameter("--date must be YYYY-MM-DD") from exc
-
-        filtered = [
-            entry
-            for entry in sessions
-            if entry.started_at.strftime("%Y-%m-%d") == date_str
-        ]
-
-        if not filtered:
-            typer.echo(
-                f"No recordings found for date {date_str} in {recordings_dir}", err=True
-            )
-            raise typer.Exit(code=1)
-
-        prompt = f"Select recording ({date_str}):"
-        return _select_session_from_rows(filtered, prompt)
+        click.echo(f"No recordings found in {recordings_dir}", err=True)
+        raise SystemExit(1)
 
     return _select_session_from_rows(sessions, "Select recording:")
 
 
-def resolve_recording_path(
-    file: Path | None,
-    date: str | None,
-    settings: recording.RecordingSettings,
-) -> Path:
-    """Return the selected recording path from --file or fzf picker."""
-    if file:
-        target = Path(file).expanduser()
-        if not target.exists():
-            raise typer.BadParameter(f"File does not exist: {target}")
-        return target
+def resolve_recording_paths_multi(settings: recording.RecordingSettings) -> List[Path]:
+    """Launch fzf multi-select to choose one or more recordings."""
+    sessions = load_sessions(settings)
+    recordings_dir = settings.directory.expanduser()
 
-    return pick_recording_interactive(date, settings)
+    if not sessions:
+        click.echo(f"No recordings found in {recordings_dir}", err=True)
+        raise SystemExit(1)
+
+    return _select_sessions_from_rows_multi(
+        sessions, "Select recording(s) [Tab=multi-select]:"
+    )
 
 
 def default_export_destination(target: Path, extension: str) -> Path:
@@ -243,9 +234,12 @@ def default_export_destination(target: Path, extension: str) -> Path:
 def run_command(cmd: Sequence[str], dry_run: bool) -> None:
     """Execute a subprocess, honoring --dry-run."""
     if dry_run:
-        typer.echo("[dry-run] " + " ".join(cmd))
+        click.echo("[dry-run] " + " ".join(cmd))
         return
-    subprocess.run(cmd, check=True)
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise click.ClickException(f"Command failed with exit code {exc.returncode}")
 
 
 def filter_sessions_by_host(
@@ -277,6 +271,33 @@ def filter_sessions_by_host(
 
         result.append(session)
 
+    return result
+
+
+def select_sessions_by_pattern(
+    sessions: List[recording.SessionRecord],
+    pattern: str,
+) -> List[recording.SessionRecord]:
+    """Filter sessions by regex pattern against display string.
+
+    Args:
+        sessions: List of session records to filter.
+        pattern: Regex pattern to match (case-insensitive).
+
+    Returns:
+        Filtered list of session records.
+    """
+    regex = re.compile(pattern, re.IGNORECASE)
+    home = str(Path.home())
+
+    result = []
+    for session in sessions:
+        cast_display = str(session.cast_path).replace(home, "~", 1)
+        display = (
+            f"{session.host} {session.started_at.strftime('%Y-%m-%d')} {cast_display}"
+        )
+        if regex.search(display):
+            result.append(session)
     return result
 
 
@@ -320,16 +341,16 @@ def delete_recording(
     cast_display = str(cast_path).replace(home, "~", 1)
 
     if dry_run:
-        console.print(f"[yellow]Would delete:[/yellow] {cast_display}")
+        console.print(f"[yellow]![/yellow] Would delete: {cast_display}")
         if index_path.exists():
             index_display = str(index_path).replace(home, "~", 1)
-            console.print(f"[yellow]Would delete:[/yellow] {index_display}")
+            console.print(f"[yellow]![/yellow] Would delete: {index_display}")
         return
 
     # Delete cast file
     try:
         cast_path.unlink()
-        console.print(f"[green]Deleted:[/green] {cast_display}")
+        console.print(f"[green]✓[/green] Deleted: {cast_display}")
     except OSError as exc:
         console.print(f"[red]Failed to delete {cast_display}: {exc}[/red]")
         return

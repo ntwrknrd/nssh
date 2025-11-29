@@ -1,20 +1,17 @@
-╭───────────────────────────────────╮
-│ nssh                              │
-│ SSH tooling for network operators │
-╰───────────────────────────────────╯
+$ nssh --help
 
-  nssh [USER@]HOST [SSH_ARGS...]
-    Connect to host                                                             
-    ('nssh -- host' if name == subcommand)                                      
-  nssh cp [USER@]HOST:PATH LOCAL
-    Copy files to/from SSH hosts                                                
-  nssh host 
-    Manage SSH config entries                                                   
-  nssh cred 
-    Manage encrypted credentials                                                
-  nssh log 
-    Manage recordings                                                           
-  nssh benchmark 
-    Performance benchmarking and analysis                                       
-  nssh self 
-    Manage CLI and optional shell helpers                                       
+╭─ Usage ────────────────────────────────────────────────────────────────╮
+│   nssh [USER@]HOST                    Connect to host                  │
+│   nssh cp                             Copy files to/from hosts         │
+│   nssh host                           Manage hosts and credentials     │
+│   nssh ctx                            Manage credential contexts       │
+│   nssh log                            Manage recordings                │
+│   nssh benchmark                      Performance benchmarking         │
+│   nssh self                           Manage nssh installation         │
+╰────────────────────────────────────────────────────────────────────────╯
+
+╭─ Options ──────────────────────────────────────────────────────────────╮
+│   --help, -h                          Show this help message           │
+│   --version, -v                       Show version number              │
+│   + [SSH_ARGS]                        Pass additional arguments to ssh │
+╰────────────────────────────────────────────────────────────────────────╯

@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from typer.testing import CliRunner
+from click.testing import CliRunner
 
 from nssh.cli.log import app, common
 from nssh.core.recording import manager as recording
@@ -59,18 +59,21 @@ def test_play_dry_run_uses_asciinema(tmp_path, monkeypatch):
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
 
+    # Mock fzf picker to return the cast path
+    monkeypatch.setattr(common, "resolve_recording_path", lambda s: cast_path)
+
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["play", "--file", str(cast_path), "--dry-run"],
+        ["play", "--dry-run"],
         env=env,
     )
     assert result.exit_code == 0
     assert "asciinema play" in result.stdout
 
 
-def test_play_with_file_option(tmp_path, monkeypatch):
-    """Test play command with --file option selecting specific session."""
+def test_play_selects_session(tmp_path, monkeypatch):
+    """Test play command selecting specific session via fzf."""
     base = tmp_path / "casts"
     _make_session(base, "lab-sw1", "2025-11-14", session="session-000")
     session_001 = _make_session(base, "lab-sw1", "2025-11-14", session="session-001")
@@ -85,11 +88,13 @@ def test_play_with_file_option(tmp_path, monkeypatch):
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
 
+    # Mock fzf picker to return session-001
+    monkeypatch.setattr(common, "resolve_recording_path", lambda s: session_001)
+
     runner = CliRunner()
-    # Test playing session-001 specifically
     result = runner.invoke(
         app,
-        ["play", "--file", str(session_001), "--dry-run"],
+        ["play", "--dry-run"],
         env=env,
     )
     assert result.exit_code == 0
@@ -160,8 +165,82 @@ def test_delete_older_than_removes_old_recordings(tmp_path, monkeypatch):
     assert new_cast.exists()
 
 
+def test_delete_select_pattern_dry_run(tmp_path, monkeypatch):
+    """Test delete --select with pattern in dry-run mode."""
+    base = tmp_path / "casts"
+    cast1 = _make_session(base, "lab-sw1", "2025-11-14")
+    cast2 = _make_session(base, "lab-sw2", "2025-11-14")
+    _make_session(base, "prod-sw1", "2025-11-14")
+
+    monkeypatch.setenv("NSSH_RECORD_DIR", str(base))
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["delete", "--select", "lab", "--dry-run", "-y"])
+
+    assert result.exit_code == 0
+    assert "Found 2 recording(s)" in result.stdout
+    assert "Would delete" in result.stdout
+    # Files should still exist in dry-run
+    assert cast1.exists()
+    assert cast2.exists()
+
+
+def test_delete_select_pattern_deletes_matching(tmp_path, monkeypatch):
+    """Test delete --select actually deletes matching recordings."""
+    base = tmp_path / "casts"
+    cast1 = _make_session(base, "lab-sw1", "2025-11-14")
+    cast2 = _make_session(base, "lab-sw2", "2025-11-14")
+    prod_cast = _make_session(base, "prod-sw1", "2025-11-14")
+
+    monkeypatch.setenv("NSSH_RECORD_DIR", str(base))
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["delete", "--select", "lab", "-y"])
+
+    assert result.exit_code == 0
+    assert "Found 2 recording(s)" in result.stdout
+    assert not cast1.exists()
+    assert not cast2.exists()
+    assert prod_cast.exists()
+
+
+def test_delete_select_no_matches(tmp_path, monkeypatch):
+    """Test delete --select with no matching recordings."""
+    base = tmp_path / "casts"
+    _make_session(base, "prod-sw1", "2025-11-14")
+
+    monkeypatch.setenv("NSSH_RECORD_DIR", str(base))
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["delete", "--select", "nonexistent"])
+
+    assert result.exit_code == 1
+    assert "No recordings match" in result.stdout
+
+
+def test_delete_multi_select_deletes_selected(tmp_path, monkeypatch):
+    """Test delete with fzf multi-select."""
+    base = tmp_path / "casts"
+    cast1 = _make_session(base, "lab-sw1", "2025-11-14")
+    cast2 = _make_session(base, "lab-sw2", "2025-11-14")
+
+    monkeypatch.setenv("NSSH_RECORD_DIR", str(base))
+
+    # Mock multi-select to return both paths
+    monkeypatch.setattr(
+        common, "resolve_recording_paths_multi", lambda s: [cast1, cast2]
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["delete", "-y"])
+
+    assert result.exit_code == 0
+    assert not cast1.exists()
+    assert not cast2.exists()
+
+
 def test_export_defaults_to_current_dir_txt(tmp_path, monkeypatch):
-    """Test export command defaults to .txt in current directory."""
+    """Test export command with -y uses default .txt output."""
     base = tmp_path / "casts"
     cast_path = _make_session(base, "lab-sw1", "2025-11-14")
     monkeypatch.setenv("NSSH_RECORD_DIR", str(base))
@@ -181,23 +260,22 @@ def test_export_defaults_to_current_dir_txt(tmp_path, monkeypatch):
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
 
+    # Mock fzf picker to return the cast path
+    monkeypatch.setattr(common, "resolve_recording_path", lambda s: cast_path)
+
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["export", "--file", str(cast_path), "--dry-run"],
+        ["export", "-y", "--dry-run"],
         env=env,
     )
     assert result.exit_code == 0
     # Should output to lab-sw1_2025-11-14_session-000.txt in current dir
-    expected_output = work_dir / "lab-sw1_2025-11-14_session-000.txt"
-    assert (
-        str(expected_output) in result.stdout
-        or "lab-sw1_2025-11-14_session-000.txt" in result.stdout
-    )
+    assert "lab-sw1_2025-11-14_session-000.txt" in result.stdout
 
 
-def test_export_gif_format(tmp_path, monkeypatch):
-    """Test export command with --format gif creates .gif in current directory."""
+def test_export_gif_format_via_prompt(tmp_path, monkeypatch):
+    """Test export command with .gif extension uses asciicast2gif."""
     base = tmp_path / "casts"
     cast_path = _make_session(base, "lab-sw1", "2025-11-14")
     monkeypatch.setenv("NSSH_RECORD_DIR", str(base))
@@ -217,55 +295,22 @@ def test_export_gif_format(tmp_path, monkeypatch):
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
 
+    # Mock fzf picker to return the cast path
+    monkeypatch.setattr(common, "resolve_recording_path", lambda s: cast_path)
+
+    gif_output = work_dir / "output.gif"
+
     runner = CliRunner()
+    # Provide .gif path via prompt input
     result = runner.invoke(
         app,
-        ["export", "--file", str(cast_path), "--format", "gif", "--dry-run"],
+        ["export", "--dry-run"],
+        input=f"{gif_output}\n",
         env=env,
     )
     assert result.exit_code == 0
-    # Should output to lab-sw1_2025-11-14_session-000.gif in current dir
-    expected_output = work_dir / "lab-sw1_2025-11-14_session-000.gif"
-    assert (
-        str(expected_output) in result.stdout
-        or "lab-sw1_2025-11-14_session-000.gif" in result.stdout
-    )
-
-
-def test_export_custom_output(tmp_path, monkeypatch):
-    """Test export command with --output overrides default path."""
-    base = tmp_path / "casts"
-    cast_path = _make_session(base, "lab-sw1", "2025-11-14")
-    monkeypatch.setenv("NSSH_RECORD_DIR", str(base))
-
-    # Set up asciinema binary
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    asciinema = bin_dir / "asciinema"
-    asciinema.write_text("#!/bin/sh\nexit 0\n")
-    asciinema.chmod(0o755)
-
-    custom_output = tmp_path / "custom" / "output.txt"
-    custom_output.parent.mkdir()
-
-    env = os.environ.copy()
-    env["PATH"] = f"{bin_dir}:{env['PATH']}"
-
-    runner = CliRunner()
-    result = runner.invoke(
-        app,
-        [
-            "export",
-            "--file",
-            str(cast_path),
-            "--output",
-            str(custom_output),
-            "--dry-run",
-        ],
-        env=env,
-    )
-    assert result.exit_code == 0
-    assert str(custom_output) in result.stdout
+    # Should use asciicast2gif since extension is .gif
+    assert "asciicast2gif" in result.stdout
 
 
 def test_load_sessions_sorts_by_cast_mtime(tmp_path, monkeypatch):
