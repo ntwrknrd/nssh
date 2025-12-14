@@ -79,22 +79,22 @@ nssh is built on the shoulders of exceptional open-source tools and communities.
 **Core Dependencies:**
 
 - [OpenSSH](https://www.openssh.com/) (BSD/ISC) - The OpenBSD project's SSH connectivity suite
-- [age](https://github.com/FiloSottile/age) (BSD-3-Clause) - Modern file encryption tool
-- [fzf](https://github.com/junegunn/fzf) (MIT) - Command-line fuzzy finder
+- [fzf](https://github.com/junegunn/fzf) (MIT) - Command-line fuzzy finder (optional - enhanced fuzzy finding)
 - [asciinema](https://github.com/asciinema/asciinema) (GPLv3) - Terminal session recorder (optional - session recording)
 
 **Go Ecosystem:**
 
 - [Go](https://go.dev/) (BSD-3-Clause) - The Go programming language
 - [Cobra](https://github.com/spf13/cobra) (Apache-2.0) - CLI framework
+- [age](https://github.com/FiloSottile/age) (BSD-3-Clause) - Modern file encryption
 - [memguard](https://github.com/awnumar/memguard) (Apache-2.0) - Secure memory management
 - [go-piv](https://github.com/go-piv/piv-go) (Apache-2.0) - YubiKey PIV library (optional - hardware key support)
 
 **License Compatibility:**
-This project is licensed under GPL-3.0, which is compatible with all the above dependencies.
+This project is licensed under [GNU GPL-3.0](https://github.com/ntwrknrd/nssh/blob/main/LICENSE), which is compatible with all the above dependencies.
 
 ## Roadmap
-
-- **FIDO2/WebAuthn Support:** Hardware key authentication via FIDO2 tokens
-- **macOS Secure Enclave:** Native Secure Enclave integration for credential protection
+- **Additional Hardware Authentication Support:**
+   - FIDO2/WebAuthn (wider range of hardware security key support)
+   - Secure Enclave (native macOS hardware security)
 - **Native Recording Engine:** Potentially replace asciinema subprocess
