@@ -1,0 +1,20 @@
+$ nssh --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh [host] [flags]               Smart connect to host                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────╮
+│   connect                           Connect to host                          │
+│   cp                                Copy files via SCP                       │
+│   ctx                               Manage credential contexts               │
+│   host                              Manage SSH host files                    │
+│   lock                              Lock credential vault                    │
+│   log                               Manage session recordings                │
+│   self                              Manage nssh installation                 │
+│   unlock                            Unlock credential vault                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Options ─────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose                     Print debug messages                     │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

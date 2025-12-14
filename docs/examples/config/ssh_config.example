@@ -1,0 +1,23 @@
+# ~/.ssh/config
+#
+# Main SSH configuration file with Include directives for organizing hosts by context.
+# nssh uses the Include file names to map hosts to credential contexts.
+
+# Include other SSH config files
+Include ~/.ssh/conf.d/
+
+# Global defaults for all hosts
+Host *
+  LogLevel ERROR
+  SetEnv TERM=xterm-256color
+  SetEnv COLORTERM=truecolor
+  ControlMaster auto
+  ControlPath ~/.ssh/controlmasters/%r@%h:%p
+  ControlPersist yes
+  TCPKeepAlive yes
+  ServerAliveInterval 240
+  ServerAliveCountMax 2
+  GSSAPIAuthentication no
+  IdentityAgent None
+  IdentitiesOnly yes
+  IdentityFile ~/.ssh/id_ed25519_sk

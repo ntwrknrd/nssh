@@ -1,0 +1,15 @@
+$ nssh host edit --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh host edit [HOST] [flags]     Edit host settings                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│   --auth STRING                     change auth type: password or key        │
+│   --dry-run                         preview only                             │
+│   -y, --yes                         skip confirmations                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Options ─────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose                     Print debug messages                     │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

@@ -1,0 +1,10 @@
+$ nssh self piv --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh self piv [flags]             Manage enrolled YubiKeys                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Options ─────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose                     Print debug messages                     │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

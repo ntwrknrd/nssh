@@ -1,0 +1,14 @@
+$ nssh log list --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh log list [flags]             List recordings                          │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│   -l, --last INT                    Filter on the last N entries             │
+│   -s, --select STRING               Filter by regex pattern                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Options ─────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose                     Print debug messages                     │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

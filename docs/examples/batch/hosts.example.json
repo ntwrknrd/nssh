@@ -1,0 +1,38 @@
+[
+  {
+    "host": "switch-03",
+    "hostname": "switch-03.example.com",
+    "user": "alice",
+    "context": "work"
+  },
+  {
+    "host": "switch-04",
+    "hostname": "switch-04.example.com",
+    "user": "alice",
+    "context": "work"
+  },
+  {
+    "host": "firewall-01",
+    "hostname": "firewall-01.example.com",
+    "user": "alice",
+    "context": "work"
+  },
+  {
+    "host": "k3s-d",
+    "hostname": "k3s-d.lan.example.net",
+    "user": "root",
+    "context": "homelab"
+  },
+  {
+    "host": "k3s-e",
+    "hostname": "k3s-e.lan.example.net",
+    "user": "root",
+    "context": "homelab"
+  },
+  {
+    "host": "rpi-b",
+    "hostname": "rpi-b.lan.example.net",
+    "user": "alice",
+    "context": "homelab"
+  }
+]

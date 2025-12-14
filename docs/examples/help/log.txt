@@ -1,0 +1,18 @@
+$ nssh log --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh log [flags]                  Manage session recordings                │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────╮
+│   auth                              Authenticate with asciinema              │
+│   delete                            Delete recordings                        │
+│   export                            Export recording                         │
+│   list                              List recordings                          │
+│   play                              Play recording                           │
+│   upload                            Upload to asciinema                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Options ─────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose                     Print debug messages                     │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

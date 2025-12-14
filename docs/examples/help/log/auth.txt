@@ -1,0 +1,14 @@
+$ nssh log auth --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh log auth [flags]             Authenticate with asciinema              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│   -q, --quiet                       Suppress diagnostic messages             │
+│   --server-url STRING               asciinema server URL (uses config d...   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Options ─────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose                     Print debug messages                     │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

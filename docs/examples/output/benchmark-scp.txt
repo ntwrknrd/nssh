@@ -1,0 +1,24 @@
+~/g/nssh : nssh self bench scp rpi-a
+
+─────────────────────────────────────────────────────── SSH BENCHMARK ────────────────────────────────────────────────────────
+
+  Host: rpi-a
+  Config: 3 samples, 1 warmup, 1K file
+
+  ── Upload ──
+  Warmup 1/1: 832.5ms
+  Sample 1/3: 74.0ms
+  Sample 2/3: 67.0ms
+  Sample 3/3: 66.2ms
+
+  Wall Clock: 66.2ms - 74.0ms
+
+  ── Download ──
+  Warmup 1/1: 92.7ms
+  Sample 1/3: 83.8ms
+  Sample 2/3: 81.6ms
+  Sample 3/3: 70.1ms
+
+  Wall Clock: 70.1ms - 83.8ms
+
+───────────────────────────────────────────────────────────── OK ─────────────────────────────────────────────────────────────

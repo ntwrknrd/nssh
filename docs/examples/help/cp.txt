@@ -1,0 +1,15 @@
+$ nssh cp --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh cp <source> <dest> [flags]   Copy files via SCP                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│   -p, --preserve                    Preserve times/modes                     │
+│   -q, --quiet                       Disable progress                         │
+│   -r, --recursive                   Copy directories                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Options ─────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose                     Verbose output                           │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

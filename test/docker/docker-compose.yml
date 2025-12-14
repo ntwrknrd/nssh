@@ -1,0 +1,68 @@
+services:
+  sshd-pwd:
+    build:
+      context: ./sshd
+      dockerfile: Dockerfile
+    hostname: ssh-pwd
+    domainname: demo.local
+    environment:
+      SSH_USER: testuser
+      SSH_PASSWORD: testpass
+      SSH_AUTH_METHOD: password
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "22"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    networks:
+      demo-net:
+        aliases:
+          - ssh-pwd.demo.local
+
+  sshd-key:
+    build:
+      context: ./sshd
+      dockerfile: Dockerfile
+    hostname: ssh-key
+    domainname: demo.local
+    environment:
+      SSH_USER: testuser
+      SSH_AUTH_METHOD: key
+      SSH_AUTHORIZED_KEYS: ${SSH_TEST_PUBKEY:-}
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "22"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    networks:
+      demo-net:
+        aliases:
+          - ssh-key.demo.local
+
+  # VHS-based runner for generating demo recordings
+  vhs-runner:
+    build:
+      context: ../..
+      dockerfile: test/docker/vhs-runner/Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+    hostname: vhs-runner
+    domainname: demo.local
+    depends_on:
+      sshd-pwd:
+        condition: service_healthy
+      sshd-key:
+        condition: service_healthy
+    volumes:
+      - ../../docs/examples:/output
+      - ../../test/vhs:/vhs:ro
+    environment:
+      TERM: xterm-256color
+    networks:
+      - demo-net
+    # Keep container running for exec commands
+    command: ["-c", "exec sleep infinity"]
+
+networks:
+  demo-net:
+    driver: bridge
