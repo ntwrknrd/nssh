@@ -1,0 +1,9 @@
+k3s-a|/home/alice/.ssh/homelab_hosts
+k3s-b|/home/alice/.ssh/homelab_hosts
+k3s-c|/home/alice/.ssh/homelab_hosts
+legacy-switch|/home/alice/.ssh/work_hosts
+pve01|/home/alice/.ssh/homelab_hosts
+router|/home/alice/.ssh/work_hosts
+rpi-a|/home/alice/.ssh/homelab_hosts
+server|/home/alice/.ssh/work_hosts
+switch|/home/alice/.ssh/work_hosts

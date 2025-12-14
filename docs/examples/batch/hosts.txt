@@ -1,0 +1,13 @@
+# Example: Simple hostname list for batch import
+#
+# Usage: nssh host add ./hosts.txt
+#
+# Format:
+#   - One FQDN per line
+#   - Lines starting with # are comments
+#   - Empty lines are ignored
+#   - Uses config.toml defaults for user, port, context
+
+switch-03.example.com
+switch-04.example.com
+firewall-01.example.com

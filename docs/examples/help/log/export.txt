@@ -1,0 +1,12 @@
+$ nssh log export --help
+
+╭─ Usage ─────────────────────────────────────────────────────────────────╮
+│   nssh log export                     Export to text or GIF             │
+╰─────────────────────────────────────────────────────────────────────────╯
+
+╭─ Options ───────────────────────────────────────────────────────────────╮
+│   --yes, -y                           Skip confirmation                 │
+│   --dry-run                           Preview actions without executing │
+│   --help, -h                          Print command-specific help       │
+╰─────────────────────────────────────────────────────────────────────────╯
+

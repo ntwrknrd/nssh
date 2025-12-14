@@ -1,0 +1,7 @@
+hostname,user,port,context,password
+switch-03.example.com,alice,22,work,
+switch-04.example.com,alice,22,work,
+firewall-01.example.com,alice,22,work,
+k3s-d.home.arpa,root,22,homelab,
+k3s-e.home.arpa,root,22,homelab,
+rpi-b.home.arpa,alice,22,homelab,

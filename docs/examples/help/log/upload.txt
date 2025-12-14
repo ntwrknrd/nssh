@@ -1,0 +1,12 @@
+$ nssh log upload --help
+
+╭─ Usage ─────────────────────────────────────────────────────────────────╮
+│   nssh log upload                     Upload to asciinema server        │
+╰─────────────────────────────────────────────────────────────────────────╯
+
+╭─ Options ───────────────────────────────────────────────────────────────╮
+│   --yes, -y                           Skip confirmation                 │
+│   --dry-run                           Preview actions without executing │
+│   --help, -h                          Print command-specific help       │
+╰─────────────────────────────────────────────────────────────────────────╯
+

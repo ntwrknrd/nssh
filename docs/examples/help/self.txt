@@ -1,0 +1,12 @@
+$ nssh self --help
+
+╭─ Usage ───────────────────────────────────────────────────────────╮
+│   nssh self init                      Install nssh                │
+│   nssh self reinstall                 Re-install nssh             │
+│   nssh self status                    Show status                 │
+│   nssh self uninstall                 Uninstall nssh              │
+╰───────────────────────────────────────────────────────────────────╯
+
+╭─ Options ─────────────────────────────────────────────────────────╮
+│   --help, -h                          Print command-specific help │
+╰───────────────────────────────────────────────────────────────────╯

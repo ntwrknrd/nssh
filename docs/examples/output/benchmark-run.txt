@@ -1,0 +1,36 @@
+~/g/nssh : nssh benchmark run rpi-a
+
+───────────────────────────────────────── BENCHMARK CAPTURE ─────────────────────────────────────────
+
+Command: /Users/alice/.local/bin/nssh rpi-a -- echo nssh-benchmark-test
+Warmup run 1/1 complete (ignored).
+Sample 1/3: total 74.0 ms
+Sample 2/3: total 87.9 ms
+Sample 3/3: total 74.9 ms
+╭──────────────────────────┬──────────┬──────────┬─────────────────────┬──────────┬─────────╮
+│ Stage                    │ Mean     │ Median   │ Min/Max             │ Std Dev  │ Samples │
+├──────────────────────────┼──────────┼──────────┼─────────────────────┼──────────┼─────────┤
+│ cli-startup              │ 1.3 µs   │ 1.2 µs   │ 1.2 µs / 1.3 µs     │ 0.0 µs   │ 3       │
+│ pty-start                │ 1.4 ms   │ 1.5 ms   │ 1.1 ms / 1.6 ms     │ 252.2 µs │ 3       │
+│ config-parse             │ 1.6 ms   │ 1.6 ms   │ 1.6 ms / 1.6 ms     │ 2.5 µs   │ 3       │
+│ host-selection           │ 1.9 ms   │ 1.9 ms   │ 1.9 ms / 1.9 ms     │ 11.7 µs  │ 3       │
+│ credential-vault         │ 5.4 ms   │ 5.4 ms   │ 5.4 ms / 5.4 ms     │ 32.7 µs  │ 3       │
+│ connection-orchestration │ 1.2 µs   │ 1.2 µs   │ 1.2 µs / 1.2 µs     │ 0.0 µs   │ 3       │
+│ recording-setup          │ 340.2 µs │ 338.2 µs │ 331.4 µs / 350.9 µs │ 8.1 µs   │ 3       │
+│ recording-session        │ 59.6 ms  │ 55.5 ms  │ 54.7 ms / 68.8 ms   │ 6.5 ms   │ 3       │
+│   asciinema-overhead     │ 31.8 ms  │ 31.8 ms  │ 31.8 ms / 31.9 ms   │ 76.2 µs  │ 3       │
+│   ssh-connection         │ 27.8 ms  │ 23.7 ms  │ 22.9 ms / 36.9 ms   │ 6.4 ms   │ 3       │
+│ pty-teardown             │ 204.2 µs │ 209.6 µs │ 185.0 µs / 218.1 µs │ 14.1 µs  │ 3       │
+│ input-validation         │ 1.6 µs   │ 1.6 µs   │ 1.6 µs / 1.6 µs     │ 0.0 µs   │ 3       │
+│   unaccounted-time       │ 8.5 ms   │ 8.5 ms   │ 8.3 ms / 8.5 ms     │ 99.5 µs  │ 3       │
+├──────────────────────────┼──────────┼──────────┼─────────────────────┼──────────┼─────────┤
+│ TOTAL                    │ 79.0 ms  │ 74.9 ms  │ 74.0 ms / 87.9 ms   │ 6.3 ms   │ 3       │
+╰──────────────────────────┴──────────┴──────────┴─────────────────────┴──────────┴─────────╯
+
+Benchmark results archived to: /Users/cj/Git/ntwrknrd/nssh/benchmark/2025-11-28_22-50-50
+  - timing.log: raw timing data
+  - output.txt: summary and statistics
+  - metadata.json: run configuration
+  - Latest run: benchmark/latest -> 2025-11-28_22-50-50
+
+──────────────────────────────────────────────── OK ─────────────────────────────────────────────────

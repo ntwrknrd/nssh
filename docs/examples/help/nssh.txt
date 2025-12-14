@@ -1,0 +1,17 @@
+$ nssh --help
+
+╭─ Usage ────────────────────────────────────────────────────────────────╮
+│   nssh [USER@]HOST                    Connect to host                  │
+│   nssh cp                             Copy files to/from hosts         │
+│   nssh host                           Manage hosts and credentials     │
+│   nssh ctx                            Manage credential contexts       │
+│   nssh log                            Manage recordings                │
+│   nssh benchmark                      Performance benchmarking         │
+│   nssh self                           Manage nssh installation         │
+╰────────────────────────────────────────────────────────────────────────╯
+
+╭─ Options ──────────────────────────────────────────────────────────────╮
+│   --help, -h                          Show this help message           │
+│   --version, -v                       Show version number              │
+│   + [SSH_ARGS]                        Pass additional arguments to ssh │
+╰────────────────────────────────────────────────────────────────────────╯

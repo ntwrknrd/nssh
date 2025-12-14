@@ -1,0 +1,32 @@
+[
+  {
+    "hostname": "switch-03.example.com",
+    "user": "alice",
+    "context": "work"
+  },
+  {
+    "hostname": "switch-04.example.com",
+    "user": "alice",
+    "context": "work"
+  },
+  {
+    "hostname": "firewall-01.example.com",
+    "user": "alice",
+    "context": "work"
+  },
+  {
+    "hostname": "k3s-d.home.arpa",
+    "user": "root",
+    "context": "homelab"
+  },
+  {
+    "hostname": "k3s-e.home.arpa",
+    "user": "root",
+    "context": "homelab"
+  },
+  {
+    "hostname": "rpi-b.home.arpa",
+    "user": "alice",
+    "context": "homelab"
+  }
+]

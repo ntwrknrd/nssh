@@ -1,0 +1,13 @@
+$ nssh host edit --help
+
+╭─ Usage ─────────────────────────────────────────────────────────────────╮
+│   nssh host edit [ALIAS]              Edit host config/credentials      │
+╰─────────────────────────────────────────────────────────────────────────╯
+
+╭─ Options ───────────────────────────────────────────────────────────────╮
+│   --yes, -y                           Skip confirmations                │
+│   --dry-run                           Preview only                      │
+│   --auth CHOICE                       Change auth type: password or key │
+│   --help, -h                          Print command-specific help       │
+╰─────────────────────────────────────────────────────────────────────────╯
+

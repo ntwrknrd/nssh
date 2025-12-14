@@ -1,0 +1,14 @@
+$ nssh log delete --help
+
+╭─ Usage ───────────────────────────────────────────────────────────────────╮
+│   nssh log delete                     Delete recorded sessions            │
+╰───────────────────────────────────────────────────────────────────────────╯
+
+╭─ Options ─────────────────────────────────────────────────────────────────╮
+│   --select, -s                        Filter by regex pattern             │
+│   --older-than INTEGER                Delete recordings older than N days │
+│   --yes, -y                           Skip confirmation                   │
+│   --dry-run                           Preview actions without executing   │
+│   --help, -h                          Print command-specific help         │
+╰───────────────────────────────────────────────────────────────────────────╯
+

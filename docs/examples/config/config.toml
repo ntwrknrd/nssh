@@ -1,0 +1,219 @@
+# nssh Configuration File
+#
+# Location: ~/.config/nssh/config.toml
+# Environment override: NSSH_CONFIG=/path/to/config.toml
+#
+# This file configures nssh behavior, encryption, and session recording.
+# All settings are optional - nssh works without this file.
+
+# ============================================================================
+# ENVIRONMENT VARIABLES
+# ============================================================================
+#
+# Environment variables override config.toml settings.
+# See env.example for the full reference.
+
+# ============================================================================
+# DEFAULTS
+# ============================================================================
+
+[defaults]
+# Default context for new hosts (used by `nssh host add`)
+# context = "work"
+
+# Default SSH username for new hosts
+# user = "admin"
+
+# ============================================================================
+# HOST MANAGEMENT
+# ============================================================================
+
+[host.add]
+# Run SSH connectivity test after adding a host
+# Default: true
+test_connection = true
+
+# Prompt to store credentials after adding a host
+# Default: false (skip the prompt)
+prompt_for_credential = false
+
+# ============================================================================
+# BATCH OPERATIONS
+# ============================================================================
+
+[batch]
+# Continue processing remaining hosts if one fails during batch import
+# Default: true
+continue_on_error = true
+
+# ============================================================================
+# ENCRYPTION
+# ============================================================================
+
+[encryption]
+# Age encryption key file path
+# Default: ~/.config/nssh/age.key
+# Tilde (~) expansion is supported
+age_key = "~/.config/nssh/age.key"
+
+# Encrypted credentials file path
+# Default: ~/.local/share/nssh/credentials.age
+# Tilde (~) expansion is supported
+credential_file = "~/.local/share/nssh/credentials.age"
+
+# ============================================================================
+# SSH CONFIGURATION
+# ============================================================================
+
+[ssh]
+# Main SSH config file location
+# Default: ~/.ssh/config
+# Tilde (~) expansion is supported
+config_file = "~/.ssh/config"
+
+# Include directory for context-specific SSH config files
+# When adding hosts with 'nssh host add', context files are created here
+# Default: ~/.ssh/conf.d
+# Tilde (~) expansion is supported
+include_dir = "~/.ssh/conf.d"
+
+# Host index file for fast lookups
+# Default: ~/.local/state/nssh/host_index
+host_index = "~/.local/state/nssh/host_index"
+
+# ============================================================================
+# BACKUP SETTINGS
+# ============================================================================
+
+[backup]
+# Maximum number of backup files to retain per source file
+# Applies to both SSH config backups (~/.local/share/nssh/backups/)
+# and credential file backups (alongside credentials.age)
+# Set to 0 to disable pruning (keep all backups)
+# Default: 10
+max_files = 10
+
+# ============================================================================
+# SHELL INTEGRATION
+# ============================================================================
+
+[self]
+# Directory that stores installed shell helpers / manifests
+# Default: ~/.local/share/nssh
+share_dir = "~/.local/share/nssh"
+
+# Fish integration directories
+# Defaults leverage XDG_CONFIG_HOME (e.g. ~/.config/fish/...)
+fish_functions_dir = "~/.config/fish/functions"
+fish_completions_dir = "~/.config/fish/completions"
+
+# ============================================================================
+# SESSION RECORDING
+# ============================================================================
+
+[recording]
+# Enable or disable automatic session recording
+# Default: false
+enabled = true
+
+# Recording storage directory
+# Default: ~/.local/state/nssh/casts
+# Tilde (~) expansion is supported
+dir = "~/.local/state/nssh/casts"
+
+# Append mode: append to daily session file vs creating separate files
+# - true: All sessions for a host on the same day append to session-000.cast
+# - false: Each session creates a new file (session-000.cast, session-001.cast, etc.)
+# Default: true
+append_mode = true
+
+# Window size for asciinema recordings (cols x rows)
+# - Sets fixed terminal dimensions for consistent playback
+# - Format: "WIDTHxHEIGHT" (e.g., "100x30", "120x30", "80x24")
+# - Smaller dimensions result in larger fonts when played back
+# - Default: unset (uses terminal's actual size)
+# - Recommended: "100x30" for readable documentation/demos
+# window_size = "100x30"
+
+# Custom asciinema server URL for self-hosted instances
+# Used by `nssh log upload` command
+# Default: https://asciinema.org (public server)
+# asciinema_server_url = "https://asciinema.example.com"
+
+# Automatic archival of old recordings (monthly tar.gz bundles)
+[recording.archive]
+# Enable the archiver (default: false)
+enabled = false
+
+# Archive output directory (default: ~/.local/state/nssh/archives)
+dir = "~/.local/state/nssh/archives"
+
+# Minimum age before a cast is archived (supports s/m/h/d/w units)
+# Default: "30d"
+min_age = "30d"
+
+# Maximum number of monthly bundles to retain (newest kept)
+# Default: 12
+max_bundles = 12
+
+# Per-run byte cap (0 = unlimited). When exceeded, remaining files
+# are left for the next run.
+max_run_bytes = 0
+
+# Jitter around the 24h cadence (default: "30m")
+jitter = "30m"
+
+# Include patterns: Only record hosts matching these patterns
+# - Glob patterns (default): "lab-*", "*-switch", "db-0[1-3]"
+# - Regex patterns: Prefix with "regex:" like "regex:^dev-\w+$"
+# - If defined, ONLY matching hosts are recorded
+# - Mutually exclusive with exclude_hosts (include_hosts takes precedence)
+# Default: [] (empty list means record all hosts if enabled=true)
+include_hosts = [
+    "lab-*",              # All hosts starting with "lab-"
+    "dev-*",              # All hosts starting with "dev-"
+    "test-*",             # All hosts starting with "test-"
+    "regex:^staging-.*",  # Regex: all hosts starting with "staging-"
+]
+
+# Exclude patterns: Never record hosts matching these patterns
+# - Same pattern syntax as include_hosts (glob or regex:...)
+# - If defined, matching hosts are NOT recorded
+# - Only used if include_hosts is empty
+# Default: [] (empty list means no exclusions)
+# exclude_hosts = [
+#     "prod-*",            # Skip all production hosts
+#     "*.production.com",  # Skip production domain
+#     "regex:.*-mgmt$",    # Regex: skip management interfaces
+# ]
+
+# ============================================================================
+# PER-CONTEXT CONFIGURATION
+# ============================================================================
+#
+# Override settings for specific contexts. Useful for separate encryption
+# keys per environment (work vs personal) or different test behaviors.
+#
+# [contexts.work]
+# key_file = "~/.config/age/work-keys.txt"
+# test_connection = false  # Skip connectivity tests for work hosts
+#
+# [contexts.homelab]
+# key_file = "~/.config/age/homelab-keys.txt"
+# test_connection = true
+
+# ============================================================================
+# PATTERN MATCHING REFERENCE
+# ============================================================================
+#
+# Glob patterns (default):
+#   "lab-*"           - Matches: lab-switch-01, lab-router-02
+#   "*-switch"        - Matches: core-switch, lab-switch
+#   "db-0[1-3]"       - Matches: db-01, db-02, db-03
+#   "*.example.com"   - Matches: host1.example.com, host2.example.com
+#
+# Regex patterns (prefix with "regex:"):
+#   "regex:^dev-.*"      - Matches: dev-server, dev-switch-01
+#   "regex:.*-mgmt$"     - Matches: switch-mgmt, router-mgmt
+#   "regex:^prod-db-\d+$" - Matches: prod-db-01, prod-db-02 (digits only)
+#   "regex:^(test|qa)-.*" - Matches: test-server, qa-server

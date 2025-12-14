@@ -1,0 +1,15 @@
+$ nssh host --help
+
+╭─ Usage ────────────────────────────────────────────────────────────╮
+│   nssh host add [FQDN|FILE]           Add host(s)                  │
+│   nssh host edit [ALIAS]              Edit host config/credentials │
+│   nssh host get ALIAS                 Show host details            │
+│   nssh host list                      List all hosts               │
+│   nssh host rm [FQDN|FILE]            Remove host(s)               │
+│   nssh host sort                      Sort hosts alphabetically    │
+╰────────────────────────────────────────────────────────────────────╯
+
+╭─ Options ──────────────────────────────────────────────────────────╮
+│   --select, -s                        Match by regex pattern       │
+│   --help, -h                          Print command-specific help  │
+╰────────────────────────────────────────────────────────────────────╯

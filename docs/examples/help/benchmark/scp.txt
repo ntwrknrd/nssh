@@ -1,0 +1,14 @@
+$ nssh benchmark scp --help
+
+╭─ Usage ──────────────────────────────────────────────────────────────╮
+│   nssh benchmark scp HOST             SCP file transfer overhead     │
+╰──────────────────────────────────────────────────────────────────────╯
+
+╭─ Options ────────────────────────────────────────────────────────────╮
+│   --size INTEGER                      Test file size in KB           │
+│   --warmups INTEGER                   Warmup runs ignored in summary │
+│   --samples INTEGER                   Measured runs captured         │
+│   --simple-only                       Report only total durations    │
+│   --help, -h                          Print command-specific help    │
+╰──────────────────────────────────────────────────────────────────────╯
+

@@ -1,0 +1,14 @@
+$ nssh ctx --help
+
+╭─ Usage ───────────────────────────────────────────────────────────╮
+│   nssh ctx add [NAME]                 Create a new context        │
+│   nssh ctx edit [NAME]                Edit context credentials    │
+│   nssh ctx get NAME                   Show context details        │
+│   nssh ctx list                       List all contexts           │
+│   nssh ctx rm [NAME]                  Delete a context            │
+╰───────────────────────────────────────────────────────────────────╯
+
+╭─ Options ─────────────────────────────────────────────────────────╮
+│   --select, -s                        Match by regex pattern      │
+│   --help, -h                          Print command-specific help │
+╰───────────────────────────────────────────────────────────────────╯

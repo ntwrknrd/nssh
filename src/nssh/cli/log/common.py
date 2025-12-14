@@ -1,0 +1,366 @@
+"""Shared helpers for nssh log CLI commands."""
+
+from __future__ import annotations
+
+import json
+import re
+import shutil
+import subprocess
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional, Sequence
+
+from nssh.cli import click
+
+from nssh.cli.common import ui
+from nssh.cli.common.selectors import FzfCancelled, fzf_select
+from nssh.core.recording import manager as recording
+from nssh.core.ui.console import get_console
+
+
+def dry_run_option(func):
+    """Decorator to add --dry-run option to a Click command."""
+    return click.option(
+        "--dry-run",
+        is_flag=True,
+        default=False,
+        help="Preview actions without executing",
+    )(func)
+
+
+def _session_updated_timestamp(entry: recording.SessionRecord) -> float:
+    """Return POSIX timestamp representing the last update time for a session."""
+    try:
+        return entry.cast_path.stat().st_mtime
+    except OSError:
+        # Fall back to finished_at/started_at if the cast is missing (e.g., deleted).
+        return entry.finished_at.timestamp()
+
+
+def _parse_iso_datetime(value: str) -> datetime:
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    return datetime.fromisoformat(value)
+
+
+def _session_duration_seconds(entry: recording.SessionRecord) -> int:
+    index_path = entry.cast_path.with_suffix(".index.json")
+    total = 0
+    try:
+        with open(index_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+            sessions = payload.get("sessions", [])
+    except (OSError, json.JSONDecodeError, AttributeError):
+        sessions = []
+
+    for session in sessions or []:
+        try:
+            started_str = session.get("started_at")
+            finished_str = session.get("finished_at")
+            if not started_str or not finished_str:
+                continue
+            started = _parse_iso_datetime(started_str)
+            finished = _parse_iso_datetime(finished_str)
+            duration = max(int((finished - started).total_seconds()), 0)
+            total += duration
+        except (ValueError, TypeError):
+            continue
+
+    if total > 0:
+        return total
+
+    fallback_delta = entry.finished_at - entry.started_at
+    return max(int(fallback_delta.total_seconds()), 0)
+
+
+def load_sessions(
+    settings: Optional[recording.RecordingSettings] = None,
+) -> List[recording.SessionRecord]:
+    """Return all recorded sessions sorted by cast modification time."""
+    sessions = list(recording.iter_session_records(settings=settings))
+    sessions.sort(key=_session_updated_timestamp, reverse=True)
+    return sessions
+
+
+def print_sessions(rows: Sequence[recording.SessionRecord]) -> None:
+    """Render recorded sessions in a shared panel/table layout."""
+    console = get_console()
+
+    if not rows:
+        console.print("[dim]No sessions found.[/dim]")
+        return
+
+    home = str(Path.home())
+    local_tz = datetime.now().astimezone().tzinfo
+    table_rows = []
+    for entry in rows:
+        seconds = _session_duration_seconds(entry)
+        minutes, rem = divmod(seconds, 60)
+        duration_str = f"{minutes:02d}:{rem:02d}"
+        session_label = entry.session_label or "-"
+        updated_ts = _session_updated_timestamp(entry)
+        updated_dt = datetime.fromtimestamp(updated_ts, tz=local_tz)
+        updated_str = updated_dt.strftime("%Y-%m-%dT%H:%M:%S")
+        cast_display = str(entry.cast_path).replace(home, "~", 1)
+        table_rows.append(
+            (updated_str, entry.host, session_label, duration_str, cast_display)
+        )
+
+    ui.print_table(
+        (
+            ("Last Updated", "cyan"),
+            ("Host", "dim"),
+            ("Session", "dim"),
+            ("Duration", "dim"),
+            ("Cast", ""),
+        ),
+        table_rows,
+    )
+    console.print(f"\n[dim]Total: {len(rows)} sessions[/dim]")
+
+
+def _format_duration(seconds: int) -> str:
+    """Return HH:MM:SS when long enough, otherwise MM:SS."""
+    minutes, rem = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{rem:02d}"
+    return f"{minutes:02d}:{rem:02d}"
+
+
+def _build_session_options(
+    rows: Sequence[recording.SessionRecord],
+) -> tuple[List[str], dict[str, Path]]:
+    """Build fzf option strings and mapping from session rows."""
+    options: List[str] = []
+    option_map: dict[str, Path] = {}
+    home = str(Path.home())
+
+    for idx, entry in enumerate(rows, 1):
+        seconds = _session_duration_seconds(entry)
+        duration_str = _format_duration(seconds)
+        started_local = entry.started_at.astimezone()
+        started_str = started_local.strftime("%Y-%m-%d %H:%M:%S")
+        label = entry.session_label or "-"
+        cast_display = str(entry.cast_path).replace(home, "~", 1)
+        option = (
+            f"[{idx:03}] {started_str} | {entry.host} | {label} | "
+            f"{duration_str} | {cast_display}"
+        )
+        options.append(option)
+        option_map[option] = entry.cast_path
+
+    return options, option_map
+
+
+def _select_session_from_rows(
+    rows: Sequence[recording.SessionRecord], prompt: str
+) -> Path:
+    """Launch fzf to pick from provided session rows."""
+    options, option_map = _build_session_options(rows)
+
+    try:
+        [selected_line] = fzf_select(options, prompt, exit_on_cancel=False)
+    except FzfCancelled:
+        click.echo("Selection cancelled", err=True)
+        raise SystemExit(0)
+    except SystemExit as exc:  # pragma: no cover - fzf not installed
+        if exc.code == 1:
+            click.echo("Install fzf (brew install fzf)", err=True)
+        raise
+
+    return option_map[selected_line]
+
+
+def _select_sessions_from_rows_multi(
+    rows: Sequence[recording.SessionRecord], prompt: str
+) -> List[Path]:
+    """Launch fzf multi-select to pick from provided session rows."""
+    options, option_map = _build_session_options(rows)
+
+    try:
+        selected_lines = fzf_select(options, prompt, multi=True, exit_on_cancel=False)
+    except FzfCancelled:
+        click.echo("Selection cancelled", err=True)
+        raise SystemExit(0)
+
+    return [option_map[line] for line in selected_lines]
+
+
+def require_binary(name: str) -> str:
+    """Ensure an external binary is present on PATH (asciinema, etc.)."""
+    path = shutil.which(name)
+    if not path:
+        click.echo(f"Error: '{name}' not found in PATH", err=True)
+        raise SystemExit(1)
+    return path
+
+
+def resolve_recording_path(settings: recording.RecordingSettings) -> Path:
+    """Launch fzf to select a recording file interactively."""
+    sessions = load_sessions(settings)
+    recordings_dir = settings.directory.expanduser()
+
+    if not sessions:
+        click.echo(f"No recordings found in {recordings_dir}", err=True)
+        raise SystemExit(1)
+
+    return _select_session_from_rows(sessions, "Select recording:")
+
+
+def resolve_recording_paths_multi(settings: recording.RecordingSettings) -> List[Path]:
+    """Launch fzf multi-select to choose one or more recordings."""
+    sessions = load_sessions(settings)
+    recordings_dir = settings.directory.expanduser()
+
+    if not sessions:
+        click.echo(f"No recordings found in {recordings_dir}", err=True)
+        raise SystemExit(1)
+
+    return _select_sessions_from_rows_multi(
+        sessions, "Select recording(s) [Tab=multi-select]:"
+    )
+
+
+def default_export_destination(target: Path, extension: str) -> Path:
+    """Derive a friendly filename for exports (hostname_date_session.*)."""
+    hostname = target.parent.parent.name
+    date = target.parent.name
+    session = target.stem
+    base_name = f"{hostname}_{date}_{session}"
+    return Path.cwd() / f"{base_name}.{extension}"
+
+
+def run_command(cmd: Sequence[str], dry_run: bool) -> None:
+    """Execute a subprocess, honoring --dry-run."""
+    if dry_run:
+        click.echo("[dry-run] " + " ".join(cmd))
+        return
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise click.ClickException(f"Command failed with exit code {exc.returncode}")
+
+
+def filter_sessions_by_host(
+    sessions: List[recording.SessionRecord],
+    host: str,
+    date_filter: str,
+) -> List[recording.SessionRecord]:
+    """Filter sessions by hostname and optional date.
+
+    Args:
+        sessions: List of session records to filter.
+        host: Hostname to match (case-insensitive substring match).
+        date_filter: Date string (YYYY-MM-DD) or '*' for all dates.
+
+    Returns:
+        Filtered list of session records.
+    """
+    result = []
+    host_lower = host.lower()
+
+    for session in sessions:
+        if host_lower not in session.host.lower():
+            continue
+
+        if date_filter != "*":
+            session_date = session.started_at.strftime("%Y-%m-%d")
+            if session_date != date_filter:
+                continue
+
+        result.append(session)
+
+    return result
+
+
+def select_sessions_by_pattern(
+    sessions: List[recording.SessionRecord],
+    pattern: str,
+) -> List[recording.SessionRecord]:
+    """Filter sessions by regex pattern against display string.
+
+    Args:
+        sessions: List of session records to filter.
+        pattern: Regex pattern to match (case-insensitive).
+
+    Returns:
+        Filtered list of session records.
+    """
+    regex = re.compile(pattern, re.IGNORECASE)
+    home = str(Path.home())
+
+    result = []
+    for session in sessions:
+        cast_display = str(session.cast_path).replace(home, "~", 1)
+        display = (
+            f"{session.host} {session.started_at.strftime('%Y-%m-%d')} {cast_display}"
+        )
+        if regex.search(display):
+            result.append(session)
+    return result
+
+
+def _cleanup_empty_dirs(cast_path: Path, base_dir: Path) -> None:
+    """Remove empty date and host directories after deletion."""
+    date_dir = cast_path.parent
+    host_dir = date_dir.parent
+
+    # Remove empty date directory
+    try:
+        if date_dir.exists() and not any(date_dir.iterdir()):
+            date_dir.rmdir()
+    except OSError:
+        pass
+
+    # Remove empty host directory
+    try:
+        if host_dir.exists() and host_dir != base_dir and not any(host_dir.iterdir()):
+            host_dir.rmdir()
+    except OSError:
+        pass
+
+
+def delete_recording(
+    cast_path: Path,
+    base_dir: Path,
+    dry_run: bool,
+    console,
+) -> None:
+    """Delete a recording file and its sidecar index, then cleanup empty dirs.
+
+    Args:
+        cast_path: Path to the .cast file.
+        base_dir: Base recording directory (for empty dir cleanup boundary).
+        dry_run: If True, only print what would be deleted.
+        console: Rich console for output.
+    """
+    index_path = cast_path.with_suffix(".index.json")
+    home = str(Path.home())
+
+    cast_display = str(cast_path).replace(home, "~", 1)
+
+    if dry_run:
+        console.print(f"[yellow]![/yellow] Would delete: {cast_display}")
+        if index_path.exists():
+            index_display = str(index_path).replace(home, "~", 1)
+            console.print(f"[yellow]![/yellow] Would delete: {index_display}")
+        return
+
+    # Delete cast file
+    try:
+        cast_path.unlink()
+        console.print(f"[green]✓[/green] Deleted: {cast_display}")
+    except OSError as exc:
+        console.print(f"[red]Failed to delete {cast_display}: {exc}[/red]")
+        return
+
+    # Delete sidecar index if it exists
+    if index_path.exists():
+        try:
+            index_path.unlink()
+        except OSError:
+            pass
+
+    # Cleanup empty directories
+    _cleanup_empty_dirs(cast_path, base_dir.expanduser())

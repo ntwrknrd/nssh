@@ -1,0 +1,14 @@
+$ nssh ctx edit --help
+
+╭─ Usage ────────────────────────────────────────────────────────────────────╮
+│   nssh ctx edit [NAME]                Edit context credentials             │
+╰────────────────────────────────────────────────────────────────────────────╯
+
+╭─ Options ──────────────────────────────────────────────────────────────────╮
+│   --domain, -d                        Set domain suffix for auto-selection │
+│   --ssh-config, -s                    Set SSH config include file          │
+│   --username, -u                      Set fallback username                │
+│   --password, -p                      Set fallback password                │
+│   --help, -h                          Print command-specific help          │
+╰────────────────────────────────────────────────────────────────────────────╯
+
