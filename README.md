@@ -38,9 +38,15 @@ Automated install script
 curl -fsSL https://raw.githubusercontent.com/ntwrknrd/nssh/main/scripts/install.sh | sh
 ```
 
+Homebrew install (if applicable)
+
+```bash
+brew install ntwrknrd/nssh/nssh
+```
+
 Initialize nssh (interactive setup)
 
-```
+```bash
 nssh self init
 ```
 
