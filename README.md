@@ -33,29 +33,19 @@ SSH wrapper for power users: manage hosts and credentials, inject passwords auto
 ### Install
 
 ```bash
-# Automated install (downloads to ~/.local/bin)
 curl -fsSL https://raw.githubusercontent.com/ntwrknrd/nssh/main/scripts/install.sh | sh
+```
 
-# Or build from source
-git clone https://github.com/ntwrknrd/nssh.git
-cd nssh
-make build
-
+```
 # Initialize nssh (interactive setup)
 nssh self init
 ```
 
 The `init` command guides you through: passphrase creation, SSH config setup, shell integration, include file creation, and optional context credential setup.
 
-> **TIP:** After installation, run `nssh self status` to see what's configured and get actionable next steps.
+> **TIP:** After installation, run `nssh self status`
 
 For detailed instructions & manual setup options see [Getting Started](docs/USER_GUIDE.md#getting-started).
-
-### Upgrade
-
-```bash
-nssh self reinstall
-```
 
 ### Uninstall
 
