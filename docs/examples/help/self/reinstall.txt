@@ -1,8 +1,9 @@
 $ nssh self reinstall --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh self reinstall [flags]       Reinstall from source                    │
+│   nssh self reinstall [flags]       Reinstall nssh from latest GitHub r...   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
+│   --dev                             build from source instead of downlo...   │
 │   --hardware                        build with hardware security suppor...   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮

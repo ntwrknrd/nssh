@@ -5,36 +5,49 @@ set -e
 REPO="ntwrknrd/nssh"
 INSTALL_DIR="${HOME}/.local/bin"
 BINARY="nssh"
+HARDWARE=false
+
+# Parse arguments
+for arg in "$@"; do
+    case "$arg" in
+        --hardware)
+            HARDWARE=true
+            ;;
+    esac
+done
 
 # Colors (if terminal supports it)
 if [ -t 1 ]; then
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[0;33m'
-    BLUE='\033[0;34m'
-    NC='\033[0m' # No Color
+    ESC=$(printf '\033')
+    DIM="${ESC}[2m"
+    RED="${ESC}[0;31m"
+    GREEN="${ESC}[0;32m"
+    YELLOW="${ESC}[0;33m"
+    GRAY="${ESC}[0;90m"
+    NC="${ESC}[0m"
 else
+    DIM=''
     RED=''
     GREEN=''
     YELLOW=''
-    BLUE=''
+    GRAY=''
     NC=''
 fi
 
 info() {
-    printf "${BLUE}==>${NC} %s\n" "$1"
+    printf "  ${DIM}${GRAY}[*]${NC} %s\n" "$1"
 }
 
 success() {
-    printf "${GREEN}==>${NC} %s\n" "$1"
+    printf "  ${DIM}${GREEN}[✓]${NC} %s\n" "$1"
 }
 
 warn() {
-    printf "${YELLOW}WARNING:${NC} %s\n" "$1"
+    printf "  ${DIM}${YELLOW}[!]${NC} %s\n" "$1"
 }
 
 error() {
-    printf "${RED}ERROR:${NC} %s\n" "$1" >&2
+    printf "  ${DIM}${RED}[✗]${NC} %s\n" "$1" >&2
     exit 1
 }
 
@@ -91,8 +104,15 @@ main() {
 
     info "Latest version: ${VERSION}"
 
-    # Build URLs
-    ARCHIVE="nssh_${VERSION_NUM}_${OS}_${ARCH}.tar.gz"
+    # Build URLs based on hardware flag
+    if [ "${HARDWARE}" = true ]; then
+        ARCHIVE="nssh-hardware_${VERSION_NUM}_${OS}_${ARCH}.tar.gz"
+        ARCHIVE_BINARY="nssh-hardware"
+        info "Installing hardware build (YubiKey/PIV support)"
+    else
+        ARCHIVE="nssh_${VERSION_NUM}_${OS}_${ARCH}.tar.gz"
+        ARCHIVE_BINARY="nssh"
+    fi
     BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
 
     # Create temp directory
@@ -129,7 +149,7 @@ main() {
     info "Installing to ${INSTALL_DIR}..."
     mkdir -p "${INSTALL_DIR}"
     tar -xzf "${ARCHIVE}"
-    mv "${BINARY}" "${INSTALL_DIR}/"
+    mv "${ARCHIVE_BINARY}" "${INSTALL_DIR}/${BINARY}"
     chmod +x "${INSTALL_DIR}/${BINARY}"
 
     success "Installed ${BINARY} to ${INSTALL_DIR}/${BINARY}"
@@ -139,16 +159,11 @@ main() {
         *":${INSTALL_DIR}:"*)
             ;;
         *)
-            echo ""
             warn "${INSTALL_DIR} is not in your PATH"
-            echo "    Add this to your shell profile (.bashrc, .zshrc, etc.):"
-            echo ""
-            echo "    export PATH=\"\${HOME}/.local/bin:\${PATH}\""
-            echo ""
+            printf "      Add to shell profile: ${GRAY}export PATH=\"\${HOME}/.local/bin:\${PATH}\"${NC}\n"
             ;;
     esac
 
-    echo ""
     info "Run 'nssh self init' to set up shell integration"
 }
 
