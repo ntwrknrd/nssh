@@ -1,4 +1,3 @@
-// Package secret provides secure memory handling for sensitive data.
 package secret
 
 import (

@@ -1,8 +1,3 @@
-// Package hardware provides types for hardware security device integration.
-//
-// Hardware modes store the private key on a separate security device (YubiKey PIV,
-// FIDO2 token, Secure Enclave) rather than on the host filesystem. The agent still
-// mediates access to the hardware token for session management.
 package hardware
 
 import "github.com/ntwrknrd/nssh/internal/session/mode"

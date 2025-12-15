@@ -1,11 +1,5 @@
 //go:build hardware
 
-// Package piv provides PIV keystore persistence and ECIES crypto helpers.
-// This package handles storage formats and cryptographic operations for
-// YubiKey PIV-based credential management.
-//
-// Device access (piv-go) is NOT in this package - it stays in internal/agent
-// behind build tags. This package is focused on persistence and crypto only.
 package piv
 
 import (

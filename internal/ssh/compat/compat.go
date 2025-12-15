@@ -1,8 +1,3 @@
-// Package compat provides SSH compatibility detection and fix definitions.
-//
-// This package is intentionally small and import-light so both the connector and
-// sshconfig mutators can share the same compatibility concepts without creating
-// unwanted dependencies.
 package compat
 
 import (

@@ -1,9 +1,3 @@
-// Package software provides host-backed age identity storage.
-//
-// "Software" means the key material is stored on the local host (encrypted on disk,
-// in OS keychain, etc.) rather than on a separate hardware security device.
-// Both software and hardware modes use the agent for session management -
-// the distinction is where the long-term private key lives.
 package software
 
 import (

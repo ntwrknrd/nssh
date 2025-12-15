@@ -1,4 +1,3 @@
-// Package logging provides audit logging for security events.
 package logging
 
 import (

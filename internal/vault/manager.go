@@ -1,4 +1,3 @@
-// Package vault provides age-encrypted credential management.
 package vault
 
 import (

@@ -1,4 +1,3 @@
-// Package shell provides shell integration and completion support.
 package shell
 
 import (

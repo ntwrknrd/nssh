@@ -1,7 +1,5 @@
 //go:build unix
 
-// Package recording provides session recording configuration, planning, and
-// metadata utilities.
 package recording
 
 import (

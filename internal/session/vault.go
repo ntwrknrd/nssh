@@ -1,8 +1,5 @@
 //go:build linux || darwin
 
-// Package session provides the composition root for vault manager construction.
-// This package may import internal/vault and internal/agent for wiring,
-// but must NOT import internal/ui, cobra, or golang.org/x/term.
 package session
 
 import (

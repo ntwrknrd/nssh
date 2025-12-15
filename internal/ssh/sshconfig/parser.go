@@ -1,4 +1,3 @@
-// Package sshconfig provides SSH config file parsing and manipulation.
 package sshconfig
 
 import (

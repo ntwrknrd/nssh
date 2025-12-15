@@ -1,4 +1,3 @@
-// Package exit provides process exit codes and typed errors used across the app.
 package exit
 
 // ExitError represents an error with a specific exit code.
