@@ -63,15 +63,12 @@ For detailed instructions & manual setup options see [Getting Started](docs/USER
 
 ### Uninstall
 
-1. If you installed shell helpers, remove them first:
-   ```bash
-   nssh self uninstall
-   # add --dry-run to preview what would be removed
-   ```
-2. Remove the binary:
-   ```bash
-   rm ~/.local/bin/nssh
-   ```
+```bash
+nssh self uninstall
+# add --dry-run to preview what would be removed
+```
+
+This removes shell integration, the binary, config, and recordings. Use `--keep-config` or `--keep-recordings` to preserve specific data.
 
 ## Learn More
 

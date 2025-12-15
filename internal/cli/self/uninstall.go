@@ -124,8 +124,8 @@ func runUninstall(keepConfig, keepRecordings, dryRun, yes bool) error {
 
 	// 4. Remove binary
 	ui.SubSection("Binary")
-	binaryPath := filepath.Join(home, ".local", "bin", "nssh")
-	if FileExists(binaryPath) {
+	binaryPath := FindBinary()
+	if binaryPath != "" && FileExists(binaryPath) {
 		if err := removeFile(binaryPath, dryRun); err != nil {
 			ui.Warning("Failed to remove binary: %v", err)
 			hasErrors = true
@@ -133,11 +133,7 @@ func runUninstall(keepConfig, keepRecordings, dryRun, yes bool) error {
 			ui.Success("Removed %s", AbbreviatePath(binaryPath))
 		}
 	} else {
-		// Check if installed elsewhere on PATH
-		pathBinary := FindBinary()
-		if pathBinary != "" && pathBinary != binaryPath {
-			ui.Warning("Binary at %s not managed by self - remove manually", AbbreviatePath(pathBinary))
-		}
+		ui.Info("Binary not found on PATH")
 	}
 
 	// 5. Optionally remove config/credentials
