@@ -6,7 +6,7 @@ $ nssh self --help
 │   bench                             Run performance benchmarks               │
 │   init                              Initialize nssh                          │
 │   piv                               Manage enrolled YubiKeys                 │
-│   reinstall                         Reinstall from source                    │
+│   reinstall                         Reinstall nssh from latest GitHub r...   │
 │   rekey                             Rotate or switch security mode           │
 │   reset                             Delete all nssh data and start fresh     │
 │   status                            Show installation status                 │

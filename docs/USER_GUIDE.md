@@ -612,7 +612,7 @@ If your `age.pub` is missing or corrupted, you can regenerate it:
 nssh self rekey --repair-pubkey
 ```
 #### self reinstall
-`reinstall` is intended for development workflows (build from source and refresh shell integration):
+`reinstall` downloads and installs the latest release from GitHub:
 ```bash
 nssh self reinstall
 ```
@@ -620,7 +620,12 @@ Hardware builds (YubiKey/PIV support):
 ```bash
 nssh self reinstall --hardware
 ```
-If the hardware build fails, you likely need CGO and PC/SC libraries:
+For development workflows (build from source):
+```bash
+nssh self reinstall --dev
+nssh self reinstall --dev --hardware
+```
+If the hardware dev build fails, you likely need CGO and PC/SC libraries:
 - macOS: PCSC.framework is built in
 - Linux: install `pcscd` and development headers (distro-specific)
 #### self bench
@@ -754,14 +759,16 @@ If smart connect says it can’t find a host:
   ```
 - Ensure `asciinema` is installed and available on PATH.
 - Check host include/exclude patterns in `[logging.session]`.
-### “Hardware support not compiled into this binary”
+### "Hardware support not compiled into this binary"
 
-You’re running a non-hardware build. Rebuild with hardware support:
+You're running a non-hardware build. Install the hardware build:
 ```bash
 nssh self reinstall --hardware
 ```
-Or build manually:
+Or build from source:
 ```bash
+nssh self reinstall --dev --hardware
+# or manually:
 go build -tags hardware ./cmd/nssh
 ```
 ### Performance questions
