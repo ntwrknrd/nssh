@@ -696,7 +696,7 @@ func showNextSteps() {
 	ui.SubSection("Next Steps")
 
 	steps := []string{
-		"Create a context: nssh ctx add <name> --file <include-file>",
+		"Create a context: nssh ctx add <name>",
 		"Add your first host: nssh host add",
 		"Connect: nssh <hostname>",
 	}

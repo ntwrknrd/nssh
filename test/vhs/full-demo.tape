@@ -3,7 +3,7 @@
 
 Set Width 1200
 Set Height 900
-Set Margin 40
+Set Margin 20
 Set MarginFill "#674EFF"
 Set WindowBar Colorful
 Set WindowBarSize 40
@@ -29,44 +29,43 @@ Sleep 500ms
 Enter
 
 # Wait for the user to review
-Sleep 3s
+Sleep 2s
 
 # Confirm software security mode
 Enter
-Sleep 200ms
+Sleep 500ms
 
 # Enter passphrase
 Type "thisisatestpass"
 Enter
-Sleep 50ms
+Sleep 500ms
 
 # Confirm passphrase
 Type "thisisatestpass"
 Enter
-Sleep 50ms
+Sleep 500ms
 
 # Skip dependency installs
 Right
-Sleep 200ms
+Sleep 500ms
 Enter
-Sleep 50ms
+Sleep 500ms
 Right
-Sleep 200ms
+Sleep 500ms
 Enter
-Sleep 50ms
+Sleep 500ms
 Right
-Sleep 200ms
+Sleep 500ms
 Enter
-Sleep 50ms
-
-# Wait for processing
 Sleep 500ms
 
 # Unlock the vault for subsequent commands
+Sleep 200ms
 Type "nssh unlock"
 Enter
 
 # Enter passphrase
+Sleep 200ms
 Type "thisisatestpass"
 Enter
 
