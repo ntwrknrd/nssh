@@ -1,5 +1,12 @@
 # nssh
 
+[![Release](https://img.shields.io/github/v/release/ntwrknrd/nssh)](https://github.com/ntwrknrd/nssh/releases)
+[![Build](https://github.com/ntwrknrd/nssh/actions/workflows/build.yml/badge.svg)](https://github.com/ntwrknrd/nssh/actions/workflows/build.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/ntwrknrd/nssh)](go.mod)
+[![Go Report Card](https://goreportcard.com/badge/github.com/ntwrknrd/nssh)](https://goreportcard.com/report/github.com/ntwrknrd/nssh)
+[![Homebrew](https://img.shields.io/badge/homebrew-available-orange)](https://github.com/ntwrknrd/homebrew-nssh)
+[![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue)]()
+
 SSH wrapper for power users: manage hosts and credentials, inject passwords automatically, and record sessions.
 
 ## Table of Contents
@@ -85,7 +92,9 @@ nssh is built on the shoulders of exceptional open-source tools and communities.
 **Go Ecosystem:**
 
 - [Go](https://go.dev/) (BSD-3-Clause) - The Go programming language
+- [creack/pty](https://github.com/creack/pty) (MIT) - PTY handling
 - [Cobra](https://github.com/spf13/cobra) (Apache-2.0) - CLI framework
+- [Charm](https://github.com/charmbracelet) (MIT) - Terminal UI libraries (Huh, Lipgloss, Bubble Tea)
 - [age](https://github.com/FiloSottile/age) (BSD-3-Clause) - Modern file encryption
 - [memguard](https://github.com/awnumar/memguard) (Apache-2.0) - Secure memory management
 - [go-piv](https://github.com/go-piv/piv-go) (Apache-2.0) - YubiKey PIV library (optional - hardware key support)
