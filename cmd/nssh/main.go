@@ -827,6 +827,7 @@ func newSelfCmd() *cobra.Command {
 	cmd.AddCommand(self.NewVersionCmd())
 	cmd.AddCommand(self.NewRekeyCmd())
 	cmd.AddCommand(self.NewPivCmd())
+	cmd.AddCommand(self.NewCfgCmd())
 	cmd.AddCommand(newBenchCmd())
 
 	ui.ApplyStyledHelpRecursive(cmd)

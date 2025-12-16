@@ -78,6 +78,10 @@ func runSSHBenchmark(host string, warmups, samples int, simpleOnly bool) error {
 	}
 
 	renderResults(result, simpleOnly)
+
+	// Save results to file
+	PrintSavedPath(SaveResults("ssh", host, result, simpleOnly))
+
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }

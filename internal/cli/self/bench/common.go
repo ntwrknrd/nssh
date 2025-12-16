@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
@@ -435,4 +437,136 @@ func sortStageNames(stages []string) []string {
 		return sorted[i] < sorted[j] // alphabetical for unknown
 	})
 	return sorted
+}
+
+// benchmarksDir returns the path to the benchmarks directory.
+func benchmarksDir() string {
+	return filepath.Join(config.DefaultPaths().DataDir, "benchmarks")
+}
+
+// PrintSavedPath prints the saved file path.
+func PrintSavedPath(path string) {
+	if path == "" {
+		return
+	}
+	fmt.Printf("\n  %s: %s\n", ui.Gray("Saved"), path)
+}
+
+// SaveResults saves benchmark results to a timestamped file and updates symlinks.
+// Returns the path to the saved file, or empty string if saving failed.
+func SaveResults(benchType, host string, result *BenchmarkResult, simpleOnly bool) string {
+	dir := benchmarksDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return ""
+	}
+
+	// Generate timestamped filename
+	timestamp := time.Now().Format("2006-01-02-150405")
+	filename := fmt.Sprintf("%s-%s-%s.txt", benchType, host, timestamp)
+	filepath := filepath.Join(dir, filename)
+
+	// Render results to string
+	content := renderResultsToString(benchType, host, result, simpleOnly)
+
+	// Write file
+	if err := os.WriteFile(filepath, []byte(content), 0644); err != nil {
+		return ""
+	}
+
+	// Update symlinks
+	updateSymlinks(dir, benchType, filename)
+
+	return filepath
+}
+
+// renderResultsToString renders benchmark results to a string (for file output).
+func renderResultsToString(benchType, host string, result *BenchmarkResult, simpleOnly bool) string {
+	var buf strings.Builder
+
+	buf.WriteString(fmt.Sprintf("%s benchmark: %s\n", strings.ToUpper(benchType), host))
+	buf.WriteString(fmt.Sprintf("Date: %s\n", time.Now().Format("2006-01-02 15:04:05")))
+	buf.WriteString(fmt.Sprintf("Samples: %d (warmups: %d)\n\n", result.MeasuredRuns, result.WarmupRuns))
+
+	if !simpleOnly && len(result.StageNames) > 0 {
+		sortedStages := sortStageNames(result.StageNames)
+		allStats := ComputeAllStats(result.Samples, result.StageNames)
+		wallStats := ComputeWallClockStats(result.WallClocks)
+
+		// Header
+		buf.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %10s\n", "Stage", "Mean", "Median", "Min", "Max"))
+		buf.WriteString(strings.Repeat("-", 62) + "\n")
+
+		// Startup overhead
+		connectorStats := allStats[connector.TimingTotal]
+		if connectorStats.Mean > 0 && wallStats.Mean > connectorStats.Mean {
+			buf.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %10s\n",
+				"startup",
+				formatDuration(wallStats.Mean-connectorStats.Mean),
+				formatDuration(wallStats.Median-connectorStats.Median),
+				formatDuration(wallStats.Min-connectorStats.Min),
+				formatDuration(wallStats.Max-connectorStats.Max),
+			))
+		}
+
+		firstReadStats := allStats[connector.TimingFirstRead]
+
+		for _, stageName := range sortedStages {
+			if stageName == connector.TimingTotal {
+				continue
+			}
+
+			stats := allStats[stageName]
+
+			if stageName == connector.TimingSessionEnd && firstReadStats.Mean > 0 {
+				buf.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %10s\n",
+					"session_io",
+					formatDuration(stats.Mean-firstReadStats.Mean),
+					formatDuration(stats.Median-firstReadStats.Median),
+					formatDuration(stats.Min-firstReadStats.Min),
+					formatDuration(stats.Max-firstReadStats.Max),
+				))
+				continue
+			}
+
+			buf.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %10s\n",
+				stageName,
+				formatDuration(stats.Mean),
+				formatDuration(stats.Median),
+				formatDuration(stats.Min),
+				formatDuration(stats.Max),
+			))
+		}
+
+		buf.WriteString(strings.Repeat("-", 62) + "\n")
+		buf.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %10s\n",
+			"total",
+			formatDuration(wallStats.Mean),
+			formatDuration(wallStats.Median),
+			formatDuration(wallStats.Min),
+			formatDuration(wallStats.Max),
+		))
+	} else {
+		stats := ComputeWallClockStats(result.WallClocks)
+		buf.WriteString(fmt.Sprintf("Wall Clock: %s - %s\n", formatDuration(stats.Min), formatDuration(stats.Max)))
+	}
+
+	return buf.String()
+}
+
+// updateSymlinks updates the latest and previous symlinks.
+func updateSymlinks(dir, benchType, newFile string) {
+	latestLink := filepath.Join(dir, benchType+"-latest.txt")
+	previousLink := filepath.Join(dir, benchType+"-previous.txt")
+
+	// Read current latest target (if exists)
+	currentTarget, err := os.Readlink(latestLink)
+	if err == nil && currentTarget != "" {
+		// Move latest -> previous
+		_ = os.Remove(previousLink)
+		_ = os.Symlink(currentTarget, previousLink)
+	}
+
+	// Update latest -> new file
+	_ = os.Remove(latestLink)
+	_ = os.Symlink(newFile, latestLink)
 }

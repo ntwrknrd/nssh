@@ -115,6 +115,8 @@ type SessionConfig struct {
 	TitleFormat string `toml:"title_format"`
 	// WindowSize is fixed terminal dimensions for recordings (cols x rows)
 	WindowSize string `toml:"window_size"`
+	// AutoExportTxt automatically exports recordings to plain text (.txt) when session ends
+	AutoExportTxt bool `toml:"auto_export_txt"`
 	// Archive holds automatic archival settings
 	Archive SessionArchiveConfig `toml:"archive"`
 }

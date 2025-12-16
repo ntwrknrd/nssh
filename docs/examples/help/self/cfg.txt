@@ -1,17 +1,10 @@
-$ nssh self --help
+$ nssh self cfg --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh self [flags]                 Manage nssh installation                 │
+│   nssh self cfg [flags]             View or edit nssh configuration          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────╮
-│   bench                             Run performance benchmarks               │
-│   cfg                               View or edit nssh configuration          │
-│   init                              Initialize nssh                          │
-│   piv                               Manage enrolled YubiKeys                 │
-│   reinstall                         Reinstall nssh from latest GitHub r...   │
-│   rekey                             Rotate or switch security mode           │
-│   reset                             Delete all nssh data and start fresh     │
-│   status                            Show installation status                 │
-│   uninstall                         Uninstall nssh                           │
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│   --edit                            open config in editor                    │
+│   --path                            print config file path only              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

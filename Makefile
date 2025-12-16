@@ -1,15 +1,16 @@
-.PHONY: build build-hardware test test-hardware verify-builds vet fmt \
-        linux recordings recordings-up recordings-down recordings-clean
+.PHONY: build build-hardware test test-hardware \
+        darwin-arm64 darwin-amd64 linux-amd64 linux-arm64 \
+        recordings recordings-up recordings-down recordings-clean
 
 # Output directory for builds (customize with: make build OUTPUT_DIR=/some/path)
-OUTPUT_DIR ?= ~/Downloads
+OUTPUT_DIR ?= ./
 
 # Version from git tags or "dev" fallback
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 BUILDFLAGS := -trimpath
 
-# Build targets
+# Native build (current platform)
 build:
 	go build $(LDFLAGS) $(BUILDFLAGS) -o $(OUTPUT_DIR)/nssh ./cmd/nssh
 
@@ -17,28 +18,29 @@ build:
 build-hardware:
 	CGO_ENABLED=1 go build -tags hardware $(LDFLAGS) $(BUILDFLAGS) -o $(OUTPUT_DIR)/nssh-hardware ./cmd/nssh
 
-# Cross-compilation target
-linux:
+# Cross-compilation targets (software-only, no CGO/hardware support)
+darwin-arm64:
+	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) $(BUILDFLAGS) -o $(OUTPUT_DIR)/nssh-darwin-arm64 ./cmd/nssh
+
+darwin-amd64:
+	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) $(BUILDFLAGS) -o $(OUTPUT_DIR)/nssh-darwin-amd64 ./cmd/nssh
+
+linux-amd64:
 	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) $(BUILDFLAGS) -o $(OUTPUT_DIR)/nssh-linux-amd64 ./cmd/nssh
 
-# Verify both builds succeed
-verify-builds: build build-hardware
-	@echo "Both builds succeeded"
-	@$(OUTPUT_DIR)/nssh -V
-	@$(OUTPUT_DIR)/nssh-hardware -V
+linux-arm64:
+	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) $(BUILDFLAGS) -o $(OUTPUT_DIR)/nssh-linux-arm64 ./cmd/nssh
 
 # Test targets
 test:
+	go vet ./...
+	gofmt -w .
 	go test ./...
 
 test-hardware:
-	CGO_ENABLED=1 go test -tags hardware ./...
-
-vet:
 	go vet ./...
-
-fmt:
 	gofmt -w .
+	CGO_ENABLED=1 go test -tags hardware ./...
 
 # Recording targets (VHS-based) - generates gif recordings
 recordings: recordings-up
@@ -54,4 +56,4 @@ recordings-down:
 
 recordings-clean:
 	docker compose -f test/docker/docker-compose.yml down -v --rmi local
-	rm -f docs/examples/demo.gif docs/examples/demo.webm docs/examples/demo.mp4
+	rm -f docs/examples/demo.gif

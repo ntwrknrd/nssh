@@ -131,6 +131,13 @@ func runInit(opts InitOptions) error {
 		ui.Success("Directories ready")
 	}
 
+	// Install example config if none exists (skip in quiet mode)
+	if !opts.Quiet {
+		if err := ensureExampleConfig(paths, opts.DryRun, opts.Yes); err != nil {
+			ui.Warning("Config setup: %v", err)
+		}
+	}
+
 	// Setup credential protection (skip in quiet mode - reinstall only refreshes shell)
 	if !opts.Quiet {
 		if !opts.DryRun {
@@ -704,6 +711,31 @@ func showNextSteps() {
 	ui.NumberedList(steps)
 	fmt.Println()
 	ui.Info("Run 'nssh --help' for more commands")
+}
+
+// ensureExampleConfig copies the example config to the config directory if none exists.
+func ensureExampleConfig(paths *config.Paths, dryRun, yes bool) error {
+	// Skip if config already exists
+	if _, err := os.Stat(paths.ConfigFile); err == nil {
+		return nil
+	}
+
+	// Confirm with user (unless --yes or non-interactive)
+	if !yes && !dryRun {
+		result, _ := ui.Confirm("Install example config file?", true)
+		if !result {
+			ui.Info("Config file: skipped (user declined)")
+			return nil
+		}
+	}
+
+	if !dryRun {
+		if err := os.WriteFile(paths.ConfigFile, []byte(config.ExampleConfig), 0644); err != nil {
+			return fmt.Errorf("write config: %w", err)
+		}
+	}
+	ui.Success("Config file: %s", AbbreviatePath(paths.ConfigFile))
+	return nil
 }
 
 // offerInstallDependency offers to install a single missing dependency.

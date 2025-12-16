@@ -63,6 +63,14 @@ func MaybeWrapWithRecording(hostname string, args []string) (bool, error) {
 	cmd.Env = append(os.Environ(), "NSSH_RECORDING_INNER=1")
 
 	err = cmd.Run()
+
+	// Export to text if enabled (do this before handling exit errors)
+	if settings.AutoExportTxt && plan.CastPath != "" {
+		if exportErr := recording.ExportToText(plan.CastPath); exportErr != nil {
+			slog.Debug("failed to export recording to text", "err", exportErr)
+		}
+	}
+
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			lock.Release()

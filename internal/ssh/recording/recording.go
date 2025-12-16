@@ -32,6 +32,7 @@ type RecordingSettings struct {
 	IdleTimeLimit     float64 // seconds, 0 = disabled
 	IdleTimeLimitMode string  // "play", "record", or "both"
 	TitleFormat       string  // template with {host}, {user}, {date}, {time}
+	AutoExportTxt     bool    // export to .txt on session close
 }
 
 // HostPattern represents a host matching pattern (glob or regex).
@@ -137,6 +138,7 @@ func LoadRecordingSettings() RecordingSettings {
 		if session.TitleFormat != "" {
 			settings.TitleFormat = session.TitleFormat
 		}
+		settings.AutoExportTxt = session.AutoExportTxt
 		settings.IncludePatterns = parseHostPatterns(session.IncludeHosts)
 		settings.ExcludePatterns = parseHostPatterns(session.ExcludeHosts)
 	}
@@ -841,4 +843,16 @@ func expandPath(path string) string {
 		path = filepath.Join(home, path[2:])
 	}
 	return os.ExpandEnv(path)
+}
+
+// ExportToText converts a .cast file to plain text using asciinema convert.
+// The output is written to a .txt file alongside the .cast file.
+func ExportToText(castPath string) error {
+	txtPath := strings.TrimSuffix(castPath, ".cast") + ".txt"
+	cmd := exec.Command("asciinema", "convert", "--overwrite", castPath, txtPath)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("export to text: %w", err)
+	}
+	slog.Debug("exported recording to text", "cast", castPath, "txt", txtPath)
+	return nil
 }

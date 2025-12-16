@@ -99,6 +99,7 @@ func runSCPBenchmark(host string, warmups, samples int, simpleOnly bool, fileSiz
 		return fmt.Errorf("upload benchmark failed: %w", err)
 	}
 	renderResults(result, simpleOnly)
+	PrintSavedPath(SaveResults("scp-upload", host, result, simpleOnly))
 
 	// Download benchmark
 	downloadFile := filepath.Join(tempDir, "downloaded")
@@ -112,6 +113,7 @@ func runSCPBenchmark(host string, warmups, samples int, simpleOnly bool, fileSiz
 		return fmt.Errorf("download benchmark failed: %w", err)
 	}
 	renderResults(downloadResult, simpleOnly)
+	PrintSavedPath(SaveResults("scp-download", host, downloadResult, simpleOnly))
 
 	// Cleanup remote file
 	cleanupArgs := []string{host, "--", "rm", "-f", remoteFile}
