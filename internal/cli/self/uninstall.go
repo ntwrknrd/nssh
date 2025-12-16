@@ -31,6 +31,7 @@ This command removes:
 - Shell integration scripts
 - Completion files
 - The nssh binary (from ~/.local/bin)
+- Installed dependencies (asciinema, agg, fzf from ~/.local/bin)
 
 Optionally removes (unless --keep-config or --keep-recordings):
 - Config file and credentials
@@ -136,7 +137,21 @@ func runUninstall(keepConfig, keepRecordings, dryRun, yes bool) error {
 		ui.Info("Binary not found on PATH")
 	}
 
-	// 5. Optionally remove config/credentials
+	// 5. Remove installed dependencies (asciinema, agg, fzf from ~/.local/bin)
+	installedDeps := InstalledDependencyPaths()
+	if len(installedDeps) > 0 {
+		ui.SubSection("Installed Dependencies")
+		for _, depPath := range installedDeps {
+			if err := removeFile(depPath, dryRun); err != nil {
+				ui.Warning("Failed to remove %s: %v", AbbreviatePath(depPath), err)
+				hasErrors = true
+			} else {
+				ui.Success("Removed %s", AbbreviatePath(depPath))
+			}
+		}
+	}
+
+	// 6. Optionally remove config/credentials
 	if !keepConfig {
 		ui.SubSection("Configuration")
 		configFiles := []string{
@@ -171,7 +186,7 @@ func runUninstall(keepConfig, keepRecordings, dryRun, yes bool) error {
 		ui.Info("Keeping config files (--keep-config)")
 	}
 
-	// 6. Optionally remove recordings
+	// 7. Optionally remove recordings
 	if !keepRecordings {
 		ui.SubSection("Recordings")
 		if DirExists(paths.RecordingsDir) {

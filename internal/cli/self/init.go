@@ -1,11 +1,17 @@
 package self
 
 import (
+	"archive/tar"
+	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	clisession "github.com/ntwrknrd/nssh/internal/cli/session"
@@ -738,16 +744,136 @@ func ensureExampleConfig(paths *config.Paths, dryRun, yes bool) error {
 	return nil
 }
 
-// offerInstallDependency offers to install a single missing dependency.
-func offerInstallDependency(dep Dependency, autoYes bool) error {
-	pm := DetectPackageManager()
-	if pm == nil {
-		return fmt.Errorf("no package manager found")
+// getLatestGitHubRelease fetches the latest release version from GitHub API.
+func getLatestGitHubRelease(owner, repo string) (string, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", owner, repo)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("fetch release: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
 	}
 
-	pkg := dep.PackageName(pm)
-	installCmd := pm.InstallCommand(pkg)
-	cmdStr := strings.Join(installCmd, " ")
+	var release struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return "", fmt.Errorf("parse release: %w", err)
+	}
+
+	return release.TagName, nil
+}
+
+// installFromGitHubRelease downloads and installs a binary from GitHub releases.
+func installFromGitHubRelease(dep Dependency) error {
+	if dep.GitHub == nil {
+		return fmt.Errorf("no GitHub release info for %s", dep.Name)
+	}
+
+	gh := dep.GitHub
+
+	// Get latest version
+	version, err := getLatestGitHubRelease(gh.Owner, gh.Repo)
+	if err != nil {
+		return fmt.Errorf("get latest version: %w", err)
+	}
+	ui.Info("  Latest version: %s", version)
+
+	// Determine asset filename for current platform
+	assetName := gh.AssetPattern(version, runtime.GOOS, runtime.GOARCH)
+	downloadURL := fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/%s",
+		gh.Owner, gh.Repo, version, assetName)
+
+	ui.Info("  Downloading %s...", assetName)
+
+	// Download the asset
+	resp, err := http.Get(downloadURL)
+	if err != nil {
+		return fmt.Errorf("download: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download failed with status %d", resp.StatusCode)
+	}
+
+	// Install to ~/.local/bin
+	installDir := filepath.Join(homeDir(), ".local", "bin")
+	if err := os.MkdirAll(installDir, 0755); err != nil {
+		return fmt.Errorf("create install dir: %w", err)
+	}
+
+	binPath := filepath.Join(installDir, dep.Name)
+
+	// Handle archive extraction if needed
+	if gh.IsArchive {
+		binaryName := gh.BinaryName
+		if binaryName == "" {
+			binaryName = dep.Name
+		}
+		content, err := extractBinaryFromTarGz(resp.Body, binaryName)
+		if err != nil {
+			return fmt.Errorf("extract archive: %w", err)
+		}
+		if err := os.WriteFile(binPath, content, 0755); err != nil {
+			return fmt.Errorf("write binary: %w", err)
+		}
+	} else {
+		// Direct binary download
+		content, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("read binary: %w", err)
+		}
+		if err := os.WriteFile(binPath, content, 0755); err != nil {
+			return fmt.Errorf("write binary: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// extractBinaryFromTarGz extracts a specific binary from a tar.gz archive.
+func extractBinaryFromTarGz(r io.Reader, binaryName string) ([]byte, error) {
+	gzr, err := gzip.NewReader(r)
+	if err != nil {
+		return nil, fmt.Errorf("gzip reader: %w", err)
+	}
+	defer func() { _ = gzr.Close() }()
+
+	tr := tar.NewReader(gzr)
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("tar read: %w", err)
+		}
+
+		// Look for the binary (might be in root or subdirectory)
+		name := filepath.Base(header.Name)
+		if name == binaryName && header.Typeflag == tar.TypeReg {
+			content, err := io.ReadAll(tr)
+			if err != nil {
+				return nil, fmt.Errorf("read binary from archive: %w", err)
+			}
+			return content, nil
+		}
+	}
+
+	return nil, fmt.Errorf("binary %q not found in archive", binaryName)
+}
+
+// offerInstallDependency offers to install a single missing dependency from GitHub releases.
+func offerInstallDependency(dep Dependency, autoYes bool) error {
+	if dep.GitHub == nil {
+		return fmt.Errorf("no GitHub release info for %s", dep.Name)
+	}
 
 	// Ask user (or auto-yes)
 	if !autoYes {
@@ -757,14 +883,8 @@ func offerInstallDependency(dep Dependency, autoYes bool) error {
 		}
 	}
 
-	ui.Info("  Running: %s", cmdStr)
-
-	cmd := exec.Command(installCmd[0], installCmd[1:]...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-
-	if err := cmd.Run(); err != nil {
+	ui.Info("  Installing from GitHub releases...")
+	if err := installFromGitHubRelease(dep); err != nil {
 		return fmt.Errorf("install failed: %w", err)
 	}
 
@@ -777,5 +897,10 @@ func offerInstallDependency(dep Dependency, autoYes bool) error {
 		}
 	}
 
+	// Binary installed but not on PATH
+	installDir := filepath.Join(homeDir(), ".local", "bin")
+	binPath := filepath.Join(installDir, dep.Name)
+	ui.Success("  %s: installed -> %s", dep.Name, AbbreviatePath(binPath))
+	ui.Warning("  Note: %s may not be on your PATH", AbbreviatePath(installDir))
 	return nil
 }
