@@ -749,7 +749,8 @@ func readFromIndex(castPath string) *SessionRecord {
 	var startedAt, finishedAt time.Time
 	var argv []string
 
-	for i, session := range payload.Sessions {
+	for i := range payload.Sessions {
+		session := &payload.Sessions[i]
 		if i == 0 {
 			startedAt = session.StartedAt
 			argv = session.Argv
