@@ -33,10 +33,18 @@ func NewListCmd() *cobra.Command {
 
 func runList(selectPattern string, lastN int) error {
 	settings := recording.LoadRecordingSettings()
-	sessions := LoadSessions(settings)
 	localTZ := time.Now().Location()
 
 	ui.CommandStart("SESSION RECORDINGS")
+
+	// Use lazy loading optimization when --last is specified without filter
+	// This avoids loading all session metadata when only a few are needed
+	var sessions []recording.SessionRecord
+	if lastN > 0 && selectPattern == "" {
+		sessions = LoadSessionsLimit(settings, lastN)
+	} else {
+		sessions = LoadSessions(settings)
+	}
 
 	if selectPattern != "" {
 		pattern, err := regexp.Compile("(?i)" + selectPattern)
@@ -60,11 +68,11 @@ func runList(selectPattern string, lastN int) error {
 			ui.CommandEnd(ui.StatusWarning)
 			return nil
 		}
-	}
 
-	// Apply --last limit (sessions are already sorted newest-first)
-	if lastN > 0 && lastN < len(sessions) {
-		sessions = sessions[:lastN]
+		// Apply --last limit after filtering (sessions are already sorted newest-first)
+		if lastN > 0 && lastN < len(sessions) {
+			sessions = sessions[:lastN]
+		}
 	}
 
 	PrintSessions(sessions, selectPattern)

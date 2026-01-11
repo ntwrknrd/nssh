@@ -714,20 +714,74 @@ func ExtractSessionLabel(castPath string) string {
 }
 
 // ReadCastMetadata reads metadata from an asciinema .cast file.
-// Uses streaming to avoid loading entire file into memory (fixes OOM on large recordings).
+// Layer 1: Tries .index.json first (instant lookup).
+// Layer 2: Falls back to tail-read of .cast file (reads last 64KB instead of full file).
 func ReadCastMetadata(castPath string) (*SessionRecord, error) {
+	// Layer 1: Try index file first (fastest path)
+	if record := readFromIndex(castPath); record != nil {
+		return record, nil
+	}
+
+	// Layer 2: Fall back to reading cast file with tail optimization
+	return readFromCastFile(castPath)
+}
+
+// readFromIndex attempts to read session metadata from the .index.json sidecar file.
+func readFromIndex(castPath string) *SessionRecord {
+	indexPath := strings.TrimSuffix(castPath, ".cast") + ".index.json"
+
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		return nil
+	}
+
+	var payload IndexPayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		slog.Debug("failed to parse index file", "path", indexPath, "err", err)
+		return nil
+	}
+
+	if len(payload.Sessions) == 0 {
+		return nil
+	}
+
+	// Calculate total duration from all sessions
+	var startedAt, finishedAt time.Time
+	var argv []string
+
+	for i, session := range payload.Sessions {
+		if i == 0 {
+			startedAt = session.StartedAt
+			argv = session.Argv
+		}
+		if session.FinishedAt.After(finishedAt) {
+			finishedAt = session.FinishedAt
+		}
+	}
+
+	return &SessionRecord{
+		Host:         payload.Host,
+		CastPath:     castPath,
+		StartedAt:    startedAt,
+		FinishedAt:   finishedAt,
+		Argv:         argv,
+		SessionLabel: ExtractSessionLabel(castPath),
+	}
+}
+
+// readFromCastFile reads metadata from cast file using tail optimization.
+// Reads header for start time, then seeks to end to find final timestamp.
+func readFromCastFile(castPath string) (*SessionRecord, error) {
 	f, err := os.Open(castPath)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
 
-	// Use buffered scanner for streaming - constant memory regardless of file size
+	// Read header (first line)
 	scanner := bufio.NewScanner(f)
-	// Allow large lines (asciinema events can contain lots of terminal output)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
-	// Read first line (header)
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
 			return nil, fmt.Errorf("read cast header: %w", err)
@@ -750,38 +804,16 @@ func ReadCastMetadata(castPath string) (*SessionRecord, error) {
 	// Extract hostname from title (format: "nssh:hostname")
 	host := strings.TrimPrefix(header.Title, "nssh:")
 	if host == header.Title {
-		// Fallback: extract from path
 		parts := strings.Split(castPath, string(filepath.Separator))
 		if len(parts) >= 3 {
-			host = parts[len(parts)-3] // <recordings>/<host>/<date>/<session>.cast
+			host = parts[len(parts)-3]
 		}
 	}
 
-	// Parse command argv
 	argv := strings.Fields(header.Command)
 
-	// Calculate duration by streaming through events
-	// Only extracts the timestamp from each event - no need to load full content
-	var totalTime float64
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var event []interface{}
-		if err := json.Unmarshal(line, &event); err != nil {
-			continue
-		}
-		if len(event) >= 1 {
-			if delta, ok := event[0].(float64); ok {
-				totalTime = delta // Last timestamp is the total duration
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		slog.Debug("error scanning cast file", "path", castPath, "err", err)
-	}
-
+	// Get final timestamp using tail-read optimization
+	totalTime := readFinalTimestamp(f)
 	finishedAt := startedAt.Add(time.Duration(totalTime * float64(time.Second)))
 
 	return &SessionRecord{
@@ -794,20 +826,135 @@ func ReadCastMetadata(castPath string) (*SessionRecord, error) {
 	}, nil
 }
 
+// readFinalTimestamp seeks to the end of the file and reads backwards to find
+// the last event timestamp. This is O(1) instead of O(file_size).
+func readFinalTimestamp(f *os.File) float64 {
+	const tailSize = 64 * 1024 // Read last 64KB
+
+	info, err := f.Stat()
+	if err != nil {
+		return 0
+	}
+
+	fileSize := info.Size()
+	readSize := tailSize
+	if fileSize < int64(tailSize) {
+		readSize = int(fileSize)
+	}
+
+	// Seek to near end of file
+	offset := fileSize - int64(readSize)
+	if offset < 0 {
+		offset = 0
+	}
+
+	buf := make([]byte, readSize)
+	n, err := f.ReadAt(buf, offset)
+	if err != nil && n == 0 {
+		return 0
+	}
+	buf = buf[:n]
+
+	// Find the last complete line with a valid event
+	var lastTimestamp float64
+	lines := strings.Split(string(buf), "\n")
+
+	// Process lines in reverse to find the last valid event
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if len(line) == 0 || line[0] != '[' {
+			continue
+		}
+
+		var event []interface{}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			continue
+		}
+
+		if len(event) >= 1 {
+			if ts, ok := event[0].(float64); ok {
+				lastTimestamp = ts
+				break
+			}
+		}
+	}
+
+	return lastTimestamp
+}
+
+// CastFileInfo holds a cast file path and its modification time for lazy loading.
+type CastFileInfo struct {
+	Path  string
+	Mtime time.Time
+}
+
+// ListCastFilesWithMtime returns cast files with modification times (cheap stat only).
+// This enables sorting by mtime before loading full metadata.
+func ListCastFilesWithMtime(settings RecordingSettings) []CastFileInfo {
+	var files []CastFileInfo
+
+	if err := filepath.WalkDir(settings.Directory, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".cast") {
+			info, err := d.Info()
+			if err != nil {
+				slog.Debug("failed to stat cast file", "path", path, "err", err)
+				return nil
+			}
+			files = append(files, CastFileInfo{Path: path, Mtime: info.ModTime()})
+		}
+		return nil
+	}); err != nil {
+		slog.Debug("failed to walk recordings directory", "dir", settings.Directory, "err", err)
+	}
+
+	return files
+}
+
 // IterSessionRecords returns all session records from the recordings directory.
 func IterSessionRecords(settings RecordingSettings) []SessionRecord {
-	var records []SessionRecord
+	return IterSessionRecordsLimit(settings, 0)
+}
 
-	for _, castPath := range ListCastFiles(settings) {
-		record, err := ReadCastMetadata(castPath)
+// IterSessionRecordsLimit returns session records, optionally limiting to the N most recent.
+// When limit > 0, only loads metadata for the top N files by mtime (lazy loading).
+func IterSessionRecordsLimit(settings RecordingSettings, limit int) []SessionRecord {
+	// Get files with mtime (cheap - no metadata parsing)
+	files := ListCastFilesWithMtime(settings)
+
+	// Sort by mtime descending (newest first)
+	sortCastFilesByMtime(files)
+
+	// Apply limit before expensive metadata loading
+	if limit > 0 && limit < len(files) {
+		files = files[:limit]
+	}
+
+	// Now load metadata only for the files we need
+	var records []SessionRecord
+	for _, f := range files {
+		record, err := ReadCastMetadata(f.Path)
 		if err != nil {
-			slog.Debug("failed to read cast metadata", "path", castPath, "err", err)
+			slog.Debug("failed to read cast metadata", "path", f.Path, "err", err)
 			continue
 		}
 		records = append(records, *record)
 	}
 
 	return records
+}
+
+// sortCastFilesByMtime sorts files by modification time descending (newest first).
+func sortCastFilesByMtime(files []CastFileInfo) {
+	for i := 0; i < len(files)-1; i++ {
+		for j := i + 1; j < len(files); j++ {
+			if files[j].Mtime.After(files[i].Mtime) {
+				files[i], files[j] = files[j], files[i]
+			}
+		}
+	}
 }
 
 // CleanupStaleLocks removes stale lock directories.
