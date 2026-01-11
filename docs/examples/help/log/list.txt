@@ -4,7 +4,7 @@ $ nssh log list --help
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
 │   -l, --last INT                    Filter on the last N entries             │
-│   -s, --select STRING               Filter by regex pattern                  │
+│   -s, --select STRING               Filter by pattern (today, yesterday...   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
