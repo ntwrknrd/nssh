@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -27,14 +26,14 @@ func sessionUpdatedTimestamp(record recording.SessionRecord) time.Time {
 
 // LoadSessions returns all session records sorted by modification time (newest first).
 func LoadSessions(settings recording.RecordingSettings) []recording.SessionRecord {
-	records := recording.IterSessionRecords(settings)
+	return LoadSessionsLimit(settings, 0)
+}
 
-	// Sort by mtime descending
-	sort.Slice(records, func(i, j int) bool {
-		return sessionUpdatedTimestamp(records[i]).After(sessionUpdatedTimestamp(records[j]))
-	})
-
-	return records
+// LoadSessionsLimit returns session records, limiting to the N most recent.
+// When limit > 0, uses lazy loading to only parse metadata for top N files.
+// Records are pre-sorted by mtime (newest first).
+func LoadSessionsLimit(settings recording.RecordingSettings, limit int) []recording.SessionRecord {
+	return recording.IterSessionRecordsLimit(settings, limit)
 }
 
 // sessionDurationSeconds calculates the duration of a session in seconds.
