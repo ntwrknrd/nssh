@@ -146,17 +146,20 @@ func PrintSessions(records []recording.SessionRecord, filter string) {
 }
 
 // FilterSessionsByPattern filters sessions by regex pattern.
+// Matches against host, start date, mtime date, and cast path.
 func FilterSessionsByPattern(sessions []recording.SessionRecord, pattern string) ([]recording.SessionRecord, error) {
 	re, err := regexp.Compile("(?i)" + pattern)
 	if err != nil {
 		return nil, fmt.Errorf("invalid regex pattern: %w", err)
 	}
 
+	localTZ := time.Now().Location()
 	var filtered []recording.SessionRecord
 	for _, session := range sessions {
+		startDate := session.StartedAt.In(localTZ).Format("2006-01-02")
+		mtimeDate := sessionUpdatedTimestamp(session).In(localTZ).Format("2006-01-02")
 		castDisplay := homeReplace(session.CastPath)
-		display := fmt.Sprintf("%s %s %s", session.Host, session.StartedAt.Format("2006-01-02"), castDisplay)
-		if re.MatchString(display) {
+		if MatchesPattern(re, session.Host, session.SessionLabel, startDate, mtimeDate, castDisplay) {
 			filtered = append(filtered, session)
 		}
 	}
@@ -432,4 +435,50 @@ func MatchesPattern(pattern *regexp.Regexp, fields ...string) bool {
 		}
 	}
 	return false
+}
+
+// ExpandDateShortcut expands convenient date shortcuts to regex patterns.
+// Supported shortcuts: today, yesterday, this-week, this-month, last-week, last-month
+// Returns the original pattern if not a recognized shortcut.
+func ExpandDateShortcut(pattern string) string {
+	now := time.Now()
+	lower := strings.ToLower(strings.TrimSpace(pattern))
+
+	switch lower {
+	case "today":
+		return now.Format("2006-01-02")
+
+	case "yesterday":
+		return now.AddDate(0, 0, -1).Format("2006-01-02")
+
+	case "this-week":
+		// Get dates for this week (Sunday to today)
+		weekday := int(now.Weekday())
+		dates := make([]string, 0, weekday+1)
+		for i := weekday; i >= 0; i-- {
+			d := now.AddDate(0, 0, -i)
+			dates = append(dates, d.Format("2006-01-02"))
+		}
+		return "(" + strings.Join(dates, "|") + ")"
+
+	case "last-week":
+		// Previous full week (Sunday to Saturday)
+		weekday := int(now.Weekday())
+		lastSunday := now.AddDate(0, 0, -weekday-7)
+		dates := make([]string, 7)
+		for i := 0; i < 7; i++ {
+			d := lastSunday.AddDate(0, 0, i)
+			dates[i] = d.Format("2006-01-02")
+		}
+		return "(" + strings.Join(dates, "|") + ")"
+
+	case "this-month":
+		return now.Format("2006-01")
+
+	case "last-month":
+		return now.AddDate(0, -1, 0).Format("2006-01")
+
+	default:
+		return pattern
+	}
 }

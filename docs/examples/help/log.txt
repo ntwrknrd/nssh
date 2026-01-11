@@ -8,6 +8,7 @@ $ nssh log --help
 │   export                            Export recording                         │
 │   list                              List recordings                          │
 │   play                              Play recording                           │
+│   search                            Search recordings for text               │
 │   upload                            Upload to asciinema                      │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮

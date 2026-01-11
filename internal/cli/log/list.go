@@ -25,7 +25,7 @@ func NewListCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&selectPattern, "select", "s", "", "Filter by regex pattern")
+	cmd.Flags().StringVarP(&selectPattern, "select", "s", "", "Filter by pattern (today, yesterday, this-week, this-month, or regex)")
 	cmd.Flags().IntVarP(&lastN, "last", "l", 0, "Filter on the last N entries")
 
 	return cmd
@@ -47,6 +47,7 @@ func runList(selectPattern string, lastN int) error {
 	}
 
 	if selectPattern != "" {
+		selectPattern = ExpandDateShortcut(selectPattern)
 		pattern, err := regexp.Compile("(?i)" + selectPattern)
 		if err != nil {
 			ui.Error("Invalid regex pattern: %s", err)
@@ -56,8 +57,9 @@ func runList(selectPattern string, lastN int) error {
 
 		var filtered []recording.SessionRecord
 		for _, s := range sessions {
-			localDate := s.StartedAt.In(localTZ).Format("2006-01-02")
-			if MatchesPattern(pattern, s.Host, s.SessionLabel, localDate) {
+			startDate := s.StartedAt.In(localTZ).Format("2006-01-02")
+			mtimeDate := sessionUpdatedTimestamp(s).In(localTZ).Format("2006-01-02")
+			if MatchesPattern(pattern, s.Host, s.SessionLabel, startDate, mtimeDate) {
 				filtered = append(filtered, s)
 			}
 		}

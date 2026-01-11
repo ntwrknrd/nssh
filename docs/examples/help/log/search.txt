@@ -1,12 +1,12 @@
-$ nssh log delete --help
+$ nssh log search --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh log delete [flags]           Delete recordings                        │
+│   nssh log search <pattern> [flags] Search recordings for text               │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
-│   --dry-run                         Preview actions without executing        │
-│   --older-than INT                  Delete recordings older than N days      │
-│   -s, --select STRING               Filter by pattern (today, yesterday...   │
-│   -y, --yes                         Skip confirmation                        │
+│   -i, --case-sensitive              Case-sensitive search                    │
+│   -C, --context INT                 Show N lines of context around matches   │
+│   -l, --last INT                    Search only the last N sessions          │
+│   -s, --select STRING               Filter sessions by pattern (today, ...   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

@@ -35,7 +35,7 @@ Cannot combine modes - use only one mode flag at a time.`,
 		},
 	}
 
-	cmd.Flags().StringVarP(&selectPattern, "select", "s", "", "Filter by regex pattern")
+	cmd.Flags().StringVarP(&selectPattern, "select", "s", "", "Filter by pattern (today, yesterday, this-week, this-month, or regex)")
 	cmd.Flags().IntVar(&olderThan, "older-than", 0, "Delete recordings older than N days")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview actions without executing")
@@ -118,6 +118,7 @@ func deleteOlderThan(settings recording.RecordingSettings, days int, dryRun bool
 func deleteByPattern(settings recording.RecordingSettings, pattern string, yes, dryRun bool) error {
 	sessions := LoadSessions(settings)
 
+	pattern = ExpandDateShortcut(pattern)
 	filtered, err := FilterSessionsByPattern(sessions, pattern)
 	if err != nil {
 		ui.Error("Invalid pattern: %s", err)
