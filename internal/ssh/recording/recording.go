@@ -770,8 +770,10 @@ func readFromIndex(castPath string) *SessionRecord {
 	}
 }
 
-// readFromCastFile reads metadata from cast file using tail optimization.
-// Reads header for start time, then seeks to end to find final timestamp.
+// readFromCastFile reads metadata from cast file header.
+// Duration is not available from v3 cast files without reading the entire file
+// (v3 uses relative timestamps that must be summed). For accurate duration,
+// use the .index.json sidecar file which is written when sessions end.
 func readFromCastFile(castPath string) (*SessionRecord, error) {
 	f, err := os.Open(castPath)
 	if err != nil {
@@ -779,7 +781,7 @@ func readFromCastFile(castPath string) (*SessionRecord, error) {
 	}
 	defer func() { _ = f.Close() }()
 
-	// Read header (first line)
+	// Read header (first line only - O(1))
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
@@ -813,9 +815,12 @@ func readFromCastFile(castPath string) (*SessionRecord, error) {
 
 	argv := strings.Fields(header.Command)
 
-	// Get final timestamp using tail-read optimization
-	totalTime := readFinalTimestamp(f)
-	finishedAt := startedAt.Add(time.Duration(totalTime * float64(time.Second)))
+	// For files without index, use file mtime as approximate finish time.
+	// This is accurate for completed sessions since the file is written during recording.
+	finishedAt := startedAt
+	if info, err := f.Stat(); err == nil {
+		finishedAt = info.ModTime()
+	}
 
 	return &SessionRecord{
 		Host:         host,
@@ -825,62 +830,6 @@ func readFromCastFile(castPath string) (*SessionRecord, error) {
 		Argv:         argv,
 		SessionLabel: ExtractSessionLabel(castPath),
 	}, nil
-}
-
-// readFinalTimestamp seeks to the end of the file and reads backwards to find
-// the last event timestamp. This is O(1) instead of O(file_size).
-func readFinalTimestamp(f *os.File) float64 {
-	const tailSize = 64 * 1024 // Read last 64KB
-
-	info, err := f.Stat()
-	if err != nil {
-		return 0
-	}
-
-	fileSize := info.Size()
-	readSize := tailSize
-	if fileSize < int64(tailSize) {
-		readSize = int(fileSize)
-	}
-
-	// Seek to near end of file
-	offset := fileSize - int64(readSize)
-	if offset < 0 {
-		offset = 0
-	}
-
-	buf := make([]byte, readSize)
-	n, err := f.ReadAt(buf, offset)
-	if err != nil && n == 0 {
-		return 0
-	}
-	buf = buf[:n]
-
-	// Find the last complete line with a valid event
-	var lastTimestamp float64
-	lines := strings.Split(string(buf), "\n")
-
-	// Process lines in reverse to find the last valid event
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
-		if len(line) == 0 || line[0] != '[' {
-			continue
-		}
-
-		var event []interface{}
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			continue
-		}
-
-		if len(event) >= 1 {
-			if ts, ok := event[0].(float64); ok {
-				lastTimestamp = ts
-				break
-			}
-		}
-	}
-
-	return lastTimestamp
 }
 
 // CastFileInfo holds a cast file path and its modification time for lazy loading.
