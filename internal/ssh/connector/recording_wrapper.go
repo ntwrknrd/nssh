@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/ntwrknrd/nssh/internal/ssh/recording"
 	"github.com/ntwrknrd/nssh/internal/ui"
@@ -62,7 +63,25 @@ func MaybeWrapWithRecording(hostname string, args []string) (bool, error) {
 	cmd.Stderr = os.Stderr
 	cmd.Env = append(os.Environ(), "NSSH_RECORDING_INNER=1")
 
+	startedAt := time.Now()
 	err = cmd.Run()
+	finishedAt := time.Now()
+
+	// Determine exit code
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+
+	// Write index file with session metadata for fast duration lookups
+	if plan.CastPath != "" {
+		sessionLabel := recording.ExtractSessionLabel(plan.CastPath)
+		if indexErr := recording.WriteIndex(plan.CastPath, hostname, startedAt, finishedAt, exitCode, "", args, sessionLabel); indexErr != nil {
+			slog.Debug("failed to write recording index", "err", indexErr)
+		}
+	}
 
 	// Export to text if enabled (do this before handling exit errors)
 	if settings.AutoExportTxt && plan.CastPath != "" {
@@ -72,10 +91,10 @@ func MaybeWrapWithRecording(hostname string, args []string) (bool, error) {
 	}
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		if exitCode != 0 {
 			lock.Release()
 			//nolint:gocritic // os.Exit is intentional here; caller expects wrapper to handle exit code.
-			os.Exit(exitErr.ExitCode())
+			os.Exit(exitCode)
 		}
 		return true, err
 	}
