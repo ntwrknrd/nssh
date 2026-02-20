@@ -44,8 +44,14 @@ function nssh --description "SSH to network equipment with password management"
         set atuin_id (atuin history start "$actual_cmd")
     end
 
+    # Set terminal/pane title to target hostname
+    printf '\e]2;%s\a' $first
+
     command $nssh_cmd $argv
     set -l exit_code $status
+
+    # Reset title to local hostname
+    printf '\e]2;%s\a' (hostname -s)
 
     if test -n "$atuin_id"
         atuin history end --exit $exit_code $atuin_id

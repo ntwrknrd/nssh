@@ -70,9 +70,15 @@ nssh() {
         atuin_id=$(atuin history start "$actual_cmd")
     fi
 
+    # Set terminal/pane title to target hostname
+    printf '\033]2;%s\a' "$first_token"
+
     # Use 'command' to bypass this function and invoke the installed CLI
     command "$nssh_cmd" "${original_args[@]}"
     local exit_code=$?
+
+    # Reset title to local hostname
+    printf '\033]2;%s\a' "$(hostname -s)"
 
     # End atuin tracking if it was started
     if [ -n "$atuin_id" ]; then
