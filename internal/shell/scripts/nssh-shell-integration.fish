@@ -47,6 +47,21 @@ function nssh --description "SSH to network equipment with password management"
     # Set terminal/pane title to target hostname
     printf '\e]2;%s\a' $first
 
+    # Promote disposable tmux sessions to persistent (named = survives detach)
+    if set -q TMUX; and string match -qr '^[0-9]+$' (tmux display-message -p '#{session_name}')
+        set -l name $first
+        if tmux has-session -t $name 2>/dev/null
+            set -l i 2
+            while tmux has-session -t "$name-$i" 2>/dev/null
+                set i (math $i + 1)
+            end
+            set name "$name-$i"
+        end
+        tmux rename-session $name
+        tmux select-pane -T $name
+        tmux set destroy-unattached off
+    end
+
     command $nssh_cmd $argv
     set -l exit_code $status
 

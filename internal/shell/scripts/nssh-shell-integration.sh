@@ -73,6 +73,25 @@ nssh() {
     # Set terminal/pane title to target hostname
     printf '\033]2;%s\a' "$first_token"
 
+    # Promote disposable tmux sessions to persistent (named = survives detach)
+    if [ -n "$TMUX" ]; then
+        local session_name
+        session_name=$(tmux display-message -p '#{session_name}' 2>/dev/null)
+        if [[ "$session_name" =~ ^[0-9]+$ ]]; then
+            local name="$first_token"
+            if tmux has-session -t "$name" 2>/dev/null; then
+                local i=2
+                while tmux has-session -t "$name-$i" 2>/dev/null; do
+                    i=$((i + 1))
+                done
+                name="$name-$i"
+            fi
+            tmux rename-session "$name"
+            tmux select-pane -T "$name"
+            tmux set destroy-unattached off
+        fi
+    fi
+
     # Use 'command' to bypass this function and invoke the installed CLI
     command "$nssh_cmd" "${original_args[@]}"
     local exit_code=$?
