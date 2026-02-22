@@ -1,16 +1,6 @@
-$ nssh host --help
+$ nssh host rename --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh host [flags]                 Manage SSH host files                    │
-╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────╮
-│   add                               Add hosts to config                      │
-│   edit                              Edit host settings                       │
-│   get                               Show host details                        │
-│   list                              List all hosts                           │
-│   prune                             Remove stale and duplicate hosts         │
-│   rename                            Rename hosts with CNAME changes          │
-│   rm                                Remove hosts from config                 │
-│   sort                              Sort hosts in config                     │
+│   nssh host rename [flags]          Rename hosts with CNAME changes          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

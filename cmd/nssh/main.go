@@ -748,6 +748,8 @@ func newHostCmd() *cobra.Command {
 	cmd.AddCommand(host.NewEditCmd())
 	cmd.AddCommand(host.NewRemoveCmd())
 	cmd.AddCommand(host.NewSortCmd())
+	cmd.AddCommand(host.NewPruneCmd())
+	cmd.AddCommand(host.NewRenameCmd())
 
 	ui.ApplyStyledHelpRecursive(cmd)
 	return cmd
