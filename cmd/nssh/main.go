@@ -329,23 +329,25 @@ func initLogging(verbose bool) {
 // This bypasses smart resolution - use for hosts not in SSH config.
 func newConnectCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "connect <host> [ssh-args...]",
+		Use:   "connect [host]",
 		Short: "Connect to host",
-		Long: `Connect directly to a host via SSH, bypassing smart routing.
+		Long: `Connect to a host via SSH with direct routing.
 
-This provides a raw SSH wrapper experience without fuzzy matching or
-host-add fallback. Use this to connect to hosts whose names conflict
-with subcommands (e.g., "host", "log", "cp", "self").
+Without a hostname, opens the fuzzy finder across all known hosts.
+With a hostname, bypasses smart matching and treats the argument as the
+SSH destination verbatim - no host-add fallback. Useful when a Host alias
+conflicts with a subcommand name (e.g., "host", "log", "cp", "self").
 
 Example: nssh connect host -p 2222`,
-		Args: func(cmd *cobra.Command, args []string) error {
-			// Allow 0 args when --explain is used (handled by PreRunE)
-			if explain, _ := cmd.Flags().GetBool("explain"); explain {
-				return nil
-			}
-			return cobra.MinimumNArgs(1)(cmd, args)
-		},
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				hostname, err := resolveHostname("")
+				if err != nil {
+					return err
+				}
+				return connectHost(hostname, nil)
+			}
 			return connectHost(args[0], args[1:])
 		},
 	}
@@ -362,19 +364,26 @@ Example: nssh connect host -p 2222`,
 // This provides smart hostname resolution with fuzzy matching and host-add fallback.
 func newSmartConnectCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:    "smart-connect <host> [ssh-args...]",
+		Use:    "smart-connect [host] [ssh-args...]",
 		Short:  "Connect to a host with smart resolution",
-		Args:   cobra.MinimumNArgs(1),
+		Args:   cobra.ArbitraryArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Extract username if user@host format was used
-			user, host := parseUserHost(args[0])
+			// Extract username if user@host format was used.
+			// With no args, pass empty string to resolveHostname to open fuzzy finder over all hosts.
+			var user, host string
+			if len(args) > 0 {
+				user, host = parseUserHost(args[0])
+			}
 			hostname, err := resolveHostname(host)
 			if err != nil {
 				return err
 			}
 			// Prepend -l flag if user was specified inline
-			sshArgs := args[1:]
+			var sshArgs []string
+			if len(args) > 1 {
+				sshArgs = args[1:]
+			}
 			if user != "" {
 				sshArgs = append([]string{"-l", user}, sshArgs...)
 			}
@@ -886,7 +895,10 @@ func resolveHostname(hostname string) (string, error) {
 		return selected, nil
 	}
 
-	// No matches - signal to spawn host add
+	// No matches - signal to spawn host add (only when a hostname was provided)
+	if hostname == "" {
+		return "", fmt.Errorf("no hosts found in SSH config")
+	}
 	return "", &cli.HostNotFoundError{Hostname: hostname}
 }
 

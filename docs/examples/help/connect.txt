@@ -1,6 +1,6 @@
 $ nssh connect --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh connect <host> [ssh-args.... Connect to host                          │
+│   nssh connect [host] [flags]       Connect to host                          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
