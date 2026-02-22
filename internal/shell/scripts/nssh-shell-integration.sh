@@ -77,7 +77,7 @@ nssh() {
     if [ -n "$TMUX" ]; then
         local session_name
         session_name=$(tmux display-message -p '#{session_name}' 2>/dev/null)
-        if [[ "$session_name" =~ ^[0-9]+$ ]]; then
+        if [[ "$session_name" =~ ^temp-[0-9]+$ ]]; then
             local name="$first_token"
             if tmux has-session -t "$name" 2>/dev/null; then
                 local i=2

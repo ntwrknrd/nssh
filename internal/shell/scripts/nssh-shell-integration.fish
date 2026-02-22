@@ -48,7 +48,7 @@ function nssh --description "SSH to network equipment with password management"
     printf '\e]2;%s\a' $first
 
     # Promote disposable tmux sessions to persistent (named = survives detach)
-    if set -q TMUX; and string match -qr '^[0-9]+$' (tmux display-message -p '#{session_name}')
+    if set -q TMUX; and string match -qr '^temp-[0-9]+$' (tmux display-message -p '#{session_name}')
         set -l name $first
         if tmux has-session -t $name 2>/dev/null
             set -l i 2

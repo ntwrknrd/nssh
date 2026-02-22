@@ -93,7 +93,7 @@ func fzfSelect(prompt string, options []string, multi bool, initialQuery string)
 	}
 
 	if multi {
-		args = append(args, "--multi")
+		args = append(args, "--multi", "--header", "TAB to select, ENTER to confirm")
 	}
 
 	if initialQuery != "" {
