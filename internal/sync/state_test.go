@@ -186,6 +186,14 @@ func TestBuildSyncIndex(t *testing.T) {
 		t.Errorf("credential_class = %q", info.CredentialClass)
 	}
 
+	// Check alternate pattern is also indexed
+	altInfo, ok := index["dfz-core01"]
+	if !ok || altInfo == nil {
+		t.Fatal("alternate pattern not in index")
+	}
+	if altInfo.Source != "test-lab" {
+		t.Errorf("alt source = %q", altInfo.Source)
+	}
 }
 
 func TestBuildSyncIndexEmpty(t *testing.T) {

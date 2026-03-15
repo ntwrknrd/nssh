@@ -98,46 +98,12 @@ func LoadSourceState(source string) (*SourceState, error) {
 
 // SaveSourceState atomically writes the source state to disk.
 func SaveSourceState(state *SourceState) error {
-	dir := syncStateDir()
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("create state dir: %w", err)
-	}
-
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)
 	}
 
-	path := stateFilePath(state.Source)
-
-	// Atomic write: temp file + rename
-	tmp, err := os.CreateTemp(dir, ".state-*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer func() {
-		if tmpPath != "" {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write state: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp file: %w", err)
-	}
-	if err := os.Chmod(tmpPath, 0600); err != nil {
-		return fmt.Errorf("set permissions: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("rename state file: %w", err)
-	}
-	tmpPath = "" // prevent cleanup
-
-	return nil
+	return atomicWriteFile(stateFilePath(state.Source), data, 0600)
 }
 
 // ListSourceStates returns the names of all sources that have state files.
@@ -209,6 +175,9 @@ func BuildSyncIndex() (map[string]*SyncHostInfo, error) {
 			}
 
 			index[mh.Host] = info
+			for _, p := range mh.Patterns {
+				index[p] = info
+			}
 		}
 	}
 

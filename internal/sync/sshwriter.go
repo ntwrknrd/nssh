@@ -29,7 +29,7 @@ func WriteManagedSSHConfigs(hosts []*ManagedHost, sourceName, provider string) e
 		content := generateSSHConfig(fileHosts, sourceName, provider)
 		destPath := filepath.Join(paths.SSHConfigDir, includeFile)
 
-		if err := atomicWriteFile(destPath, []byte(content)); err != nil {
+		if err := atomicWriteFile(destPath, []byte(content), 0644); err != nil {
 			return fmt.Errorf("write %s: %w", includeFile, err)
 		}
 	}
@@ -93,7 +93,7 @@ func generateSSHConfig(hosts []*ManagedHost, sourceName, provider string) string
 }
 
 // atomicWriteFile writes data to path via temp file + rename.
-func atomicWriteFile(path string, data []byte) error {
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create dir: %w", err)
@@ -117,7 +117,7 @@ func atomicWriteFile(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close: %w", err)
 	}
-	if err := os.Chmod(tmpPath, 0644); err != nil {
+	if err := os.Chmod(tmpPath, perm); err != nil {
 		return fmt.Errorf("chmod: %w", err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
