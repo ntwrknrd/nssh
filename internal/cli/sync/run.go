@@ -134,7 +134,7 @@ func runSourceSync(
 
 	// Discover
 	ui.Info("Discovering from %s...", src.Name)
-	objects, err := provider.Discover(context.TODO(), src, runner)
+	objects, err := provider.Discover(context.Background(), src, runner)
 	if err != nil {
 		ui.CommandEnd(ui.StatusError)
 		return fmt.Errorf("discover: %w", err)

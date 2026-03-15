@@ -16,7 +16,6 @@ import (
 	intsync "github.com/ntwrknrd/nssh/internal/sync"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/ntwrknrd/nssh/internal/vault"
-	"golang.org/x/term"
 )
 
 // ResolvedHost holds the result of host resolution: everything needed to
@@ -82,18 +81,11 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 		slog.Debug("vault not available", "err", err)
 	} else {
 		// Auto-prompt for unlock if needed and TTY is available
-		if mgr.NeedsUnlock() {
-			if term.IsTerminal(int(os.Stdin.Fd())) {
-				slog.Debug("vault locked, prompting for unlock")
-				if err := clisession.Unlock(mgr, false); err != nil {
-					if err == ui.ErrInterrupted {
-						os.Exit(130)
-					}
-					slog.Warn("unlock failed", "err", err)
-				}
-			} else {
-				slog.Debug("vault locked and no TTY available, skipping unlock")
+		if err := clisession.TryUnlockIfTTY(mgr); err != nil {
+			if err == ui.ErrInterrupted {
+				os.Exit(130)
 			}
+			slog.Warn("unlock failed", "err", err)
 		}
 
 		// Single vault resolution call -- split result by source

@@ -8,7 +8,7 @@ OUTPUT_DIR ?= ./
 # Version from git tags or "dev" fallback
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
-BUILDFLAGS := -trimpath
+BUILDFLAGS := -trimpath -buildvcs=false
 
 # Native build (current platform)
 build:
