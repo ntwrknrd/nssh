@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -24,9 +23,11 @@ import (
 	"github.com/ntwrknrd/nssh/internal/cli/host"
 	"github.com/ntwrknrd/nssh/internal/cli/lock"
 	"github.com/ntwrknrd/nssh/internal/cli/log"
+	"github.com/ntwrknrd/nssh/internal/cli/resolve"
 	"github.com/ntwrknrd/nssh/internal/cli/self"
 	"github.com/ntwrknrd/nssh/internal/cli/self/bench"
 	clisession "github.com/ntwrknrd/nssh/internal/cli/session"
+	synccli "github.com/ntwrknrd/nssh/internal/cli/sync"
 	"github.com/ntwrknrd/nssh/internal/cli/unlock"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
@@ -39,7 +40,6 @@ import (
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/ntwrknrd/nssh/internal/vault"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 var (
@@ -57,6 +57,7 @@ var (
 		"lock":               true,
 		"unlock":             true,
 		"connect":            true,
+		"sync":               true,
 		"smart-connect":      true,
 		"__list-subcommands": true,
 		"__agent":            true, // Hidden agent daemon mode
@@ -215,6 +216,7 @@ and record sessions.`,
 	rootCmd.AddCommand(newLogCmd())
 	rootCmd.AddCommand(newCpCmd())
 	rootCmd.AddCommand(newSelfCmd())
+	rootCmd.AddCommand(newSyncCmd())
 
 	lockCmd := lock.NewCmd()
 	unlockCmd := unlock.NewCmd()
@@ -407,12 +409,14 @@ func connectHost(hostname string, sshArgs []string) error {
 		return nil
 	}
 
-	// Load config
+	// Resolve host, credentials, and config via shared resolver
 	configTimer := connector.StartTiming(connector.TimingConfigLoad)
-	cfg, err := config.LoadDefault()
+	explicitUser := extractExplicitUser(hostname, sshArgs)
+	resolved, err := resolve.ResolveHostForConnect(hostname, explicitUser)
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return fmt.Errorf("resolve host: %w", err)
 	}
+	cfg := resolved.Config
 	configTimer.Emit()
 
 	// Set up audit logging for SSH connections (best-effort; non-fatal)
@@ -429,85 +433,24 @@ func connectHost(hostname string, sshArgs []string) error {
 	}
 
 	slog.Debug("connecting to host",
-		"host", hostname,
+		"host", resolved.Hostname,
 		"ssh_args", sshArgs,
 		"timeout", cfg.SSH.Connection.Timeout.Duration(),
 	)
 
 	if audit != nil {
-		audit.Info("ssh_connect_start", "host", hostname, "ssh_args", sshArgs)
-	}
-
-	// Resolve username from SSH config or args
-	username := resolveUsername(hostname, sshArgs, cfg)
-
-	// Strip user@ prefix from hostname if present (handles direct connectHost calls)
-	if idx := strings.LastIndex(hostname, "@"); idx != -1 {
-		hostname = hostname[idx+1:]
-	}
-
-	// Look up include file for this host (used for credential resolution)
-	includeFile := ""
-	var hostEntry *sshconfig.HostEntry
-	parser := sshconfig.NewParser()
-	if host, err := parser.FindHost(hostname); err == nil && host != nil {
-		hostEntry = host
-		includeFile = filepath.Base(host.SourceFile)
-	}
-
-	// Resolve credentials
-	credTimer := connector.StartTiming(connector.TimingCredentialLookup)
-	var cred *vault.ResolvedCredential
-	mgr, err := clisession.NewManager(vault.Auto())
-	if err != nil {
-		slog.Debug("vault not available", "err", err)
-	} else {
-		// Auto-prompt for unlock if needed and TTY is available
-		if mgr.NeedsUnlock() {
-			if term.IsTerminal(int(os.Stdin.Fd())) {
-				slog.Debug("vault locked, prompting for unlock")
-				if err := clisession.Unlock(mgr, false); err != nil {
-					if err == ui.ErrInterrupted {
-						os.Exit(130) // Standard exit code for SIGINT
-					}
-					slog.Warn("unlock failed", "err", err)
-					// Continue without credentials
-				}
-			} else {
-				slog.Debug("vault locked and no TTY available, skipping unlock")
-			}
-		}
-
-		// Try include file-based resolution first, then domain-based
-		if includeFile != "" {
-			cred, err = mgr.ResolveCredential(hostname, includeFile, username)
-			if err != nil {
-				slog.Warn("credential resolution failed", "err", err)
-			}
-		}
-		if cred == nil {
-			cred, err = mgr.ResolveCredentialWithDomain(hostname, username)
-			if err != nil {
-				slog.Warn("domain credential resolution failed", "err", err)
-			}
-		}
-	}
-	credTimer.Emit()
-
-	// If we have credentials, use the resolved username
-	if cred != nil {
-		username = cred.Username
-		slog.Debug("resolved credential", "username", username, "source", cred.Source)
+		audit.Info("ssh_connect_start", "host", resolved.Hostname, "ssh_args", sshArgs)
 	}
 
 	// Create connector
 	var password *secret.Secret
-	if cred != nil {
-		password = cred.Password
+	if resolved.Credential != nil {
+		password = resolved.Credential.Password
+		slog.Debug("resolved credential", "username", resolved.Username, "source", resolved.Credential.Source)
 	}
-	conn := connector.NewConnector(hostname, username, password, sshArgs)
-	if hostEntry != nil {
-		conn.SetResolvedEndpoint(hostEntry.HostName, hostEntry.Port())
+	conn := connector.NewConnector(resolved.Hostname, resolved.Username, password, sshArgs)
+	if resolved.HostEntry != nil {
+		conn.SetResolvedEndpoint(resolved.HostEntry.HostName, resolved.HostEntry.Port())
 	}
 	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 
@@ -519,39 +462,39 @@ func connectHost(hostname string, sshArgs []string) error {
 
 	if audit != nil {
 		if connErr == nil {
-			audit.Info("ssh_connect_end", "host", hostname, "status", "success")
+			audit.Info("ssh_connect_end", "host", resolved.Hostname, "status", "success")
 		} else {
 			exitCode := 1
 			var exitErr *exit.ExitError
 			if errors.As(connErr, &exitErr) {
 				exitCode = exitErr.Code
 			}
-			audit.Info("ssh_connect_end", "host", hostname, "status", "error", "exit_code", exitCode, "error", connErr.Error())
+			audit.Info("ssh_connect_end", "host", resolved.Hostname, "status", "error", "exit_code", exitCode, "error", connErr.Error())
 		}
 	}
 
 	// Check if connection failed with a compatibility error
 	if connErr != nil && isCompatibilityError(connErr) {
-		if handleCompatibilityFix(hostname, includeFile) {
+		if handleCompatibilityFix(resolved.Hostname, resolved.IncludeFile) {
 			// Retry connection after fixes applied
-			// Re-resolve credentials since the previous ones may have been destroyed
 			slog.Debug("retrying connection after compatibility fixes")
 
 			var retryPassword *secret.Secret
+			mgr := resolved.Manager
 			if mgr != nil {
 				var retryCred *vault.ResolvedCredential
-				if includeFile != "" {
-					retryCred, _ = mgr.ResolveCredential(hostname, includeFile, username)
+				if resolved.IncludeFile != "" {
+					retryCred, _ = mgr.ResolveCredential(resolved.Hostname, resolved.IncludeFile, resolved.Username)
 				}
 				if retryCred == nil {
-					retryCred, _ = mgr.ResolveCredentialWithDomain(hostname, username)
+					retryCred, _ = mgr.ResolveCredentialWithDomain(resolved.Hostname, resolved.Username)
 				}
 				if retryCred != nil {
 					retryPassword = retryCred.Password
 				}
 			}
 
-			conn2 := connector.NewConnector(hostname, username, retryPassword, sshArgs)
+			conn2 := connector.NewConnector(resolved.Hostname, resolved.Username, retryPassword, sshArgs)
 			conn2.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 			conn2.SetTimeouts(&cfg.SSH.Connection)
 			return conn2.Run(context.Background())
@@ -703,9 +646,9 @@ func parseUserHost(input string) (username, hostname string) {
 	return "", input
 }
 
-// resolveUsername extracts username from SSH args, SSH config, or nssh config.
-func resolveUsername(hostname string, sshArgs []string, cfg *config.Config) string {
-	// Check for -l flag in args (highest priority)
+// extractExplicitUser extracts a user from -l flag or user@host in args.
+// Returns empty string if no explicit user is specified.
+func extractExplicitUser(hostname string, sshArgs []string) string {
 	for i, arg := range sshArgs {
 		if arg == "-l" && i+1 < len(sshArgs) {
 			return sshArgs[i+1]
@@ -714,22 +657,10 @@ func resolveUsername(hostname string, sshArgs []string, cfg *config.Config) stri
 			return arg[2:]
 		}
 	}
-
-	// Check for user@host format (hostname might contain @)
 	if idx := strings.LastIndex(hostname, "@"); idx != -1 {
 		return hostname[:idx]
 	}
-
-	// Check SSH config for User directive
-	parser := sshconfig.NewParser()
-	if host, err := parser.FindHost(hostname); err == nil && host != nil {
-		if user := host.User(); user != "" {
-			return user
-		}
-	}
-
-	// Use default from nssh config
-	return cfg.Host.Defaults.DefaultUser
+	return ""
 }
 
 // newHostCmd creates the host subcommand for managing SSH hosts.
@@ -821,6 +752,13 @@ func newBenchCmd() *cobra.Command {
 	return cmd
 }
 
+// newSyncCmd creates the sync subcommand for managing external inventory sync.
+func newSyncCmd() *cobra.Command {
+	cmd := synccli.NewCmd()
+	ui.ApplyStyledHelpRecursive(cmd)
+	return cmd
+}
+
 // newSelfCmd creates the self subcommand for managing nssh installation.
 func newSelfCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -855,7 +793,7 @@ func newListSubcommandsCmd() *cobra.Command {
 		Hidden: true,
 		Run: func(cmd *cobra.Command, args []string) {
 			// Print one subcommand per line (fish splits on newlines)
-			for _, subcmd := range []string{"host", "ctx", "log", "cp", "self", "lock", "unlock", "connect"} {
+			for _, subcmd := range []string{"host", "ctx", "log", "cp", "self", "lock", "unlock", "connect", "sync"} {
 				fmt.Println(subcmd)
 			}
 		},

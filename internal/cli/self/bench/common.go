@@ -483,9 +483,9 @@ func SaveResults(benchType, host string, result *BenchmarkResult, simpleOnly boo
 func renderResultsToString(benchType, host string, result *BenchmarkResult, simpleOnly bool) string {
 	var buf strings.Builder
 
-	buf.WriteString(fmt.Sprintf("%s benchmark: %s\n", strings.ToUpper(benchType), host))
-	buf.WriteString(fmt.Sprintf("Date: %s\n", time.Now().Format("2006-01-02 15:04:05")))
-	buf.WriteString(fmt.Sprintf("Samples: %d (warmups: %d)\n\n", result.MeasuredRuns, result.WarmupRuns))
+	fmt.Fprintf(&buf, "%s benchmark: %s\n", strings.ToUpper(benchType), host)
+	fmt.Fprintf(&buf, "Date: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(&buf, "Samples: %d (warmups: %d)\n\n", result.MeasuredRuns, result.WarmupRuns)
 
 	if !simpleOnly && len(result.StageNames) > 0 {
 		sortedStages := sortStageNames(result.StageNames)
@@ -493,19 +493,19 @@ func renderResultsToString(benchType, host string, result *BenchmarkResult, simp
 		wallStats := ComputeWallClockStats(result.WallClocks)
 
 		// Header
-		buf.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %10s\n", "Stage", "Mean", "Median", "Min", "Max"))
+		fmt.Fprintf(&buf, "%-20s %10s %10s %10s %10s\n", "Stage", "Mean", "Median", "Min", "Max")
 		buf.WriteString(strings.Repeat("-", 62) + "\n")
 
 		// Startup overhead
 		connectorStats := allStats[connector.TimingTotal]
 		if connectorStats.Mean > 0 && wallStats.Mean > connectorStats.Mean {
-			buf.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %10s\n",
+			fmt.Fprintf(&buf, "%-20s %10s %10s %10s %10s\n",
 				"startup",
 				formatDuration(wallStats.Mean-connectorStats.Mean),
 				formatDuration(wallStats.Median-connectorStats.Median),
 				formatDuration(wallStats.Min-connectorStats.Min),
 				formatDuration(wallStats.Max-connectorStats.Max),
-			))
+			)
 		}
 
 		firstReadStats := allStats[connector.TimingFirstRead]
@@ -518,36 +518,36 @@ func renderResultsToString(benchType, host string, result *BenchmarkResult, simp
 			stats := allStats[stageName]
 
 			if stageName == connector.TimingSessionEnd && firstReadStats.Mean > 0 {
-				buf.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %10s\n",
+				fmt.Fprintf(&buf, "%-20s %10s %10s %10s %10s\n",
 					"session_io",
 					formatDuration(stats.Mean-firstReadStats.Mean),
 					formatDuration(stats.Median-firstReadStats.Median),
 					formatDuration(stats.Min-firstReadStats.Min),
 					formatDuration(stats.Max-firstReadStats.Max),
-				))
+				)
 				continue
 			}
 
-			buf.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %10s\n",
+			fmt.Fprintf(&buf, "%-20s %10s %10s %10s %10s\n",
 				stageName,
 				formatDuration(stats.Mean),
 				formatDuration(stats.Median),
 				formatDuration(stats.Min),
 				formatDuration(stats.Max),
-			))
+			)
 		}
 
 		buf.WriteString(strings.Repeat("-", 62) + "\n")
-		buf.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %10s\n",
+		fmt.Fprintf(&buf, "%-20s %10s %10s %10s %10s\n",
 			"total",
 			formatDuration(wallStats.Mean),
 			formatDuration(wallStats.Median),
 			formatDuration(wallStats.Min),
 			formatDuration(wallStats.Max),
-		))
+		)
 	} else {
 		stats := ComputeWallClockStats(result.WallClocks)
-		buf.WriteString(fmt.Sprintf("Wall Clock: %s - %s\n", formatDuration(stats.Min), formatDuration(stats.Max)))
+		fmt.Fprintf(&buf, "Wall Clock: %s - %s\n", formatDuration(stats.Min), formatDuration(stats.Max))
 	}
 
 	return buf.String()

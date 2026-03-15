@@ -61,8 +61,9 @@ type HostCredentials struct {
 
 // VaultData is the top-level structure stored in the encrypted file.
 type VaultData struct {
-	Contexts map[string]*Context         `json:"contexts"`
-	Hosts    map[string]*HostCredentials `json:"hosts"`
+	Contexts    map[string]*Context         `json:"contexts"`
+	Hosts       map[string]*HostCredentials `json:"hosts"`
+	SyncSources map[string]*SyncSourceVault `json:"sync_sources,omitempty"`
 }
 
 // ContextEntry is returned by ListContexts with computed fields.

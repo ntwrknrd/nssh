@@ -31,8 +31,7 @@ func TestResolveCredentialNoDefaultFallsBackToContext(t *testing.T) {
 	}
 	if cred == nil {
 		t.Fatal("expected credential, got nil")
-	}
-	if cred.Username != "contextuser" {
+	} else if cred.Username != "contextuser" {
 		t.Errorf("username = %q, want %q", cred.Username, "contextuser")
 	}
 	if cred.Source != "context" {
@@ -69,8 +68,7 @@ func TestResolveCredentialContextFallback(t *testing.T) {
 	}
 	if cred == nil {
 		t.Fatal("expected credential, got nil")
-	}
-	if cred.Username != "contextuser" {
+	} else if cred.Username != "contextuser" {
 		t.Errorf("username = %q, want %q", cred.Username, "contextuser")
 	}
 	if cred.Source != "context" {
@@ -107,8 +105,7 @@ func TestResolveCredentialWithUsername(t *testing.T) {
 	}
 	if cred == nil {
 		t.Fatal("expected credential, got nil")
-	}
-	if cred.Username != "backup" {
+	} else if cred.Username != "backup" {
 		t.Errorf("username = %q, want %q", cred.Username, "backup")
 	}
 
@@ -119,8 +116,7 @@ func TestResolveCredentialWithUsername(t *testing.T) {
 	}
 	if cred == nil {
 		t.Fatal("expected credential, got nil")
-	}
-	if cred.Username != "contextuser" {
+	} else if cred.Username != "contextuser" {
 		t.Errorf("username = %q, want %q", cred.Username, "contextuser")
 	}
 	if cred.Source != "context" {
@@ -195,8 +191,7 @@ func TestResolveCredentialWithDomain(t *testing.T) {
 	}
 	if cred == nil {
 		t.Fatal("expected credential, got nil")
-	}
-	if cred.Username != "domainuser" {
+	} else if cred.Username != "domainuser" {
 		t.Errorf("username = %q, want %q", cred.Username, "domainuser")
 	}
 	if cred.Source != "context" {
@@ -238,8 +233,7 @@ func TestResolveCredentialWithDomainNoDefaultFallsBackToContext(t *testing.T) {
 	}
 	if cred == nil {
 		t.Fatal("expected credential, got nil")
-	}
-	if cred.Username != "domainuser" {
+	} else if cred.Username != "domainuser" {
 		t.Errorf("username = %q, want %q", cred.Username, "domainuser")
 	}
 	if cred.Source != "context" {
@@ -281,8 +275,7 @@ func TestResolveCredentialWithDefault(t *testing.T) {
 	}
 	if cred == nil {
 		t.Fatal("expected credential, got nil")
-	}
-	if cred.Username != "backup" {
+	} else if cred.Username != "backup" {
 		t.Errorf("username = %q, want %q", cred.Username, "backup")
 	}
 	if cred.Source != "host" {
@@ -339,8 +332,7 @@ func TestResolveCredentialDefaultNotFound(t *testing.T) {
 	}
 	if cred == nil {
 		t.Fatal("expected credential, got nil")
-	}
-	if cred.Username != "contextuser" {
+	} else if cred.Username != "contextuser" {
 		t.Errorf("username = %q, want %q", cred.Username, "contextuser")
 	}
 	if cred.Source != "context" {
@@ -442,8 +434,7 @@ func TestResolveCredentialWithDomainAndDefault(t *testing.T) {
 	}
 	if cred == nil {
 		t.Fatal("expected credential, got nil")
-	}
-	if cred.Username != "backup" {
+	} else if cred.Username != "backup" {
 		t.Errorf("username = %q, want %q", cred.Username, "backup")
 	}
 	if cred.Source != "host" {

@@ -16,6 +16,7 @@ type Config struct {
 	Host    HostConfig    `toml:"host"`
 	Logging LoggingConfig `toml:"logging"`
 	SSH     SSHConfig     `toml:"ssh"`
+	Sync    SyncConfig    `toml:"sync"`
 }
 
 // ============================================================================
@@ -352,6 +353,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := c.SSH.Security.Validate(); err != nil {
+		return err
+	}
+	if err := c.Sync.Validate(); err != nil {
 		return err
 	}
 	return nil

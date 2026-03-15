@@ -70,8 +70,7 @@ func TestManagerCreateContext(t *testing.T) {
 	}
 	if ctx == nil {
 		t.Fatal("expected context, got nil")
-	}
-	if ctx.Name != "work" {
+	} else if ctx.Name != "work" {
 		t.Errorf("name = %q, want %q", ctx.Name, "work")
 	}
 	// CreateContext now stores absolute paths to prevent basename collisions
@@ -218,8 +217,7 @@ func TestManagerGetContextByIncludeFile(t *testing.T) {
 	}
 	if ctx == nil {
 		t.Fatal("expected context, got nil")
-	}
-	if ctx.Name != "work" {
+	} else if ctx.Name != "work" {
 		t.Errorf("name = %q, want %q", ctx.Name, "work")
 	}
 
