@@ -33,13 +33,7 @@ func runGet(sourceName string) error {
 	}
 
 	// Find the source config
-	var src *config.SyncSourceConfig
-	for i := range cfg.Sync.Sources {
-		if cfg.Sync.Sources[i].Name == sourceName {
-			src = &cfg.Sync.Sources[i]
-			break
-		}
-	}
+	src := findSource(cfg.Sync.Sources, sourceName)
 	if src == nil {
 		ui.Error("Source %q not found in config", sourceName)
 		ui.CommandEnd(ui.StatusError)
@@ -51,12 +45,12 @@ func runGet(sourceName string) error {
 	panel.Row("Routes", fmt.Sprintf("%d", len(src.Routes)))
 
 	switch src.Provider {
-	case "containerlab":
+	case config.ProviderContainerlab:
 		if src.Containerlab != nil {
 			panel.Row("Jump Host", src.Containerlab.JumpHost)
 			panel.Row("Sudo", fmt.Sprintf("%v", src.Containerlab.Sudo))
 		}
-	case "netbox":
+	case config.ProviderNetBox:
 		if src.NetBox != nil {
 			panel.Row("Base URL", src.NetBox.BaseURL)
 			panel.Row("Token Env", src.NetBox.TokenEnv)

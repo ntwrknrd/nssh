@@ -93,7 +93,7 @@ func ParseContainerlabJSON(data []byte, sourceName, jumpHost string) ([]sync.Inv
 		}
 
 		obj := sync.InventoryObject{
-			Provider:        "containerlab",
+			Provider:        config.ProviderContainerlab,
 			Source:          sourceName,
 			ObjectID:        objectID,
 			ObjectType:      "node",

@@ -3,6 +3,8 @@ package sync
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/cli/resolve"
@@ -60,15 +62,11 @@ func runSync(sourceName string, dryRun, prune bool) error {
 	// Select sources to process
 	var sources []config.SyncSourceConfig
 	if sourceName != "" {
-		for _, s := range cfg.Sync.Sources {
-			if s.Name == sourceName {
-				sources = append(sources, s)
-				break
-			}
-		}
-		if len(sources) == 0 {
+		src := findSource(cfg.Sync.Sources, sourceName)
+		if src == nil {
 			return fmt.Errorf("source %q not found in config", sourceName)
 		}
+		sources = []config.SyncSourceConfig{*src}
 	} else {
 		sources = cfg.Sync.Sources
 	}
@@ -166,9 +164,7 @@ func runSourceSync(
 	// Build the final host set
 	allHosts := make(map[string]*intsync.ManagedHost)
 	if current != nil {
-		for id, h := range current.Objects {
-			allHosts[id] = h
-		}
+		maps.Copy(allHosts, current.Objects)
 	}
 	for _, h := range plan.Adds {
 		allHosts[h.ObjectID] = h
@@ -183,10 +179,7 @@ func runSourceSync(
 	}
 
 	// Collect hosts for SSH config writing
-	var hostList []*intsync.ManagedHost
-	for _, h := range allHosts {
-		hostList = append(hostList, h)
-	}
+	hostList := slices.Collect(maps.Values(allHosts))
 
 	// Write SSH config
 	if len(hostList) > 0 {
@@ -200,7 +193,7 @@ func runSourceSync(
 	if prune && len(hostList) == 0 {
 		// All hosts removed, clean up include files
 		if current != nil {
-			files := intsync.CollectIncludeFiles(valuesSlice(current.Objects))
+			files := intsync.CollectIncludeFiles(slices.Collect(maps.Values(current.Objects)))
 			for _, f := range files {
 				if err := intsync.RemoveManagedSSHConfig(f); err != nil {
 					ui.Warning("Failed to remove %s: %s", f, err)
@@ -234,7 +227,7 @@ func runSourceSync(
 
 func createProvider(providerName string) (intsync.Provider, error) {
 	switch providerName {
-	case "containerlab":
+	case config.ProviderContainerlab:
 		return providers.NewContainerlabProvider(), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider %q", providerName)
@@ -269,14 +262,9 @@ func printPlan(plan *intsync.SyncPlan) {
 }
 
 func promptMissingCredentials(plan *intsync.SyncPlan, source string, mgr *vault.Manager) error {
-	// Collect unique credential classes from adds
+	// Collect unique credential classes from adds and updates
 	classSet := make(map[string]bool)
-	for _, h := range plan.Adds {
-		if h.CredentialClass != "" {
-			classSet[h.CredentialClass] = true
-		}
-	}
-	for _, h := range plan.Updates {
+	for _, h := range append(plan.Adds, plan.Updates...) {
 		if h.CredentialClass != "" {
 			classSet[h.CredentialClass] = true
 		}
@@ -328,12 +316,13 @@ func prunedCount(plan *intsync.SyncPlan, prune bool) int {
 	return 0
 }
 
-func valuesSlice(m map[string]*intsync.ManagedHost) []*intsync.ManagedHost {
-	s := make([]*intsync.ManagedHost, 0, len(m))
-	for _, v := range m {
-		s = append(s, v)
+func findSource(sources []config.SyncSourceConfig, name string) *config.SyncSourceConfig {
+	for i := range sources {
+		if sources[i].Name == name {
+			return &sources[i]
+		}
 	}
-	return s
+	return nil
 }
 
 // syncRunner adapts remoteexec.SSHRunner to the sync.RemoteRunner interface.

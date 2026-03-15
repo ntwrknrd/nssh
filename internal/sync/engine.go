@@ -1,6 +1,8 @@
 package sync
 
 import (
+	"slices"
+
 	"github.com/ntwrknrd/nssh/internal/config"
 )
 
@@ -113,20 +115,8 @@ func managedHostChanged(old, new *ManagedHost) bool {
 	if old.IncludeFile != new.IncludeFile {
 		return true
 	}
-	if !stringSliceEqual(old.Patterns, new.Patterns) {
+	if !slices.Equal(old.Patterns, new.Patterns) {
 		return true
 	}
 	return false
-}
-
-func stringSliceEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

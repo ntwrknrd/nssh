@@ -5,6 +5,12 @@ import (
 	"strings"
 )
 
+// Provider name constants.
+const (
+	ProviderContainerlab = "containerlab"
+	ProviderNetBox       = "netbox"
+)
+
 // SyncConfig holds the top-level sync configuration.
 type SyncConfig struct {
 	Sources []SyncSourceConfig `toml:"sources"`
@@ -46,8 +52,8 @@ type SyncRouteMatch map[string][]string
 
 // supportedProviders lists the known provider names.
 var supportedProviders = map[string]bool{
-	"containerlab": true,
-	"netbox":       true,
+	ProviderContainerlab: true,
+	ProviderNetBox:       true,
 }
 
 // Validate checks that the sync config is well-formed.
@@ -90,7 +96,7 @@ func (c *SyncSourceConfig) Validate() error {
 	hasNetBox := c.NetBox != nil
 
 	switch c.Provider {
-	case "containerlab":
+	case ProviderContainerlab:
 		if !hasClab {
 			return fmt.Errorf("provider is %q but containerlab config block is missing", c.Provider)
 		}
@@ -100,7 +106,7 @@ func (c *SyncSourceConfig) Validate() error {
 		if c.Containerlab.JumpHost == "" {
 			return fmt.Errorf("containerlab.jump_host is required")
 		}
-	case "netbox":
+	case ProviderNetBox:
 		if !hasNetBox {
 			return fmt.Errorf("provider is %q but netbox config block is missing", c.Provider)
 		}

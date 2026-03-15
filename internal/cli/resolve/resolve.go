@@ -101,7 +101,7 @@ func ResolveHostForConnect(query string, explicitUser string) (*ResolvedHost, er
 		}
 
 		// Steps 2-3: sync credential (class, then default)
-		if cred == nil {
+		if cred == nil && len(cfg.Sync.Sources) > 0 {
 			cred = resolveSyncCredential(mgr, hostname, username)
 		}
 
@@ -154,22 +154,23 @@ func resolveSyncCredential(mgr *vault.Manager, hostname, username string) *vault
 		return nil
 	}
 
-	// Try class credential first
-	if info.CredentialClass != "" {
-		cred, err := mgr.GetSyncSourceCredential(info.Source, info.CredentialClass)
-		if err != nil {
-			slog.Warn("sync class credential lookup failed", "err", err)
-		} else if cred != nil {
-			return toResolvedCredential(cred, username, "sync-class")
-		}
+	sv, err := mgr.GetSyncSource(info.Source)
+	if err != nil {
+		slog.Warn("sync credential lookup failed", "err", err)
+		return nil
+	}
+	if sv == nil {
+		return nil
 	}
 
-	// Try default credential
-	cred, err := mgr.GetSyncSourceCredential(info.Source, "")
-	if err != nil {
-		slog.Warn("sync default credential lookup failed", "err", err)
-	} else if cred != nil {
-		return toResolvedCredential(cred, username, "sync-default")
+	// Try class credential first, then default
+	if info.CredentialClass != "" && sv.ClassCredentials != nil {
+		if c := sv.ClassCredentials[info.CredentialClass]; c != nil {
+			return toResolvedCredential(c, username, "sync-class")
+		}
+	}
+	if sv.DefaultCredential != nil {
+		return toResolvedCredential(sv.DefaultCredential, username, "sync-default")
 	}
 
 	return nil
