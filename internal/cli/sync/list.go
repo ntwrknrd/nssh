@@ -45,7 +45,9 @@ func runList() error {
 		hostCount := "-"
 
 		state, err := intsync.LoadSourceState(src.Name)
-		if err == nil && state != nil {
+		if err != nil {
+			ui.Warning("Failed to load state for %s: %s", src.Name, err)
+		} else if state != nil {
 			if !state.LastSync.IsZero() {
 				lastSync = state.LastSync.Format(time.RFC3339)
 			}
