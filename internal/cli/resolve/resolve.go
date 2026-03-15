@@ -35,10 +35,17 @@ type ResolvedHost struct {
 // ResolveHostForConnect performs host lookup, include-file discovery, vault
 // unlock, and credential resolution. This is the shared path used by both
 // interactive connect and remote command execution.
-func ResolveHostForConnect(query string, explicitUser string) (*ResolvedHost, error) {
-	cfg, err := config.LoadDefault()
-	if err != nil {
-		return nil, err
+// If cfg is provided, it is used instead of loading the default config.
+func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*ResolvedHost, error) {
+	var c *config.Config
+	if len(cfg) > 0 && cfg[0] != nil {
+		c = cfg[0]
+	} else {
+		var err error
+		c, err = config.LoadDefault()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	hostname := query
@@ -65,7 +72,7 @@ func ResolveHostForConnect(query string, explicitUser string) (*ResolvedHost, er
 		username = hostEntry.User()
 	}
 	if username == "" {
-		username = cfg.Host.Defaults.DefaultUser
+		username = c.Host.Defaults.DefaultUser
 	}
 
 	// Resolve credentials
@@ -89,30 +96,32 @@ func ResolveHostForConnect(query string, explicitUser string) (*ResolvedHost, er
 			}
 		}
 
-		// Step 1: host-specific override (source "host" only)
+		// Single vault resolution call -- split result by source
+		var hostCred, contextCred *vault.ResolvedCredential
 		if includeFile != "" {
-			cred, err = mgr.ResolveCredential(hostname, includeFile, username)
-			if err != nil {
-				slog.Warn("credential resolution failed", "err", err)
-			}
-			if cred != nil && cred.Source != "host" {
-				cred = nil // only accept host-specific at this step
+			resolved, resolveErr := mgr.ResolveCredential(hostname, includeFile, username)
+			if resolveErr != nil {
+				slog.Warn("credential resolution failed", "err", resolveErr)
+			} else if resolved != nil {
+				if resolved.Source == vault.CredSourceHost {
+					hostCred = resolved
+				} else {
+					contextCred = resolved
+				}
 			}
 		}
 
+		// Step 1: host-specific override
+		cred = hostCred
+
 		// Steps 2-3: sync credential (class, then default)
-		if cred == nil && len(cfg.Sync.Sources) > 0 {
+		if cred == nil && len(c.Sync.Sources) > 0 {
 			cred = resolveSyncCredential(mgr, hostname, username)
 		}
 
-		// Steps 4-5: legacy include-file context + domain fallback
+		// Steps 4-5: context + domain fallback
 		if cred == nil {
-			if includeFile != "" {
-				cred, err = mgr.ResolveCredential(hostname, includeFile, username)
-				if err != nil {
-					slog.Warn("credential resolution failed", "err", err)
-				}
-			}
+			cred = contextCred
 			if cred == nil {
 				cred, err = mgr.ResolveCredentialWithDomain(hostname, username)
 				if err != nil {
@@ -135,7 +144,7 @@ func ResolveHostForConnect(query string, explicitUser string) (*ResolvedHost, er
 		HostEntry:   hostEntry,
 		Credential:  cred,
 		Manager:     mgr,
-		Config:      cfg,
+		Config:      c,
 	}, nil
 }
 
@@ -166,11 +175,11 @@ func resolveSyncCredential(mgr *vault.Manager, hostname, username string) *vault
 	// Try class credential first, then default
 	if info.CredentialClass != "" && sv.ClassCredentials != nil {
 		if c := sv.ClassCredentials[info.CredentialClass]; c != nil {
-			return toResolvedCredential(c, username, "sync-class")
+			return toResolvedCredential(c, username, vault.CredSourceSyncClass)
 		}
 	}
 	if sv.DefaultCredential != nil {
-		return toResolvedCredential(sv.DefaultCredential, username, "sync-default")
+		return toResolvedCredential(sv.DefaultCredential, username, vault.CredSourceSyncDefault)
 	}
 
 	return nil

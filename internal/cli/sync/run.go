@@ -83,7 +83,7 @@ func runSync(sourceName string, dryRun, prune bool) error {
 		}
 	}
 
-	runner := newSyncRunner()
+	runner := newSyncRunner(cfg)
 	var anyFailed bool
 
 	for _, src := range sources {
@@ -181,8 +181,9 @@ func runSourceSync(
 	// Collect hosts for SSH config writing
 	hostList := slices.Collect(maps.Values(allHosts))
 
-	// Write SSH config
-	if len(hostList) > 0 {
+	// Write SSH config only when there are actual changes
+	hasChanges := len(plan.Adds) > 0 || len(plan.Updates) > 0 || (prune && len(plan.Removals) > 0)
+	if hasChanges && len(hostList) > 0 {
 		if err := intsync.WriteManagedSSHConfigs(hostList, src.Name, src.Provider); err != nil {
 			ui.CommandEnd(ui.StatusError)
 			return fmt.Errorf("write SSH config: %w", err)
@@ -325,14 +326,9 @@ func findSource(sources []config.SyncSourceConfig, name string) *config.SyncSour
 	return nil
 }
 
-// syncRunner adapts remoteexec.SSHRunner to the sync.RemoteRunner interface.
-type syncRunner struct {
-	ssh *remoteexec.SSHRunner
-}
-
-func newSyncRunner() *syncRunner {
+func newSyncRunner(cfg *config.Config) intsync.RemoteRunner {
 	resolver := func(host string) (*remoteexec.HostInfo, error) {
-		resolved, err := resolve.ResolveHostForConnect(host, "")
+		resolved, err := resolve.ResolveHostForConnect(host, "", cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -341,21 +337,5 @@ func newSyncRunner() *syncRunner {
 			Username: resolved.Username,
 		}, nil
 	}
-	return &syncRunner{ssh: remoteexec.NewSSHRunner(resolver)}
-}
-
-func (r *syncRunner) Run(ctx context.Context, host string, cmd intsync.RemoteCommand) (*intsync.RemoteResult, error) {
-	result, err := r.ssh.Run(ctx, host, remoteexec.RemoteCommand{
-		Argv:    cmd.Argv,
-		Sudo:    cmd.Sudo,
-		Timeout: cmd.Timeout,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &intsync.RemoteResult{
-		Stdout:   result.Stdout,
-		Stderr:   result.Stderr,
-		ExitCode: result.ExitCode,
-	}, nil
+	return remoteexec.NewSSHRunner(resolver)
 }

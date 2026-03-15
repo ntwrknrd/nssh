@@ -2,9 +2,9 @@ package sync
 
 import (
 	"context"
-	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/ssh/remoteexec"
 )
 
 // InventoryObject is a normalized representation of a discovered object from
@@ -30,19 +30,11 @@ type Provider interface {
 	Discover(ctx context.Context, source config.SyncSourceConfig, runner RemoteRunner) ([]InventoryObject, error)
 }
 
-// RemoteCommand describes a command to execute on a remote host.
-type RemoteCommand struct {
-	Argv    []string
-	Sudo    bool
-	Timeout time.Duration
-}
+// RemoteCommand is an alias for remoteexec.RemoteCommand.
+type RemoteCommand = remoteexec.RemoteCommand
 
-// RemoteResult holds the output of a remote command execution.
-type RemoteResult struct {
-	Stdout   []byte
-	Stderr   []byte
-	ExitCode int
-}
+// RemoteResult is an alias for remoteexec.RemoteResult.
+type RemoteResult = remoteexec.RemoteResult
 
 // RemoteRunner executes commands on remote hosts via SSH.
 type RemoteRunner interface {

@@ -20,11 +20,12 @@ func (m *Manager) GetSyncSource(source string) (*SyncSourceVault, error) {
 	return data.SyncSources[source], nil
 }
 
-// SetSyncSourceDefaultCredential sets the default credential for a sync source.
-func (m *Manager) SetSyncSourceDefaultCredential(source string, cred *Credential) error {
+// ensureSyncSource loads the vault fresh and returns the data and the
+// (possibly newly created) SyncSourceVault for the named source.
+func (m *Manager) ensureSyncSource(source string) (*VaultData, *SyncSourceVault, error) {
 	data, err := m.loadFresh()
 	if err != nil {
-		return fmt.Errorf("load vault: %w", err)
+		return nil, nil, fmt.Errorf("load vault: %w", err)
 	}
 	if data.SyncSources == nil {
 		data.SyncSources = make(map[string]*SyncSourceVault)
@@ -33,6 +34,15 @@ func (m *Manager) SetSyncSourceDefaultCredential(source string, cred *Credential
 	if sv == nil {
 		sv = &SyncSourceVault{}
 		data.SyncSources[source] = sv
+	}
+	return data, sv, nil
+}
+
+// SetSyncSourceDefaultCredential sets the default credential for a sync source.
+func (m *Manager) SetSyncSourceDefaultCredential(source string, cred *Credential) error {
+	data, sv, err := m.ensureSyncSource(source)
+	if err != nil {
+		return err
 	}
 	sv.DefaultCredential = cred
 	m.auditInfo("sync_source_set_default", "source", source, "username", cred.Username)
@@ -41,17 +51,9 @@ func (m *Manager) SetSyncSourceDefaultCredential(source string, cred *Credential
 
 // SetSyncSourceClassCredential sets a class credential for a sync source.
 func (m *Manager) SetSyncSourceClassCredential(source, class string, cred *Credential) error {
-	data, err := m.loadFresh()
+	data, sv, err := m.ensureSyncSource(source)
 	if err != nil {
-		return fmt.Errorf("load vault: %w", err)
-	}
-	if data.SyncSources == nil {
-		data.SyncSources = make(map[string]*SyncSourceVault)
-	}
-	sv := data.SyncSources[source]
-	if sv == nil {
-		sv = &SyncSourceVault{}
-		data.SyncSources[source] = sv
+		return err
 	}
 	if sv.ClassCredentials == nil {
 		sv.ClassCredentials = make(map[string]*Credential)

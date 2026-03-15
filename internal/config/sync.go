@@ -50,10 +50,9 @@ type SyncRouteConfig struct {
 // Different fields are AND; multiple values within one field are OR.
 type SyncRouteMatch map[string][]string
 
-// supportedProviders lists the known provider names.
+// supportedProviders lists the implemented provider names.
 var supportedProviders = map[string]bool{
 	ProviderContainerlab: true,
-	ProviderNetBox:       true,
 }
 
 // Validate checks that the sync config is well-formed.
