@@ -10,6 +10,7 @@ const (
 	CredSourceContext     = "context"
 	CredSourceSyncClass   = "sync-class"
 	CredSourceSyncDefault = "sync-default"
+	CredSourceSyncContext = "sync-context"
 )
 
 // ResolvedCredential represents a resolved username/password pair.

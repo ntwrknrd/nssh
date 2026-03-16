@@ -88,6 +88,13 @@ func runSync(sourceName string, dryRun bool) error {
 		}
 	}
 
+	// Validate that every referenced route context exists in vault
+	if mgr != nil {
+		if err := validateRouteContexts(sources, mgr); err != nil {
+			return err
+		}
+	}
+
 	runner := newSyncRunner(cfg)
 	var anyFailed bool
 
@@ -340,6 +347,30 @@ func findSource(sources []config.SyncSourceConfig, name string) *config.SyncSour
 		if sources[i].Name == name {
 			return &sources[i]
 		}
+	}
+	return nil
+}
+
+func validateRouteContexts(sources []config.SyncSourceConfig, mgr *vault.Manager) error {
+	seen := make(map[string]bool)
+	var missing []string
+	for _, src := range sources {
+		for _, r := range src.Routes {
+			if seen[r.Context] {
+				continue
+			}
+			seen[r.Context] = true
+			ctx, err := mgr.GetContext(r.Context)
+			if err != nil {
+				return fmt.Errorf("vault error checking context %q: %w", r.Context, err)
+			}
+			if ctx == nil {
+				missing = append(missing, r.Context)
+			}
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("route context(s) not found in vault: %v; create with 'nssh ctx add'", missing)
 	}
 	return nil
 }

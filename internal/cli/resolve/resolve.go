@@ -106,12 +106,12 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 		// Step 1: host-specific override
 		cred = hostCred
 
-		// Steps 2-3: sync credential (class, then default)
+		// Steps 2-4: sync credential (class, default, context)
 		if cred == nil && len(c.Sync.Sources) > 0 {
 			cred = resolveSyncCredential(mgr, hostname, username)
 		}
 
-		// Steps 4-5: context + domain fallback
+		// Steps 5-6: legacy include-file context + domain fallback
 		if cred == nil {
 			cred = contextCred
 			if cred == nil {
@@ -172,6 +172,16 @@ func resolveSyncCredential(mgr *vault.Manager, hostname, username string) *vault
 	}
 	if sv.DefaultCredential != nil {
 		return toResolvedCredential(sv.DefaultCredential, username, vault.CredSourceSyncDefault)
+	}
+
+	// Step 4: sync-managed context credential
+	if info.Context != "" {
+		ctx, err := mgr.GetContext(info.Context)
+		if err != nil {
+			slog.Warn("sync context lookup failed", "err", err)
+		} else if ctx != nil && ctx.Credential != nil {
+			return toResolvedCredential(ctx.Credential, username, vault.CredSourceSyncContext)
+		}
 	}
 
 	return nil
