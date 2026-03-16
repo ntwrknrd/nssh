@@ -177,6 +177,12 @@ func resolveSyncCredential(mgr *vault.Manager, hostname, username string) *vault
 	return nil
 }
 
+// toResolvedCredential builds a ResolvedCredential from a vault entry.
+// Sync credentials are class-based (shared password across a device class),
+// so the username comes from the normal resolution chain (SSH config, nssh
+// defaults) rather than the stored credential. The caller-provided username
+// takes precedence when set; the credential's own username is only used as
+// a fallback for non-sync credential sources.
 func toResolvedCredential(cred *vault.Credential, username, source string) *vault.ResolvedCredential {
 	u := cred.Username
 	if username != "" {
