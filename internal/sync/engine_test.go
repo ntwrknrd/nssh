@@ -44,16 +44,15 @@ func TestReconcileUpdates(t *testing.T) {
 
 	current := &SourceState{
 		Objects: map[string]*ManagedHost{
-			"lab1/core01": {
-				ObjectID:    "lab1/core01",
-				Host:        "clab-core01",
-				Patterns:    []string{"clab-core01"},
-				HostName:    "172.20.0.2", // old IP
-				Context:     "lab",
-				IncludeFile: "conf.d/sync_test-lab",
+				"lab1/core01": {
+					ObjectID:    "lab1/core01",
+					Host:        "clab-core01",
+					Patterns:    []string{"clab-core01"},
+					HostName:    "172.20.0.2", // old IP
+					Context:     "lab",
+				},
 			},
-		},
-	}
+		}
 
 	plan := Reconcile(objects, routes, "test-lab", current)
 
@@ -131,16 +130,15 @@ func TestReconcileUnchanged(t *testing.T) {
 
 	current := &SourceState{
 		Objects: map[string]*ManagedHost{
-			"lab1/core01": {
-				ObjectID:    "lab1/core01",
-				Host:        "clab-core01",
-				Patterns:    []string{"clab-core01"},
-				HostName:    "172.20.0.2",
-				Context:     "lab",
-				IncludeFile: "conf.d/sync_test-lab",
+				"lab1/core01": {
+					ObjectID:    "lab1/core01",
+					Host:        "clab-core01",
+					Patterns:    []string{"clab-core01"},
+					HostName:    "172.20.0.2",
+					Context:     "lab",
+				},
 			},
-		},
-	}
+		}
 
 	plan := Reconcile(objects, routes, "test-lab", current)
 

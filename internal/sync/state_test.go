@@ -19,17 +19,17 @@ func TestSourceStateRoundTrip(t *testing.T) {
 	setupTestStateDir(t)
 
 	state := &SourceState{
-		Version:  StateVersion,
-		Source:   "test-lab",
-		Provider: "containerlab",
-		LastSync: time.Date(2026, 3, 14, 12, 0, 0, 0, time.UTC),
+		Version:     StateVersion,
+		Source:      "test-lab",
+		Provider:    "containerlab",
+		LastSync:    time.Date(2026, 3, 14, 12, 0, 0, 0, time.UTC),
+		IncludeFile: "conf.d/sync_test-lab",
 		Objects: map[string]*ManagedHost{
 			"lab1/core01": {
 				ObjectID:        "lab1/core01",
 				Host:            "clab-core01",
 				Patterns:        []string{"clab-core01", "core01"},
 				Context:         "lab",
-				IncludeFile:     "conf.d/sync_test-lab",
 				HostName:        "172.20.0.2",
 				ProxyJump:       "nre-netlab01",
 				UsesPassword:    true,
@@ -57,12 +57,15 @@ func TestSourceStateRoundTrip(t *testing.T) {
 	if loaded.Provider != "containerlab" {
 		t.Errorf("provider = %q", loaded.Provider)
 	}
-	if !loaded.LastSync.Equal(state.LastSync) {
-		t.Errorf("last_sync = %v", loaded.LastSync)
-	}
-	if len(loaded.Objects) != 1 {
-		t.Fatalf("objects count = %d", len(loaded.Objects))
-	}
+		if !loaded.LastSync.Equal(state.LastSync) {
+			t.Errorf("last_sync = %v", loaded.LastSync)
+		}
+		if loaded.IncludeFile != state.IncludeFile {
+			t.Errorf("include_file = %q, want %q", loaded.IncludeFile, state.IncludeFile)
+		}
+		if len(loaded.Objects) != 1 {
+			t.Fatalf("objects count = %d", len(loaded.Objects))
+		}
 
 	obj := loaded.Objects["lab1/core01"]
 	if obj == nil {
@@ -146,20 +149,20 @@ func TestBuildSyncIndex(t *testing.T) {
 	setupTestStateDir(t)
 
 	// Save test state
-	state := &SourceState{
-		Version:  StateVersion,
-		Source:   "test-lab",
-		Provider: "containerlab",
-		Objects: map[string]*ManagedHost{
-			"dfz/core01": {
-				ObjectID:        "dfz/core01",
-				Host:            "clab-dfz-core01",
-				Patterns:        []string{"clab-dfz-core01", "dfz-core01"},
-				Context:         "lab",
-				IncludeFile:     "conf.d/sync_test-lab",
-				CredentialClass: "ceos",
+		state := &SourceState{
+			Version:     StateVersion,
+			Source:      "test-lab",
+			Provider:    "containerlab",
+			IncludeFile: "conf.d/sync_test-lab",
+			Objects: map[string]*ManagedHost{
+				"dfz/core01": {
+					ObjectID:        "dfz/core01",
+					Host:            "clab-dfz-core01",
+					Patterns:        []string{"clab-dfz-core01", "dfz-core01"},
+					Context:         "lab",
+					CredentialClass: "ceos",
+				},
 			},
-		},
 	}
 
 	if err := SaveSourceState(state); err != nil {

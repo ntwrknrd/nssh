@@ -13,27 +13,15 @@ import (
 // sshConfigHeader is the header written to sync-owned include files.
 const sshConfigHeader = "# Managed by nssh sync -- DO NOT EDIT"
 
-// WriteManagedSSHConfigs generates and atomically writes sync-owned SSH config
-// include files. Hosts are grouped by IncludeFile. Each file is written as a
-// complete replacement (whole-file atomic rewrite).
-func WriteManagedSSHConfigs(hosts []*ManagedHost, sourceName, provider string) error {
-	// Group hosts by include file
-	groups := make(map[string][]*ManagedHost)
-	for _, h := range hosts {
-		groups[h.IncludeFile] = append(groups[h.IncludeFile], h)
-	}
-
+// WriteManagedSSHConfig generates and atomically writes a sync-owned SSH config
+// include file as a complete replacement (whole-file atomic rewrite).
+func WriteManagedSSHConfig(includeFile string, hosts []*ManagedHost, sourceName, provider string) error {
 	paths := config.DefaultPaths()
-
-	for includeFile, fileHosts := range groups {
-		content := generateSSHConfig(fileHosts, sourceName, provider)
-		destPath := filepath.Join(paths.SSHConfigDir, includeFile)
-
-		if err := atomicWriteFile(destPath, []byte(content), 0644); err != nil {
-			return fmt.Errorf("write %s: %w", includeFile, err)
-		}
+	content := generateSSHConfig(hosts, sourceName, provider)
+	destPath := filepath.Join(paths.SSHConfigDir, includeFile)
+	if err := atomicWriteFile(destPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("write %s: %w", includeFile, err)
 	}
-
 	return nil
 }
 
@@ -125,18 +113,4 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	}
 	tmpPath = "" // prevent cleanup
 	return nil
-}
-
-// CollectIncludeFiles returns the unique set of include files from managed hosts.
-func CollectIncludeFiles(hosts []*ManagedHost) []string {
-	seen := make(map[string]bool)
-	var files []string
-	for _, h := range hosts {
-		if !seen[h.IncludeFile] {
-			seen[h.IncludeFile] = true
-			files = append(files, h.IncludeFile)
-		}
-	}
-	sort.Strings(files)
-	return files
 }

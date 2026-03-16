@@ -55,22 +55,6 @@ func TestGenerateSSHConfig(t *testing.T) {
 	}
 }
 
-func TestCollectIncludeFiles(t *testing.T) {
-	hosts := []*ManagedHost{
-		{IncludeFile: "conf.d/sync_b"},
-		{IncludeFile: "conf.d/sync_a"},
-		{IncludeFile: "conf.d/sync_b"}, // duplicate
-	}
-
-	files := CollectIncludeFiles(hosts)
-	if len(files) != 2 {
-		t.Fatalf("expected 2 unique files, got %d: %v", len(files), files)
-	}
-	if files[0] != "conf.d/sync_a" || files[1] != "conf.d/sync_b" {
-		t.Errorf("files = %v", files)
-	}
-}
-
 func TestGenerateSSHConfigDefaultPort(t *testing.T) {
 	hosts := []*ManagedHost{
 		{

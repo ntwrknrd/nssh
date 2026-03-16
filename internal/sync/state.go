@@ -26,11 +26,12 @@ func SetStateDir(dir string) {
 // SourceState holds non-secret sync state for a single source.
 // Stored per-source at ~/.local/state/nssh/sync/sources/<source>.json.
 type SourceState struct {
-	Version  int                     `json:"version"`
-	Source   string                  `json:"source"`
-	Provider string                  `json:"provider"`
-	LastSync time.Time               `json:"last_sync"`
-	Objects  map[string]*ManagedHost `json:"objects"`
+	Version     int                     `json:"version"`
+	Source      string                  `json:"source"`
+	Provider    string                  `json:"provider"`
+	LastSync    time.Time               `json:"last_sync"`
+	IncludeFile string                  `json:"include_file"`
+	Objects     map[string]*ManagedHost `json:"objects"`
 }
 
 // ManagedHost represents one sync-managed SSH target persisted in state.
@@ -39,7 +40,6 @@ type ManagedHost struct {
 	Host            string   `json:"host"`
 	Patterns        []string `json:"patterns,omitempty"`
 	Context         string   `json:"context,omitempty"`
-	IncludeFile     string   `json:"include_file,omitempty"`
 	HostName        string   `json:"hostname"`
 	Port            int      `json:"port,omitempty"`
 	ProxyJump       string   `json:"proxy_jump,omitempty"`
@@ -68,6 +68,12 @@ func stateFilePath(source string) string {
 	return filepath.Join(syncStateDir(), source+".json")
 }
 
+// SourceIncludeFile returns the deterministic sync-owned SSH config file for a
+// source.
+func SourceIncludeFile(source string) string {
+	return filepath.Join("conf.d", "sync_"+source)
+}
+
 // LoadSourceState loads state for the named source.
 // Returns nil state (not an error) if the state file does not exist.
 func LoadSourceState(source string) (*SourceState, error) {
@@ -87,6 +93,9 @@ func LoadSourceState(source string) (*SourceState, error) {
 
 	if state.Version != StateVersion {
 		return nil, fmt.Errorf("unsupported state version %d in %s (expected %d)", state.Version, path, StateVersion)
+	}
+	if state.IncludeFile == "" {
+		state.IncludeFile = SourceIncludeFile(state.Source)
 	}
 
 	if state.Objects == nil {
@@ -144,7 +153,6 @@ type SyncHostInfo struct {
 	Source          string
 	Context         string
 	CredentialClass string
-	IncludeFile     string
 }
 
 // BuildSyncIndex scans all per-source state files and builds a reverse index
@@ -166,13 +174,12 @@ func BuildSyncIndex() (map[string]*SyncHostInfo, error) {
 			continue
 		}
 
-		for _, mh := range state.Objects {
-			info := &SyncHostInfo{
-				Source:          sourceName,
-				Context:         mh.Context,
-				CredentialClass: mh.CredentialClass,
-				IncludeFile:     mh.IncludeFile,
-			}
+			for _, mh := range state.Objects {
+				info := &SyncHostInfo{
+					Source:          sourceName,
+					Context:         mh.Context,
+					CredentialClass: mh.CredentialClass,
+				}
 
 			index[mh.Host] = info
 			for _, p := range mh.Patterns {

@@ -36,10 +36,10 @@ func Reconcile(
 			continue
 		}
 
-		ctx, includeFile := ResolveDestination(route, sourceName)
-		mh := objectToManagedHost(obj, ctx, includeFile)
-		desired[mh.ObjectID] = mh
-	}
+			ctx, _ := ResolveDestination(route, sourceName)
+			mh := objectToManagedHost(obj, ctx)
+			desired[mh.ObjectID] = mh
+		}
 
 	// Diff desired vs current
 	var currentObjects map[string]*ManagedHost
@@ -74,13 +74,12 @@ func Reconcile(
 }
 
 // objectToManagedHost converts an InventoryObject + route outcome into a ManagedHost.
-func objectToManagedHost(obj *InventoryObject, context, includeFile string) *ManagedHost {
+func objectToManagedHost(obj *InventoryObject, context string) *ManagedHost {
 	return &ManagedHost{
 		ObjectID:        obj.ObjectID,
 		Host:            obj.Name,
 		Patterns:        []string{obj.Name},
 		Context:         context,
-		IncludeFile:     includeFile,
 		HostName:        obj.HostName,
 		Port:            obj.Port,
 		ProxyJump:       obj.ProxyJump,
@@ -110,9 +109,6 @@ func managedHostChanged(old, new *ManagedHost) bool {
 		return true
 	}
 	if old.Context != new.Context {
-		return true
-	}
-	if old.IncludeFile != new.IncludeFile {
 		return true
 	}
 	if !slices.Equal(old.Patterns, new.Patterns) {

@@ -22,15 +22,12 @@ import (
 
 // NewRunCmd creates the sync run command.
 func NewRunCmd() *cobra.Command {
-	var dryRun bool
-
 	cmd := &cobra.Command{
 		Use:   "run [source]",
 		Short: "Run sync for one or all sources",
 		Long: `Run inventory sync for a named source or all configured sources.
 
 Without a source name, processes all configured sources sequentially.
-With --dry-run, shows the plan without making changes.
 
 Sync is authoritative: hosts no longer discovered are removed automatically.
 
@@ -42,15 +39,13 @@ SSH authentication. Password-only jump hosts are not supported.`,
 			if len(args) > 0 {
 				source = args[0]
 			}
-			return runSync(source, dryRun)
+			return runSync(source)
 		},
 	}
-
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show plan without making changes")
 	return cmd
 }
 
-func runSync(sourceName string, dryRun bool) error {
+func runSync(sourceName string) error {
 	cfg, err := config.LoadDefault()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -73,33 +68,28 @@ func runSync(sourceName string, dryRun bool) error {
 		sources = cfg.Sync.Sources
 	}
 
-	// Initialize vault manager for credential operations (not needed for dry-run)
-	var mgr *vault.Manager
-	if !dryRun {
-		mgr, err = clisession.NewManager(vault.Auto())
-		if err != nil {
-			return fmt.Errorf("vault: %w", err)
-		}
-		if err := clisession.TryUnlockIfTTY(mgr); err != nil {
-			return fmt.Errorf("vault unlock: %w", err)
-		}
-		if mgr.NeedsUnlock() {
-			return fmt.Errorf("vault is locked and no TTY available for interactive unlock")
-		}
+	// Initialize vault manager for context validation and credential operations.
+	mgr, err := clisession.NewManager(vault.Auto())
+	if err != nil {
+		return fmt.Errorf("vault: %w", err)
+	}
+	if err := clisession.TryUnlockIfTTY(mgr); err != nil {
+		return fmt.Errorf("vault unlock: %w", err)
+	}
+	if mgr.NeedsUnlock() {
+		return fmt.Errorf("vault is locked and no TTY available for interactive unlock")
 	}
 
 	// Validate that every referenced route context exists in vault
-	if mgr != nil {
-		if err := validateRouteContexts(sources, mgr); err != nil {
-			return err
-		}
+	if err := validateRouteContexts(sources, mgr); err != nil {
+		return err
 	}
 
 	runner := newSyncRunner(cfg)
 	var anyFailed bool
 
 	for _, src := range sources {
-		if err := runSourceSync(src, runner, mgr, dryRun); err != nil {
+		if err := runSourceSync(src, runner, mgr); err != nil {
 			ui.Error("Source %s failed: %s", src.Name, err)
 			anyFailed = true
 			// Continue with remaining sources
@@ -116,19 +106,16 @@ func runSourceSync(
 	src config.SyncSourceConfig,
 	runner intsync.RemoteRunner,
 	mgr *vault.Manager,
-	dryRun bool,
 ) error {
 	ui.CommandStart(fmt.Sprintf("SYNC: %s (%s)", src.Name, src.Provider))
 
 	// Acquire per-source lock
-	if !dryRun {
-		unlock, err := intsync.AcquireSourceLock(src.Name)
-		if err != nil {
-			ui.CommandEnd(ui.StatusError)
-			return fmt.Errorf("acquire lock: %w", err)
-		}
-		defer unlock()
+	unlock, err := intsync.AcquireSourceLock(src.Name)
+	if err != nil {
+		ui.CommandEnd(ui.StatusError)
+		return fmt.Errorf("acquire lock: %w", err)
 	}
+	defer unlock()
 
 	// Load current state
 	current, err := intsync.LoadSourceState(src.Name)
@@ -159,18 +146,10 @@ func runSourceSync(
 	// Show plan
 	printPlan(plan)
 
-	if dryRun {
-		ui.Info("Dry run -- no changes written")
-		ui.CommandEnd(ui.StatusInfo)
-		return nil
-	}
-
 	// Prompt for missing class credentials
-	if mgr != nil {
-		if err := promptMissingCredentials(plan, src.Name, mgr); err != nil {
-			ui.CommandEnd(ui.StatusError)
-			return err
-		}
+	if err := promptMissingCredentials(plan, src.Name, mgr); err != nil {
+		ui.CommandEnd(ui.StatusError)
+		return err
 	}
 
 	// Build the final host set (removals always applied)
@@ -195,11 +174,12 @@ func runSourceSync(
 	// rollback state to keep the two in sync.
 	hasChanges := len(plan.Adds) > 0 || len(plan.Updates) > 0 || len(plan.Removals) > 0
 	state := &intsync.SourceState{
-		Version:  intsync.StateVersion,
-		Source:   src.Name,
-		Provider: src.Provider,
-		LastSync: time.Now().UTC(),
-		Objects:  allHosts,
+		Version:     intsync.StateVersion,
+		Source:      src.Name,
+		Provider:    src.Provider,
+		LastSync:    time.Now().UTC(),
+		IncludeFile: intsync.SourceIncludeFile(src.Name),
+		Objects:     allHosts,
 	}
 	if err := intsync.SaveSourceState(state); err != nil {
 		ui.CommandEnd(ui.StatusError)
@@ -208,7 +188,7 @@ func runSourceSync(
 
 	// Write SSH config only when there are actual changes
 	if hasChanges && len(hostList) > 0 {
-		if err := intsync.WriteManagedSSHConfigs(hostList, src.Name, src.Provider); err != nil {
+		if err := intsync.WriteManagedSSHConfig(state.IncludeFile, hostList, src.Name, src.Provider); err != nil {
 			// Rollback state to previous version
 			if current != nil {
 				if rbErr := intsync.SaveSourceState(current); rbErr != nil {
@@ -223,28 +203,13 @@ func runSourceSync(
 			return fmt.Errorf("write SSH config: %w", err)
 		}
 	} else if hasChanges && len(hostList) == 0 && current != nil {
-		// All hosts removed -- delete the old include files
-		for _, f := range intsync.CollectIncludeFiles(slices.Collect(maps.Values(current.Objects))) {
-			if err := intsync.RemoveManagedSSHConfig(f); err != nil {
-				ui.Warning("Failed to remove %s: %s", f, err)
-			}
+		// All hosts removed -- delete the old source-owned include file.
+		includeFile := current.IncludeFile
+		if includeFile == "" {
+			includeFile = intsync.SourceIncludeFile(src.Name)
 		}
-	}
-
-	// Clean stale include files (e.g. route removed, hosts moved to different file)
-	if hasChanges && current != nil && len(hostList) > 0 {
-		oldFiles := intsync.CollectIncludeFiles(slices.Collect(maps.Values(current.Objects)))
-		newFiles := intsync.CollectIncludeFiles(hostList)
-		newSet := make(map[string]bool, len(newFiles))
-		for _, f := range newFiles {
-			newSet[f] = true
-		}
-		for _, f := range oldFiles {
-			if !newSet[f] {
-				if err := intsync.RemoveManagedSSHConfig(f); err != nil {
-					ui.Warning("Failed to remove %s: %s", f, err)
-				}
-			}
+		if err := intsync.RemoveManagedSSHConfig(includeFile); err != nil {
+			ui.Warning("Failed to remove %s: %s", includeFile, err)
 		}
 	}
 
