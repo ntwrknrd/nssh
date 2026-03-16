@@ -296,7 +296,7 @@ func promptMissingCredentials(plan *intsync.SyncPlan, source string, mgr *vault.
 		ui.Info("New class credential needed for source %q:", source)
 		fmt.Printf("  %s\n", class)
 
-		username, err := ui.InputWithDefault("    Username [admin]", "admin")
+		username, err := ui.Input("    Username", "")
 		if err != nil {
 			return err
 		}

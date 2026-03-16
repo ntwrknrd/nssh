@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	clisession "github.com/ntwrknrd/nssh/internal/cli/session"
+	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/ntwrknrd/nssh/internal/vault"
@@ -38,6 +39,11 @@ func newCredentialGetCmd() *cobra.Command {
 
 func runCredentialGet(source string) error {
 	ui.CommandStart("SYNC CREDENTIALS: " + source)
+
+	cfg, err := config.LoadDefault()
+	if err == nil && findSource(cfg.Sync.Sources, source) == nil {
+		ui.Warning("Source %q is not in the current config (credentials may be stale)", source)
+	}
 
 	mgr, err := clisession.NewManager(vault.Auto())
 	if err != nil {
@@ -97,6 +103,9 @@ func newCredentialEditCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !isDefault && className == "" {
 				return fmt.Errorf("specify --default or --class <name>")
+			}
+			if isDefault && className != "" {
+				return fmt.Errorf("--default and --class are mutually exclusive")
 			}
 			return runCredentialEdit(args[0], className, isDefault)
 		},
