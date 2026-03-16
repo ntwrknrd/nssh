@@ -23,7 +23,6 @@ import (
 // NewRunCmd creates the sync run command.
 func NewRunCmd() *cobra.Command {
 	var dryRun bool
-	var prune bool
 
 	cmd := &cobra.Command{
 		Use:   "run [source]",
@@ -31,8 +30,9 @@ func NewRunCmd() *cobra.Command {
 		Long: `Run inventory sync for a named source or all configured sources.
 
 Without a source name, processes all configured sources sequentially.
-With --dry-run, shows the plan without making changes (vault must still be unlockable).
-With --prune, removes hosts that are no longer discovered.
+With --dry-run, shows the plan without making changes.
+
+Sync is authoritative: hosts no longer discovered are removed automatically.
 
 Jump hosts used for remote discovery (e.g. containerlab) must use key-based
 SSH authentication. Password-only jump hosts are not supported.`,
@@ -42,16 +42,15 @@ SSH authentication. Password-only jump hosts are not supported.`,
 			if len(args) > 0 {
 				source = args[0]
 			}
-			return runSync(source, dryRun, prune)
+			return runSync(source, dryRun)
 		},
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show plan without making changes")
-	cmd.Flags().BoolVar(&prune, "prune", false, "Remove hosts no longer present in source")
 	return cmd
 }
 
-func runSync(sourceName string, dryRun, prune bool) error {
+func runSync(sourceName string, dryRun bool) error {
 	cfg, err := config.LoadDefault()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -74,20 +73,17 @@ func runSync(sourceName string, dryRun, prune bool) error {
 		sources = cfg.Sync.Sources
 	}
 
-	// Initialize vault manager for credential operations
+	// Initialize vault manager for credential operations (not needed for dry-run)
 	var mgr *vault.Manager
-	mgr, err = clisession.NewManager(vault.Auto())
-	if err != nil {
-		return fmt.Errorf("vault: %w", err)
-	}
-	if err := clisession.TryUnlockIfTTY(mgr); err != nil {
-		return fmt.Errorf("vault unlock: %w", err)
-	}
-	if mgr.NeedsUnlock() {
-		if dryRun {
-			ui.Warning("Vault is locked; dry-run plan may be incomplete")
-			mgr = nil
-		} else {
+	if !dryRun {
+		mgr, err = clisession.NewManager(vault.Auto())
+		if err != nil {
+			return fmt.Errorf("vault: %w", err)
+		}
+		if err := clisession.TryUnlockIfTTY(mgr); err != nil {
+			return fmt.Errorf("vault unlock: %w", err)
+		}
+		if mgr.NeedsUnlock() {
 			return fmt.Errorf("vault is locked and no TTY available for interactive unlock")
 		}
 	}
@@ -96,7 +92,7 @@ func runSync(sourceName string, dryRun, prune bool) error {
 	var anyFailed bool
 
 	for _, src := range sources {
-		if err := runSourceSync(src, runner, mgr, dryRun, prune); err != nil {
+		if err := runSourceSync(src, runner, mgr, dryRun); err != nil {
 			ui.Error("Source %s failed: %s", src.Name, err)
 			anyFailed = true
 			// Continue with remaining sources
@@ -113,7 +109,7 @@ func runSourceSync(
 	src config.SyncSourceConfig,
 	runner intsync.RemoteRunner,
 	mgr *vault.Manager,
-	dryRun, prune bool,
+	dryRun bool,
 ) error {
 	ui.CommandStart(fmt.Sprintf("SYNC: %s (%s)", src.Name, src.Provider))
 
@@ -150,6 +146,12 @@ func runSourceSync(
 	}
 	ui.Info("Discovered %d objects", len(objects))
 
+	// Safety: refuse to wipe existing hosts on empty discovery
+	if len(objects) == 0 && current != nil && len(current.Objects) > 0 {
+		ui.CommandEnd(ui.StatusError)
+		return fmt.Errorf("discovery returned 0 objects but state has %d; refusing to sync (possible provider failure)", len(current.Objects))
+	}
+
 	// Reconcile
 	plan := intsync.Reconcile(objects, src.Routes, src.Name, current)
 
@@ -170,7 +172,7 @@ func runSourceSync(
 		}
 	}
 
-	// Build the final host set
+	// Build the final host set (removals always applied)
 	allHosts := make(map[string]*intsync.ManagedHost)
 	if current != nil {
 		maps.Copy(allHosts, current.Objects)
@@ -181,10 +183,8 @@ func runSourceSync(
 	for _, h := range plan.Updates {
 		allHosts[h.ObjectID] = h
 	}
-	if prune {
-		for _, h := range plan.Removals {
-			delete(allHosts, h.ObjectID)
-		}
+	for _, h := range plan.Removals {
+		delete(allHosts, h.ObjectID)
 	}
 
 	// Collect hosts for SSH config writing
@@ -192,7 +192,7 @@ func runSourceSync(
 
 	// Save state, then write SSH configs. If SSH config write fails,
 	// rollback state to keep the two in sync.
-	hasChanges := len(plan.Adds) > 0 || len(plan.Updates) > 0 || (prune && len(plan.Removals) > 0)
+	hasChanges := len(plan.Adds) > 0 || len(plan.Updates) > 0 || len(plan.Removals) > 0
 	state := &intsync.SourceState{
 		Version:  intsync.StateVersion,
 		Source:   src.Name,
@@ -221,10 +221,17 @@ func runSourceSync(
 			ui.CommandEnd(ui.StatusError)
 			return fmt.Errorf("write SSH config: %w", err)
 		}
+	} else if hasChanges && len(hostList) == 0 && current != nil {
+		// All hosts removed -- delete the old include files
+		for _, f := range intsync.CollectIncludeFiles(slices.Collect(maps.Values(current.Objects))) {
+			if err := intsync.RemoveManagedSSHConfig(f); err != nil {
+				ui.Warning("Failed to remove %s: %s", f, err)
+			}
+		}
 	}
 
-	// Clean stale include files after partial prune
-	if prune && hasChanges && current != nil {
+	// Clean stale include files (e.g. route removed, hosts moved to different file)
+	if hasChanges && current != nil && len(hostList) > 0 {
 		oldFiles := intsync.CollectIncludeFiles(slices.Collect(maps.Values(current.Objects)))
 		newFiles := intsync.CollectIncludeFiles(hostList)
 		newSet := make(map[string]bool, len(newFiles))
@@ -244,7 +251,7 @@ func runSourceSync(
 	fmt.Println()
 	ui.Info("SSH config:")
 	fmt.Printf("  [+] %d added   [~] %d updated   [-] %d removed   [=] %d unchanged\n",
-		len(plan.Adds), len(plan.Updates), prunedCount(plan, prune), len(plan.Unchanged))
+		len(plan.Adds), len(plan.Updates), len(plan.Removals), len(plan.Unchanged))
 
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil
@@ -273,7 +280,7 @@ func printPlan(plan *intsync.SyncPlan) {
 		}
 	}
 	if len(plan.Removals) > 0 {
-		ui.SubSection("Removals (requires --prune)")
+		ui.SubSection("Removals")
 		for _, h := range plan.Removals {
 			fmt.Printf("    [-] %s\n", h.Host)
 		}
@@ -332,13 +339,6 @@ func promptMissingCredentials(plan *intsync.SyncPlan, source string, mgr *vault.
 	}
 
 	return nil
-}
-
-func prunedCount(plan *intsync.SyncPlan, prune bool) int {
-	if prune {
-		return len(plan.Removals)
-	}
-	return 0
 }
 
 func findSource(sources []config.SyncSourceConfig, name string) *config.SyncSourceConfig {
