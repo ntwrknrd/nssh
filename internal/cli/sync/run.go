@@ -3,7 +3,6 @@ package sync
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"maps"
 	"slices"
 	"time"
@@ -32,8 +31,11 @@ func NewRunCmd() *cobra.Command {
 		Long: `Run inventory sync for a named source or all configured sources.
 
 Without a source name, processes all configured sources sequentially.
-With --dry-run, shows the plan without making changes.
-With --prune, removes hosts that are no longer discovered.`,
+With --dry-run, shows the plan without making changes (vault must still be unlockable).
+With --prune, removes hosts that are no longer discovered.
+
+Jump hosts used for remote discovery (e.g. containerlab) must use key-based
+SSH authentication. Password-only jump hosts are not supported.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var source string
@@ -74,15 +76,18 @@ func runSync(sourceName string, dryRun, prune bool) error {
 
 	// Initialize vault manager for credential operations
 	var mgr *vault.Manager
-	if !dryRun {
-		mgr, err = clisession.NewManager(vault.Auto())
-		if err != nil {
-			return fmt.Errorf("vault: %w", err)
-		}
-		if err := clisession.TryUnlockIfTTY(mgr); err != nil {
-			return fmt.Errorf("vault unlock: %w", err)
-		}
-		if mgr.NeedsUnlock() {
+	mgr, err = clisession.NewManager(vault.Auto())
+	if err != nil {
+		return fmt.Errorf("vault: %w", err)
+	}
+	if err := clisession.TryUnlockIfTTY(mgr); err != nil {
+		return fmt.Errorf("vault unlock: %w", err)
+	}
+	if mgr.NeedsUnlock() {
+		if dryRun {
+			ui.Warning("Vault is locked; dry-run plan may be incomplete")
+			mgr = nil
+		} else {
 			return fmt.Errorf("vault is locked and no TTY available for interactive unlock")
 		}
 	}
@@ -185,9 +190,8 @@ func runSourceSync(
 	// Collect hosts for SSH config writing
 	hostList := slices.Collect(maps.Values(allHosts))
 
-	// Save state first -- source of truth for reconciliation.
-	// If SSH config write fails after this, next run sees matching
-	// state and re-attempts the write harmlessly.
+	// Save state, then write SSH configs. If SSH config write fails,
+	// rollback state to keep the two in sync.
 	hasChanges := len(plan.Adds) > 0 || len(plan.Updates) > 0 || (prune && len(plan.Removals) > 0)
 	state := &intsync.SourceState{
 		Version:  intsync.StateVersion,
@@ -204,6 +208,16 @@ func runSourceSync(
 	// Write SSH config only when there are actual changes
 	if hasChanges && len(hostList) > 0 {
 		if err := intsync.WriteManagedSSHConfigs(hostList, src.Name, src.Provider); err != nil {
+			// Rollback state to previous version
+			if current != nil {
+				if rbErr := intsync.SaveSourceState(current); rbErr != nil {
+					ui.Warning("State rollback also failed: %s", rbErr)
+				}
+			} else {
+				if rbErr := intsync.DeleteSourceState(src.Name); rbErr != nil {
+					ui.Warning("State rollback also failed: %s", rbErr)
+				}
+			}
 			ui.CommandEnd(ui.StatusError)
 			return fmt.Errorf("write SSH config: %w", err)
 		}
@@ -343,8 +357,7 @@ func newSyncRunner(cfg *config.Config) intsync.RemoteRunner {
 			return nil, err
 		}
 		if resolved.Credential != nil {
-			slog.Warn("sync remote exec requires key-based auth; password-only jump hosts will fail with BatchMode=yes",
-				"host", host)
+			return nil, fmt.Errorf("host %q resolves to password-based auth, but sync remote exec requires key-based access (BatchMode=yes)", host)
 		}
 		return &remoteexec.HostInfo{
 			Hostname: resolved.Hostname,

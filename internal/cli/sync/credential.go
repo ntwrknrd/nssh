@@ -119,6 +119,13 @@ func newCredentialEditCmd() *cobra.Command {
 func runCredentialEdit(source, class string, isDefault bool) error {
 	ui.CommandStart("EDIT SYNC CREDENTIAL: " + source)
 
+	cfg, err := config.LoadDefault()
+	if err == nil && findSource(cfg.Sync.Sources, source) == nil {
+		ui.Error("Source %q not found in config", source)
+		ui.CommandEnd(ui.StatusError)
+		return fmt.Errorf("source %q not found in config; add it before setting credentials", source)
+	}
+
 	mgr, err := clisession.NewManager(vault.Auto())
 	if err != nil {
 		ui.Error("Vault not available: %s", err)
