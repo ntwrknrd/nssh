@@ -135,11 +135,11 @@ func runReinstallDev(hardware bool) error {
 	var buildCmd *exec.Cmd
 	if hardware {
 		ui.Info("Building nssh with hardware support...")
-		buildCmd = exec.Command("go", "build", "-tags", "hardware", "-o", binPath, "./cmd/nssh")
+		buildCmd = exec.Command("go", "build", "-tags", "hardware", "-trimpath", "-buildvcs=false", "-o", binPath, "./cmd/nssh")
 		buildCmd.Env = append(os.Environ(), "CGO_ENABLED=1")
 	} else {
 		ui.Info("Building nssh...")
-		buildCmd = exec.Command("go", "build", "-o", binPath, "./cmd/nssh")
+		buildCmd = exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", binPath, "./cmd/nssh")
 	}
 	buildCmd.Dir = projectRoot
 	buildCmd.Stdout = os.Stdout
