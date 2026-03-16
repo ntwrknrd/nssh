@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"time"
@@ -340,6 +341,10 @@ func newSyncRunner(cfg *config.Config) intsync.RemoteRunner {
 		resolved, err := resolve.ResolveHostForConnect(host, "", cfg)
 		if err != nil {
 			return nil, err
+		}
+		if resolved.Credential != nil {
+			slog.Warn("sync remote exec requires key-based auth; password-only jump hosts will fail with BatchMode=yes",
+				"host", host)
 		}
 		return &remoteexec.HostInfo{
 			Hostname: resolved.Hostname,
