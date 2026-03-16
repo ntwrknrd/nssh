@@ -181,29 +181,10 @@ func runSourceSync(
 	// Collect hosts for SSH config writing
 	hostList := slices.Collect(maps.Values(allHosts))
 
-	// Write SSH config only when there are actual changes
+	// Save state first -- source of truth for reconciliation.
+	// If SSH config write fails after this, next run sees matching
+	// state and re-attempts the write harmlessly.
 	hasChanges := len(plan.Adds) > 0 || len(plan.Updates) > 0 || (prune && len(plan.Removals) > 0)
-	if hasChanges && len(hostList) > 0 {
-		if err := intsync.WriteManagedSSHConfigs(hostList, src.Name, src.Provider); err != nil {
-			ui.CommandEnd(ui.StatusError)
-			return fmt.Errorf("write SSH config: %w", err)
-		}
-	}
-
-	// Handle pruned include files
-	if prune && len(hostList) == 0 {
-		// All hosts removed, clean up include files
-		if current != nil {
-			files := intsync.CollectIncludeFiles(slices.Collect(maps.Values(current.Objects)))
-			for _, f := range files {
-				if err := intsync.RemoveManagedSSHConfig(f); err != nil {
-					ui.Warning("Failed to remove %s: %s", f, err)
-				}
-			}
-		}
-	}
-
-	// Save state
 	state := &intsync.SourceState{
 		Version:  intsync.StateVersion,
 		Source:   src.Name,
@@ -214,6 +195,31 @@ func runSourceSync(
 	if err := intsync.SaveSourceState(state); err != nil {
 		ui.CommandEnd(ui.StatusError)
 		return fmt.Errorf("save state: %w", err)
+	}
+
+	// Write SSH config only when there are actual changes
+	if hasChanges && len(hostList) > 0 {
+		if err := intsync.WriteManagedSSHConfigs(hostList, src.Name, src.Provider); err != nil {
+			ui.CommandEnd(ui.StatusError)
+			return fmt.Errorf("write SSH config: %w", err)
+		}
+	}
+
+	// Clean stale include files after partial prune
+	if prune && hasChanges && current != nil {
+		oldFiles := intsync.CollectIncludeFiles(slices.Collect(maps.Values(current.Objects)))
+		newFiles := intsync.CollectIncludeFiles(hostList)
+		newSet := make(map[string]bool, len(newFiles))
+		for _, f := range newFiles {
+			newSet[f] = true
+		}
+		for _, f := range oldFiles {
+			if !newSet[f] {
+				if err := intsync.RemoveManagedSSHConfig(f); err != nil {
+					ui.Warning("Failed to remove %s: %s", f, err)
+				}
+			}
+		}
 	}
 
 	// Summary
