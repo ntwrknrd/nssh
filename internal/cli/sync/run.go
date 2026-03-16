@@ -346,13 +346,24 @@ func newSyncRunner(cfg *config.Config) intsync.RemoteRunner {
 		if err != nil {
 			return nil, err
 		}
-		if resolved.Credential != nil {
-			return nil, fmt.Errorf("host %q resolves to password-based auth, but sync remote exec requires key-based access (BatchMode=yes)", host)
-		}
-		return &remoteexec.HostInfo{
-			Hostname: resolved.Hostname,
-			Username: resolved.Username,
-		}, nil
+		return remoteExecHostInfo(host, resolved)
 	}
 	return remoteexec.NewSSHRunner(resolver)
+}
+
+func remoteExecHostInfo(host string, resolved *resolve.ResolvedHost) (*remoteexec.HostInfo, error) {
+	if resolved.HostEntry != nil && resolved.HostEntry.UsesPassword() {
+		return nil, fmt.Errorf("host %q is configured for password auth, but sync remote exec requires key-based access (BatchMode=yes)", host)
+	}
+	username := resolved.Username
+	if resolved.HostEntry != nil {
+		if transportUser := resolved.HostEntry.User(); transportUser != "" {
+			username = transportUser
+		}
+	}
+	return &remoteexec.HostInfo{
+		Target:   host,
+		Hostname: resolved.Hostname,
+		Username: username,
+	}, nil
 }

@@ -65,6 +65,35 @@ const testClabJSON = `{
   ]
 }`
 
+const testClabJSONByLab = `{
+  "dfz": [
+    {
+      "lab_name": "dfz",
+      "labPath": "/nre/labs/mini-dfz/topology.yaml",
+      "name": "clab-dfz-core01",
+      "container_id": "abc123",
+      "image": "vrnetlab/juniper_vjunos-router:24.4R2-S2.6",
+      "kind": "juniper_vjunosrouter",
+      "state": "running",
+      "ipv4_address": "172.20.20.2/24",
+      "ipv6_address": "3fff:172:20:20::2/64",
+      "owner": "nre"
+    },
+    {
+      "lab_name": "dfz",
+      "labPath": "/nre/labs/mini-dfz/topology.yaml",
+      "name": "clab-dfz-bdr01",
+      "container_id": "def456",
+      "image": "ceos64:4.32.9M",
+      "kind": "ceos",
+      "state": "running",
+      "ipv4_address": "172.20.20.18/24",
+      "ipv6_address": "3fff:172:20:20::12/64",
+      "owner": "nre"
+    }
+  ]
+}`
+
 func TestParseContainerlabJSON(t *testing.T) {
 	objects, err := ParseContainerlabJSON([]byte(testClabJSON), "test-lab", "nre-netlab01")
 	if err != nil {
@@ -128,6 +157,25 @@ func TestParseContainerlabJSONEmpty(t *testing.T) {
 	}
 	if len(objects) != 0 {
 		t.Errorf("expected 0 objects, got %d", len(objects))
+	}
+}
+
+func TestParseContainerlabJSONByLabMap(t *testing.T) {
+	objects, err := ParseContainerlabJSON([]byte(testClabJSONByLab), "test-lab", "nre-netlab01")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(objects) != 2 {
+		t.Fatalf("expected 2 objects, got %d", len(objects))
+	}
+	if objects[0].ObjectID != "dfz/core01" {
+		t.Fatalf("object_id[0] = %q, want %q", objects[0].ObjectID, "dfz/core01")
+	}
+	if objects[1].ObjectID != "dfz/bdr01" {
+		t.Fatalf("object_id[1] = %q, want %q", objects[1].ObjectID, "dfz/bdr01")
+	}
+	if objects[0].HostName != "172.20.20.2" {
+		t.Fatalf("hostname[0] = %q", objects[0].HostName)
 	}
 }
 

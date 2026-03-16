@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"filippo.io/age"
+	"github.com/ntwrknrd/nssh/internal/cli/resolve"
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/vault"
 )
 
@@ -84,5 +86,58 @@ func TestValidateRouteContexts(t *testing.T) {
 
 	if err := validateRouteContexts(sources, mgr); err != nil {
 		t.Fatalf("unexpected error for valid context: %v", err)
+	}
+}
+
+func TestRemoteExecHostInfoAllowsKeyTransportWithVaultCredential(t *testing.T) {
+	resolved := &resolve.ResolvedHost{
+		Hostname: "nre-netlab01.custcbb.local",
+		Username: "contextuser",
+		HostEntry: &sshconfig.HostEntry{
+			Properties: map[string]string{
+				"user":                 "nre",
+				"pubkeyauthentication": "yes",
+				"identityfile":         "~/.ssh/1Password",
+			},
+		},
+		Credential: &vault.ResolvedCredential{
+			Username: "contextuser",
+			Source:   vault.CredSourceContext,
+		},
+	}
+
+	info, err := remoteExecHostInfo("nre-netlab01", resolved)
+	if err != nil {
+		t.Fatalf("expected key-capable host to be allowed, got error: %v", err)
+	}
+	if info.Target != "nre-netlab01" {
+		t.Fatalf("target = %q, want %q", info.Target, "nre-netlab01")
+	}
+	if info.Hostname != "nre-netlab01.custcbb.local" {
+		t.Fatalf("hostname = %q", info.Hostname)
+	}
+	if info.Username != "nre" {
+		t.Fatalf("username = %q, want %q", info.Username, "nre")
+	}
+}
+
+func TestRemoteExecHostInfoRejectsPasswordTransport(t *testing.T) {
+	resolved := &resolve.ResolvedHost{
+		Hostname: "router.example.com",
+		Username: "admin",
+		HostEntry: &sshconfig.HostEntry{
+			Properties: map[string]string{
+				"pubkeyauthentication":     "no",
+				"preferredauthentications": "keyboard-interactive,password",
+			},
+		},
+	}
+
+	_, err := remoteExecHostInfo("router", resolved)
+	if err == nil {
+		t.Fatal("expected password-auth host to be rejected")
+	}
+	if !strings.Contains(err.Error(), "configured for password auth") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

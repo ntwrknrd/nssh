@@ -27,6 +27,7 @@ type RemoteResult struct {
 
 // HostInfo holds the resolved host information needed for remote execution.
 type HostInfo struct {
+	Target   string
 	Hostname string
 	Username string
 }
@@ -96,8 +97,13 @@ func buildSSHArgs(info *HostInfo, cmd RemoteCommand) []string {
 		args = append(args, "-l", info.Username)
 	}
 
-	// Host
-	args = append(args, info.Hostname)
+	// Use the original host alias when available so OpenSSH still applies
+	// alias-bound config such as IdentityFile, ProxyJump, and Match rules.
+	target := info.Target
+	if target == "" {
+		target = info.Hostname
+	}
+	args = append(args, target)
 
 	// Build remote command
 	remoteCmd := cmd.Argv

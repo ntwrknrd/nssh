@@ -19,11 +19,6 @@ func NewContainerlabProvider() *ContainerlabProvider {
 	return &ContainerlabProvider{}
 }
 
-// clabInspectOutput matches the top-level JSON from containerlab inspect --all --format json.
-type clabInspectOutput struct {
-	Containers []clabContainer `json:"containers"`
-}
-
 // clabContainer represents a single container from containerlab inspect output.
 type clabContainer struct {
 	Name        string `json:"name"`
@@ -70,14 +65,14 @@ func (p *ContainerlabProvider) Discover(ctx context.Context, source config.SyncS
 // ParseContainerlabJSON parses containerlab inspect JSON output and returns
 // normalized inventory objects.
 func ParseContainerlabJSON(data []byte, sourceName, jumpHost string) ([]sync.InventoryObject, error) {
-	var output clabInspectOutput
-	if err := json.Unmarshal(data, &output); err != nil {
+	containers, err := parseContainerlabInspect(data)
+	if err != nil {
 		return nil, fmt.Errorf("parse containerlab JSON: %w", err)
 	}
 
 	var objects []sync.InventoryObject
-	for i := range output.Containers {
-		c := &output.Containers[i]
+	for i := range containers {
+		c := &containers[i]
 		hostname := stripCIDR(c.IPv4Address)
 		if hostname == "" {
 			hostname = stripCIDR(c.IPv6Address)
@@ -87,10 +82,7 @@ func ParseContainerlabJSON(data []byte, sourceName, jumpHost string) ([]sync.Inv
 			continue
 		}
 
-		objectID := fmt.Sprintf("%s/%s", c.LabName, c.ShortName)
-		if c.LabName == "" {
-			objectID = c.Name
-		}
+		objectID := containerObjectID(c)
 
 		obj := sync.InventoryObject{
 			Provider:        config.ProviderContainerlab,
@@ -114,6 +106,66 @@ func ParseContainerlabJSON(data []byte, sourceName, jumpHost string) ([]sync.Inv
 	}
 
 	return objects, nil
+}
+
+func parseContainerlabInspect(data []byte) ([]clabContainer, error) {
+	var legacy struct {
+		Containers []clabContainer `json:"containers"`
+	}
+	if err := json.Unmarshal(data, &legacy); err == nil && legacy.Containers != nil {
+		return legacy.Containers, nil
+	}
+
+	var byLab map[string][]clabContainer
+	if err := json.Unmarshal(data, &byLab); err != nil {
+		return nil, err
+	}
+
+	var containers []clabContainer
+	for labName, list := range byLab {
+		for i := range list {
+			if list[i].LabName == "" {
+				list[i].LabName = labName
+			}
+			containers = append(containers, list[i])
+		}
+	}
+	return containers, nil
+}
+
+func containerObjectID(c *clabContainer) string {
+	short := strings.TrimSpace(c.ShortName)
+	if short == "" {
+		short = deriveShortName(c.Name, c.LabName)
+	}
+	if c.LabName != "" && short != "" {
+		return fmt.Sprintf("%s/%s", c.LabName, short)
+	}
+	if c.LabName != "" {
+		return fmt.Sprintf("%s/%s", c.LabName, c.Name)
+	}
+	return c.Name
+}
+
+func deriveShortName(name, labName string) string {
+	name = strings.TrimSpace(name)
+	labName = strings.TrimSpace(labName)
+	if name == "" {
+		return ""
+	}
+	if labName != "" {
+		prefix := "clab-" + labName + "-"
+		if strings.HasPrefix(name, prefix) {
+			return strings.TrimPrefix(name, prefix)
+		}
+	}
+	if strings.HasPrefix(name, "clab-") {
+		parts := strings.SplitN(name, "-", 3)
+		if len(parts) == 3 {
+			return parts[2]
+		}
+	}
+	return name
 }
 
 // stripCIDR removes a /prefix from an IP address string.
