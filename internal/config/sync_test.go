@@ -231,6 +231,24 @@ func TestSyncConfigValidation(t *testing.T) {
 			}}},
 			wantErr: "unsupported provider",
 		},
+		{
+			name: "duplicate include_file across sources",
+			cfg: SyncConfig{Sources: []SyncSourceConfig{
+				{
+					Name:         "src1",
+					Provider:     "containerlab",
+					Containerlab: &ContainerlabConfig{JumpHost: "j1"},
+					Routes:       []SyncRouteConfig{{Context: "c", IncludeFile: "conf.d/shared"}},
+				},
+				{
+					Name:         "src2",
+					Provider:     "containerlab",
+					Containerlab: &ContainerlabConfig{JumpHost: "j2"},
+					Routes:       []SyncRouteConfig{{Context: "c", IncludeFile: "conf.d/shared"}},
+				},
+			}},
+			wantErr: "include_file",
+		},
 	}
 
 	for _, tt := range tests {
