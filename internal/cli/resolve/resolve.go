@@ -175,12 +175,20 @@ func resolveSyncCredential(mgr *vault.Manager, hostname, username string) *vault
 	}
 
 	// Step 4: sync-managed context credential
+	// Context credentials own both username and password (unlike class/default
+	// which share a password across devices and take the username from the SSH
+	// config chain). Build the result directly to match legacy context behavior
+	// in vault.ResolveCredential.
 	if info.Context != "" {
 		ctx, err := mgr.GetContext(info.Context)
 		if err != nil {
 			slog.Warn("sync context lookup failed", "err", err)
 		} else if ctx != nil && ctx.Credential != nil {
-			return toResolvedCredential(ctx.Credential, username, vault.CredSourceSyncContext)
+			return &vault.ResolvedCredential{
+				Username: ctx.Credential.Username,
+				Password: secret.NewFromString(ctx.Credential.Password),
+				Source:   vault.CredSourceSyncContext,
+			}
 		}
 	}
 

@@ -124,8 +124,11 @@ func TestResolveSyncContext(t *testing.T) {
 		t.Fatalf("recreate sync source: %v", err)
 	}
 
-	// host-a should resolve to "lab" context credential
-	credA := resolveSyncCredential(mgr, "clab-host-a", "")
+	// host-a should resolve to "lab" context credential.
+	// Pass a non-empty username (simulating SSH config / defaults already
+	// resolved) to verify context credential owns the username and is NOT
+	// overwritten by the pre-resolved value.
+	credA := resolveSyncCredential(mgr, "clab-host-a", "sshdefault")
 	if credA == nil {
 		t.Fatal("expected credential for host-a after class removal, got nil")
 	} else {
@@ -133,12 +136,12 @@ func TestResolveSyncContext(t *testing.T) {
 			t.Errorf("host-a: source = %q, want %q", credA.Source, vault.CredSourceSyncContext)
 		}
 		if credA.Username != "labuser" {
-			t.Errorf("host-a: username = %q, want %q", credA.Username, "labuser")
+			t.Errorf("host-a: username = %q, want %q (context must own username)", credA.Username, "labuser")
 		}
 	}
 
 	// host-b should resolve to "prod" context credential
-	credB := resolveSyncCredential(mgr, "clab-host-b", "")
+	credB := resolveSyncCredential(mgr, "clab-host-b", "sshdefault")
 	if credB == nil {
 		t.Fatal("expected credential for host-b, got nil")
 	} else {
@@ -146,7 +149,7 @@ func TestResolveSyncContext(t *testing.T) {
 			t.Errorf("host-b: source = %q, want %q", credB.Source, vault.CredSourceSyncContext)
 		}
 		if credB.Username != "produser" {
-			t.Errorf("host-b: username = %q, want %q", credB.Username, "produser")
+			t.Errorf("host-b: username = %q, want %q (context must own username)", credB.Username, "produser")
 		}
 
 		// Different contexts must yield different credentials
