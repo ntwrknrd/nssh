@@ -3,6 +3,8 @@ package sync
 import (
 	"strings"
 	"testing"
+
+	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 )
 
 func TestGenerateSSHConfig(t *testing.T) {
@@ -84,5 +86,24 @@ func TestGenerateSSHConfigNoPasswordDirectives(t *testing.T) {
 	content := generateSSHConfig(hosts, "src", "test")
 	if strings.Contains(content, "PubkeyAuthentication") {
 		t.Error("should not have PubkeyAuthentication when UsesPassword is false")
+	}
+}
+
+func TestGenerateSSHConfigCompatFixes(t *testing.T) {
+	hosts := []*ManagedHost{
+		{
+			Host:        "clab-dfz-core01",
+			Patterns:    []string{"clab-dfz-core01"},
+			HostName:    "172.20.0.2",
+			CompatFixes: []compat.CompatType{compat.CompatKex, compat.CompatHostKey},
+		},
+	}
+
+	content := generateSSHConfig(hosts, "src", "test")
+	if !strings.Contains(content, "KexAlgorithms +diffie-hellman-group1-sha1") {
+		t.Error("missing compat KexAlgorithms directive")
+	}
+	if !strings.Contains(content, "HostKeyAlgorithms +ssh-rsa,ssh-dss") {
+		t.Error("missing compat HostKeyAlgorithms directive")
 	}
 }

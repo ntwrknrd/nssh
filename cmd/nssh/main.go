@@ -37,6 +37,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 	"github.com/ntwrknrd/nssh/internal/ssh/recording"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
+	intsync "github.com/ntwrknrd/nssh/internal/sync"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/ntwrknrd/nssh/internal/vault"
 	"github.com/spf13/cobra"
@@ -522,6 +523,12 @@ func handleCompatibilityFix(hostname, includeFile string) bool {
 		return false
 	}
 
+	syncState, err := intsync.LoadSourceStateByIncludeFile(includeFile)
+	if err != nil {
+		slog.Debug("sync state lookup failed", "include_file", includeFile, "err", err)
+	}
+	isSyncManaged := syncState != nil && syncState.FindManagedHost(hostname) != nil
+
 	var allFixesApplied []compat.CompatType
 	appliedSet := make(map[compat.CompatType]bool)
 
@@ -542,7 +549,9 @@ func handleCompatibilityFix(hostname, includeFile string) bool {
 			}
 		}
 
-		testResult, err := connector.TestConnection(context.Background(), hostEntry.HostName, hostEntry.User(), testCfg)
+		// Test via the host alias, not raw HostName, so host-specific config
+		// (including sync-managed compat directives and ProxyJump) is applied.
+		testResult, err := connector.TestConnection(context.Background(), hostEntry.Host, hostEntry.User(), testCfg)
 		if err != nil {
 			slog.Debug("test connection failed", "err", err)
 			break
@@ -601,15 +610,28 @@ func handleCompatibilityFix(hostname, includeFile string) bool {
 		}
 
 		// Apply fixes
-		if err := sshconfig.ApplyCompatFixes(hostEntry, newFixes); err != nil {
-			ui.Error("Failed to apply fixes: %s", err)
-			return false
-		}
+		if isSyncManaged {
+			if err := intsync.PersistCompatFixes(syncState.IncludeFile, hostname, newFixes); err != nil {
+				ui.Error("Failed to persist sync compat fixes: %s", err)
+				return false
+			}
 
-		// Write updated config
-		if err := parser.WriteFile(parsedCfg); err != nil {
-			ui.Error("Failed to write config: %s", err)
-			return false
+			hostEntry, parsedCfg, err = parser.FindHostWithLocation(hostname)
+			if err != nil || hostEntry == nil {
+				ui.Error("Failed to reload sync-managed host after compat fix: %v", err)
+				return false
+			}
+		} else {
+			if err := sshconfig.ApplyCompatFixes(hostEntry, newFixes); err != nil {
+				ui.Error("Failed to apply fixes: %s", err)
+				return false
+			}
+
+			// Write updated config
+			if err := parser.WriteFile(parsedCfg); err != nil {
+				ui.Error("Failed to write config: %s", err)
+				return false
+			}
 		}
 
 		// Track applied fixes

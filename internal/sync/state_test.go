@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 )
 
 func setupTestStateDir(t *testing.T) string {
@@ -34,6 +36,7 @@ func TestSourceStateRoundTrip(t *testing.T) {
 				ProxyJump:       "nre-netlab01",
 				UsesPassword:    true,
 				CredentialClass: "ceos",
+				CompatFixes:     []compat.CompatType{compat.CompatKex},
 			},
 		},
 	}
@@ -57,15 +60,15 @@ func TestSourceStateRoundTrip(t *testing.T) {
 	if loaded.Provider != "containerlab" {
 		t.Errorf("provider = %q", loaded.Provider)
 	}
-		if !loaded.LastSync.Equal(state.LastSync) {
-			t.Errorf("last_sync = %v", loaded.LastSync)
-		}
-		if loaded.IncludeFile != state.IncludeFile {
-			t.Errorf("include_file = %q, want %q", loaded.IncludeFile, state.IncludeFile)
-		}
-		if len(loaded.Objects) != 1 {
-			t.Fatalf("objects count = %d", len(loaded.Objects))
-		}
+	if !loaded.LastSync.Equal(state.LastSync) {
+		t.Errorf("last_sync = %v", loaded.LastSync)
+	}
+	if loaded.IncludeFile != state.IncludeFile {
+		t.Errorf("include_file = %q, want %q", loaded.IncludeFile, state.IncludeFile)
+	}
+	if len(loaded.Objects) != 1 {
+		t.Fatalf("objects count = %d", len(loaded.Objects))
+	}
 
 	obj := loaded.Objects["lab1/core01"]
 	if obj == nil {
@@ -78,6 +81,9 @@ func TestSourceStateRoundTrip(t *testing.T) {
 	}
 	if obj.CredentialClass != "ceos" {
 		t.Errorf("credential_class = %q", obj.CredentialClass)
+	}
+	if len(obj.CompatFixes) != 1 || obj.CompatFixes[0] != compat.CompatKex {
+		t.Errorf("compat_fixes = %v", obj.CompatFixes)
 	}
 }
 
@@ -149,20 +155,20 @@ func TestBuildSyncIndex(t *testing.T) {
 	setupTestStateDir(t)
 
 	// Save test state
-		state := &SourceState{
-			Version:     StateVersion,
-			Source:      "test-lab",
-			Provider:    "containerlab",
-			IncludeFile: "conf.d/sync_test-lab",
-			Objects: map[string]*ManagedHost{
-				"dfz/core01": {
-					ObjectID:        "dfz/core01",
-					Host:            "clab-dfz-core01",
-					Patterns:        []string{"clab-dfz-core01", "dfz-core01"},
-					Context:         "lab",
-					CredentialClass: "ceos",
-				},
+	state := &SourceState{
+		Version:     StateVersion,
+		Source:      "test-lab",
+		Provider:    "containerlab",
+		IncludeFile: "conf.d/sync_test-lab",
+		Objects: map[string]*ManagedHost{
+			"dfz/core01": {
+				ObjectID:        "dfz/core01",
+				Host:            "clab-dfz-core01",
+				Patterns:        []string{"clab-dfz-core01", "dfz-core01"},
+				Context:         "lab",
+				CredentialClass: "ceos",
 			},
+		},
 	}
 
 	if err := SaveSourceState(state); err != nil {
@@ -208,5 +214,30 @@ func TestBuildSyncIndexEmpty(t *testing.T) {
 	}
 	if len(index) != 0 {
 		t.Errorf("expected empty index, got %d entries", len(index))
+	}
+}
+
+func TestLoadSourceStateByIncludeFile(t *testing.T) {
+	setupTestStateDir(t)
+
+	state := &SourceState{
+		Version:     StateVersion,
+		Source:      "test-lab",
+		IncludeFile: "conf.d/sync_test-lab",
+		Objects:     map[string]*ManagedHost{},
+	}
+	if err := SaveSourceState(state); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadSourceStateByIncludeFile("sync_test-lab")
+	if err != nil {
+		t.Fatalf("load by include file: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("expected matching state")
+	}
+	if loaded.Source != "test-lab" {
+		t.Fatalf("source = %q, want %q", loaded.Source, "test-lab")
 	}
 }

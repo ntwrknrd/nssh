@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 )
 
 func TestReconcileAdds(t *testing.T) {
@@ -44,15 +45,15 @@ func TestReconcileUpdates(t *testing.T) {
 
 	current := &SourceState{
 		Objects: map[string]*ManagedHost{
-				"lab1/core01": {
-					ObjectID:    "lab1/core01",
-					Host:        "clab-core01",
-					Patterns:    []string{"clab-core01"},
-					HostName:    "172.20.0.2", // old IP
-					Context:     "lab",
-				},
+			"lab1/core01": {
+				ObjectID: "lab1/core01",
+				Host:     "clab-core01",
+				Patterns: []string{"clab-core01"},
+				HostName: "172.20.0.2", // old IP
+				Context:  "lab",
 			},
-		}
+		},
+	}
 
 	plan := Reconcile(objects, routes, "test-lab", current)
 
@@ -130,15 +131,15 @@ func TestReconcileUnchanged(t *testing.T) {
 
 	current := &SourceState{
 		Objects: map[string]*ManagedHost{
-				"lab1/core01": {
-					ObjectID:    "lab1/core01",
-					Host:        "clab-core01",
-					Patterns:    []string{"clab-core01"},
-					HostName:    "172.20.0.2",
-					Context:     "lab",
-				},
+			"lab1/core01": {
+				ObjectID: "lab1/core01",
+				Host:     "clab-core01",
+				Patterns: []string{"clab-core01"},
+				HostName: "172.20.0.2",
+				Context:  "lab",
 			},
-		}
+		},
+	}
 
 	plan := Reconcile(objects, routes, "test-lab", current)
 
@@ -147,5 +148,39 @@ func TestReconcileUnchanged(t *testing.T) {
 	}
 	if len(plan.Adds) != 0 {
 		t.Errorf("adds = %d, want 0", len(plan.Adds))
+	}
+}
+
+func TestReconcilePreservesCompatFixes(t *testing.T) {
+	routes := []config.SyncRouteConfig{{
+		Name:    "all",
+		Context: "lab",
+		Match:   config.SyncRouteMatch{},
+	}}
+
+	objects := []InventoryObject{
+		{ObjectID: "lab1/core01", Name: "clab-core01", HostName: "172.20.0.99"},
+	}
+
+	current := &SourceState{
+		Objects: map[string]*ManagedHost{
+			"lab1/core01": {
+				ObjectID:    "lab1/core01",
+				Host:        "clab-core01",
+				Patterns:    []string{"clab-core01"},
+				Context:     "lab",
+				HostName:    "172.20.0.2",
+				CompatFixes: []compat.CompatType{compat.CompatKex},
+			},
+		},
+	}
+
+	plan := Reconcile(objects, routes, "test-lab", current)
+
+	if len(plan.Updates) != 1 {
+		t.Fatalf("updates = %d, want 1", len(plan.Updates))
+	}
+	if len(plan.Updates[0].CompatFixes) != 1 || plan.Updates[0].CompatFixes[0] != compat.CompatKex {
+		t.Fatalf("compat_fixes = %v, want [%s]", plan.Updates[0].CompatFixes, compat.CompatKex)
 	}
 }

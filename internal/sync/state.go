@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 )
 
 // StateVersion is the current version of the state file format.
@@ -36,15 +38,16 @@ type SourceState struct {
 
 // ManagedHost represents one sync-managed SSH target persisted in state.
 type ManagedHost struct {
-	ObjectID        string   `json:"object_id"`
-	Host            string   `json:"host"`
-	Patterns        []string `json:"patterns,omitempty"`
-	Context         string   `json:"context,omitempty"`
-	HostName        string   `json:"hostname"`
-	Port            int      `json:"port,omitempty"`
-	ProxyJump       string   `json:"proxy_jump,omitempty"`
-	UsesPassword    bool     `json:"uses_password,omitempty"`
-	CredentialClass string   `json:"credential_class,omitempty"`
+	ObjectID        string              `json:"object_id"`
+	Host            string              `json:"host"`
+	Patterns        []string            `json:"patterns,omitempty"`
+	Context         string              `json:"context,omitempty"`
+	HostName        string              `json:"hostname"`
+	Port            int                 `json:"port,omitempty"`
+	ProxyJump       string              `json:"proxy_jump,omitempty"`
+	UsesPassword    bool                `json:"uses_password,omitempty"`
+	CredentialClass string              `json:"credential_class,omitempty"`
+	CompatFixes     []compat.CompatType `json:"compat_fixes,omitempty"`
 }
 
 // syncStateDir returns the per-source state directory.
@@ -148,6 +151,101 @@ func DeleteSourceState(source string) error {
 	return nil
 }
 
+// LoadSourceStateByIncludeFile finds the source state that owns the given
+// sync-managed include file. Matching is done on basename so callers may pass
+// either "conf.d/sync_<source>" or just "sync_<source>".
+func LoadSourceStateByIncludeFile(includeFile string) (*SourceState, error) {
+	targetBase := filepath.Base(includeFile)
+	sources, err := ListSourceStates()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, sourceName := range sources {
+		state, err := LoadSourceState(sourceName)
+		if err != nil {
+			return nil, err
+		}
+		if state == nil {
+			continue
+		}
+		if filepath.Base(state.IncludeFile) == targetBase {
+			return state, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// FindManagedHost locates a managed host by primary host name or any emitted
+// pattern in this source state.
+func (s *SourceState) FindManagedHost(pattern string) *ManagedHost {
+	if s == nil {
+		return nil
+	}
+
+	for _, mh := range s.Objects {
+		if mh.Host == pattern || slices.Contains(mh.Patterns, pattern) {
+			return mh
+		}
+	}
+
+	return nil
+}
+
+// ManagedHosts returns the state objects as a slice for rendering.
+func (s *SourceState) ManagedHosts() []*ManagedHost {
+	if s == nil {
+		return nil
+	}
+
+	hosts := make([]*ManagedHost, 0, len(s.Objects))
+	for _, mh := range s.Objects {
+		hosts = append(hosts, mh)
+	}
+	return hosts
+}
+
+// PersistCompatFixes updates the compat metadata for a sync-managed host in
+// durable state, then rewrites the sync-owned include file from that state.
+func PersistCompatFixes(includeFile, hostPattern string, fixes []compat.CompatType) error {
+	if len(fixes) == 0 {
+		return nil
+	}
+
+	current, err := LoadSourceStateByIncludeFile(includeFile)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return fmt.Errorf("no sync state found for include file %q", includeFile)
+	}
+
+	next := cloneSourceState(current)
+	host := next.FindManagedHost(hostPattern)
+	if host == nil {
+		return fmt.Errorf("host %q not found in sync state for %q", hostPattern, includeFile)
+	}
+
+	merged := mergeCompatFixes(host.CompatFixes, fixes)
+	if slices.Equal(host.CompatFixes, merged) {
+		return nil
+	}
+	host.CompatFixes = merged
+
+	if err := SaveSourceState(next); err != nil {
+		return err
+	}
+	if err := WriteManagedSSHConfig(next.IncludeFile, next.ManagedHosts(), next.Source, next.Provider); err != nil {
+		if rollbackErr := SaveSourceState(current); rollbackErr != nil {
+			return fmt.Errorf("write managed config: %w (rollback state: %v)", err, rollbackErr)
+		}
+		return fmt.Errorf("write managed config: %w", err)
+	}
+
+	return nil
+}
+
 // SyncHostInfo holds the sync-managed metadata for a single host pattern.
 type SyncHostInfo struct {
 	Source          string
@@ -174,12 +272,12 @@ func BuildSyncIndex() (map[string]*SyncHostInfo, error) {
 			continue
 		}
 
-			for _, mh := range state.Objects {
-				info := &SyncHostInfo{
-					Source:          sourceName,
-					Context:         mh.Context,
-					CredentialClass: mh.CredentialClass,
-				}
+		for _, mh := range state.Objects {
+			info := &SyncHostInfo{
+				Source:          sourceName,
+				Context:         mh.Context,
+				CredentialClass: mh.CredentialClass,
+			}
 
 			index[mh.Host] = info
 			for _, p := range mh.Patterns {
@@ -189,4 +287,58 @@ func BuildSyncIndex() (map[string]*SyncHostInfo, error) {
 	}
 
 	return index, nil
+}
+
+func cloneSourceState(state *SourceState) *SourceState {
+	if state == nil {
+		return nil
+	}
+
+	clone := *state
+	clone.Objects = make(map[string]*ManagedHost, len(state.Objects))
+	for id, host := range state.Objects {
+		hostClone := *host
+		hostClone.Patterns = slices.Clone(host.Patterns)
+		hostClone.CompatFixes = slices.Clone(host.CompatFixes)
+		clone.Objects[id] = &hostClone
+	}
+
+	return &clone
+}
+
+func mergeCompatFixes(existing, added []compat.CompatType) []compat.CompatType {
+	if len(existing) == 0 && len(added) == 0 {
+		return nil
+	}
+
+	seen := make(map[compat.CompatType]bool, len(existing)+len(added))
+	for _, ct := range existing {
+		seen[ct] = true
+	}
+	for _, ct := range added {
+		seen[ct] = true
+	}
+
+	merged := make([]compat.CompatType, 0, len(seen))
+	for _, ct := range compat.AllCompatTypes() {
+		if seen[ct] {
+			merged = append(merged, ct)
+			delete(seen, ct)
+		}
+	}
+
+	for _, ct := range existing {
+		if seen[ct] {
+			merged = append(merged, ct)
+			delete(seen, ct)
+		}
+	}
+	for _, ct := range added {
+		if seen[ct] {
+			merged = append(merged, ct)
+			delete(seen, ct)
+		}
+	}
+
+	return merged
 }

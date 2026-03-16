@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 )
 
 // sshConfigHeader is the header written to sync-owned include files.
@@ -63,6 +64,17 @@ func generateSSHConfig(hosts []*ManagedHost, sourceName, provider string) string
 		// Port (only if non-default)
 		if h.Port > 0 && h.Port != 22 {
 			fmt.Fprintf(&b, "  Port %d\n", h.Port)
+		}
+
+		// Compatibility directives persisted in sync state.
+		for _, ct := range h.CompatFixes {
+			cfg, ok := compat.CompatConfigs[ct]
+			if !ok {
+				continue
+			}
+			for _, line := range cfg.ConfigLines {
+				b.WriteString(line)
+			}
 		}
 
 		// ProxyJump

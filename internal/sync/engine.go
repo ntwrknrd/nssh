@@ -36,10 +36,10 @@ func Reconcile(
 			continue
 		}
 
-			ctx, _ := ResolveDestination(route, sourceName)
-			mh := objectToManagedHost(obj, ctx)
-			desired[mh.ObjectID] = mh
-		}
+		ctx, _ := ResolveDestination(route, sourceName)
+		mh := objectToManagedHost(obj, ctx)
+		desired[mh.ObjectID] = mh
+	}
 
 	// Diff desired vs current
 	var currentObjects map[string]*ManagedHost
@@ -53,6 +53,9 @@ func Reconcile(
 			continue
 		}
 		ch, exists := currentObjects[id]
+		if exists {
+			dh.CompatFixes = slices.Clone(ch.CompatFixes)
+		}
 		switch {
 		case !exists:
 			plan.Adds = append(plan.Adds, dh)
@@ -112,6 +115,9 @@ func managedHostChanged(old, new *ManagedHost) bool {
 		return true
 	}
 	if !slices.Equal(old.Patterns, new.Patterns) {
+		return true
+	}
+	if !slices.Equal(old.CompatFixes, new.CompatFixes) {
 		return true
 	}
 	return false
