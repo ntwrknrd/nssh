@@ -123,14 +123,13 @@ func TestSyncConfigValidation(t *testing.T) {
 			}}},
 		},
 		{
-			name: "netbox not yet supported",
+			name: "valid netbox",
 			cfg: SyncConfig{Sources: []SyncSourceConfig{{
 				Name:     "nb1",
 				Provider: "netbox",
 				NetBox:   &NetBoxConfig{BaseURL: "https://nb.local", TokenEnv: "NB_TOKEN"},
 				Routes:   []SyncRouteConfig{{Context: "prod"}},
 			}}},
-			wantErr: "unsupported provider",
 		},
 		{
 			name: "missing name",
@@ -218,14 +217,24 @@ func TestSyncConfigValidation(t *testing.T) {
 			wantErr: "jump_host is required",
 		},
 		{
-			name: "netbox provider rejected",
+			name: "netbox missing base_url",
 			cfg: SyncConfig{Sources: []SyncSourceConfig{{
 				Name:     "s1",
 				Provider: "netbox",
 				NetBox:   &NetBoxConfig{TokenEnv: "t"},
 				Routes:   []SyncRouteConfig{{Context: "c"}},
 			}}},
-			wantErr: "unsupported provider",
+			wantErr: "netbox.base_url is required",
+		},
+		{
+			name: "netbox missing token_env",
+			cfg: SyncConfig{Sources: []SyncSourceConfig{{
+				Name:     "s1",
+				Provider: "netbox",
+				NetBox:   &NetBoxConfig{BaseURL: "https://nb.local"},
+				Routes:   []SyncRouteConfig{{Context: "c"}},
+			}}},
+			wantErr: "netbox.token_env is required",
 		},
 	}
 

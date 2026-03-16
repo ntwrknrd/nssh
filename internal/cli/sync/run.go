@@ -227,6 +227,8 @@ func createProvider(providerName string) (intsync.Provider, error) {
 	switch providerName {
 	case config.ProviderContainerlab:
 		return providers.NewContainerlabProvider(), nil
+	case config.ProviderNetBox:
+		return providers.NewNetBoxProvider(), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider %q", providerName)
 	}
