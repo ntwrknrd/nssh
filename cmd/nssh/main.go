@@ -480,18 +480,11 @@ func connectHost(hostname string, sshArgs []string) error {
 			slog.Debug("retrying connection after compatibility fixes")
 
 			var retryPassword *secret.Secret
-			mgr := resolved.Manager
-			if mgr != nil {
-				var retryCred *vault.ResolvedCredential
-				if resolved.IncludeFile != "" {
-					retryCred, _ = mgr.ResolveCredential(resolved.Hostname, resolved.IncludeFile, resolved.Username)
-				}
-				if retryCred == nil {
-					retryCred, _ = mgr.ResolveCredentialWithDomain(resolved.Hostname, resolved.Username)
-				}
-				if retryCred != nil {
-					retryPassword = retryCred.Password
-				}
+			retryResolved, retryErr := resolve.ResolveHostForConnect(resolved.Hostname, resolved.Username, cfg)
+			if retryErr != nil {
+				slog.Warn("credential re-resolution failed", "err", retryErr)
+			} else if retryResolved.Credential != nil {
+				retryPassword = retryResolved.Credential.Password
 			}
 
 			conn2 := connector.NewConnector(resolved.Hostname, resolved.Username, retryPassword, sshArgs)
