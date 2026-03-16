@@ -75,13 +75,7 @@ func fieldMatches(obj *InventoryObject, field string, values []string) bool {
 }
 
 // ResolveDestination returns the context and include file for a matched route.
-// If IncludeFile is empty in the route config, the default sync-owned
-// include file is derived from the source name.
+// Each source owns a single include file: conf.d/sync_<source>.
 func ResolveDestination(route *config.SyncRouteConfig, sourceName string) (context, includeFile string) {
-	context = route.Context
-	includeFile = route.IncludeFile
-	if includeFile == "" {
-		includeFile = fmt.Sprintf("conf.d/sync_%s", sourceName)
-	}
-	return context, includeFile
+	return route.Context, fmt.Sprintf("conf.d/sync_%s", sourceName)
 }

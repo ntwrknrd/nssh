@@ -66,11 +66,7 @@ func runGet(sourceName string) error {
 		if name == "" {
 			name = "(unnamed)"
 		}
-		fmt.Printf("    %s -> context=%s", name, r.Context)
-		if r.IncludeFile != "" {
-			fmt.Printf(" include=%s", r.IncludeFile)
-		}
-		fmt.Println()
+		fmt.Printf("    %s -> context=%s\n", name, r.Context)
 		if len(r.Match) > 0 {
 			for field, values := range r.Match {
 				fmt.Printf("      %s: %v\n", field, values)

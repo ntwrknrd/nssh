@@ -131,14 +131,14 @@ func TestResolveDestination(t *testing.T) {
 		wantIncludeFile string
 	}{
 		{
-			name:            "explicit include_file",
-			route:           config.SyncRouteConfig{Context: "lab", IncludeFile: "conf.d/clab_nre-netlab01"},
+			name:            "default include_file from source name",
+			route:           config.SyncRouteConfig{Context: "lab"},
 			source:          "nre-netlab01",
 			wantContext:     "lab",
-			wantIncludeFile: "conf.d/clab_nre-netlab01",
+			wantIncludeFile: "conf.d/sync_nre-netlab01",
 		},
 		{
-			name:            "default include_file",
+			name:            "different source name",
 			route:           config.SyncRouteConfig{Context: "prod"},
 			source:          "netbox-prod",
 			wantContext:     "prod",

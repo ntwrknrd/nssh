@@ -21,7 +21,6 @@ provider = "containerlab"
   [[sync.sources.routes]]
   name = "clab-default"
   context = "lab"
-  include_file = "conf.d/clab_nre-netlab01"
 
     [sync.sources.routes.match]
     kind = ["ceos", "vjunos"]
@@ -82,9 +81,6 @@ provider = "netbox"
 	}
 	if clab.Routes[0].Context != "lab" {
 		t.Errorf("route context = %q, want lab", clab.Routes[0].Context)
-	}
-	if clab.Routes[0].IncludeFile != "conf.d/clab_nre-netlab01" {
-		t.Errorf("route include_file = %q", clab.Routes[0].IncludeFile)
 	}
 	kinds := clab.Routes[0].Match["kind"]
 	if len(kinds) != 2 || kinds[0] != "ceos" || kinds[1] != "vjunos" {
@@ -230,24 +226,6 @@ func TestSyncConfigValidation(t *testing.T) {
 				Routes:   []SyncRouteConfig{{Context: "c"}},
 			}}},
 			wantErr: "unsupported provider",
-		},
-		{
-			name: "duplicate include_file across sources",
-			cfg: SyncConfig{Sources: []SyncSourceConfig{
-				{
-					Name:         "src1",
-					Provider:     "containerlab",
-					Containerlab: &ContainerlabConfig{JumpHost: "j1"},
-					Routes:       []SyncRouteConfig{{Context: "c", IncludeFile: "conf.d/shared"}},
-				},
-				{
-					Name:         "src2",
-					Provider:     "containerlab",
-					Containerlab: &ContainerlabConfig{JumpHost: "j2"},
-					Routes:       []SyncRouteConfig{{Context: "c", IncludeFile: "conf.d/shared"}},
-				},
-			}},
-			wantErr: "include_file",
 		},
 	}
 

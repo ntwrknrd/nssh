@@ -146,12 +146,6 @@ func runSourceSync(
 	}
 	ui.Info("Discovered %d objects", len(objects))
 
-	// Safety: refuse to wipe existing hosts on empty discovery
-	if len(objects) == 0 && current != nil && len(current.Objects) > 0 {
-		ui.CommandEnd(ui.StatusError)
-		return fmt.Errorf("discovery returned 0 objects but state has %d; refusing to sync (possible provider failure)", len(current.Objects))
-	}
-
 	// Reconcile
 	plan := intsync.Reconcile(objects, src.Routes, src.Name, current)
 

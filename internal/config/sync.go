@@ -40,10 +40,9 @@ type NetBoxConfig struct {
 
 // SyncRouteConfig defines a route that filters and places discovered objects.
 type SyncRouteConfig struct {
-	Name        string         `toml:"name"`
-	Context     string         `toml:"context"`
-	IncludeFile string         `toml:"include_file,omitempty"`
-	Match       SyncRouteMatch `toml:"match"`
+	Name    string         `toml:"name"`
+	Context string         `toml:"context"`
+	Match   SyncRouteMatch `toml:"match"`
 }
 
 // SyncRouteMatch is an open map of field names to value lists.
@@ -62,7 +61,6 @@ func (c *SyncConfig) Validate() error {
 	}
 
 	seen := make(map[string]bool)
-	includeFiles := make(map[string]string) // includeFile -> sourceName
 	for i, src := range c.Sources {
 		if src.Name == "" {
 			return fmt.Errorf("sync.sources[%d]: name is required", i)
@@ -77,15 +75,6 @@ func (c *SyncConfig) Validate() error {
 
 		if err := src.Validate(); err != nil {
 			return fmt.Errorf("sync.sources[%d] (%s): %w", i, src.Name, err)
-		}
-
-		for _, r := range src.Routes {
-			if r.IncludeFile != "" {
-				if prev, ok := includeFiles[r.IncludeFile]; ok {
-					return fmt.Errorf("sync.sources[%d] (%s): include_file %q already used by source %q", i, src.Name, r.IncludeFile, prev)
-				}
-				includeFiles[r.IncludeFile] = src.Name
-			}
 		}
 	}
 	return nil
