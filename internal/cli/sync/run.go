@@ -81,6 +81,9 @@ func runSync(sourceName string, dryRun, prune bool) error {
 		if err := clisession.TryUnlockIfTTY(mgr); err != nil {
 			return fmt.Errorf("vault unlock: %w", err)
 		}
+		if mgr.NeedsUnlock() {
+			return fmt.Errorf("vault is locked and no TTY available for interactive unlock")
+		}
 	}
 
 	runner := newSyncRunner(cfg)
