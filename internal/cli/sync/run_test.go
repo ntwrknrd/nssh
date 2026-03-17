@@ -9,6 +9,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/cli/resolve"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
+	intsync "github.com/ntwrknrd/nssh/internal/sync"
 	"github.com/ntwrknrd/nssh/internal/vault"
 )
 
@@ -139,5 +140,94 @@ func TestRemoteExecHostInfoRejectsPasswordTransport(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "configured for password auth") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveManagedHostMetadataPrefersContextCredential(t *testing.T) {
+	mgr := newTestManager(t)
+
+	if err := mgr.CreateContext("custcbb", "custcbb_hosts", "", &vault.Credential{
+		Username: "chris.jones",
+		Password: "secret",
+	}); err != nil {
+		t.Fatalf("create context: %v", err)
+	}
+	if err := mgr.SetSyncSourceDefaultCredential("netbox-prod", &vault.Credential{
+		Username: "fallback",
+		Password: "secret",
+	}); err != nil {
+		t.Fatalf("set sync default: %v", err)
+	}
+
+	sv, err := mgr.GetSyncSource("netbox-prod")
+	if err != nil {
+		t.Fatalf("get sync source: %v", err)
+	}
+
+	host := &intsync.ManagedHost{
+		Host:            "151-fac-sw1.custcbb.local",
+		Context:         "custcbb",
+		CredentialClass: "junos",
+	}
+
+	username, usesPassword, err := resolveManagedHostMetadata(host, mgr, sv, "admin")
+	if err != nil {
+		t.Fatalf("resolve metadata: %v", err)
+	}
+	if username != "chris.jones" {
+		t.Fatalf("username = %q, want %q", username, "chris.jones")
+	}
+	if !usesPassword {
+		t.Fatal("expected password auth")
+	}
+}
+
+func TestResolveManagedHostMetadataFallsBackToSyncClassAndDefaultUser(t *testing.T) {
+	mgr := newTestManager(t)
+
+	if err := mgr.SetSyncSourceClassCredential("netbox-prod", "junos", &vault.Credential{
+		Password: "secret",
+	}); err != nil {
+		t.Fatalf("set sync class credential: %v", err)
+	}
+
+	sv, err := mgr.GetSyncSource("netbox-prod")
+	if err != nil {
+		t.Fatalf("get sync source: %v", err)
+	}
+
+	host := &intsync.ManagedHost{
+		Host:            "151-fac-sw1.custcbb.local",
+		Context:         "custcbb",
+		CredentialClass: "junos",
+	}
+
+	username, usesPassword, err := resolveManagedHostMetadata(host, mgr, sv, "netops")
+	if err != nil {
+		t.Fatalf("resolve metadata: %v", err)
+	}
+	if username != "netops" {
+		t.Fatalf("username = %q, want %q", username, "netops")
+	}
+	if !usesPassword {
+		t.Fatal("expected password auth from sync class credential")
+	}
+}
+
+func TestResolveManagedHostMetadataPreservesKeyOnlyHost(t *testing.T) {
+	host := &intsync.ManagedHost{
+		Host:         "edge01.example.com",
+		UsesPassword: false,
+	}
+
+	username, usesPassword, err := resolveManagedHostMetadata(host, nil, nil, "operator")
+	if err != nil {
+		t.Fatalf("resolve metadata: %v", err)
+	}
+	if username != "operator" {
+		t.Fatalf("username = %q, want %q", username, "operator")
+	}
+	if usesPassword {
+		t.Fatal("expected key auth to remain enabled")
 	}
 }

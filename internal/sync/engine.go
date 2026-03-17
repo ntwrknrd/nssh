@@ -24,6 +24,18 @@ func Reconcile(
 	sourceName string,
 	current *SourceState,
 ) *SyncPlan {
+	return ReconcileWithReservedTargets(objects, routes, sourceName, current, nil)
+}
+
+// ReconcileWithReservedTargets behaves like Reconcile but skips discovered
+// objects whose resolved target already exists elsewhere in SSH config.
+func ReconcileWithReservedTargets(
+	objects []InventoryObject,
+	routes []config.SyncRouteConfig,
+	sourceName string,
+	current *SourceState,
+	reservedTargets map[string]struct{},
+) *SyncPlan {
 	plan := &SyncPlan{}
 
 	// Build desired state from discovered objects
@@ -38,6 +50,9 @@ func Reconcile(
 
 		ctx, _ := ResolveDestination(route, sourceName)
 		mh := objectToManagedHost(obj, ctx)
+		if isReservedTarget(mh.HostName, reservedTargets) {
+			continue
+		}
 		desired[mh.ObjectID] = mh
 	}
 
@@ -84,6 +99,7 @@ func objectToManagedHost(obj *InventoryObject, context string) *ManagedHost {
 		Patterns:        []string{obj.Name},
 		Context:         context,
 		HostName:        obj.HostName,
+		Username:        "",
 		Port:            obj.Port,
 		ProxyJump:       obj.ProxyJump,
 		UsesPassword:    obj.UsesPassword,
@@ -97,6 +113,9 @@ func managedHostChanged(old, new *ManagedHost) bool {
 		return true
 	}
 	if old.HostName != new.HostName {
+		return true
+	}
+	if old.Username != new.Username {
 		return true
 	}
 	if old.Port != new.Port {
@@ -121,4 +140,12 @@ func managedHostChanged(old, new *ManagedHost) bool {
 		return true
 	}
 	return false
+}
+
+func isReservedTarget(target string, reservedTargets map[string]struct{}) bool {
+	if len(reservedTargets) == 0 {
+		return false
+	}
+	_, ok := reservedTargets[target]
+	return ok
 }

@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/cli/resolve"
@@ -12,6 +14,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/ssh/remoteexec"
+	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	intsync "github.com/ntwrknrd/nssh/internal/sync"
 
 	"github.com/ntwrknrd/nssh/internal/sync/providers"
@@ -89,7 +92,7 @@ func runSync(sourceName string) error {
 	var anyFailed bool
 
 	for _, src := range sources {
-		if err := runSourceSync(src, runner, mgr); err != nil {
+		if err := runSourceSync(src, runner, mgr, cfg); err != nil {
 			ui.Error("Source %s failed: %s", src.Name, err)
 			anyFailed = true
 			// Continue with remaining sources
@@ -106,6 +109,7 @@ func runSourceSync(
 	src config.SyncSourceConfig,
 	runner intsync.RemoteRunner,
 	mgr *vault.Manager,
+	cfg *config.Config,
 ) error {
 	ui.CommandStart(fmt.Sprintf("SYNC: %s (%s)", src.Name, src.Provider))
 
@@ -141,7 +145,12 @@ func runSourceSync(
 	ui.Info("Discovered %d objects", len(objects))
 
 	// Reconcile
-	plan := intsync.Reconcile(objects, src.Routes, src.Name, current)
+	reservedTargets, err := buildReservedTargets(src.Name)
+	if err != nil {
+		ui.CommandEnd(ui.StatusError)
+		return fmt.Errorf("build reserved target index: %w", err)
+	}
+	plan := intsync.ReconcileWithReservedTargets(objects, src.Routes, src.Name, current, reservedTargets)
 
 	// Show plan
 	printPlan(plan)
@@ -165,6 +174,11 @@ func runSourceSync(
 	}
 	for _, h := range plan.Removals {
 		delete(allHosts, h.ObjectID)
+	}
+
+	if err := enrichManagedHosts(allHosts, src.Name, mgr, cfg.Host.Defaults.DefaultUser); err != nil {
+		ui.CommandEnd(ui.StatusError)
+		return fmt.Errorf("resolve sync host metadata: %w", err)
 	}
 
 	// Collect hosts for SSH config writing
@@ -221,6 +235,104 @@ func runSourceSync(
 
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil
+}
+
+func enrichManagedHosts(hosts map[string]*intsync.ManagedHost, source string, mgr *vault.Manager, defaultUser string) error {
+	var syncSource *vault.SyncSourceVault
+	if mgr != nil {
+		var err error
+		syncSource, err = mgr.GetSyncSource(source)
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, host := range hosts {
+		username, usesPassword, err := resolveManagedHostMetadata(host, mgr, syncSource, defaultUser)
+		if err != nil {
+			return err
+		}
+		host.Username = username
+		host.UsesPassword = usesPassword
+	}
+
+	return nil
+}
+
+func resolveManagedHostMetadata(
+	host *intsync.ManagedHost,
+	mgr *vault.Manager,
+	syncSource *vault.SyncSourceVault,
+	defaultUser string,
+) (username string, usesPassword bool, err error) {
+	if host == nil {
+		return defaultUser, false, nil
+	}
+
+	username = host.Username
+	usesPassword = host.UsesPassword
+
+	if mgr != nil && host.Context != "" {
+		ctx, err := mgr.GetContext(host.Context)
+		if err != nil {
+			return "", false, err
+		}
+		if ctx != nil && ctx.Credential != nil {
+			if ctx.Credential.Username != "" {
+				username = ctx.Credential.Username
+			}
+			usesPassword = true
+		}
+	}
+
+	if syncSource != nil {
+		if host.CredentialClass != "" && syncSource.ClassCredentials != nil {
+			if cred := syncSource.ClassCredentials[host.CredentialClass]; cred != nil {
+				if username == "" && cred.Username != "" {
+					username = cred.Username
+				}
+				usesPassword = true
+			}
+		}
+		if syncSource.DefaultCredential != nil {
+			if username == "" && syncSource.DefaultCredential.Username != "" {
+				username = syncSource.DefaultCredential.Username
+			}
+			usesPassword = true
+		}
+	}
+
+	if username == "" {
+		username = defaultUser
+	}
+
+	return username, usesPassword, nil
+}
+
+func buildReservedTargets(sourceName string) (map[string]struct{}, error) {
+	parser := sshconfig.NewParser()
+	hosts, err := parser.GetAllHosts()
+	if err != nil {
+		return nil, err
+	}
+
+	currentIncludeBase := filepath.Base(intsync.SourceIncludeFile(sourceName))
+	reserved := make(map[string]struct{})
+	for _, host := range hosts {
+		if filepath.Base(host.SourceFile) == currentIncludeBase {
+			continue
+		}
+		target := strings.TrimSpace(host.HostName)
+		if target == "" {
+			target = strings.TrimSpace(host.Host)
+		}
+		if target == "" {
+			continue
+		}
+		reserved[target] = struct{}{}
+	}
+
+	return reserved, nil
 }
 
 func createProvider(providerName string) (intsync.Provider, error) {

@@ -61,6 +61,11 @@ func generateSSHConfig(hosts []*ManagedHost, sourceName, provider string) string
 		// HostName directive
 		fmt.Fprintf(&b, "  HostName %s\n", h.HostName)
 
+		// User directive when known so sync-owned entries look like normal hosts.
+		if h.Username != "" {
+			fmt.Fprintf(&b, "  User %s\n", h.Username)
+		}
+
 		// Port (only if non-default)
 		if h.Port > 0 && h.Port != 22 {
 			fmt.Fprintf(&b, "  Port %d\n", h.Port)
@@ -86,6 +91,9 @@ func generateSSHConfig(hosts []*ManagedHost, sourceName, provider string) string
 		if h.UsesPassword {
 			b.WriteString("  PubkeyAuthentication no\n")
 			b.WriteString("  PreferredAuthentications keyboard-interactive,password\n")
+		} else {
+			b.WriteString("  PubkeyAuthentication yes\n")
+			b.WriteString("  PasswordAuthentication no\n")
 		}
 	}
 

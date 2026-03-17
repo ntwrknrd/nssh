@@ -184,3 +184,64 @@ func TestReconcilePreservesCompatFixes(t *testing.T) {
 		t.Fatalf("compat_fixes = %v, want [%s]", plan.Updates[0].CompatFixes, compat.CompatKex)
 	}
 }
+
+func TestReconcileWithReservedTargetsSkipsExistingSSHHost(t *testing.T) {
+	routes := []config.SyncRouteConfig{{
+		Name:    "all",
+		Context: "custcbb",
+		Match:   config.SyncRouteMatch{},
+	}}
+
+	objects := []InventoryObject{
+		{ObjectID: "1", Name: "151-agg-sw1.custcbb.local", HostName: "151-agg-sw1.custcbb.local"},
+	}
+
+	reserved := map[string]struct{}{
+		"151-agg-sw1.custcbb.local": {},
+	}
+
+	plan := ReconcileWithReservedTargets(objects, routes, "netbox-prod", nil, reserved)
+
+	if len(plan.Adds) != 0 {
+		t.Fatalf("adds = %d, want 0", len(plan.Adds))
+	}
+	if len(plan.Removals) != 0 {
+		t.Fatalf("removals = %d, want 0", len(plan.Removals))
+	}
+}
+
+func TestReconcileWithReservedTargetsRemovesExistingDuplicateFromState(t *testing.T) {
+	routes := []config.SyncRouteConfig{{
+		Name:    "all",
+		Context: "custcbb",
+		Match:   config.SyncRouteMatch{},
+	}}
+
+	objects := []InventoryObject{
+		{ObjectID: "1", Name: "151-agg-sw1.custcbb.local", HostName: "151-agg-sw1.custcbb.local"},
+	}
+
+	current := &SourceState{
+		Objects: map[string]*ManagedHost{
+			"1": {
+				ObjectID: "1",
+				Host:     "151-agg-sw1.custcbb.local",
+				Patterns: []string{"151-agg-sw1.custcbb.local"},
+				HostName: "151-agg-sw1.custcbb.local",
+				Context:  "custcbb",
+			},
+		},
+	}
+	reserved := map[string]struct{}{
+		"151-agg-sw1.custcbb.local": {},
+	}
+
+	plan := ReconcileWithReservedTargets(objects, routes, "netbox-prod", current, reserved)
+
+	if len(plan.Removals) != 1 {
+		t.Fatalf("removals = %d, want 1", len(plan.Removals))
+	}
+	if plan.Removals[0].Host != "151-agg-sw1.custcbb.local" {
+		t.Fatalf("removal host = %q", plan.Removals[0].Host)
+	}
+}

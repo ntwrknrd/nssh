@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
@@ -105,12 +108,39 @@ func TestNormalizeNetBoxDevices(t *testing.T) {
 
 func TestNetBoxProviderDiscover(t *testing.T) {
 	handler := http.NewServeMux()
+	handler.HandleFunc("/api/dcim/manufacturers/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Query().Get("name") == "Arista" || r.URL.Query().Get("slug") == "Arista" || r.URL.Query().Get("slug") == "arista":
+			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{Results: []netboxNamedRef{{Name: "Arista", Slug: "arista"}}})
+		case r.URL.Query().Get("name") == "Juniper" || r.URL.Query().Get("slug") == "Juniper" || r.URL.Query().Get("slug") == "juniper":
+			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{Results: []netboxNamedRef{{Name: "Juniper", Slug: "juniper"}}})
+		default:
+			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{})
+		}
+	})
+	handler.HandleFunc("/api/tenancy/tenants/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Query().Get("name") == "Expedient" || r.URL.Query().Get("slug") == "Expedient" || r.URL.Query().Get("slug") == "expedient-48":
+			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{Results: []netboxNamedRef{{Name: "Expedient", Slug: "expedient-48"}}})
+		default:
+			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{})
+		}
+	})
 	handler.HandleFunc("/api/dcim/devices/", func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Token test-token" {
 			t.Fatalf("authorization header = %q", got)
 		}
 		if r.URL.Query().Get("limit") != "100" {
 			t.Fatalf("limit query = %q", r.URL.Query().Get("limit"))
+		}
+		if got := r.URL.Query()["manufacturer"]; !slices.Equal(got, []string{"arista", "juniper"}) {
+			t.Fatalf("manufacturer query = %v", got)
+		}
+		if got := r.URL.Query()["tenant"]; !slices.Equal(got, []string{"expedient-48"}) {
+			t.Fatalf("tenant query = %v", got)
+		}
+		if got := r.URL.Query().Get("name__iregex"); got != "^[A-Za-z0-9._-]+(?:\\.custcbb\\.local|\\.expedient\\.com)$" {
+			t.Fatalf("name__iregex query = %q", got)
 		}
 		resp := netboxListResponse{
 			Results: []netboxDevice{
@@ -131,6 +161,24 @@ func TestNetBoxProviderDiscover(t *testing.T) {
 		NetBox: &config.NetBoxConfig{
 			BaseURL:  server.URL,
 			TokenEnv: "NB_TEST_TOKEN",
+		},
+		Routes: []config.SyncRouteConfig{
+			{
+				Context: "custcbb",
+				Match: config.SyncRouteMatch{
+					"manufacturer":  {"Juniper", "Arista"},
+					"tenant":        {"Expedient"},
+					"domain_suffix": {".custcbb.local"},
+				},
+			},
+			{
+				Context: "cbb",
+				Match: config.SyncRouteMatch{
+					"manufacturer":  {"Juniper", "Arista"},
+					"tenant":        {"Expedient"},
+					"domain_suffix": {".expedient.com"},
+				},
+			},
 		},
 	}
 
@@ -163,4 +211,222 @@ func TestNetBoxProviderDiscoverMissingToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing token error")
 	}
+}
+
+func TestNetBoxProviderDiscoverLoadsTokenFromEnvFile(t *testing.T) {
+	handler := http.NewServeMux()
+	handler.HandleFunc("/api/dcim/devices/", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Token file-token" {
+			t.Fatalf("authorization header = %q", got)
+		}
+		resp := netboxListResponse{
+			Results: []netboxDevice{
+				{ID: 1, Name: "edge01.expedient.com", Status: netboxChoice{Value: "active"}},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	envFile := filepath.Join(tmpDir, ".env")
+	if err := os.WriteFile(envFile, []byte("NB_FILE_URL="+server.URL+"\nNB_FILE_TOKEN=file-token\n"), 0600); err != nil {
+		t.Fatalf("write env file: %v", err)
+	}
+
+	provider := &NetBoxProvider{Client: server.Client()}
+	source := config.SyncSourceConfig{
+		Name:     "netbox-prod",
+		Provider: config.ProviderNetBox,
+		NetBox: &config.NetBoxConfig{
+			URLEnv:   "NB_FILE_URL",
+			TokenEnv: "NB_FILE_TOKEN",
+			EnvFile:  envFile,
+		},
+	}
+
+	objects, err := provider.Discover(context.Background(), source, nil)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(objects) != 1 {
+		t.Fatalf("objects = %d", len(objects))
+	}
+}
+
+func TestNetBoxProviderDiscoverUsesDefaultEnvFileAndTokenName(t *testing.T) {
+	handler := http.NewServeMux()
+	handler.HandleFunc("/api/dcim/devices/", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Token default-token" {
+			t.Fatalf("authorization header = %q", got)
+		}
+		resp := netboxListResponse{
+			Results: []netboxDevice{
+				{ID: 1, Name: "edge01.expedient.com", Status: netboxChoice{Value: "active"}},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("NETBOX_URL", "")
+	t.Setenv("NETBOX_TOKEN", "")
+	if err := os.WriteFile(filepath.Join(tmpHome, ".env"), []byte("NETBOX_URL="+server.URL+"\nNETBOX_TOKEN=default-token\n"), 0600); err != nil {
+		t.Fatalf("write default env file: %v", err)
+	}
+
+	provider := &NetBoxProvider{Client: server.Client()}
+	source := config.SyncSourceConfig{
+		Name:     "netbox-prod",
+		Provider: config.ProviderNetBox,
+		NetBox:   &config.NetBoxConfig{},
+	}
+
+	objects, err := provider.Discover(context.Background(), source, nil)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(objects) != 1 {
+		t.Fatalf("objects = %d", len(objects))
+	}
+}
+
+func TestNetBoxProviderDetectsPaginationLoop(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := netboxListResponse{
+			Next: serverURLWithPath(r.Host, r.URL.Path, r.URL.RawQuery),
+			Results: []netboxDevice{
+				{ID: 1, Name: "edge01.expedient.com", Status: netboxChoice{Value: "active"}},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	provider := &NetBoxProvider{Client: server.Client()}
+	_, err := provider.fetchDevices(context.Background(), server.URL, "test-token", nil)
+	if err == nil {
+		t.Fatal("expected pagination loop error")
+	}
+	if !strings.Contains(err.Error(), "pagination loop detected") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildNetBoxDeviceQuery(t *testing.T) {
+	handler := http.NewServeMux()
+	handler.HandleFunc("/api/dcim/manufacturers/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Query().Get("name") == "Arista" || r.URL.Query().Get("slug") == "Arista" || r.URL.Query().Get("slug") == "arista":
+			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{Results: []netboxNamedRef{{Name: "Arista", Slug: "arista"}}})
+		case r.URL.Query().Get("name") == "Juniper" || r.URL.Query().Get("slug") == "Juniper" || r.URL.Query().Get("slug") == "juniper":
+			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{Results: []netboxNamedRef{{Name: "Juniper", Slug: "juniper"}}})
+		default:
+			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{})
+		}
+	})
+	handler.HandleFunc("/api/tenancy/tenants/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Query().Get("name") == "Expedient" || r.URL.Query().Get("slug") == "Expedient" || r.URL.Query().Get("slug") == "expedient-48":
+			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{Results: []netboxNamedRef{{Name: "Expedient", Slug: "expedient-48"}}})
+		default:
+			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{})
+		}
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	query := buildNetBoxDeviceQuery(context.Background(), server.Client(), server.URL, "test-token", []config.SyncRouteConfig{
+		{
+			Context: "custcbb",
+			Match: config.SyncRouteMatch{
+				"manufacturer":  {"Juniper", "Arista"},
+				"tenant":        {"Expedient"},
+				"domain_suffix": {".custcbb.local"},
+			},
+		},
+		{
+			Context: "cbb",
+			Match: config.SyncRouteMatch{
+				"manufacturer":  {"Arista", "Juniper"},
+				"tenant":        {"Expedient"},
+				"domain_suffix": {".expedient.com"},
+			},
+		},
+	})
+
+	if got := query["manufacturer"]; !slices.Equal(got, []string{"arista", "juniper"}) {
+		t.Fatalf("manufacturer query = %v", got)
+	}
+	if got := query["tenant"]; !slices.Equal(got, []string{"expedient-48"}) {
+		t.Fatalf("tenant query = %v", got)
+	}
+	if got := query.Get("name__iregex"); got != "^[A-Za-z0-9._-]+(?:\\.custcbb\\.local|\\.expedient\\.com)$" {
+		t.Fatalf("name__iregex query = %q", got)
+	}
+}
+
+func TestBuildNetBoxDeviceQuerySkipsPartialRouteFilters(t *testing.T) {
+	query := buildNetBoxDeviceQuery(context.Background(), nil, "https://netbox.example.com", "test-token", []config.SyncRouteConfig{
+		{
+			Context: "custcbb",
+			Match: config.SyncRouteMatch{
+				"manufacturer": {"Juniper"},
+			},
+		},
+		{
+			Context: "cbb",
+			Match:   config.SyncRouteMatch{},
+		},
+	})
+
+	if query == nil {
+		return
+	}
+	if _, ok := query["manufacturer"]; ok {
+		t.Fatalf("manufacturer query should be omitted when not present on every route: %v", query["manufacturer"])
+	}
+}
+
+func TestFetchDevicesIncludesQueryParameters(t *testing.T) {
+	handler := http.NewServeMux()
+	handler.HandleFunc("/api/dcim/devices/", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("role"); got != "router" {
+			t.Fatalf("role query = %q", got)
+		}
+		if got := r.URL.Query().Get("limit"); got != "100" {
+			t.Fatalf("limit query = %q", got)
+		}
+		resp := netboxListResponse{
+			Results: []netboxDevice{
+				{ID: 1, Name: "edge01.expedient.com", Status: netboxChoice{Value: "active"}},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	provider := &NetBoxProvider{Client: server.Client()}
+	query := url.Values{}
+	query.Set("role", "router")
+	devices, err := provider.fetchDevices(context.Background(), server.URL, "test-token", query)
+	if err != nil {
+		t.Fatalf("fetchDevices: %v", err)
+	}
+	if len(devices) != 1 {
+		t.Fatalf("devices = %d", len(devices))
+	}
+}
+
+func serverURLWithPath(host, path, rawQuery string) string {
+	url := "http://" + host + path
+	if rawQuery != "" {
+		url += "?" + rawQuery
+	}
+	return url
 }

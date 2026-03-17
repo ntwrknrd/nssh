@@ -35,7 +35,9 @@ type ContainerlabConfig struct {
 // NetBoxConfig holds NetBox provider settings.
 type NetBoxConfig struct {
 	BaseURL  string `toml:"base_url"`
+	URLEnv   string `toml:"url_env"`
 	TokenEnv string `toml:"token_env"`
+	EnvFile  string `toml:"env_file"`
 }
 
 // SyncRouteConfig defines a route that filters and places discovered objects.
@@ -111,12 +113,6 @@ func (c *SyncSourceConfig) Validate() error {
 		}
 		if hasClab {
 			return fmt.Errorf("provider is %q but containerlab config block is also present", c.Provider)
-		}
-		if c.NetBox.BaseURL == "" {
-			return fmt.Errorf("netbox.base_url is required")
-		}
-		if c.NetBox.TokenEnv == "" {
-			return fmt.Errorf("netbox.token_env is required")
 		}
 	}
 

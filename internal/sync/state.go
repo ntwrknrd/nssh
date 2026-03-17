@@ -43,6 +43,7 @@ type ManagedHost struct {
 	Patterns        []string            `json:"patterns,omitempty"`
 	Context         string              `json:"context,omitempty"`
 	HostName        string              `json:"hostname"`
+	Username        string              `json:"username,omitempty"`
 	Port            int                 `json:"port,omitempty"`
 	ProxyJump       string              `json:"proxy_jump,omitempty"`
 	UsesPassword    bool                `json:"uses_password,omitempty"`

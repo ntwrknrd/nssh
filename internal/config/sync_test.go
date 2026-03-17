@@ -31,8 +31,9 @@ name = "netbox-prod"
 provider = "netbox"
 
   [sync.sources.netbox]
-  base_url = "https://netbox.example.com"
+  url_env = "NETBOX_URL"
   token_env = "NETBOX_TOKEN"
+  env_file = "~/.env"
 
   [[sync.sources.routes]]
   name = "custcbb-juniper"
@@ -95,8 +96,14 @@ provider = "netbox"
 	if nb.NetBox == nil {
 		t.Fatal("source[1].NetBox is nil")
 	}
-	if nb.NetBox.BaseURL != "https://netbox.example.com" {
+	if nb.NetBox.BaseURL != "" {
 		t.Errorf("base_url = %q", nb.NetBox.BaseURL)
+	}
+	if nb.NetBox.URLEnv != "NETBOX_URL" {
+		t.Errorf("url_env = %q", nb.NetBox.URLEnv)
+	}
+	if nb.NetBox.EnvFile != "~/.env" {
+		t.Errorf("env_file = %q", nb.NetBox.EnvFile)
 	}
 	if len(nb.Routes) != 2 {
 		t.Fatalf("source[1] routes: got %d, want 2", len(nb.Routes))
@@ -127,7 +134,7 @@ func TestSyncConfigValidation(t *testing.T) {
 			cfg: SyncConfig{Sources: []SyncSourceConfig{{
 				Name:     "nb1",
 				Provider: "netbox",
-				NetBox:   &NetBoxConfig{BaseURL: "https://nb.local", TokenEnv: "NB_TOKEN"},
+				NetBox:   &NetBoxConfig{BaseURL: "https://nb.local"},
 				Routes:   []SyncRouteConfig{{Context: "prod"}},
 			}}},
 		},
@@ -224,17 +231,6 @@ func TestSyncConfigValidation(t *testing.T) {
 				NetBox:   &NetBoxConfig{TokenEnv: "t"},
 				Routes:   []SyncRouteConfig{{Context: "c"}},
 			}}},
-			wantErr: "netbox.base_url is required",
-		},
-		{
-			name: "netbox missing token_env",
-			cfg: SyncConfig{Sources: []SyncSourceConfig{{
-				Name:     "s1",
-				Provider: "netbox",
-				NetBox:   &NetBoxConfig{BaseURL: "https://nb.local"},
-				Routes:   []SyncRouteConfig{{Context: "c"}},
-			}}},
-			wantErr: "netbox.token_env is required",
 		},
 	}
 

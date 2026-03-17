@@ -1,17 +1,29 @@
 package providers
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/sync"
+)
+
+const (
+	defaultNetBoxURLEnv   = "NETBOX_URL"
+	defaultNetBoxTokenEnv = "NETBOX_TOKEN"
+	defaultNetBoxEnvFile  = "~/.env"
 )
 
 // NetBoxProvider discovers device inventory from the NetBox API.
@@ -29,6 +41,10 @@ func NewNetBoxProvider() *NetBoxProvider {
 type netboxListResponse struct {
 	Next    string         `json:"next"`
 	Results []netboxDevice `json:"results"`
+}
+
+type netboxNamedListResponse struct {
+	Results []netboxNamedRef `json:"results"`
 }
 
 type netboxDevice struct {
@@ -65,29 +81,78 @@ func (p *NetBoxProvider) Discover(ctx context.Context, source config.SyncSourceC
 	if source.NetBox == nil {
 		return nil, fmt.Errorf("netbox config missing for source %q", source.Name)
 	}
-	token := strings.TrimSpace(os.Getenv(source.NetBox.TokenEnv))
-	if token == "" {
-		return nil, fmt.Errorf("environment variable %q is not set", source.NetBox.TokenEnv)
+	var err error
+	tokenEnv := source.NetBox.TokenEnv
+	if tokenEnv == "" {
+		tokenEnv = defaultNetBoxTokenEnv
+	}
+	envFile := source.NetBox.EnvFile
+	if envFile == "" {
+		envFile = defaultNetBoxEnvFile
 	}
 
-	devices, err := p.fetchDevices(ctx, source.NetBox.BaseURL, token)
+	baseURL := strings.TrimSpace(source.NetBox.BaseURL)
+	if baseURL == "" {
+		urlEnv := source.NetBox.URLEnv
+		if urlEnv == "" {
+			urlEnv = defaultNetBoxURLEnv
+		}
+		baseURL, err = loadEnvValue(urlEnv, envFile)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	token, err := loadEnvValue(tokenEnv, envFile)
 	if err != nil {
 		return nil, err
 	}
 
+	slog.Debug("netbox discovery start",
+		"source", source.Name,
+		"base_url", baseURL,
+		"url_env", source.NetBox.URLEnv,
+		"token_env", tokenEnv,
+		"env_file", envFile,
+	)
+
+	query := buildNetBoxDeviceQuery(ctx, p.Client, baseURL, token, source.Routes)
+	slog.Debug("netbox discovery filters", "source", source.Name, "query", query.Encode())
+
+	devices, err := p.fetchDevices(ctx, baseURL, token, query)
+	if err != nil {
+		return nil, err
+	}
+
+	slog.Debug("netbox discovery complete", "source", source.Name, "devices", len(devices))
+
 	return NormalizeNetBoxDevices(devices, source.Name), nil
 }
 
-func (p *NetBoxProvider) fetchDevices(ctx context.Context, baseURL, token string) ([]netboxDevice, error) {
+func (p *NetBoxProvider) fetchDevices(ctx context.Context, baseURL, token string, query url.Values) ([]netboxDevice, error) {
 	client := p.Client
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
 
-	nextURL := strings.TrimRight(baseURL, "/") + "/api/dcim/devices/?limit=100"
+	nextURL := strings.TrimRight(baseURL, "/") + "/api/dcim/devices/"
+	if len(query) == 0 {
+		query = make(url.Values)
+	}
+	query.Set("limit", "100")
+	nextURL += "?" + query.Encode()
 	var devices []netboxDevice
+	seenURLs := make(map[string]struct{})
+	pageNum := 0
 
 	for nextURL != "" {
+		if _, seen := seenURLs[nextURL]; seen {
+			return nil, fmt.Errorf("netbox pagination loop detected at %s", nextURL)
+		}
+		seenURLs[nextURL] = struct{}{}
+		pageNum++
+		slog.Debug("netbox fetch page", "page", pageNum, "url", nextURL)
+
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
 		if err != nil {
 			return nil, fmt.Errorf("build request: %w", err)
@@ -115,6 +180,12 @@ func (p *NetBoxProvider) fetchDevices(ctx context.Context, baseURL, token string
 		}
 
 		devices = append(devices, page.Results...)
+		slog.Debug("netbox page complete",
+			"page", pageNum,
+			"results", len(page.Results),
+			"total", len(devices),
+			"has_next", page.Next != "",
+		)
 		nextURL = page.Next
 	}
 
@@ -217,4 +288,245 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func buildNetBoxDeviceQuery(ctx context.Context, client *http.Client, baseURL, token string, routes []config.SyncRouteConfig) url.Values {
+	if len(routes) == 0 {
+		return nil
+	}
+
+	query := make(url.Values)
+	addResolvedReferenceQueryFilter(ctx, client, baseURL, token, query, routes, "manufacturer", "manufacturer", "/api/dcim/manufacturers/")
+	addResolvedReferenceQueryFilter(ctx, client, baseURL, token, query, routes, "tenant", "tenant", "/api/tenancy/tenants/")
+	addResolvedReferenceQueryFilter(ctx, client, baseURL, token, query, routes, "role", "role", "/api/dcim/device-roles/")
+	addUnionQueryFilter(query, routes, "status", "status")
+	addResolvedReferenceQueryFilter(ctx, client, baseURL, token, query, routes, "site", "site", "/api/dcim/sites/")
+	addResolvedReferenceQueryFilter(ctx, client, baseURL, token, query, routes, "platform", "platform", "/api/dcim/platforms/")
+	addDomainSuffixRegexFilter(query, routes)
+
+	if len(query) == 0 {
+		return nil
+	}
+	return query
+}
+
+func addUnionQueryFilter(query url.Values, routes []config.SyncRouteConfig, routeField, queryField string) {
+	values, ok := unionRouteMatchValues(routes, routeField)
+	if !ok {
+		return
+	}
+	for _, value := range values {
+		query.Add(queryField, value)
+	}
+}
+
+func addResolvedReferenceQueryFilter(ctx context.Context, client *http.Client, baseURL, token string, query url.Values, routes []config.SyncRouteConfig, routeField, queryField, endpoint string) {
+	values, ok := unionRouteMatchValues(routes, routeField)
+	if !ok {
+		return
+	}
+
+	resolved := resolveNetBoxReferenceValues(ctx, client, baseURL, token, endpoint, routeField, values)
+	for _, value := range resolved {
+		query.Add(queryField, value)
+	}
+}
+
+func addDomainSuffixRegexFilter(query url.Values, routes []config.SyncRouteConfig) {
+	suffixes, ok := unionRouteMatchValues(routes, "domain_suffix")
+	if !ok || len(suffixes) == 0 {
+		return
+	}
+
+	patterns := make([]string, 0, len(suffixes))
+	for _, suffix := range suffixes {
+		suffix = strings.TrimSpace(suffix)
+		if suffix == "" {
+			continue
+		}
+		patterns = append(patterns, regexp.QuoteMeta(suffix))
+	}
+	if len(patterns) == 0 {
+		return
+	}
+
+	query.Set("name__iregex", "^[A-Za-z0-9._-]+(?:"+strings.Join(patterns, "|")+")$")
+}
+
+func unionRouteMatchValues(routes []config.SyncRouteConfig, field string) ([]string, bool) {
+	values := make(map[string]struct{})
+	for _, route := range routes {
+		matches := route.Match[field]
+		if len(matches) == 0 {
+			return nil, false
+		}
+		for _, value := range matches {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			values[value] = struct{}{}
+		}
+	}
+	if len(values) == 0 {
+		return nil, false
+	}
+
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out, true
+}
+
+func resolveNetBoxReferenceValues(ctx context.Context, client *http.Client, baseURL, token, endpoint, field string, values []string) []string {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+
+	resolved := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		slug, ok := lookupNetBoxReferenceSlug(ctx, client, baseURL, token, endpoint, value)
+		if !ok {
+			slog.Debug("netbox query filter unresolved", "field", field, "value", value)
+			continue
+		}
+		if _, exists := seen[slug]; exists {
+			continue
+		}
+		seen[slug] = struct{}{}
+		resolved = append(resolved, slug)
+	}
+	sort.Strings(resolved)
+	return resolved
+}
+
+func lookupNetBoxReferenceSlug(ctx context.Context, client *http.Client, baseURL, token, endpoint, value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", false
+	}
+
+	for _, field := range []string{"slug", "name"} {
+		slug, ok := queryNetBoxReferenceSlug(ctx, client, baseURL, token, endpoint, field, value)
+		if ok {
+			return slug, true
+		}
+	}
+
+	return "", false
+}
+
+func queryNetBoxReferenceSlug(ctx context.Context, client *http.Client, baseURL, token, endpoint, field, value string) (string, bool) {
+	query := url.Values{}
+	query.Set("limit", "2")
+	query.Set(field, value)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+endpoint+"?"+query.Encode(), nil)
+	if err != nil {
+		return "", false
+	}
+	req.Header.Set("Authorization", "Token "+token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", false
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", false
+	}
+
+	var result netboxNamedListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", false
+	}
+
+	for _, item := range result.Results {
+		if strings.EqualFold(item.Slug, value) || strings.EqualFold(item.Name, value) {
+			return item.Slug, true
+		}
+	}
+	if len(result.Results) == 1 && strings.TrimSpace(result.Results[0].Slug) != "" {
+		return result.Results[0].Slug, true
+	}
+
+	return "", false
+}
+
+func loadEnvValue(name, envFile string) (string, error) {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value, nil
+	}
+
+	path := expandHomePath(envFile)
+	values, err := readDotEnv(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("environment variable %q is not set and env file %q was not found", name, path)
+		}
+		return "", fmt.Errorf("read env file %q: %w", path, err)
+	}
+
+	value := strings.TrimSpace(values[name])
+	if value == "" {
+		return "", fmt.Errorf("environment variable %q is not set and was not found in %q", name, path)
+	}
+	return value, nil
+}
+
+func readDotEnv(path string) (map[string]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	values := make(map[string]string)
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "export ") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"'`)
+		if key != "" {
+			values[key] = value
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return values, nil
+}
+
+func expandHomePath(path string) string {
+	path = strings.TrimSpace(path)
+	switch {
+	case path == "":
+		return path
+	case path == "~":
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+	case strings.HasPrefix(path, "~/"):
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		}
+	}
+	return path
 }

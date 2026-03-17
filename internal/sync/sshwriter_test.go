@@ -13,6 +13,7 @@ func TestGenerateSSHConfig(t *testing.T) {
 			Host:         "clab-dfz-core01",
 			Patterns:     []string{"clab-dfz-core01", "dfz-core01"},
 			HostName:     "172.20.0.2",
+			Username:     "admin",
 			ProxyJump:    "nre-netlab01",
 			UsesPassword: true,
 		},
@@ -40,6 +41,9 @@ func TestGenerateSSHConfig(t *testing.T) {
 	}
 	if !strings.Contains(content, "HostName 172.20.0.2") {
 		t.Error("missing HostName")
+	}
+	if !strings.Contains(content, "User admin") {
+		t.Error("missing User")
 	}
 	if !strings.Contains(content, "ProxyJump nre-netlab01") {
 		t.Error("missing ProxyJump")
@@ -79,13 +83,20 @@ func TestGenerateSSHConfigNoPasswordDirectives(t *testing.T) {
 			Host:         "no-pw",
 			Patterns:     []string{"no-pw"},
 			HostName:     "10.0.0.1",
+			Username:     "operator",
 			UsesPassword: false,
 		},
 	}
 
 	content := generateSSHConfig(hosts, "src", "test")
-	if strings.Contains(content, "PubkeyAuthentication") {
-		t.Error("should not have PubkeyAuthentication when UsesPassword is false")
+	if !strings.Contains(content, "User operator") {
+		t.Error("missing User")
+	}
+	if !strings.Contains(content, "PubkeyAuthentication yes") {
+		t.Error("missing key auth directive")
+	}
+	if !strings.Contains(content, "PasswordAuthentication no") {
+		t.Error("missing password disable directive")
 	}
 }
 
