@@ -67,10 +67,10 @@ func NewPassphraseStore(cfg Config) (*PassphraseStore, error) {
 		logger = nilLogger()
 	}
 
-	// Default scrypt work factor (2^18 = ~262k iterations, ~1s on modern hardware)
+	// Default scrypt work factor (2^18 = ~262k iterations, ~1s on modern systems)
 	workFactor := cfg.ScryptWorkFactor
 	if workFactor < 14 {
-		workFactor = 18 // default: secure for modern hardware
+		workFactor = 18 // default: secure for modern systems
 	} else if workFactor > 22 {
 		workFactor = 22 // cap to prevent excessive delays (2^22 = ~4M iterations)
 	}

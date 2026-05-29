@@ -37,9 +37,9 @@ type AgentConfig struct {
 	Security AgentSecurityConfig `toml:"security"`
 }
 
-// AgentSecurityConfig holds agent security mode-specific settings.
-// Note: Security mode is detected from filesystem state (age.key.enc vs piv.json),
-// not from config. See vault.DetectSecurityMode().
+// AgentSecurityConfig holds credential protection settings.
+// Note: Security mode is detected from filesystem state (age.key.enc), not from
+// config. See vault.DetectSecurityMode().
 type AgentSecurityConfig struct {
 	// Software holds settings specific to software mode
 	Software SoftwareSecurityConfig `toml:"software"`

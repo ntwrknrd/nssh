@@ -1,11 +1,8 @@
-//go:build (linux || darwin) && !hardware
+//go:build linux || darwin
 
 package agent
 
 // CompiledFeatures lists optional security features compiled into this binary.
-// The default build has no optional features (software mode is always available).
+// nssh currently ships as a pure-Go software build, so there are no optional
+// compiled-in credential features.
 var CompiledFeatures []string
-
-// PIVAvailable reports whether PIV support is compiled in.
-// Returns false in non-hardware builds.
-func PIVAvailable() bool { return false }

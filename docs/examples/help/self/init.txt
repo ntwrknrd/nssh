@@ -1,6 +1,6 @@
 $ nssh self init --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh self init [flags]            Initialize nssh                          │
+│   nssh self init [flags]            Initialize configuration                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
 │   --dry-run                         preview changes without applying         │

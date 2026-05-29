@@ -24,7 +24,7 @@ const (
 )
 
 // Store is the interface for host-backed key storage.
-// The key material lives on the local host, not on a hardware security device.
+// The key material lives on the local host.
 // Implementations include passphrase-protected files, OS keychains, etc.
 //
 // All methods are non-interactive - callers handle passphrase prompting.

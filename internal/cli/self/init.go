@@ -38,7 +38,7 @@ func NewInitCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Initialize nssh",
+		Short: "Initialize configuration",
 		Long: `Initialize nssh with configuration and shell integration.
 
 Automatically detects your shell and offers to install:
@@ -52,7 +52,6 @@ Session caching keeps credentials unlocked for 4 hours (configurable).
 Use --skip-shell to opt out of shell integration entirely.
 Use -y to skip all confirmation prompts.
 
-To switch security modes, use 'nssh self rekey --software' or 'nssh self rekey --hardware'.
 To start fresh, use 'nssh self reset'.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInit(opts)
@@ -442,15 +441,6 @@ const (
 	StateAlreadyInitialized                        // Protected storage already configured
 )
 
-// SecurityMode represents the top-level security mode choice.
-type SecurityMode string
-
-// Security modes for credential protection.
-const (
-	SecurityModeSoftware SecurityMode = "software" // Software-based encryption with passphrase
-	SecurityModeHardware SecurityMode = "hardware" // Hardware security module (e.g., YubiKey)
-)
-
 // detectSecurityState determines the current credential protection state.
 func detectSecurityState(paths *config.Paths) SecurityState {
 	pubKeyPath := filepath.Join(paths.ConfigDir, "age.pub")
@@ -568,14 +558,14 @@ func setupCredentialProtection(paths *config.Paths, cfg *config.Config, skipProm
 			} else {
 				ui.Success("Credential protection: already configured")
 				fmt.Println()
-				ui.Info("To switch modes: nssh self rekey --software or --hardware")
+				ui.Info("To rotate keys: nssh self rekey")
 				ui.Info("To start fresh: nssh self reset")
 				return nil
 			}
 		} else {
 			ui.Success("Credential protection: already configured")
 			fmt.Println()
-			ui.Info("To switch modes: nssh self rekey --software or --hardware")
+			ui.Info("To rotate keys: nssh self rekey")
 			ui.Info("To start fresh: nssh self reset")
 			return nil
 		}
@@ -599,41 +589,9 @@ func setupCredentialProtection(paths *config.Paths, cfg *config.Config, skipProm
 		return nil
 	}
 
-	// New install - ask user to choose security mode
+	// New install - initialize software credential protection.
 	ui.SubSection("Credential Protection")
-
-	mode, err := selectSecurityMode()
-	if err != nil {
-		return err
-	}
-
-	switch mode {
-	case SecurityModeHardware:
-		return initHardwareMode(paths, cfg)
-	default:
-		return initSoftwareMode(paths, cfg)
-	}
-}
-
-// selectSecurityMode prompts user to choose between software and hardware.
-// In non-interactive environments (no TTY), defaults to software mode.
-func selectSecurityMode() (SecurityMode, error) {
-	// Auto-select software mode in non-interactive environments (CI, Docker)
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return SecurityModeSoftware, nil
-	}
-
-	options := []ui.SelectOption{
-		{Label: "Software (passphrase-protected key)", Value: "software"},
-		{Label: "Hardware (YubiKey/security token)", Value: "hardware"},
-	}
-
-	choice, err := ui.Select("Select security mode", options)
-	if err != nil {
-		return "", err
-	}
-
-	return SecurityMode(choice), nil
+	return initSoftwareMode(paths, cfg)
 }
 
 // initSoftwareMode initializes passphrase-protected credentials.

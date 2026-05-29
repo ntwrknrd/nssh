@@ -64,8 +64,8 @@ func TestNewManagerAutoWithAppConfigAllowsLegacySyncSources(t *testing.T) {
 		CredentialsFile: filepath.Join(tmpDir, "credentials.age"),
 		BackupDir:       filepath.Join(tmpDir, "backups"),
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "piv.json"), []byte("{}"), 0600); err != nil {
-		t.Fatalf("write piv keystore marker: %v", err)
+	if err := os.WriteFile(filepath.Join(tmpDir, "age.key.enc"), []byte("test"), 0600); err != nil {
+		t.Fatalf("write software keystore marker: %v", err)
 	}
 
 	cfg := config.DefaultConfig()
@@ -75,8 +75,8 @@ func TestNewManagerAutoWithAppConfigAllowsLegacySyncSources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager Auto with legacy app config: %v", err)
 	}
-	if got := mgr.ModeString(); got != "piv" {
-		t.Fatalf("mode = %q, want piv", got)
+	if got := mgr.ModeString(); got != "passphrase" {
+		t.Fatalf("mode = %q, want passphrase", got)
 	}
 }
 

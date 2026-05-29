@@ -7,20 +7,17 @@
 //
 // # Lifecycle
 //
-// The agent is spawned by [Spawn] or [SpawnPIV] when the vault is unlocked,
-// and terminates automatically based on configurable timeouts:
+// The agent is spawned by [Spawn] when the vault is unlocked, and terminates
+// automatically based on configurable timeouts:
 //
 //   - Idle timeout: terminates after period of inactivity (default 1h)
 //   - Max lifetime: hard cap regardless of activity (default 24h)
 //   - Manual lock: terminated via "nssh lock" command
 //
-// # Security Modes
+// # Credential Protection
 //
-// The agent supports multiple credential protection backends via the [Provider]
-// interface:
-//
-//   - Software mode: passphrase-protected age identity with scrypt KDF
-//   - PIV mode: YubiKey hardware-backed decryption (requires CGO build)
+// The agent uses a software provider that holds a passphrase-protected age
+// identity in memory after unlock.
 //
 // # Protocol
 //

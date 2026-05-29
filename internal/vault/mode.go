@@ -2,7 +2,6 @@ package vault
 
 import (
 	"filippo.io/age"
-	"github.com/ntwrknrd/nssh/internal/vault/hardware"
 	"github.com/ntwrknrd/nssh/internal/vault/software"
 )
 
@@ -13,13 +12,11 @@ type Mode interface{ mode() }
 // Unexported structs - callers must use constructor functions
 type auto struct{}
 type softwareMode struct{ store software.Store }
-type hardwareMode struct{ kind hardware.Kind }
 type provided struct{ identity *age.X25519Identity }
 
 // Marker method implementations (unexported = sealed)
 func (auto) mode()         {}
 func (softwareMode) mode() {}
-func (hardwareMode) mode() {}
 func (provided) mode()     {}
 
 // Auto returns a mode that detects configuration from existing files.
@@ -35,17 +32,6 @@ func Software(store software.Store) Mode {
 		panic("vault.Software: store must not be nil")
 	}
 	return softwareMode{store: store}
-}
-
-// Hardware returns a mode using a key stored on a hardware device.
-// The agent mediates access to the hardware token.
-// Panics if kind is empty (programming error). Unknown kinds return
-// errors from NewManager, not panics, since they may come from config.
-func Hardware(kind hardware.Kind) Mode {
-	if kind == "" {
-		panic("vault.Hardware: kind must not be empty")
-	}
-	return hardwareMode{kind: kind}
 }
 
 // Provided returns a mode using an already-decrypted identity.

@@ -10,7 +10,7 @@ import (
 )
 
 // SoftwareProvider implements Provider using an in-memory age X25519 identity.
-// This is the default provider, compatible with CGO=0 builds.
+// This is the default provider.
 type SoftwareProvider struct {
 	identity *age.X25519Identity
 }

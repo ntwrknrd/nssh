@@ -26,7 +26,7 @@ SSH wrapper for power users: manage hosts and credentials, inject passwords auto
 
 - **Interactive PTY connector** - In-process password injection without external tools (see [ARCHITECTURE.md](docs/ARCHITECTURE.md#pty-connector-architecture))
 - **Fuzzy host selection** - Exact matches connect instantly; partial matches use `fzf` for interactive filtering
-- **Agent-based credential management** - Background daemon holds decrypted credentials with configurable idle/lifetime timeouts; supports passphrase-protected keys and YubiKey PIV hardware tokens
+- **Agent-based credential management** - Background daemon holds decrypted credentials with configurable idle/lifetime timeouts and passphrase-protected keys
 - **Age-encrypted vault** - Context-aware storage with domain-based resolution and host-specific overrides; passwords never in plaintext or CLI args (streamed directly through the PTY connector)
 - **SSH config management** - Create, remove, sort, and update host entries in SSH config files with automatic alphabetical sorting, timestamped backups, and indexed lookups across SSH 'Include' config files
 - **Legacy device compatibility** - Auto-detects SSH algorithm mismatches and applies KEX/cipher/MAC fixes for older network equipment (see [ARCHITECTURE.md](docs/ARCHITECTURE.md#ssh-compatibility-detection-and-remediation))
@@ -94,13 +94,10 @@ nssh is built on the shoulders of exceptional open-source tools and communities.
 - [Charm](https://github.com/charmbracelet) (MIT) - Terminal UI libraries (Huh, Lipgloss, Bubble Tea)
 - [age](https://github.com/FiloSottile/age) (BSD-3-Clause) - Modern file encryption
 - [memguard](https://github.com/awnumar/memguard) (Apache-2.0) - Secure memory management
-- [go-piv](https://github.com/go-piv/piv-go) (Apache-2.0) - YubiKey PIV library (optional - hardware key support)
 
 **License Compatibility:**
 This project is licensed under [GNU GPL-3.0](https://github.com/ntwrknrd/nssh/blob/main/LICENSE), which is compatible with all the above dependencies.
 
 ## Roadmap
-- **Additional Hardware Authentication Support:**
-   - FIDO2/WebAuthn (wider range of hardware security key support)
-   - Secure Enclave (native macOS hardware security)
+
 - **Native Recording Engine:** Potentially replace asciinema subprocess

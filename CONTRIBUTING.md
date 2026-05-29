@@ -10,10 +10,7 @@ cd nssh
 # Build for current platform
 make build
 
-# Or build with YubiKey PIV support (requires libpcsclite-dev on Linux)
-make build-hardware
-
-# Cross-compilation (software-only, no hardware support)
+# Cross-compilation
 make darwin-arm64
 make darwin-amd64
 make linux-amd64

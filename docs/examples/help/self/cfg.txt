@@ -1,6 +1,6 @@
 $ nssh self cfg --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh self cfg [flags]             View or edit nssh configuration          │
+│   nssh self cfg [flags]             Manage configuration                     │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
 │   --edit                            open config in editor                    │

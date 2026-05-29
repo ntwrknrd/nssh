@@ -723,7 +723,7 @@ func newCpCmd() *cobra.Command {
 func newBenchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bench",
-		Short: "Run performance benchmarks",
+		Short: "Performance benchmarking",
 		Long:  "Run performance benchmarks for SSH and SCP connections.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -739,7 +739,7 @@ func newBenchCmd() *cobra.Command {
 func newSelfCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "self",
-		Short: "Manage nssh installation",
+		Short: "Manage nssh",
 		Long:  "Manage nssh installation, shell integration, and updates.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -753,7 +753,6 @@ func newSelfCmd() *cobra.Command {
 	cmd.AddCommand(self.NewResetCmd())
 	cmd.AddCommand(self.NewVersionCmd())
 	cmd.AddCommand(self.NewRekeyCmd())
-	cmd.AddCommand(self.NewPivCmd())
 	cmd.AddCommand(self.NewCfgCmd())
 	cmd.AddCommand(newBenchCmd())
 
@@ -897,13 +896,12 @@ func spawnHostAdd(hostname string) error {
 }
 
 // runAgentMode runs the agent daemon.
-// This is invoked via "nssh __agent" from the Spawn or SpawnPIV function.
-// In software mode, the identity is passed via inherited pipe (fd 3).
-// In PIV mode, the YubiKey PIN is passed via the same pipe.
+// This is invoked via "nssh __agent" from the Spawn function.
+// The age identity is passed via inherited pipe (fd 3).
 // Readiness is signaled via another pipe (fd 4).
 func runAgentMode() {
 	// Get pipes from inherited file descriptors
-	dataPipe := os.NewFile(3, "data-pipe") // identity (software) or PIN (PIV)
+	dataPipe := os.NewFile(3, "data-pipe")
 	readyPipe := os.NewFile(4, "ready-pipe")
 
 	// Helper to signal error to parent and exit
@@ -939,75 +937,29 @@ func runAgentMode() {
 		signalError("failed to load config: " + err.Error())
 	}
 
-	// Detect mode from filesystem (single source of truth)
 	paths := config.DefaultPaths()
-	mode, err := vault.DetectSecurityMode(paths.ConfigDir)
+
+	// Read identity from pipe directly into memguard-protected memory.
+	// Age X25519 identity is 74 bytes: "AGE-SECRET-KEY-1" + 58 chars.
+	// We use 256 as max to handle any whitespace/newlines.
+	identitySecret, err := secret.NewFromReader(dataPipe, 256)
+	_ = dataPipe.Close()
 	if err != nil {
-		signalError("failed to detect security mode: " + err.Error())
+		signalError("failed to read identity: " + err.Error())
 	}
 
-	// Create provider based on detected mode
-	var provider agent.Provider
-
-	switch mode {
-	case agent.ModePIV:
-		// PIV mode: pipe contains PIN, not identity
-		pinSecret, err := secret.NewFromReader(dataPipe, 256)
-		_ = dataPipe.Close()
-		if err != nil {
-			signalError("failed to read PIN: " + err.Error())
-		}
-
-		// Extract PIN from secure memory for the callback
-		var pin string
-		if err := pinSecret.UseString(func(s string) error {
-			pin = strings.TrimSpace(s)
-			return nil
-		}); err != nil {
-			pinSecret.Destroy()
-			signalError("failed to access PIN: " + err.Error())
-		}
-		pinSecret.Destroy()
-
-		// Create PIV provider with PIN callback
-		// Note: NewPIVProvider will block waiting for YubiKey touch
-		pivProvider, err := agent.NewPIVProvider(
-			config.DefaultPaths().ConfigDir,
-			func() (string, error) { return pin, nil },
-		)
-		if err != nil {
-			signalError("PIV provider: " + err.Error())
-		}
-		provider = pivProvider
-
-	default: // "software" or unset
-		// Software mode: pipe contains the age X25519 identity
-		// Read identity from pipe directly into memguard-protected memory.
-		// Age X25519 identity is 74 bytes: "AGE-SECRET-KEY-1" + 58 chars.
-		// We use 256 as max to handle any whitespace/newlines.
-		identitySecret, err := secret.NewFromReader(dataPipe, 256)
-		_ = dataPipe.Close()
-		if err != nil {
-			signalError("failed to read identity: " + err.Error())
-		}
-
-		// Parse the age identity from secure memory
-		var identity *age.X25519Identity
-		if err := identitySecret.UseString(func(s string) error {
-			var parseErr error
-			identity, parseErr = age.ParseX25519Identity(strings.TrimSpace(s))
-			return parseErr
-		}); err != nil {
-			identitySecret.Destroy()
-			signalError("failed to parse identity: " + err.Error())
-		}
-
-		// Destroy the secret - identity is now held by the age library
+	// Parse the age identity from secure memory.
+	var identity *age.X25519Identity
+	if err := identitySecret.UseString(func(s string) error {
+		var parseErr error
+		identity, parseErr = age.ParseX25519Identity(strings.TrimSpace(s))
+		return parseErr
+	}); err != nil {
 		identitySecret.Destroy()
-
-		// Create provider with identity
-		provider = agent.NewSoftwareProvider(identity)
+		signalError("failed to parse identity: " + err.Error())
 	}
+	identitySecret.Destroy()
+	provider := agent.NewSoftwareProvider(identity)
 
 	// Resolve recording paths for the archiver (honors recording config/env)
 	recordingSettings := recording.LoadRecordingSettings()

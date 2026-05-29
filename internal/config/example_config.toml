@@ -29,10 +29,6 @@
 
 [agent.security]
 
-# Security mode: "software", "piv", "fido2", "secureenclave"
-# Hardware modes require building nssh with appropriate tags
-# mode = "software"
-
 # ============================================================================
 # [agent.security.software]
 # ============================================================================

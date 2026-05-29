@@ -23,66 +23,42 @@ import (
 // NewRekeyCmd creates the rekey command.
 func NewRekeyCmd() *cobra.Command {
 	var (
-		repairPubkey   bool
-		rollback       bool
-		switchHardware bool
-		switchSoftware bool
+		repairPubkey bool
+		rollback     bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "rekey",
-		Short: "Rotate or switch security mode",
-		Long: `Rotate the credential encryption keys or switch between security modes.
+		Short: "Rotate keys",
+		Long: `Rotate the credential encryption keys.
 
-By default, rotates keys within the current mode:
-  - Software mode: generates new passphrase-protected key
-  - Hardware mode: generates new age identity (P-256 key on YubiKey preserved)
-
-Use --software or --hardware to switch security modes while preserving
-all stored credentials. The vault is re-encrypted with the new key.
+Generates a new passphrase-protected age identity and re-encrypts the vault.
 
 Use --repair-pubkey to regenerate the public key file without rotating keys.
-Use --rollback to restore from the most recent rollback backup (rekey or mode switch).`,
+Use --rollback to restore from the most recent rollback backup.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if rollback {
 				return runRollback()
 			}
-			return runRekey(repairPubkey, switchHardware, switchSoftware)
+			return runRekey(repairPubkey)
 		},
 	}
 
 	cmd.Flags().BoolVar(&repairPubkey, "repair-pubkey", false, "regenerate age.pub without rotation")
 	cmd.Flags().BoolVar(&rollback, "rollback", false, "restore from rollback backup")
-	cmd.Flags().BoolVar(&switchHardware, "hardware", false, "switch to YubiKey PIV mode")
-	cmd.Flags().BoolVar(&switchSoftware, "software", false, "switch to passphrase mode")
 
 	return cmd
 }
 
-func runRekey(repairPubkey, switchHardware, switchSoftware bool) error {
+func runRekey(repairPubkey bool) error {
 	paths := config.DefaultPaths()
 	cfg, err := config.LoadDefault()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	// Validate flags
-	if switchHardware && switchSoftware {
-		return fmt.Errorf("cannot specify both --hardware and --software")
-	}
-
-	// Detect current mode from filesystem
-	currentMode, err := vault.DetectSecurityMode(paths.ConfigDir)
-	if err != nil {
+	if _, err := vault.DetectSecurityMode(paths.ConfigDir); err != nil {
 		return fmt.Errorf("detect security mode: %w", err)
-	}
-
-	// Validate mode switch flags
-	if switchHardware && currentMode == agent.ModePIV {
-		return fmt.Errorf("already in hardware mode. Use 'rekey' without flags to rotate keys")
-	}
-	if switchSoftware && currentMode == agent.ModeSoftware {
-		return fmt.Errorf("already in software mode. Use 'rekey' without flags to rotate keys")
 	}
 
 	ui.CommandStart("REKEY CREDENTIALS")
@@ -105,23 +81,6 @@ func runRekey(repairPubkey, switchHardware, switchSoftware bool) error {
 	if repairPubkey {
 		return repairPublicKey(mgr, paths)
 	}
-
-	// Dispatch based on flags and current mode
-	switch {
-	case switchHardware:
-		// software -> hardware mode switch
-		return runSoftwareToHardware(paths, cfg)
-	case switchSoftware:
-		// hardware -> software mode switch
-		return runHardwareToSoftware(paths, cfg)
-	case currentMode == agent.ModePIV:
-		// Same-mode rekey for hardware
-		return runRekeyPIV(paths, cfg)
-	default:
-		// Same-mode rekey for software (fall through to existing logic)
-	}
-
-	// Software mode: Continue with passphrase-based rekey
 
 	// Create target store config
 	ksCfg := software.Config{
@@ -329,9 +288,8 @@ func reEncryptVaultSafely(mgr *vault.Manager, newRecipient age.Recipient, newIde
 }
 
 const (
-	rollbackPrefixRekey      = "rekey-rollback-"
-	rollbackPrefixModeSwitch = "mode-switch-rollback-"
-	rollbackTimeFormat       = "20060102-150405"
+	rollbackPrefixRekey = "rekey-rollback-"
+	rollbackTimeFormat  = "20060102-150405"
 )
 
 type rollbackMetadata struct {
@@ -352,10 +310,8 @@ func createRollbackBackup(rollbackDir string, paths *config.Paths) error {
 		src, dst string
 	}{
 		{filepath.Join(paths.ConfigDir, "age.key.enc"), filepath.Join(rollbackDir, "age.key.enc")},
-		{filepath.Join(paths.ConfigDir, "age.key.piv"), filepath.Join(rollbackDir, "age.key.piv")},
 		{filepath.Join(paths.ConfigDir, "age.key"), filepath.Join(rollbackDir, "age.key")},
 		{filepath.Join(paths.ConfigDir, "age.pub"), filepath.Join(rollbackDir, "age.pub")},
-		{filepath.Join(paths.ConfigDir, "piv.json"), filepath.Join(rollbackDir, "piv.json")},
 		{paths.CredentialsFile, filepath.Join(rollbackDir, "credentials.age")},
 		{paths.ConfigFile, filepath.Join(rollbackDir, "config.toml")},
 	}
@@ -400,27 +356,6 @@ func readRollbackMetadata(rollbackDir string) rollbackMetadata {
 	return meta
 }
 
-// createModeSwitchBackup creates a rollback backup when changing security modes.
-// Used by mode_switch.go (hardware builds only).
-//
-//nolint:unused // used in hardware builds (mode_switch.go)
-func createModeSwitchBackup(paths *config.Paths, fromMode, toMode string) (string, error) {
-	rollbackDir := filepath.Join(paths.BackupDir, fmt.Sprintf("%s%s", rollbackPrefixModeSwitch, time.Now().Format(rollbackTimeFormat)))
-
-	if err := createRollbackBackup(rollbackDir, paths); err != nil {
-		return "", err
-	}
-
-	writeRollbackMetadata(rollbackDir, rollbackMetadata{
-		Kind:      "mode-switch",
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		FromMode:  fromMode,
-		ToMode:    toMode,
-	})
-
-	return rollbackDir, nil
-}
-
 // copyFile copies a file from src to dst.
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
@@ -458,7 +393,7 @@ func purgeOldVaultBackups(backupDir, currentRollbackDir string) int {
 		}
 
 		// Remove old rollback directories from previous failed/successful operations
-		if entry.IsDir() && (strings.HasPrefix(name, rollbackPrefixRekey) || strings.HasPrefix(name, rollbackPrefixModeSwitch)) {
+		if entry.IsDir() && strings.HasPrefix(name, rollbackPrefixRekey) {
 			if err := os.RemoveAll(path); err == nil {
 				purged++
 			}
@@ -499,16 +434,6 @@ func runRollback() error {
 			created = "unknown time"
 		}
 		switch meta.Kind {
-		case "mode-switch":
-			from := meta.FromMode
-			if from == "" {
-				from = "unknown"
-			}
-			to := meta.ToMode
-			if to == "" {
-				to = "unknown"
-			}
-			ui.Info("Type: mode switch (%s -> %s) at %s", from, to, created)
 		case "rekey":
 			ui.Info("Type: rekey (created %s)", created)
 		default:
@@ -556,15 +481,10 @@ func findLatestRollback(backupDir string) (string, error) {
 
 		name := entry.Name()
 
-		var ts string
-		switch {
-		case strings.HasPrefix(name, rollbackPrefixRekey):
-			ts = strings.TrimPrefix(name, rollbackPrefixRekey)
-		case strings.HasPrefix(name, rollbackPrefixModeSwitch):
-			ts = strings.TrimPrefix(name, rollbackPrefixModeSwitch)
-		default:
+		if !strings.HasPrefix(name, rollbackPrefixRekey) {
 			continue
 		}
+		ts := strings.TrimPrefix(name, rollbackPrefixRekey)
 
 		t, err := time.Parse(rollbackTimeFormat, ts)
 		if err != nil {
@@ -590,11 +510,9 @@ func restoreFromRollback(rollbackDir string, paths *config.Paths) error {
 		src, dst string
 	}{
 		{filepath.Join(rollbackDir, "age.key.enc"), filepath.Join(paths.ConfigDir, "age.key.enc")},
-		{filepath.Join(rollbackDir, "age.key.piv"), filepath.Join(paths.ConfigDir, "age.key.piv")},
 		{filepath.Join(rollbackDir, "age.key"), filepath.Join(paths.ConfigDir, "age.key")},
 		{filepath.Join(rollbackDir, "age.pub"), filepath.Join(paths.ConfigDir, "age.pub")},
 		{filepath.Join(rollbackDir, "credentials.age"), paths.CredentialsFile},
-		{filepath.Join(rollbackDir, "piv.json"), filepath.Join(paths.ConfigDir, "piv.json")},
 		{filepath.Join(rollbackDir, "config.toml"), paths.ConfigFile},
 	}
 

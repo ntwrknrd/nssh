@@ -5,17 +5,11 @@ This file provides guidance to AI coding agents when working with code in this r
 ## Build Commands
 
 ```bash
-# Standard build (software-only, no CGO)
+# Standard build
 make build
-
-# Hardware-enabled build (requires PC/SC: libpcsclite-dev on Linux)
-make build-hardware
 
 # Cross-compile for Linux
 make linux
-
-# Verify both builds succeed
-make verify-builds
 ```
 
 ## Testing
@@ -23,9 +17,6 @@ make verify-builds
 ```bash
 # Run all tests
 make test
-
-# Run hardware-enabled tests
-make test-hardware
 
 # Run a single test
 go test ./internal/agent -run TestDaemon
@@ -72,8 +63,6 @@ nssh is an SSH wrapper providing host management, encrypted credential storage, 
 **Argument Preprocessing**: `preprocessArgs()` in main.go transforms `nssh hostname` to `nssh smart-connect hostname`, separating global flags from SSH passthrough flags.
 
 **Two-Layer Credential System**: Vault owns encrypted on-disk data; Agent holds decrypted session in memory via Unix socket. Commands can run with vault locked (will prompt or proceed without passwords).
-
-**Build Tags**: Hardware features (YubiKey PIV) use `hardware` build tag. Stub files (`*_stub.go`) provide no-op implementations for standard builds.
 
 **PTY Connector**: Ring buffer with tiered pattern matching (suffix -> contains -> regex) for prompt detection. Passwords held as `*secret.Secret`, accessed via `secret.Use()`.
 

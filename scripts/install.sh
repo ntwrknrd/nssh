@@ -5,16 +5,7 @@ set -e
 REPO="ntwrknrd/nssh"
 INSTALL_DIR="${HOME}/.local/bin"
 BINARY="nssh"
-HARDWARE=false
-
-# Parse arguments
-for arg in "$@"; do
-    case "$arg" in
-        --hardware)
-            HARDWARE=true
-            ;;
-    esac
-done
+RELEASE=""
 
 # Colors (if terminal supports it)
 if [ -t 1 ]; then
@@ -51,6 +42,22 @@ error() {
     exit 1
 }
 
+# Parse arguments
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --release)
+            if [ "$#" -lt 2 ]; then
+                error "--release requires a value"
+            fi
+            RELEASE="$2"
+            shift 2
+            ;;
+        *)
+            error "Unknown option: $1"
+            ;;
+    esac
+done
+
 # Detect OS
 detect_os() {
     case "$(uname -s)" in
@@ -81,6 +88,21 @@ get_latest_version() {
     echo "${VERSION}"
 }
 
+normalize_version() {
+    VERSION="$1"
+    case "${VERSION}" in
+        *[!A-Za-z0-9._-]*|'')
+            error "Invalid release tag: ${VERSION}"
+            ;;
+    esac
+    case "${VERSION}" in
+        [0-9]*)
+            VERSION="v${VERSION}"
+            ;;
+    esac
+    echo "${VERSION}"
+}
+
 # Compute SHA256 checksum (works on both macOS and Linux)
 sha256() {
     if command -v sha256sum >/dev/null 2>&1; then
@@ -99,20 +121,21 @@ main() {
 
     info "Detecting platform: ${OS}/${ARCH}"
 
-    VERSION=$(get_latest_version)
+    if [ -n "${RELEASE}" ]; then
+        VERSION=$(normalize_version "${RELEASE}")
+    else
+        VERSION=$(get_latest_version)
+    fi
     VERSION_NUM=${VERSION#v}  # strip 'v' prefix
 
-    info "Latest version: ${VERSION}"
-
-    # Build URLs based on hardware flag
-    if [ "${HARDWARE}" = true ]; then
-        ARCHIVE="nssh-hardware_${VERSION_NUM}_${OS}_${ARCH}.tar.gz"
-        ARCHIVE_BINARY="nssh-hardware"
-        info "Installing hardware build (YubiKey/PIV support)"
+    if [ -n "${RELEASE}" ]; then
+        info "Selected version: ${VERSION}"
     else
-        ARCHIVE="nssh_${VERSION_NUM}_${OS}_${ARCH}.tar.gz"
-        ARCHIVE_BINARY="nssh"
+        info "Latest version: ${VERSION}"
     fi
+
+    ARCHIVE="nssh_${VERSION_NUM}_${OS}_${ARCH}.tar.gz"
+    ARCHIVE_BINARY="nssh"
     BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
 
     # Create temp directory

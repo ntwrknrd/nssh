@@ -38,8 +38,16 @@ Examples:
   nssh cp myhost:~/file.txt ./           # pull from remote
   nssh cp ./file.txt myhost:~/           # push to remote
   nssh cp -r myhost:~/dir ./local/       # recursive pull`,
-		Args: cobra.ExactArgs(2),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return nil
+			}
+			return cobra.ExactArgs(2)(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
 			return runCp(args[0], args[1], recursive, preserve, quiet, verbose)
 		},
 	}

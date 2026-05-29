@@ -117,78 +117,9 @@ func waitForReady(r *os.File, timeout time.Duration) error {
 	return fmt.Errorf("agent sent unexpected response: %q", msg)
 }
 
-// SpawnPIV starts a new agent daemon in PIV mode.
-//
-// Instead of passing the decrypted identity like Spawn(), this passes the
-// YubiKey PIN. The agent uses the PIN to unlock the YubiKey and decrypt
-// the age identity stored in age.key.piv.
-//
-// The PIN is passed via the same pipe mechanism (fd 3) as the identity
-// in software mode. The agent determines what to expect based on the
-// configured security mode.
-func SpawnPIV(pinSecret *secret.Secret) error {
-	// Create pipe for PIN transfer (parent writes, agent reads)
-	pinR, pinW, err := os.Pipe()
-	if err != nil {
-		return fmt.Errorf("create PIN pipe: %w", err)
-	}
-
-	// Create pipe for readiness signal (agent writes, parent reads)
-	readyR, readyW, err := os.Pipe()
-	if err != nil {
-		_ = pinR.Close()
-		_ = pinW.Close()
-		return fmt.Errorf("create ready pipe: %w", err)
-	}
-
-	// Prepare the agent command
-	cmd := exec.Command(os.Args[0], "__agent")
-
-	// Pass pipes as extra files (will become fd 3 and fd 4 in child)
-	cmd.ExtraFiles = []*os.File{pinR, readyW}
-
-	// Daemonize: create new session (no controlling terminal)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true,
-	}
-
-	// Prevent stdin/stdout/stderr inheritance
-	cmd.Stdin = nil
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-
-	// Start the agent
-	if err := cmd.Start(); err != nil {
-		_ = pinR.Close()
-		_ = pinW.Close()
-		_ = readyR.Close()
-		_ = readyW.Close()
-		return fmt.Errorf("start agent: %w", err)
-	}
-
-	// Close pipe ends we don't need
-	_ = pinR.Close()   // Agent will read from fd 3
-	_ = readyW.Close() // Agent will write to fd 4
-
-	// Pass PIN through pipe using secure memory access
-	err = pinSecret.Use(func(pinBytes []byte) error {
-		_, writeErr := pinW.Write(pinBytes)
-		return writeErr
-	})
-	_ = pinW.Close()
-
-	if err != nil {
-		_ = readyR.Close()
-		return fmt.Errorf("write PIN to pipe: %w", err)
-	}
-
-	// Wait for agent to signal readiness (or report error)
-	return waitForReady(readyR, SpawnTimeout)
-}
-
 // SpawnCache starts a cache-only agent daemon.
 func SpawnCache() error {
-	// Keep the fd layout identical to Spawn/SpawnPIV so __agent startup stays simple.
+	// Keep the fd layout identical to Spawn so __agent startup stays simple.
 	dataR, dataW, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("create data pipe: %w", err)

@@ -103,9 +103,7 @@ func TestProviderModeConstants(t *testing.T) {
 		want     string
 	}{
 		{"ModeSoftware", ModeSoftware, "software"},
-		{"ModePIV", ModePIV, "piv"},
-		{"ModeFIDO2", ModeFIDO2, "fido2"},
-		{"ModeSecureEnclave", ModeSecureEnclave, "secureenclave"},
+		{"ModeCache", ModeCache, "cache"},
 	}
 
 	for _, tt := range tests {
@@ -114,17 +112,5 @@ func TestProviderModeConstants(t *testing.T) {
 				t.Errorf("%s = %q, want %q", tt.name, tt.constant, tt.want)
 			}
 		})
-	}
-}
-
-// TestHardwareStubReturnsError is in provider_stub_test.go (needs !hardware build tag)
-
-func TestSecureEnclaveStubReturnsError(t *testing.T) {
-	_, err := NewSecureEnclaveProvider()
-	if err == nil {
-		t.Error("NewSecureEnclaveProvider() expected error (stub), got nil")
-	}
-	if err != ErrSecureEnclaveNotAvailable {
-		t.Errorf("NewSecureEnclaveProvider() error = %v, want %v", err, ErrSecureEnclaveNotAvailable)
 	}
 }

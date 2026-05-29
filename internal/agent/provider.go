@@ -5,17 +5,13 @@ package agent
 import "github.com/ntwrknrd/nssh/internal/session/mode"
 
 // Provider abstracts cryptographic operations for different security modes.
-// The agent delegates decryption to a Provider, enabling software-only and
-// hardware-backed security modes.
+// The agent delegates decryption to a Provider.
 //
 // Implementations:
-//   - softwareProvider: Default, holds age X25519 identity in memory (CGO=0 compatible)
-//   - pivProvider: PIV/YubiKey hardware token (requires hardware build tag + CGO)
-//   - fido2Provider: FIDO2/WebAuthn hardware key (requires hardware build tag + CGO)
-//   - secureEnclaveProvider: macOS Secure Enclave (requires secureenclave build tag + CGO)
+//   - softwareProvider: Default, holds age X25519 identity in memory
 type Provider interface {
 	// Mode returns the security mode identifier.
-	// Examples: "software", "piv", "fido2", "secureenclave"
+	// Example: "software"
 	Mode() string
 
 	// Decrypt decrypts age-encrypted ciphertext using the provider's key.
@@ -33,9 +29,6 @@ type Provider interface {
 
 // ProviderMode constants for Provider.Mode() return values.
 const (
-	ModeSoftware      = string(mode.Software)
-	ModePIV           = string(mode.PIV)
-	ModeFIDO2         = string(mode.FIDO2)
-	ModeSecureEnclave = string(mode.SecureEnclave)
-	ModeCache         = "cache"
+	ModeSoftware = string(mode.Software)
+	ModeCache    = "cache"
 )

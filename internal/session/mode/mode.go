@@ -6,16 +6,13 @@ package mode
 type Mode string
 
 const (
-	Software      Mode = "software"
-	PIV           Mode = "piv"
-	FIDO2         Mode = "fido2"
-	SecureEnclave Mode = "secureenclave"
+	Software Mode = "software"
 )
 
 // Valid returns true if the mode is a known type.
 func (m Mode) Valid() bool {
 	switch m {
-	case Software, PIV, FIDO2, SecureEnclave:
+	case Software:
 		return true
 	}
 	return false

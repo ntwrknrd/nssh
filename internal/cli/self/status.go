@@ -36,7 +36,7 @@ func SetVersion(v, c, d, f string) {
 func NewStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "Show installation status",
+		Short: "Show status",
 		Long: `Display the current installation status of nssh, including:
 - Version information
 - Binary location
@@ -124,17 +124,8 @@ func runStatus() error {
 	// Detect mode from filesystem and show appropriate key file
 	detectedMode, detectErr := vault.DetectSecurityMode(paths.ConfigDir)
 	if detectErr == nil {
-		switch detectedMode {
-		case agent.ModePIV:
-			printFileStatus(filepath.Join(paths.ConfigDir, "piv.json"), "PIV keystore")
-		default:
-			printFileStatus(filepath.Join(paths.ConfigDir, "age.key.enc"), "Encrypted key")
-		}
-		securityMode := detectedMode
-		if securityMode != agent.ModeSoftware {
-			securityMode = fmt.Sprintf("hardware (%s)", securityMode)
-		}
-		ui.StatusLineNeutral("Security mode", securityMode)
+		printFileStatus(filepath.Join(paths.ConfigDir, "age.key.enc"), "Encrypted key")
+		ui.StatusLineNeutral("Security mode", detectedMode)
 	} else {
 		ui.StatusLineNeutral("Security mode", "not initialized")
 	}

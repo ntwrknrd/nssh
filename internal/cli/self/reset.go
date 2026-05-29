@@ -43,7 +43,7 @@ func NewResetCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "reset",
-		Short: "Delete all nssh data and start fresh",
+		Short: "Reset configuration",
 		Long: `Reset nssh by deleting all configuration and credentials.
 
 This command permanently deletes:

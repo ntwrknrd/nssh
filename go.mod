@@ -9,7 +9,6 @@ require (
 	github.com/charmbracelet/huh v0.8.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/creack/pty v1.1.24
-	github.com/go-piv/piv-go/v2 v2.4.0
 	github.com/mattn/go-runewidth v0.0.19
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10

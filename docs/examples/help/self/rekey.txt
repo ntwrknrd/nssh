@@ -1,12 +1,10 @@
 $ nssh self rekey --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh self rekey [flags]           Rotate or switch security mode           │
+│   nssh self rekey [flags]           Rotate keys                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
-│   --hardware                        switch to YubiKey PIV mode               │
 │   --repair-pubkey                   regenerate age.pub without rotation      │
 │   --rollback                        restore from rollback backup             │
-│   --software                        switch to passphrase mode                │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

@@ -22,17 +22,17 @@ func TestDetectSecurityMode(t *testing.T) {
 			wantMode: string(mode.Software),
 		},
 		{
-			name:     "hardware mode - piv.json exists",
-			setup:    func(dir string) { createFile(t, dir, "piv.json") },
-			wantMode: string(mode.PIV),
+			name:    "piv marker alone is not initialized",
+			setup:   func(dir string) { createFile(t, dir, "piv.json") },
+			wantErr: ErrNotInitialized,
 		},
 		{
-			name: "ambiguous - both exist",
+			name: "software wins even with leftover piv marker",
 			setup: func(dir string) {
 				createFile(t, dir, "age.key.enc")
 				createFile(t, dir, "piv.json")
 			},
-			wantErr: ErrAmbiguousMode,
+			wantMode: string(mode.Software),
 		},
 		{
 			name:    "not initialized - neither exists",
@@ -65,50 +65,6 @@ func TestDetectSecurityMode(t *testing.T) {
 	}
 }
 
-func TestHasMultipleKeystores(t *testing.T) {
-	tests := []struct {
-		name  string
-		setup func(dir string)
-		want  bool
-	}{
-		{
-			name:  "neither exists",
-			setup: func(dir string) {},
-			want:  false,
-		},
-		{
-			name:  "only software",
-			setup: func(dir string) { createFile(t, dir, "age.key.enc") },
-			want:  false,
-		},
-		{
-			name:  "only hardware",
-			setup: func(dir string) { createFile(t, dir, "piv.json") },
-			want:  false,
-		},
-		{
-			name: "both exist",
-			setup: func(dir string) {
-				createFile(t, dir, "age.key.enc")
-				createFile(t, dir, "piv.json")
-			},
-			want: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			tt.setup(dir)
-
-			got := HasMultipleKeystores(dir)
-			if got != tt.want {
-				t.Errorf("HasMultipleKeystores() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestIsInitialized(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -126,12 +82,12 @@ func TestIsInitialized(t *testing.T) {
 			want:  true,
 		},
 		{
-			name:  "hardware initialized",
+			name:  "legacy piv marker is not initialized",
 			setup: func(dir string) { createFile(t, dir, "piv.json") },
-			want:  true,
+			want:  false,
 		},
 		{
-			name: "both initialized",
+			name: "software initialized with leftover piv marker",
 			setup: func(dir string) {
 				createFile(t, dir, "age.key.enc")
 				createFile(t, dir, "piv.json")

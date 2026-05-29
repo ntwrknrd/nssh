@@ -1,4 +1,4 @@
-.PHONY: build build-hardware test test-hardware \
+.PHONY: build test \
         darwin-arm64 darwin-amd64 linux-amd64 linux-arm64 \
         recordings recordings-up recordings-down recordings-clean
 
@@ -14,11 +14,7 @@ BUILDFLAGS := -trimpath -buildvcs=false
 build:
 	go build $(LDFLAGS) $(BUILDFLAGS) -o $(OUTPUT_DIR)/nssh ./cmd/nssh
 
-# Hardware-enabled build (requires PC/SC: libpcsclite-dev on Linux, PCSC.framework on macOS)
-build-hardware:
-	CGO_ENABLED=1 go build -tags hardware $(LDFLAGS) $(BUILDFLAGS) -o $(OUTPUT_DIR)/nssh-hardware ./cmd/nssh
-
-# Cross-compilation targets (software-only, no CGO/hardware support)
+# Cross-compilation targets
 darwin-arm64:
 	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) $(BUILDFLAGS) -o $(OUTPUT_DIR)/nssh-darwin-arm64 ./cmd/nssh
 
@@ -36,11 +32,6 @@ test:
 	go vet ./...
 	gofmt -w .
 	go test ./...
-
-test-hardware:
-	go vet ./...
-	gofmt -w .
-	CGO_ENABLED=1 go test -tags hardware ./...
 
 # Recording targets (VHS-based) - generates gif recordings
 recordings: recordings-up

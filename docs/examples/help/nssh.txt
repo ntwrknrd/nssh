@@ -9,7 +9,7 @@ $ nssh --help
 │   inv                               Manage inventory                         │
 │   lock                              Lock credential vault                    │
 │   log                               Manage session recordings                │
-│   self                              Manage nssh installation                 │
+│   self                              Manage nssh                              │
 │   unlock                            Unlock credential vault                  │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮

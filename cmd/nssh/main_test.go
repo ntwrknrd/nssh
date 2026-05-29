@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -65,6 +67,107 @@ func TestRootCommandCutover(t *testing.T) {
 	for _, removed := range []string{"host", "ctx", "sync"} {
 		if cmd, _, err := root.Find([]string{removed}); err == nil && cmd != root && cmd.Name() == removed {
 			t.Fatalf("removed command %q is still registered", removed)
+		}
+	}
+}
+
+func TestHardwareKeySurfacesAreRemoved(t *testing.T) {
+	root := newRootCmd()
+
+	if cmd, _, err := root.Find([]string{"self", "piv"}); err == nil && cmd.Name() == "piv" {
+		t.Fatal("self piv command should not be registered")
+	}
+
+	reinstall, _, err := root.Find([]string{"self", "reinstall"})
+	if err != nil {
+		t.Fatalf("find self reinstall: %v", err)
+	}
+	if reinstall.Flags().Lookup("hardware") != nil {
+		t.Fatal("self reinstall should not expose --hardware")
+	}
+	if reinstall.Flags().Lookup("release") == nil {
+		t.Fatal("self reinstall should expose --release")
+	}
+
+	rekey, _, err := root.Find([]string{"self", "rekey"})
+	if err != nil {
+		t.Fatalf("find self rekey: %v", err)
+	}
+	for _, flag := range []string{"hardware", "software"} {
+		if rekey.Flags().Lookup(flag) != nil {
+			t.Fatalf("self rekey should not expose --%s", flag)
+		}
+	}
+}
+
+func TestBuildAndInstallSurfacesDoNotMentionHardwareOrCGO(t *testing.T) {
+	for _, file := range []string{"Makefile", filepath.Join("scripts", "install.sh")} {
+		data, err := os.ReadFile(filepath.Join(repoRoot(), file))
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		text := strings.ToLower(string(data))
+		for _, reject := range []string{"hardware", "cgo", "piv"} {
+			if strings.Contains(text, reject) {
+				t.Fatalf("%s should not mention %q after hardware-key support removal", file, reject)
+			}
+		}
+	}
+}
+
+func TestSelfHelpDoesNotTruncate(t *testing.T) {
+	root := newRootCmd()
+	for _, path := range [][]string{
+		{"self"},
+		{"self", "reinstall"},
+		{"self", "rekey"},
+	} {
+		cmd, _, err := root.Find(path)
+		if err != nil {
+			t.Fatalf("find %v: %v", path, err)
+		}
+		help := ui.RenderStyledHelp(cmd, ui.StyledHelpConfig{ShowGlobalFlags: true, Width: 80})
+		if strings.Contains(help, "...") {
+			t.Fatalf("%s help should not be truncated:\n%s", strings.Join(path, " "), help)
+		}
+	}
+}
+
+func TestSelfHelpUsesApprovedCommandDescriptions(t *testing.T) {
+	root := newRootCmd()
+	cmd, _, err := root.Find([]string{"self"})
+	if err != nil {
+		t.Fatalf("find self: %v", err)
+	}
+
+	help := ui.RenderStyledHelp(cmd, ui.StyledHelpConfig{ShowGlobalFlags: true, Width: 80})
+	for _, want := range []string{
+		"bench                             Performance benchmarking",
+		"cfg                               Manage configuration",
+		"init                              Initialize configuration",
+		"reset                             Reset configuration",
+	} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("self help missing %q:\n%s", want, help)
+		}
+	}
+}
+
+func TestSelfReinstallHelpSaysGitHubPackage(t *testing.T) {
+	root := newRootCmd()
+	cmd, _, err := root.Find([]string{"self", "reinstall"})
+	if err != nil {
+		t.Fatalf("find self reinstall: %v", err)
+	}
+
+	help := ui.RenderStyledHelp(cmd, ui.StyledHelpConfig{ShowGlobalFlags: true, Width: 80})
+	for _, want := range []string{
+		"Install latest from GitHub",
+		"--release STRING",
+		"GitHub release tag",
+	} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("help missing %q:\n%s", want, help)
 		}
 	}
 }

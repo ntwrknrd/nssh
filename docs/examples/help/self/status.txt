@@ -1,6 +1,6 @@
 $ nssh self status --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh self status [flags]          Show installation status                 │
+│   nssh self status [flags]          Show status                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

@@ -1,6 +1,6 @@
 $ nssh self bench --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh self bench [flags]           Run performance benchmarks               │
+│   nssh self bench [flags]           Performance benchmarking                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
 │   scp                               Benchmark SCP transfers                  │

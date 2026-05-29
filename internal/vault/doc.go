@@ -1,8 +1,7 @@
 // Package vault provides age-encrypted credential management.
 //
 // The vault stores credentials (username/password pairs) encrypted with age,
-// organized into contexts that map to SSH config include files. It supports
-// multiple security backends via the agent package.
+// organized into contexts that map to SSH config include files.
 //
 // # Storage Structure
 //
@@ -10,9 +9,7 @@
 //
 //	$XDG_CONFIG_HOME/nssh/credentials.age
 //
-// The encryption key is either:
-//   - Software mode: passphrase-protected age identity (age.key.enc)
-//   - PIV mode: YubiKey hardware-backed key (piv.json)
+// The encryption key is a passphrase-protected age identity (age.key.enc).
 //
 // # Credential Resolution
 //

@@ -1,12 +1,9 @@
 package vault
 
 import (
-	"path/filepath"
 	"testing"
 
 	"filippo.io/age"
-	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/vault/hardware"
 	"github.com/ntwrknrd/nssh/internal/vault/software"
 	"github.com/stretchr/testify/assert"
 )
@@ -48,23 +45,6 @@ func TestSoftware_NilStore_Panics(t *testing.T) {
 	})
 }
 
-func TestHardware_ValidKinds(t *testing.T) {
-	for _, kind := range []hardware.Kind{hardware.PIV, hardware.FIDO2, hardware.SecureEnclave} {
-		mode := Hardware(kind)
-		assert.NotNil(t, mode)
-		// Verify it's the right type with the kind
-		hm, ok := mode.(hardwareMode)
-		assert.True(t, ok, "Hardware() should return hardwareMode type")
-		assert.Equal(t, kind, hm.kind)
-	}
-}
-
-func TestHardware_EmptyKind_Panics(t *testing.T) {
-	assert.PanicsWithValue(t, "vault.Hardware: kind must not be empty", func() {
-		Hardware("")
-	})
-}
-
 func TestProvided_Valid(t *testing.T) {
 	identity, err := age.GenerateX25519Identity()
 	assert.NoError(t, err)
@@ -83,27 +63,6 @@ func TestProvided_NilIdentity_Panics(t *testing.T) {
 	})
 }
 
-func TestNewManager_Hardware_InvalidKind_ReturnsError(t *testing.T) {
-	// Create temp directory for test paths
-	tmpDir := t.TempDir()
-
-	paths := &config.Paths{
-		CredentialsFile: filepath.Join(tmpDir, "credentials.age"),
-		ConfigDir:       tmpDir,
-		DataDir:         tmpDir,
-		StateDir:        tmpDir,
-		BackupDir:       filepath.Join(tmpDir, "backups"),
-	}
-
-	// Try to create a manager with an invalid hardware kind
-	_, err := NewManager(
-		Hardware("invalid"),
-		WithPaths(paths),
-	)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown hardware kind")
-}
-
 // TestMode_Sealed verifies that the Mode interface is properly sealed
 // by checking that all exported constructors produce types with the mode() method
 func TestMode_Sealed(t *testing.T) {
@@ -113,7 +72,6 @@ func TestMode_Sealed(t *testing.T) {
 	modes := []Mode{
 		Auto(),
 		Software(store),
-		Hardware(hardware.PIV),
 		Provided(identity),
 	}
 

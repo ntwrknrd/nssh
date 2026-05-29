@@ -6,15 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"filippo.io/age"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/logging"
 	"github.com/ntwrknrd/nssh/internal/session/mode"
-	"github.com/ntwrknrd/nssh/internal/vault/hardware"
 	"github.com/ntwrknrd/nssh/internal/vault/software"
 )
 
@@ -79,7 +76,7 @@ type ContextEntry struct {
 // Manager handles age-encrypted credential storage.
 type Manager struct {
 	credentialPath string
-	configDir      string // For age.pub, piv.json access
+	configDir      string
 	backupDir      string
 	maxBackups     int
 	audit          *logging.AuditLogger
@@ -95,7 +92,7 @@ type Manager struct {
 	identities []age.Identity
 	recipient  age.Recipient
 
-	// Store for software key storage (nil for hardware modes)
+	// Store for software key storage.
 	store software.Store
 
 	// sessionDeps holds injected session behavior for locked-mode operations
@@ -179,8 +176,6 @@ func (m *Manager) ModeString() string {
 		return "auto"
 	case softwareMode:
 		return string(mode.store.Kind())
-	case hardwareMode:
-		return string(mode.kind)
 	case provided:
 		return "provided"
 	default:
@@ -190,16 +185,6 @@ func (m *Manager) ModeString() string {
 
 // lockedError returns a mode-specific error message for locked vault.
 func (m *Manager) lockedError() error {
-	if mode, ok := m.modeType.(hardwareMode); ok {
-		switch mode.kind {
-		case hardware.PIV:
-			return errors.New("vault locked (piv): insert YubiKey and run 'nssh unlock'")
-		case hardware.FIDO2:
-			return errors.New("vault locked (fido2): insert security key and run 'nssh unlock'")
-		case hardware.SecureEnclave:
-			return errors.New("vault locked (secureenclave): run 'nssh unlock'")
-		}
-	}
 	return errors.New("vault locked (software): run 'nssh unlock'")
 }
 
@@ -225,8 +210,6 @@ func NewManager(mode Mode, opts ...Option) (*Manager, error) {
 		return newAuto(cfg)
 	case softwareMode:
 		return newSoftware(m.store, cfg)
-	case hardwareMode:
-		return newHardware(m.kind, cfg)
 	case provided:
 		return newProvided(m.identity, cfg)
 	default:
@@ -236,7 +219,7 @@ func NewManager(mode Mode, opts ...Option) (*Manager, error) {
 }
 
 // newAuto detects configuration from existing files.
-// Mode is detected from filesystem (age.key.enc vs piv.json), not config.
+// Mode is detected from filesystem (age.key.enc), not config.
 func newAuto(cfg *managerConfig) (*Manager, error) {
 	// Detect mode from filesystem (single source of truth)
 	detectedMode, err := DetectSecurityMode(cfg.paths.ConfigDir)
@@ -248,9 +231,6 @@ func newAuto(cfg *managerConfig) (*Manager, error) {
 				return nil, fmt.Errorf("legacy unprotected key found: run 'nssh self init' to migrate to protected storage")
 			}
 			return nil, fmt.Errorf("no vault initialized: run 'nssh self init'")
-		}
-		if errors.Is(err, ErrAmbiguousMode) {
-			return nil, fmt.Errorf("ambiguous state: both software and hardware keystores found. Run 'nssh self rekey --rollback' to recover from a failed mode switch, or 'nssh self reset' to start fresh")
 		}
 		return nil, err
 	}
@@ -276,18 +256,6 @@ func newAuto(cfg *managerConfig) (*Manager, error) {
 	}
 
 	switch detectedMode {
-	case string(mode.PIV):
-		// Hardware PIV mode - agent handles decryption
-		return &Manager{
-			credentialPath: cfg.paths.CredentialsFile,
-			configDir:      cfg.paths.ConfigDir,
-			backupDir:      cfg.paths.BackupDir,
-			maxBackups:     maxBackups,
-			audit:          auditLogger,
-			modeType:       hardwareMode{kind: hardware.PIV},
-			sessionDeps:    cfg.sessionDeps,
-		}, nil
-
 	case string(mode.Software):
 		// Software mode - create passphrase store
 		ks, ksAudit, err := newSoftwareStore(appCfg, cfg.paths)
@@ -341,40 +309,6 @@ func newSoftware(store software.Store, cfg *managerConfig) (*Manager, error) {
 		store:          store,
 		audit:          cfg.audit,
 		modeType:       softwareMode{store: store},
-		sessionDeps:    cfg.sessionDeps,
-	}, nil
-}
-
-// newHardware creates a manager for hardware-backed keys.
-func newHardware(kind hardware.Kind, cfg *managerConfig) (*Manager, error) {
-	if !kind.Valid() {
-		return nil, fmt.Errorf("unknown hardware kind: %s", kind)
-	}
-
-	// Verify hardware mode is initialized
-	switch kind {
-	case hardware.PIV:
-		pivPath := filepath.Join(cfg.paths.ConfigDir, "piv.json")
-		pubKeyPath := filepath.Join(cfg.paths.ConfigDir, "age.pub")
-		if _, err := os.Stat(pivPath); err != nil {
-			return nil, fmt.Errorf("PIV mode not initialized: run 'nssh self init --mode piv'")
-		}
-		if _, err := os.Stat(pubKeyPath); err != nil {
-			return nil, fmt.Errorf("PIV mode not initialized: missing age.pub")
-		}
-	case hardware.FIDO2:
-		return nil, errors.New("FIDO2 mode not yet implemented")
-	case hardware.SecureEnclave:
-		return nil, errors.New("SecureEnclave mode not yet implemented")
-	}
-
-	return &Manager{
-		credentialPath: cfg.paths.CredentialsFile,
-		configDir:      cfg.paths.ConfigDir,
-		backupDir:      cfg.paths.BackupDir,
-		maxBackups:     cfg.maxBackups,
-		audit:          cfg.audit,
-		modeType:       hardwareMode{kind: kind},
 		sessionDeps:    cfg.sessionDeps,
 	}, nil
 }
@@ -493,7 +427,7 @@ func (m *Manager) Lock() error {
 }
 
 // GetRecipient returns the age recipient for encryption.
-// Does NOT require unlock - reads from cached value, store, or age.pub file.
+// Does NOT require unlock - reads from cached value or the software store.
 func (m *Manager) GetRecipient() (age.Recipient, error) {
 	// Provided mode: derive from pre-loaded identity
 	if len(m.identities) > 0 {
@@ -512,26 +446,7 @@ func (m *Manager) GetRecipient() (age.Recipient, error) {
 		return m.store.Recipient()
 	}
 
-	// Hardware modes: read from age.pub
-	return m.loadRecipientFromFile()
-}
-
-// loadRecipientFromFile reads and caches the recipient from age.pub.
-// Used by hardware modes (PIV, FIDO2, SecureEnclave) and as fallback.
-func (m *Manager) loadRecipientFromFile() (age.Recipient, error) {
-	pubPath := filepath.Join(m.configDir, "age.pub")
-	data, err := os.ReadFile(pubPath)
-	if err != nil {
-		return nil, fmt.Errorf("read public key: %w", err)
-	}
-
-	recipient, err := age.ParseX25519Recipient(strings.TrimSpace(string(data)))
-	if err != nil {
-		return nil, fmt.Errorf("parse public key: %w", err)
-	}
-
-	m.recipient = recipient // Cache it
-	return recipient, nil
+	return nil, errors.New("no software store available")
 }
 
 // GetIdentity returns the current age identity for decryption.
@@ -557,7 +472,6 @@ func (m *Manager) ConfigDir() string {
 }
 
 // SoftwareStore returns the software store for CLI unlock operations.
-// Returns nil for hardware modes.
 func (m *Manager) SoftwareStore() software.Store {
 	return m.store
 }

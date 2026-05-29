@@ -1,6 +1,6 @@
 $ nssh self reset --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh self reset [flags]           Delete all nssh data and start fresh     │
+│   nssh self reset [flags]           Reset configuration                      │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
 │   --dry-run                         preview what would be deleted witho...   │

@@ -12,7 +12,6 @@ import (
 	"filippo.io/age"
 	"github.com/ntwrknrd/nssh/internal/agent"
 	"github.com/ntwrknrd/nssh/internal/secret"
-	"github.com/ntwrknrd/nssh/internal/session/mode"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/ntwrknrd/nssh/internal/vault"
 	"golang.org/x/term"
@@ -27,20 +26,10 @@ func Unlock(mgr *vault.Manager, useStdin bool) error {
 		return nil
 	}
 
-	// Detect mode
-	detectedMode, err := vault.DetectSecurityMode(mgr.ConfigDir())
-	if err != nil {
+	if _, err := vault.DetectSecurityMode(mgr.ConfigDir()); err != nil {
 		return err
 	}
-
-	switch mode.Mode(detectedMode) {
-	case mode.Software:
-		return unlockSoftware(mgr, useStdin)
-	case mode.PIV:
-		return unlockPIV(useStdin)
-	default:
-		return fmt.Errorf("unsupported mode: %s", detectedMode)
-	}
+	return unlockSoftware(mgr, useStdin)
 }
 
 // unlockSoftware handles software mode unlock with passphrase.
@@ -78,20 +67,6 @@ func unlockSoftware(mgr *vault.Manager, useStdin bool) error {
 	defer identitySecret.Destroy()
 
 	return agent.Spawn(identitySecret)
-}
-
-// unlockPIV handles PIV/YubiKey mode unlock with PIN.
-func unlockPIV(useStdin bool) error {
-	// Collect PIN
-	pin, err := collectPassphrase(useStdin, "YubiKey PIN")
-	if err != nil {
-		return err
-	}
-
-	pinSecret := secret.New(pin)
-	defer pinSecret.Destroy()
-
-	return agent.SpawnPIV(pinSecret)
 }
 
 // collectPassphrase collects a passphrase/PIN from stdin or TTY prompt.

@@ -20,7 +20,7 @@ func NewCfgCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "cfg",
-		Short: "View or edit nssh configuration",
+		Short: "Manage configuration",
 		Long: `View or edit the nssh configuration file.
 
 By default, prints the effective configuration (merged from file,
