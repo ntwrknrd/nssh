@@ -127,6 +127,10 @@ func RenderStyledHelp(cmd *cobra.Command, cfg StyledHelpConfig) string {
 // This ensures alignment between Usage and Options panels.
 const descriptionColumn = 36
 
+// UsageLinesAnnotation lets a command provide explicit usage lines for styled
+// help when Cobra's generic "[flags]" suffix obscures the actual command forms.
+const UsageLinesAnnotation = "nssh.usage-lines"
+
 // globalOptionNames defines flags that appear in Global Options (in display order).
 var globalOptionNames = []string{"explain", "help", "verbose", "version"}
 
@@ -141,13 +145,14 @@ var globalOptionFlags = func() map[string]bool {
 
 // renderUsagePanel renders the Usage section panel.
 func renderUsagePanel(cmd *cobra.Command, width int) string {
-	// Build usage line
-	usageLine := cmd.UseLine()
-	short := cmd.Short
+	usageLines := []string{cmd.UseLine()}
+	if cmd.Annotations != nil {
+		if annotated := strings.TrimSpace(cmd.Annotations[UsageLinesAnnotation]); annotated != "" {
+			usageLines = strings.Split(annotated, "\n")
+		}
+	}
 
-	// Format: "  nssh ctx add [NAME]              Create new context"
-	content := formatUsageRow(usageLine, short, width-6, descriptionColumn)
-
+	content := formatUsageRows(usageLines, cmd.Short, width-6, descriptionColumn)
 	return renderPanel("Usage", content, width)
 }
 
@@ -276,6 +281,18 @@ func formatUsageRow(usage, description string, width, descCol int) string {
 	return fmt.Sprintf("  %s%s",
 		usageStyle.Render(padRight(usage, cmdCol)),
 		descStyle.Render(description))
+}
+
+func formatUsageRows(usages []string, description string, width, descCol int) string {
+	lines := make([]string, 0, len(usages))
+	for i, usage := range usages {
+		desc := ""
+		if i == 0 {
+			desc = description
+		}
+		lines = append(lines, formatUsageRow(strings.TrimSpace(usage), desc, width, descCol))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // formatFlags formats a slice of flags into aligned rows.

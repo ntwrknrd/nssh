@@ -1,0 +1,18 @@
+$ nssh inv set --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh inv set HOST                 Create or update local inventory         │
+│   nssh inv set -g GROUP                                                      │
+│   nssh inv set HOST -g GROUP                                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│   -g, --group STRING                target group                             │
+│   --hostname STRING                 SSH HostName                             │
+│   --port INT                        SSH Port                                 │
+│   --user STRING                     SSH User                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Options ─────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose                     Print debug messages                     │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

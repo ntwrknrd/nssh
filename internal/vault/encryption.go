@@ -185,6 +185,9 @@ func (m *Manager) decrypt() (*VaultData, error) {
 	if data.Hosts == nil {
 		data.Hosts = make(map[string]*HostCredentials)
 	}
+	if data.Groups == nil {
+		data.Groups = make(map[string]*Credential)
+	}
 	if data.SyncSources == nil {
 		data.SyncSources = make(map[string]*SyncSourceVault)
 	}
@@ -293,6 +296,7 @@ func (m *Manager) encrypt(data *VaultData) error {
 func emptyData() *VaultData {
 	return &VaultData{
 		Contexts:    make(map[string]*Context),
+		Groups:      make(map[string]*Credential),
 		Hosts:       make(map[string]*HostCredentials),
 		SyncSources: make(map[string]*SyncSourceVault),
 	}

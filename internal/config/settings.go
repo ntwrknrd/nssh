@@ -12,11 +12,13 @@ import (
 
 // Config is the root configuration structure loaded from config.toml.
 type Config struct {
-	Agent   AgentConfig   `toml:"agent"`
-	Host    HostConfig    `toml:"host"`
-	Logging LoggingConfig `toml:"logging"`
-	SSH     SSHConfig     `toml:"ssh"`
-	Sync    SyncConfig    `toml:"sync"`
+	Agent      AgentConfig      `toml:"agent"`
+	Credential CredentialConfig `toml:"credential"`
+	Host       HostConfig       `toml:"host"`
+	Inventory  InventoryConfig  `toml:"inventory"`
+	Logging    LoggingConfig    `toml:"logging"`
+	SSH        SSHConfig        `toml:"ssh"`
+	Sync       SyncConfig       `toml:"-"`
 }
 
 // ============================================================================
@@ -68,7 +70,7 @@ type HostConfig struct {
 
 // HostDefaultsConfig holds default values for new hosts.
 type HostDefaultsConfig struct {
-	// DefaultContext is the default context for new hosts (used by `nssh host add`)
+	// DefaultContext is deprecated; group placement is configured under inventory.
 	DefaultContext string `toml:"default_context"`
 	// DefaultUser is the default SSH username for new hosts
 	DefaultUser string `toml:"default_user"`
@@ -225,6 +227,15 @@ func DefaultConfig() *Config {
 				DefaultUser:    "",
 			},
 		},
+		Credential: CredentialConfig{
+			Type: CredentialProviderAge,
+		},
+		Inventory: InventoryConfig{
+			DefaultGroup: "default",
+			Group: map[string]GroupConfig{
+				"default": {},
+			},
+		},
 		Logging: LoggingConfig{
 			Audit: AuditConfig{
 				Enabled:        true,
@@ -284,9 +295,14 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 
-	if err := toml.Unmarshal(data, cfg); err != nil {
+	md, err := toml.Decode(string(data), cfg)
+	if err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
+	if md.IsDefined("sync", "sources") {
+		return nil, fmt.Errorf("validate config %s: %w", path, legacySyncSourcesError())
+	}
+	pruneImplicitInventoryDefaults(md, cfg)
 
 	applyEnvOverrides(cfg)
 
@@ -295,6 +311,18 @@ func Load(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func pruneImplicitInventoryDefaults(md toml.MetaData, cfg *Config) {
+	if cfg == nil || cfg.Inventory.Group == nil {
+		return
+	}
+	defaultGroupExplicit := md.IsDefined("inventory", "group", "default")
+	configDefinesGroups := md.IsDefined("inventory", "group")
+	configChangesDefaultGroup := md.IsDefined("inventory", "default_group") && cfg.Inventory.DefaultGroup != "default"
+	if !defaultGroupExplicit && (configDefinesGroups || configChangesDefaultGroup) {
+		delete(cfg.Inventory.Group, "default")
+	}
 }
 
 // applyEnvOverrides applies environment variable overrides to the config.
@@ -329,6 +357,9 @@ func LoadDefault() (*Config, error) {
 
 // Save writes the config to the specified path.
 func Save(path string, cfg *Config) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("create config: %w", err)
@@ -346,6 +377,12 @@ func (c *Config) Validate() error {
 	if err := c.Agent.Validate(); err != nil {
 		return err
 	}
+	if err := c.Credential.Validate(); err != nil {
+		return err
+	}
+	if err := c.Inventory.Validate(); err != nil {
+		return err
+	}
 	if err := c.Logging.Audit.Validate(); err != nil {
 		return err
 	}
@@ -355,10 +392,14 @@ func (c *Config) Validate() error {
 	if err := c.SSH.Security.Validate(); err != nil {
 		return err
 	}
-	if err := c.Sync.Validate(); err != nil {
-		return err
+	if len(c.Sync.Sources) > 0 {
+		return legacySyncSourcesError()
 	}
 	return nil
+}
+
+func legacySyncSourcesError() error {
+	return fmt.Errorf("sync.sources is no longer supported; configure inventory.provider instead")
 }
 
 // Validate checks AgentConfig values are within acceptable bounds.

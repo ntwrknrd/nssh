@@ -2,7 +2,7 @@
 package cli
 
 // HostNotFoundError indicates a host was not found and carries the hostname
-// for potential use in spawning host add.
+// for potential use in spawning local inventory creation.
 type HostNotFoundError struct {
 	Hostname string
 }

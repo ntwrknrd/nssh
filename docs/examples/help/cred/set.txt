@@ -1,0 +1,15 @@
+$ nssh cred set --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh cred set HOST                Create or update credentials             │
+│   nssh cred set -g GROUP                                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│   -g, --group STRING                group credential scope                   │
+│   --username STRING                 SSH username                             │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Options ─────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose                     Print debug messages                     │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

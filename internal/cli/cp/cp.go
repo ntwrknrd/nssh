@@ -200,7 +200,7 @@ func runCp(source, dest string, recursive, preserve, quiet, verbose bool) error 
 	}
 
 	// Resolve credential using the Host identifier (how credentials are indexed in the vault)
-	// host add stores credentials keyed by Host, not by HostName
+	// inventory host credentials are keyed by Host, not by HostName
 	cred, _ := mgr.ResolveCredential(hostSearch, filepath.Base(includeFile), scpUser)
 	if cred != nil {
 		if scpUser == "" {

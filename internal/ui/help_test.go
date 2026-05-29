@@ -80,6 +80,31 @@ func TestRenderStyledHelp_WithGlobalFlags(t *testing.T) {
 	}
 }
 
+func TestRenderStyledHelp_AnnotatedUsageLines(t *testing.T) {
+	cmd := &cobra.Command{
+		Use:   "get NAME",
+		Short: "Show details",
+		Annotations: map[string]string{
+			UsageLinesAnnotation: "nssh inv get HOST\nnssh inv get -g GROUP",
+		},
+	}
+	cmd.Flags().BoolP("group", "g", false, "treat argument as a group name")
+
+	output := RenderStyledHelp(cmd, StyledHelpConfig{ShowGlobalFlags: false, Width: 80})
+	for _, want := range []string{
+		"nssh inv get HOST",
+		"nssh inv get -g GROUP",
+		"-g, --group",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("help missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "get NAME [flags]") {
+		t.Fatalf("help used generic cobra usage:\n%s", output)
+	}
+}
+
 func TestFormatFlagName(t *testing.T) {
 	tests := []struct {
 		name      string

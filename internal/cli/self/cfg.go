@@ -7,6 +7,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -73,21 +74,19 @@ func openInEditor(path string) error {
 }
 
 func printEffectiveConfig(paths *config.Paths) error {
-	// Print header with metadata
-	exists := "exists"
-	if _, err := os.Stat(paths.ConfigFile); os.IsNotExist(err) {
-		exists = "not found, using defaults"
-	}
-	fmt.Printf("# Config: %s (%s)\n", paths.ConfigFile, exists)
-	fmt.Printf("# Effective configuration\n\n")
+	ui.CommandStart(paths.ConfigFile)
 
-	// Load and marshal config
 	cfg, err := config.LoadDefault()
 	if err != nil {
+		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 
-	// Encode as TOML to stdout
 	encoder := toml.NewEncoder(os.Stdout)
-	return encoder.Encode(cfg)
+	if err := encoder.Encode(cfg); err != nil {
+		ui.CommandEnd(ui.StatusError)
+		return err
+	}
+	ui.CommandEnd(ui.StatusSuccess)
+	return nil
 }

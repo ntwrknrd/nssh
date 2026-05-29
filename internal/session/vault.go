@@ -33,7 +33,16 @@ func agentAvailable(ctx context.Context) bool {
 	defer cancel()
 
 	done := make(chan bool, 1)
-	go func() { done <- agent.IsRunning() }()
+	go func() {
+		client, err := agent.Connect()
+		if err != nil {
+			done <- false
+			return
+		}
+		defer func() { _ = client.Close() }()
+		mode, err := client.Hello()
+		done <- err == nil && mode != agent.ModeCache
+	}()
 
 	select {
 	case result := <-done:

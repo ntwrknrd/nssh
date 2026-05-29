@@ -37,4 +37,5 @@ const (
 	ModePIV           = string(mode.PIV)
 	ModeFIDO2         = string(mode.FIDO2)
 	ModeSecureEnclave = string(mode.SecureEnclave)
+	ModeCache         = "cache"
 )

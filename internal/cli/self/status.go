@@ -139,14 +139,14 @@ func runStatus() error {
 		ui.StatusLineNeutral("Security mode", "not initialized")
 	}
 
-	// SSH Config (with contexts/hosts counts)
+	// SSH Config (with inventory hosts count)
 	ui.SubSection("SSH Config")
 	printFileStatus(paths.SSHConfigFile, "SSH config")
 
-	// SSH conf.d directory
-	confD := filepath.Join(paths.SSHConfigDir, "conf.d")
-	if DirExists(confD) {
-		files, _ := filepath.Glob(filepath.Join(confD, "*"))
+	// SSH nssh.d directory
+	nsshD := filepath.Join(paths.SSHConfigDir, "nssh.d")
+	if DirExists(nsshD) {
+		files, _ := filepath.Glob(filepath.Join(nsshD, "*"))
 		fileCount := 0
 		for _, f := range files {
 			if info, err := os.Stat(f); err == nil && !info.IsDir() {
@@ -163,9 +163,9 @@ func runStatus() error {
 				}
 			}
 		}
-		printStatus(true, "Include dir", fmt.Sprintf("%s (%d files, %d hosts)", AbbreviatePath(confD), fileCount, hostCount))
+		printStatus(true, "Include dir", fmt.Sprintf("%s (%d files, %d hosts)", AbbreviatePath(nsshD), fileCount, hostCount))
 	} else {
-		printStatus(false, "Include dir", AbbreviatePath(confD)+" (not found)")
+		printStatus(false, "Include dir", AbbreviatePath(nsshD)+" (not found)")
 	}
 
 	// Logging
@@ -203,7 +203,11 @@ func runStatus() error {
 	ui.SubSection("Session")
 	if client, err := agent.Connect(); err == nil {
 		if status, err := client.Status(); err == nil {
-			printStatus(true, "Status", "unlocked")
+			if status.Mode == agent.ModeCache {
+				ui.StatusLineNeutral("Status", "credential cache active")
+			} else {
+				printStatus(true, "Status", "unlocked")
+			}
 			ui.StatusLineNeutral("Idle in", formatDuration(status.RemainingIdle))
 			ui.StatusLineNeutral("Ends in", formatDuration(status.RemainingLife))
 		} else {

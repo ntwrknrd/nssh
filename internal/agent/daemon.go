@@ -84,6 +84,33 @@ type sessionState struct {
 	mu                sync.RWMutex
 }
 
+type secretCache struct {
+	mu   sync.RWMutex
+	data map[string][]byte
+}
+
+func newSecretCache() *secretCache {
+	return &secretCache{data: make(map[string][]byte)}
+}
+
+func (c *secretCache) get(key string) ([]byte, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	value, ok := c.data[key]
+	if !ok {
+		return nil, false
+	}
+	return append([]byte(nil), value...), true
+}
+
+func (c *secretCache) put(key string, value []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.data[key] = append([]byte(nil), value...)
+}
+
 // stripMonotonic removes the monotonic component from a time.Time value.
 // This ensures comparisons use wall clock time so that system sleep or clock
 // adjustments are accounted for.
@@ -192,7 +219,7 @@ func Run(provider Provider, cfg RuntimeConfig) error {
 // Handles multiple requests per connection until client disconnects or lock.
 // The activityCh is used to signal the main loop that activity occurred,
 // allowing it to reset the idle timer for long-lived connections.
-func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger, shutdown chan<- string, state *sessionState, activityCh chan<- struct{}) {
+func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger, shutdown chan<- string, state *sessionState, activityCh chan<- struct{}, cache *secretCache) {
 	defer func() { _ = conn.Close() }()
 
 	// Verify peer credentials
@@ -284,6 +311,16 @@ func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger
 			// Signal activity for recipient requests (used during encryption)
 			signalActivity()
 			resp = Response{ID: req.ID, OK: true, Data: []byte(provider.Recipient())}
+
+		case OpCacheGet:
+			signalActivity()
+			data, found := cache.get(req.Key)
+			resp = Response{ID: req.ID, OK: true, Found: found, Data: data}
+
+		case OpCachePut:
+			signalActivity()
+			cache.put(req.Key, req.Data)
+			resp = Response{ID: req.ID, OK: true}
 
 		case OpLock:
 			logger.Info("agent stopping", "reason", "lock_command")
@@ -441,6 +478,7 @@ func runAgent(ctx context.Context, provider Provider, cfg RuntimeConfig, extendS
 	connSem := semaphore.NewWeighted(maxConcurrentConnections)
 	defer func() { _ = provider.Close() }()
 
+	cache := newSecretCache()
 	activityCh := make(chan struct{}, 1)
 	shutdown := make(chan string, 1)
 
@@ -546,7 +584,7 @@ func runAgent(ctx context.Context, provider Provider, cfg RuntimeConfig, extendS
 
 			go func(c *net.UnixConn) {
 				defer connSem.Release(1)
-				handleConnection(c, provider, cfg.Logger, shutdown, state, activityCh)
+				handleConnection(c, provider, cfg.Logger, shutdown, state, activityCh, cache)
 			}(result.conn)
 		}
 	}

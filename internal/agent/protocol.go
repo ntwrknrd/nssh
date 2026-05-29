@@ -15,14 +15,16 @@ type Request struct {
 	ID      string `json:"id,omitempty"`   // Request ID for log correlation (optional)
 	Op      string `json:"op"`             // Operation: "hello", "decrypt", "recipient", "lock"
 	Data    []byte `json:"data,omitempty"` // Ciphertext for decrypt operation
+	Key     string `json:"key,omitempty"`  // Cache key for cache operations
 }
 
 // Response represents a message from agent to client.
 type Response struct {
-	ID   string `json:"id,omitempty"`   // Echoes request ID for correlation
-	OK   bool   `json:"ok"`             // true if operation succeeded
-	Data []byte `json:"data,omitempty"` // Result data (mode string, plaintext, or recipient)
-	Err  string `json:"err,omitempty"`  // Error message if OK is false
+	ID    string `json:"id,omitempty"`   // Echoes request ID for correlation
+	OK    bool   `json:"ok"`             // true if operation succeeded
+	Data  []byte `json:"data,omitempty"` // Result data (mode string, plaintext, or recipient)
+	Found bool   `json:"found,omitempty"`
+	Err   string `json:"err,omitempty"` // Error message if OK is false
 }
 
 // Operation constants for Request.Op field.
@@ -32,6 +34,8 @@ const (
 	OpDecrypt   = "decrypt"   // Decrypts ciphertext, returns plaintext
 	OpRecipient = "recipient" // Returns age public key for encryption
 	OpLock      = "lock"      // Terminates the agent
+	OpCacheGet  = "cache_get" // Returns cached data for key, if present
+	OpCachePut  = "cache_put" // Stores cached data for key
 )
 
 // StatusInfo is returned by the status operation.

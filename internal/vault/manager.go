@@ -62,6 +62,7 @@ type HostCredentials struct {
 // VaultData is the top-level structure stored in the encrypted file.
 type VaultData struct {
 	Contexts    map[string]*Context         `json:"contexts"`
+	Groups      map[string]*Credential      `json:"groups,omitempty"`
 	Hosts       map[string]*HostCredentials `json:"hosts"`
 	SyncSources map[string]*SyncSourceVault `json:"sync_sources,omitempty"`
 }
@@ -107,6 +108,7 @@ type Option func(*managerConfig)
 // managerConfig holds configuration for NewManager options.
 type managerConfig struct {
 	paths       *config.Paths
+	appConfig   *config.Config
 	audit       *logging.AuditLogger
 	maxBackups  int
 	sessionDeps SessionDeps
@@ -115,6 +117,11 @@ type managerConfig struct {
 // WithPaths sets explicit paths (default: config.DefaultPaths()).
 func WithPaths(paths *config.Paths) Option {
 	return func(c *managerConfig) { c.paths = paths }
+}
+
+// WithAppConfig supplies already-loaded application config for Auto mode.
+func WithAppConfig(cfg *config.Config) Option {
+	return func(c *managerConfig) { c.appConfig = cfg }
 }
 
 // WithAuditLogger sets the audit logger for security events.
@@ -248,10 +255,10 @@ func newAuto(cfg *managerConfig) (*Manager, error) {
 		return nil, err
 	}
 
-	// Load config for audit logger settings and software store config
-	appCfg, err := config.LoadDefault()
+	// Load config for audit logger settings and software store config.
+	appCfg, err := loadManagerConfig(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
+		return nil, err
 	}
 
 	var auditLogger *logging.AuditLogger
@@ -304,6 +311,24 @@ func newAuto(cfg *managerConfig) (*Manager, error) {
 	default:
 		return nil, fmt.Errorf("unknown mode: %s", detectedMode)
 	}
+}
+
+func loadManagerConfig(cfg *managerConfig) (*config.Config, error) {
+	if cfg.appConfig != nil {
+		return cfg.appConfig, nil
+	}
+	if cfg.paths != nil && cfg.paths.ConfigFile != "" {
+		appCfg, err := config.Load(cfg.paths.ConfigFile)
+		if err != nil {
+			return nil, fmt.Errorf("load config: %w", err)
+		}
+		return appCfg, nil
+	}
+	appCfg, err := config.LoadDefault()
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	return appCfg, nil
 }
 
 // newSoftware creates a manager using a software store.

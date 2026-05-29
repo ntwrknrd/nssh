@@ -31,7 +31,7 @@ nssh() {
     fi
 
     # Detect top-level subcommands (fall back to defaults if lookup fails)
-    local -a subcommands=(host ctx log cp benchmark self help version completion)
+    local -a subcommands=(inv cred log cp benchmark self help version completion)
     if [ -n "$BASH_VERSION" ]; then
         mapfile -t subcommands < <(command "$nssh_cmd" __list-subcommands 2>/dev/null) || true
     elif [ -n "$ZSH_VERSION" ]; then

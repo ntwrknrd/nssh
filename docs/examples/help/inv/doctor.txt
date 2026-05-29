@@ -1,0 +1,10 @@
+$ nssh inv doctor --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh inv doctor [flags]           Check inventory health                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Options ─────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose                     Print debug messages                     │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

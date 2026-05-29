@@ -1,10 +1,10 @@
 # ~/.ssh/config
 #
-# Main SSH configuration file with Include directives for organizing hosts by context.
-# nssh uses the Include file names to map hosts to credential contexts.
+# Main SSH configuration file with Include directives for nssh inventory.
+# Group placement lives in nssh config; SSH files are the inventory backing store.
 
 # Include other SSH config files
-Include ~/.ssh/conf.d/
+Include ~/.ssh/nssh.d/*
 
 # Global defaults for all hosts
 Host *

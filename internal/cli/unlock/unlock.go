@@ -43,6 +43,22 @@ For automation:
 
 // Run executes the unlock operation. Exported for use by other packages (e.g., init).
 func Run(useStdin bool) error {
+	cfg, err := config.LoadDefault()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	return runWithConfig(useStdin, cfg)
+}
+
+func runWithConfig(useStdin bool, cfg *config.Config) error {
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+	if cfg.Credential.Type != config.CredentialProviderAge {
+		ui.Info("Credential provider %s does not use the local nssh vault", cfg.Credential.Type)
+		return nil
+	}
+
 	// Create vault manager via session composition root
 	mgr, err := clisession.NewManager(vault.Auto())
 	if err != nil {
@@ -61,11 +77,6 @@ func Run(useStdin bool) error {
 			os.Exit(130) // Standard exit code for SIGINT
 		}
 		return err
-	}
-
-	cfg, err := config.LoadDefault()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
 	}
 
 	idleTimeout := cfg.Agent.IdleTimeout.Duration()

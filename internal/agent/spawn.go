@@ -186,6 +186,46 @@ func SpawnPIV(pinSecret *secret.Secret) error {
 	return waitForReady(readyR, SpawnTimeout)
 }
 
+// SpawnCache starts a cache-only agent daemon.
+func SpawnCache() error {
+	// Keep the fd layout identical to Spawn/SpawnPIV so __agent startup stays simple.
+	dataR, dataW, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("create data pipe: %w", err)
+	}
+
+	readyR, readyW, err := os.Pipe()
+	if err != nil {
+		_ = dataR.Close()
+		_ = dataW.Close()
+		return fmt.Errorf("create ready pipe: %w", err)
+	}
+
+	cmd := exec.Command(os.Args[0], "__agent")
+	cmd.ExtraFiles = []*os.File{dataR, readyW}
+	cmd.Env = append(os.Environ(), "NSSH_AGENT_CACHE_ONLY=1")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setsid: true,
+	}
+	cmd.Stdin = nil
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+
+	if err := cmd.Start(); err != nil {
+		_ = dataR.Close()
+		_ = dataW.Close()
+		_ = readyR.Close()
+		_ = readyW.Close()
+		return fmt.Errorf("start agent: %w", err)
+	}
+
+	_ = dataR.Close()
+	_ = dataW.Close()
+	_ = readyW.Close()
+
+	return waitForReady(readyR, SpawnTimeout)
+}
+
 // IsRunning checks if an agent is currently running and responsive.
 func IsRunning() bool {
 	client, err := Connect()

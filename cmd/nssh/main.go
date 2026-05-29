@@ -19,25 +19,26 @@ import (
 	"github.com/ntwrknrd/nssh/internal/agent"
 	"github.com/ntwrknrd/nssh/internal/cli"
 	"github.com/ntwrknrd/nssh/internal/cli/cp"
-	"github.com/ntwrknrd/nssh/internal/cli/ctx"
-	"github.com/ntwrknrd/nssh/internal/cli/host"
+	"github.com/ntwrknrd/nssh/internal/cli/cred"
+	"github.com/ntwrknrd/nssh/internal/cli/inv"
 	"github.com/ntwrknrd/nssh/internal/cli/lock"
 	"github.com/ntwrknrd/nssh/internal/cli/log"
 	"github.com/ntwrknrd/nssh/internal/cli/resolve"
 	"github.com/ntwrknrd/nssh/internal/cli/self"
 	"github.com/ntwrknrd/nssh/internal/cli/self/bench"
 	clisession "github.com/ntwrknrd/nssh/internal/cli/session"
-	synccli "github.com/ntwrknrd/nssh/internal/cli/sync"
 	"github.com/ntwrknrd/nssh/internal/cli/unlock"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
+	"github.com/ntwrknrd/nssh/internal/inventory"
+	invproviders "github.com/ntwrknrd/nssh/internal/inventory/providers"
 	"github.com/ntwrknrd/nssh/internal/logging"
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 	"github.com/ntwrknrd/nssh/internal/ssh/recording"
+	"github.com/ntwrknrd/nssh/internal/ssh/remoteexec"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
-	intsync "github.com/ntwrknrd/nssh/internal/sync"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/ntwrknrd/nssh/internal/vault"
 	"github.com/spf13/cobra"
@@ -50,15 +51,14 @@ var (
 
 	// subcommands lists known subcommand names for routing
 	subcommands = map[string]bool{
-		"host":               true,
-		"ctx":                true,
+		"inv":                true,
+		"cred":               true,
 		"log":                true,
 		"cp":                 true,
 		"self":               true,
 		"lock":               true,
 		"unlock":             true,
 		"connect":            true,
-		"sync":               true,
 		"smart-connect":      true,
 		"__list-subcommands": true,
 		"__agent":            true, // Hidden agent daemon mode
@@ -140,7 +140,7 @@ func main() {
 			return
 		}
 
-		// Handle HostNotFoundError by spawning host add
+		// Handle HostNotFoundError by spawning local inventory creation
 		var notFound *cli.HostNotFoundError
 		if errors.As(err, &notFound) {
 			if spawnErr := spawnHostAdd(notFound.Hostname); spawnErr != nil {
@@ -212,12 +212,11 @@ and record sessions.`,
 	// Add subcommands
 	rootCmd.AddCommand(newConnectCmd())
 	rootCmd.AddCommand(newSmartConnectCmd())
-	rootCmd.AddCommand(newHostCmd())
-	rootCmd.AddCommand(newCtxCmd())
+	rootCmd.AddCommand(newInvCmd())
+	rootCmd.AddCommand(newCredCmd())
 	rootCmd.AddCommand(newLogCmd())
 	rootCmd.AddCommand(newCpCmd())
 	rootCmd.AddCommand(newSelfCmd())
-	rootCmd.AddCommand(newSyncCmd())
 
 	lockCmd := lock.NewCmd()
 	unlockCmd := unlock.NewCmd()
@@ -523,11 +522,11 @@ func handleCompatibilityFix(hostname, includeFile string) bool {
 		return false
 	}
 
-	syncState, err := intsync.LoadSourceStateByIncludeFile(includeFile)
+	providerState, err := inventory.LoadProviderStateByIncludeFile(includeFile)
 	if err != nil {
-		slog.Debug("sync state lookup failed", "include_file", includeFile, "err", err)
+		slog.Debug("provider state lookup failed", "include_file", includeFile, "err", err)
 	}
-	isSyncManaged := syncState != nil && syncState.FindManagedHost(hostname) != nil
+	isProviderManaged := providerState != nil && providerState.FindHost(hostname) != nil
 
 	var allFixesApplied []compat.CompatType
 	appliedSet := make(map[compat.CompatType]bool)
@@ -550,7 +549,7 @@ func handleCompatibilityFix(hostname, includeFile string) bool {
 		}
 
 		// Test via the host alias, not raw HostName, so host-specific config
-		// (including sync-managed compat directives and ProxyJump) is applied.
+		// (including provider-managed compat directives and ProxyJump) is applied.
 		testResult, err := connector.TestConnection(context.Background(), hostEntry.Host, hostEntry.User(), testCfg)
 		if err != nil {
 			slog.Debug("test connection failed", "err", err)
@@ -610,15 +609,15 @@ func handleCompatibilityFix(hostname, includeFile string) bool {
 		}
 
 		// Apply fixes
-		if isSyncManaged {
-			if err := intsync.PersistCompatFixes(syncState.IncludeFile, hostname, newFixes); err != nil {
-				ui.Error("Failed to persist sync compat fixes: %s", err)
+		if isProviderManaged {
+			if err := inventory.PersistCompatFixes(providerState.IncludeFile, hostname, newFixes); err != nil {
+				ui.Error("Failed to persist provider compat fixes: %s", err)
 				return false
 			}
 
 			hostEntry, parsedCfg, err = parser.FindHostWithLocation(hostname)
 			if err != nil || hostEntry == nil {
-				ui.Error("Failed to reload sync-managed host after compat fix: %v", err)
+				ui.Error("Failed to reload provider-managed host after compat fix: %v", err)
 				return false
 			}
 		} else {
@@ -678,48 +677,17 @@ func extractExplicitUser(hostname string, sshArgs []string) string {
 	return ""
 }
 
-// newHostCmd creates the host subcommand for managing SSH hosts.
-func newHostCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "host",
-		Short: "Manage SSH host files",
-		Long:  "Manage SSH host configurations in your SSH config files.",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
-		},
-	}
-	cmd.AddCommand(host.NewListCmd())
-	cmd.AddCommand(host.NewAddCmd())
-	cmd.AddCommand(host.NewGetCmd())
-	cmd.AddCommand(host.NewEditCmd())
-	cmd.AddCommand(host.NewRemoveCmd())
-	cmd.AddCommand(host.NewSortCmd())
-	cmd.AddCommand(host.NewPruneCmd())
-	cmd.AddCommand(host.NewRenameCmd())
-
+// newInvCmd creates the inv subcommand for managing inventory.
+func newInvCmd() *cobra.Command {
+	cmd := inv.NewCmd()
 	ui.ApplyStyledHelpRecursive(cmd)
 	return cmd
 }
 
-// newCtxCmd creates the ctx subcommand for managing credential contexts.
-func newCtxCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "ctx",
-		Short: "Manage credential contexts",
-		Long:  "Manage credential contexts for organizing hosts and storing authentication.",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
-		},
-	}
-	cmd.AddCommand(ctx.NewListCmd())
-	cmd.AddCommand(ctx.NewAddCmd())
-	cmd.AddCommand(ctx.NewGetCmd())
-	cmd.AddCommand(ctx.NewEditCmd())
-	cmd.AddCommand(ctx.NewRemoveCmd())
-
-	// Opt-in to styled help for ctx command group
+// newCredCmd creates the cred subcommand for managing credentials.
+func newCredCmd() *cobra.Command {
+	cmd := cred.NewCmd()
 	ui.ApplyStyledHelpRecursive(cmd)
-
 	return cmd
 }
 
@@ -767,19 +735,13 @@ func newBenchCmd() *cobra.Command {
 	return cmd
 }
 
-// newSyncCmd creates the sync subcommand for managing external inventory sync.
-func newSyncCmd() *cobra.Command {
-	cmd := synccli.NewCmd()
-	ui.ApplyStyledHelpRecursive(cmd)
-	return cmd
-}
-
 // newSelfCmd creates the self subcommand for managing nssh installation.
 func newSelfCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "self",
 		Short: "Manage nssh installation",
 		Long:  "Manage nssh installation, shell integration, and updates.",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
@@ -808,7 +770,7 @@ func newListSubcommandsCmd() *cobra.Command {
 		Hidden: true,
 		Run: func(cmd *cobra.Command, args []string) {
 			// Print one subcommand per line (fish splits on newlines)
-			for _, subcmd := range []string{"host", "ctx", "log", "cp", "self", "lock", "unlock", "connect", "sync"} {
+			for _, subcmd := range []string{"inv", "cred", "log", "cp", "self", "lock", "unlock", "connect"} {
 				fmt.Println(subcmd)
 			}
 		},
@@ -819,7 +781,7 @@ func newListSubcommandsCmd() *cobra.Command {
 // - Exact match: returns hostname unchanged
 // - Single partial match: returns the matched hostname
 // - Multiple partial matches: opens fuzzy finder with query pre-filled
-// - No matches: returns HostNotFoundError to trigger host add
+// - No matches: returns HostNotFoundError to trigger local inventory creation
 func resolveHostname(hostname string) (string, error) {
 	parser := sshconfig.NewParser()
 
@@ -850,18 +812,83 @@ func resolveHostname(hostname string) (string, error) {
 		return selected, nil
 	}
 
-	// No matches - signal to spawn host add (only when a hostname was provided)
+	// No matches - signal to spawn local inventory creation (only when a hostname was provided)
 	if hostname == "" {
 		return "", fmt.Errorf("no hosts found in SSH config")
+	}
+	if refreshProvidersForLookup(hostname) {
+		result, err = parser.MatchHost(hostname)
+		if err != nil {
+			slog.Debug("failed to match host after provider refresh", "err", err)
+			return hostname, nil
+		}
+		if result.Host != nil {
+			if result.Host.Host != hostname {
+				slog.Debug("auto-resolved hostname after provider refresh", "input", hostname, "resolved", result.Host.Host)
+			}
+			return result.Host.Host, nil
+		}
+		if len(result.Suggestions) > 0 {
+			sort.Strings(result.Suggestions)
+			selected, err := ui.FuzzySelectString("Select host", result.Suggestions, hostname)
+			if err != nil {
+				return "", fmt.Errorf("fuzzy select: %w", err)
+			}
+			if selected == "" {
+				return "", fmt.Errorf("selection canceled")
+			}
+			return selected, nil
+		}
 	}
 	return "", &cli.HostNotFoundError{Hostname: hostname}
 }
 
-// spawnHostAdd spawns nssh host add with the hostname pre-filled.
+var refreshProvidersForLookup = refreshProvidersOnce
+
+func refreshProvidersOnce(hostname string) bool {
+	cfg, err := config.LoadDefault()
+	if err != nil {
+		slog.Debug("skip provider refresh on lookup miss: config load failed", "host", hostname, "err", err)
+		return false
+	}
+	if len(cfg.Inventory.Provider) == 0 {
+		return false
+	}
+	runner := remoteexec.NewSSHRunner(func(host string) (*remoteexec.HostInfo, error) {
+		resolved, err := resolve.ResolveHostForConnect(host, "", cfg)
+		if err != nil {
+			return nil, err
+		}
+		username := resolved.Username
+		if resolved.HostEntry != nil && resolved.HostEntry.User() != "" {
+			username = resolved.HostEntry.User()
+		}
+		return &remoteexec.HostInfo{Target: host, Hostname: resolved.Hostname, Username: username}, nil
+	})
+
+	refreshed := false
+	now := time.Now().UTC()
+	for name, providerCfg := range cfg.Inventory.Provider {
+		provider, err := invproviders.New(providerCfg.Type)
+		if err != nil {
+			slog.Warn("skip provider refresh: provider unavailable", "provider", name, "err", err)
+			continue
+		}
+		result := inventory.RefreshProvider(context.Background(), name, providerCfg, provider, runner, inventory.RefreshOptions{Now: now, WriteSSHConfig: true})
+		if result.Err != nil {
+			slog.Warn("provider refresh failed during lookup miss", "provider", name, "host", hostname, "err", result.Err)
+			continue
+		}
+		refreshed = true
+	}
+	return refreshed
+}
+
+// spawnHostAdd spawns nssh inv set with the hostname pre-filled.
 func spawnHostAdd(hostname string) error {
 	fmt.Printf("Host '%s' not found. Adding new host...\n", hostname)
 
-	cmd := exec.Command(os.Args[0], "host", "add", hostname)
+	cmd := exec.Command(os.Args[0], "inv", "set", hostname)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -890,6 +917,20 @@ func runAgentMode() {
 
 	if dataPipe == nil || readyPipe == nil {
 		signalError("missing pipe file descriptors")
+	}
+
+	if os.Getenv("NSSH_AGENT_CACHE_ONLY") == "1" {
+		_ = dataPipe.Close()
+		agentCfg := agent.DefaultRuntimeConfig()
+		agentCfg.ReadyPipe = readyPipe
+		if err := agent.Run(agent.NewCacheOnlyProvider(), agentCfg); err != nil {
+			if readyPipe != nil {
+				_, _ = readyPipe.WriteString("err:" + err.Error() + "\n")
+				_ = readyPipe.Close()
+			}
+			os.Exit(1)
+		}
+		return
 	}
 
 	// Load config for agent settings
