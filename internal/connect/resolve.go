@@ -1,7 +1,6 @@
-// Package resolve extracts shared host lookup, credential resolution, and
-// vault unlock logic so that both interactive connect and remote command
-// execution can share the same resolution path.
-package resolve
+// Package connect extracts shared host lookup and credential resolution so
+// interactive SSH and remote command execution can share the same path.
+package connect
 
 import (
 	"log/slog"
@@ -38,9 +37,9 @@ type ResolvedHost struct {
 	Config      *config.Config
 }
 
-// ResolveHostForConnect performs host lookup, include-file discovery, vault
-// unlock, and credential resolution. This is the shared path used by both
-// interactive connect and remote command execution.
+// ResolveHostForConnect performs host lookup, include-file discovery, and
+// credential resolution. This is the shared path used by both interactive
+// connect and remote command execution.
 // If cfg is provided, it is used instead of loading the default config.
 func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*ResolvedHost, error) {
 	var c *config.Config
@@ -185,53 +184,6 @@ func resolveScopedCredential(provider credential.Provider, scope credentialScope
 		Password: record.Secret,
 		Source:   source,
 	}, nil
-}
-
-func resolveTargetCredential(provider credential.Provider, hostname, group, username string) (*ResolvedCredential, error) {
-	if provider == nil {
-		return nil, nil
-	}
-	if shouldQueryHostCredential(provider, hostname) {
-		hostCred, err := provider.GetHost(hostname)
-		if err != nil {
-			return nil, err
-		}
-		if credentialMatchesUser(hostCred, username) {
-			recordUsername := hostCred.Username
-			if recordUsername == "" {
-				recordUsername = username
-			}
-			return &ResolvedCredential{
-				Username: recordUsername,
-				Password: hostCred.Secret,
-				Source:   CredSourceHost,
-			}, nil
-		}
-	}
-	if group == "" {
-		return nil, nil
-	}
-	groupCred, err := provider.GetGroup(group)
-	if err != nil || groupCred == nil {
-		return nil, err
-	}
-	if !credentialMatchesUser(groupCred, username) {
-		return nil, nil
-	}
-	recordUsername := groupCred.Username
-	if recordUsername == "" {
-		recordUsername = username
-	}
-	return &ResolvedCredential{
-		Username: recordUsername,
-		Password: groupCred.Secret,
-		Source:   CredSourceGroup,
-	}, nil
-}
-
-func shouldQueryHostCredential(provider credential.Provider, hostname string) bool {
-	indexed, ok := provider.(credential.HostCredentialIndex)
-	return !ok || indexed.HasHostCredential(hostname)
 }
 
 func credentialMatchesUser(record *credential.Record, username string) bool {

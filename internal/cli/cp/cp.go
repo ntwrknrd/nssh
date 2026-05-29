@@ -8,7 +8,7 @@ import (
 	"regexp"
 
 	"github.com/creack/pty"
-	"github.com/ntwrknrd/nssh/internal/cli/resolve"
+	"github.com/ntwrknrd/nssh/internal/connect"
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
@@ -222,7 +222,7 @@ func runCp(source, dest string, recursive, preserve, quiet, verbose bool) error 
 	return runScp(args, password)
 }
 
-var resolveHostForConnect = resolve.ResolveHostForConnect
+var resolveHostForConnect = connect.ResolveHostForConnect
 
 var runScp = runScpWithPty
 

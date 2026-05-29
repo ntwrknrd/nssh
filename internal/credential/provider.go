@@ -16,44 +16,10 @@ type Record struct {
 	Ref      string
 }
 
-// Status describes the active credential provider backend.
-type Status struct {
-	Type      string
-	Available bool
-	Detail    string
-}
-
-// Capabilities describes provider behavior that callers can depend on without
-// knowing provider internals.
-type Capabilities struct {
-	ProviderSessionPolicy       string
-	SupportsHostCRUD            bool
-	SupportsGroupCRUD           bool
-	SupportsSecretRefs          bool
-	SupportsStatusCheck         bool
-	SupportsResolvedSecretCache bool
-}
-
-// Provider stores and retrieves host/group SSH target credentials.
+// Provider resolves host/group SSH target credentials.
 type Provider interface {
 	GetHost(host string) (*Record, error)
-	SetHost(host string, record *Record) error
-	RemoveHost(host string) (bool, error)
 	GetGroup(group string) (*Record, error)
-	SetGroup(group string, record *Record) error
-	RemoveGroup(group string) (bool, error)
-	Status() Status
-}
-
-// CapabilityProvider marks providers that expose explicit behavior metadata.
-type CapabilityProvider interface {
-	Capabilities() Capabilities
-}
-
-// HostCredentialIndex marks providers that can cheaply tell whether a host
-// override relationship exists without probing the backing secret manager.
-type HostCredentialIndex interface {
-	HasHostCredential(host string) bool
 }
 
 // Registry holds configured credential provider instances by name.
@@ -108,19 +74,6 @@ func (r *Registry) DefaultProvider() Provider {
 		return nil
 	}
 	return r.providers[r.defaultProvider]
-}
-
-// NewProvider constructs the configured default credential provider.
-func NewProvider(cfg *config.Config) (Provider, error) {
-	registry, err := NewRegistry(cfg)
-	if err != nil {
-		return nil, err
-	}
-	provider := registry.DefaultProvider()
-	if provider == nil {
-		return nil, fmt.Errorf("credential.default_provider references unknown provider %q", registry.DefaultProviderName())
-	}
-	return provider, nil
 }
 
 func buildNamedProvider(name string, providerCfg config.CredentialProviderConfig, cfg *config.Config) (Provider, error) {

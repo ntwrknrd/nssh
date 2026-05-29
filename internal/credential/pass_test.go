@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/secret"
 )
 
 type fakePassRunner struct {
@@ -36,52 +35,6 @@ func (f *fakePassRunner) Run(_ context.Context, stdin []byte, args ...string) ([
 	return []byte(out.data), out.err
 }
 
-func (f *fakePassRunner) LookPath(name string) (string, error) {
-	if f.missing {
-		return "", errors.New("not found")
-	}
-	return "/usr/bin/" + name, nil
-}
-
-func TestPassGetHostReadsDeterministicEntry(t *testing.T) {
-	runner := &fakePassRunner{outs: []fakePassOut{{
-		data: "secret\nusername: admin\nignored: value\n",
-	}}}
-	provider := &passProvider{command: "pass", prefix: "nssh", runner: runner}
-
-	got, err := provider.GetHost("edge01")
-	if err != nil {
-		t.Fatalf("GetHost: %v", err)
-	}
-	if got == nil || got.Username != "admin" || revealTestSecret(t, got) != "secret" || got.Ref != "nssh/hosts/edge01" {
-		t.Fatalf("record = %+v secret=%q", got, revealTestSecret(t, got))
-	}
-	if len(runner.calls) != 1 {
-		t.Fatalf("calls = %d", len(runner.calls))
-	}
-	if strings.Join(runner.calls[0].args, " ") != "show nssh/hosts/edge01" {
-		t.Fatalf("args = %#v", runner.calls[0].args)
-	}
-}
-
-func TestPassGetGroupReadsDeterministicEntry(t *testing.T) {
-	runner := &fakePassRunner{outs: []fakePassOut{{
-		data: "secret\nusername: netops\n",
-	}}}
-	provider := &passProvider{command: "pass", prefix: "nssh", runner: runner}
-
-	got, err := provider.GetGroup("custcbb")
-	if err != nil {
-		t.Fatalf("GetGroup: %v", err)
-	}
-	if got == nil || got.Username != "netops" || revealTestSecret(t, got) != "secret" || got.Ref != "nssh/groups/custcbb" {
-		t.Fatalf("record = %+v secret=%q", got, revealTestSecret(t, got))
-	}
-	if strings.Join(runner.calls[0].args, " ") != "show nssh/groups/custcbb" {
-		t.Fatalf("args = %#v", runner.calls[0].args)
-	}
-}
-
 func TestPassGetHostReadsConfiguredRef(t *testing.T) {
 	runner := &fakePassRunner{outs: []fakePassOut{{
 		data: "secret\nusername: admin\n",
@@ -107,22 +60,19 @@ func TestPassGetHostReadsConfiguredRef(t *testing.T) {
 	}
 }
 
-func TestPassSetHostWritesExpectedEntry(t *testing.T) {
+func TestPassGetHostWithoutConfiguredRefReturnsNil(t *testing.T) {
 	runner := &fakePassRunner{}
 	provider := &passProvider{command: "pass", prefix: "nssh", runner: runner}
 
-	err := provider.SetHost("edge01", &Record{Username: "admin", Secret: secret.NewFromString("secret")})
+	got, err := provider.GetHost("edge01")
 	if err != nil {
-		t.Fatalf("SetHost: %v", err)
+		t.Fatalf("GetHost: %v", err)
 	}
-	if len(runner.calls) != 1 {
-		t.Fatalf("calls = %d", len(runner.calls))
+	if got != nil {
+		t.Fatalf("record = %+v, want nil", got)
 	}
-	if strings.Join(runner.calls[0].args, " ") != "insert --multiline --force nssh/hosts/edge01" {
-		t.Fatalf("args = %#v", runner.calls[0].args)
-	}
-	if runner.calls[0].stdin != "secret\nusername: admin\n" {
-		t.Fatalf("stdin = %q", runner.calls[0].stdin)
+	if len(runner.calls) != 0 {
+		t.Fatalf("calls = %d, want 0", len(runner.calls))
 	}
 }
 
@@ -139,17 +89,5 @@ func TestPassMissingEntryReturnsNil(t *testing.T) {
 	}
 	if got != nil {
 		t.Fatalf("record = %+v, want nil", got)
-	}
-}
-
-func TestPassStatusUnavailableWhenCommandMissing(t *testing.T) {
-	provider := &passProvider{command: "pass", prefix: "nssh", runner: &fakePassRunner{missing: true}}
-
-	status := provider.Status()
-	if status.Type != config.CredentialProviderPass {
-		t.Fatalf("status type = %q", status.Type)
-	}
-	if status.Available {
-		t.Fatalf("status should be unavailable: %+v", status)
 	}
 }

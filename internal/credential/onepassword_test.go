@@ -11,7 +11,6 @@ import (
 
 	"github.com/ntwrknrd/nssh/internal/agent"
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/secret"
 )
 
 type fakeOPRunner struct {
@@ -57,34 +56,19 @@ func (f *fakeOPRunner) Run(_ context.Context, stdin []byte, args ...string) ([]b
 	return []byte(out.data), out.err
 }
 
-func TestOnePasswordGetHostReadsDeterministicItem(t *testing.T) {
-	runner := &fakeOPRunner{outs: []fakeOPOut{{
-		data: `{"title":"nssh host edge01","fields":[{"label":"username","value":"admin"},{"label":"password","value":"secret"}]}`,
-	}}}
+func TestOnePasswordGetHostWithoutConfiguredRefReturnsNil(t *testing.T) {
+	runner := &fakeOPRunner{}
 	provider := &onePasswordProvider{account: "ntwrknrd", vault: "Network", runner: runner}
 
 	got, err := provider.GetHost("edge01")
 	if err != nil {
 		t.Fatalf("GetHost: %v", err)
 	}
-	var gotSecret string
-	if got != nil && got.Secret != nil {
-		if err := got.Secret.UseString(func(s string) error {
-			gotSecret = s
-			return nil
-		}); err != nil {
-			t.Fatalf("secret: %v", err)
-		}
+	if got != nil {
+		t.Fatalf("record = %+v, want nil", got)
 	}
-	if got == nil || got.Username != "admin" || gotSecret != "secret" {
-		t.Fatalf("record = %+v", got)
-	}
-	if len(runner.calls) != 1 {
-		t.Fatalf("calls = %d", len(runner.calls))
-	}
-	wantArgs := []string{"item", "get", "nssh host edge01", "--vault", "Network", "--account", "ntwrknrd", "--format", "json", "--reveal"}
-	if strings.Join(runner.calls[0].args, "\x00") != strings.Join(wantArgs, "\x00") {
-		t.Fatalf("args = %#v", runner.calls[0].args)
+	if len(runner.calls) != 0 {
+		t.Fatalf("calls = %d, want 0", len(runner.calls))
 	}
 }
 
@@ -197,7 +181,7 @@ func TestOnePasswordGetHostCachesConfiguredSecretRefs(t *testing.T) {
 	}
 }
 
-func TestOnePasswordGetHostCachesMissingDeterministicItem(t *testing.T) {
+func TestOnePasswordGetHostCachesMissingConfiguredItem(t *testing.T) {
 	socketPath := fmt.Sprintf("/tmp/nssh-cred-%d-%d.sock", os.Getpid(), time.Now().UnixNano())
 	t.Cleanup(func() { _ = os.Remove(socketPath) })
 	restore := agent.SetSocketPathForTest(socketPath)
@@ -214,7 +198,10 @@ func TestOnePasswordGetHostCachesMissingDeterministicItem(t *testing.T) {
 		{data: "not found", err: errors.New("exit status 1")},
 	}}
 	provider := &onePasswordProvider{
-		vault:  "Network",
+		vault: "Network",
+		hostRefs: map[string]config.CredentialRefConfig{
+			"edge01": {Ref: "Missing Edge"},
+		},
 		runner: runner,
 		cache:  true,
 	}
@@ -269,7 +256,10 @@ func TestOnePasswordAgentSessionRoutesGetThroughAgent(t *testing.T) {
 		account: "ntwrknrd",
 		vault:   "Network",
 		session: config.ProviderSessionAgentOwned,
-		cache:   true,
+		hostRefs: map[string]config.CredentialRefConfig{
+			"edge01": {Ref: "nssh host edge01"},
+		},
+		cache: true,
 	}
 	got, err := op.GetHost("edge01")
 	if err != nil {
@@ -315,8 +305,24 @@ func TestOnePasswordAgentSessionRepeatedRequestsUseAgentProcess(t *testing.T) {
 	}()
 	waitForCredentialAgent(t)
 
-	first := &onePasswordProvider{name: "op-network", vault: "Network", session: config.ProviderSessionAgentOwned, cache: true}
-	second := &onePasswordProvider{name: "op-network", vault: "Network", session: config.ProviderSessionAgentOwned, cache: true}
+	first := &onePasswordProvider{
+		name:    "op-network",
+		vault:   "Network",
+		session: config.ProviderSessionAgentOwned,
+		hostRefs: map[string]config.CredentialRefConfig{
+			"edge01": {Ref: "nssh host edge01"},
+		},
+		cache: true,
+	}
+	second := &onePasswordProvider{
+		name:    "op-network",
+		vault:   "Network",
+		session: config.ProviderSessionAgentOwned,
+		hostRefs: map[string]config.CredentialRefConfig{
+			"edge02": {Ref: "nssh host edge02"},
+		},
+		cache: true,
+	}
 	if _, err := first.GetHost("edge01"); err != nil {
 		t.Fatalf("first GetHost: %v", err)
 	}
@@ -359,6 +365,7 @@ func TestOnePasswordAgentSessionAutoStartsRuntimeAgent(t *testing.T) {
 	op := &onePasswordProvider{
 		name:           "op-network",
 		session:        config.ProviderSessionAgentOwned,
+		hostRefs:       map[string]config.CredentialRefConfig{"edge01": {Ref: "nssh host edge01"}},
 		autoStartAgent: true,
 	}
 	got, err := op.GetHost("edge01")
@@ -396,6 +403,7 @@ func TestOnePasswordAgentSessionAutoStartCanBeDisabled(t *testing.T) {
 	op := &onePasswordProvider{
 		name:           "op-network",
 		session:        config.ProviderSessionAgentOwned,
+		hostRefs:       map[string]config.CredentialRefConfig{"edge01": {Ref: "nssh host edge01"}},
 		autoStartAgent: false,
 	}
 	_, err := op.GetHost("edge01")
@@ -404,30 +412,6 @@ func TestOnePasswordAgentSessionAutoStartCanBeDisabled(t *testing.T) {
 	}
 	if spawnCalls != 0 {
 		t.Fatalf("spawn calls = %d, want 0", spawnCalls)
-	}
-}
-
-func TestOnePasswordSetHostCreatesDeterministicItemWhenMissing(t *testing.T) {
-	runner := &fakeOPRunner{outs: []fakeOPOut{
-		{data: "not found", err: errors.New("exit status 1")},
-		{},
-	}}
-	provider := &onePasswordProvider{vault: "Network", runner: runner}
-
-	err := provider.SetHost("edge01", &Record{Username: "admin", Secret: secret.NewFromString("secret")})
-	if err != nil {
-		t.Fatalf("SetHost: %v", err)
-	}
-	if len(runner.calls) != 2 {
-		t.Fatalf("calls = %d", len(runner.calls))
-	}
-	if strings.Join(runner.calls[1].args, " ") != "item create --vault Network -" {
-		t.Fatalf("create args = %#v", runner.calls[1].args)
-	}
-	for _, want := range []string{`"title":"nssh host edge01"`, `"label":"username"`, `"value":"admin"`, `"label":"password"`, `"value":"secret"`} {
-		if !strings.Contains(runner.calls[1].stdin, want) {
-			t.Fatalf("missing %s in stdin: %s", want, runner.calls[1].stdin)
-		}
 	}
 }
 
@@ -458,28 +442,4 @@ func revealTestSecret(t *testing.T, record *Record) string {
 		t.Fatalf("secret: %v", err)
 	}
 	return value
-}
-
-func TestOnePasswordSetGroupEditsExistingItem(t *testing.T) {
-	runner := &fakeOPRunner{outs: []fakeOPOut{
-		{data: `{"id":"abc","title":"nssh group lab","fields":[{"label":"username","value":"old"},{"label":"password","value":"oldpass"}]}`},
-		{},
-	}}
-	provider := &onePasswordProvider{vault: "Network", runner: runner}
-
-	err := provider.SetGroup("lab", &Record{Username: "netops", Secret: secret.NewFromString("newpass")})
-	if err != nil {
-		t.Fatalf("SetGroup: %v", err)
-	}
-	if len(runner.calls) != 2 {
-		t.Fatalf("calls = %d", len(runner.calls))
-	}
-	if strings.Join(runner.calls[1].args, " ") != "item edit nssh group lab --vault Network -" {
-		t.Fatalf("edit args = %#v", runner.calls[1].args)
-	}
-	for _, want := range []string{`"title":"nssh group lab"`, `"value":"netops"`, `"value":"newpass"`} {
-		if !strings.Contains(runner.calls[1].stdin, want) {
-			t.Fatalf("missing %s in stdin: %s", want, runner.calls[1].stdin)
-		}
-	}
 }

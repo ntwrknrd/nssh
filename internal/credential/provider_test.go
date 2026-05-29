@@ -1,23 +1,23 @@
 package credential
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 )
 
-func TestNewProviderUsesDefaultNamedProvider(t *testing.T) {
-	provider, err := NewProvider(config.DefaultConfig())
-	if err != nil {
-		t.Fatalf("NewProvider: %v", err)
-	}
-	if _, ok := provider.(*passProvider); !ok {
-		t.Fatalf("provider = %T, want *passProvider", provider)
+func TestProviderInterfaceIsReadOnly(t *testing.T) {
+	providerType := reflect.TypeOf((*Provider)(nil)).Elem()
+	for _, method := range []string{"SetHost", "SetGroup", "RemoveHost", "RemoveGroup", "Status"} {
+		if _, ok := providerType.MethodByName(method); ok {
+			t.Fatalf("Provider should not expose %s after credential CLI removal", method)
+		}
 	}
 }
 
-func TestNewProviderRejectsActiveAgeProvider(t *testing.T) {
-	_, err := NewProvider(&config.Config{
+func TestNewRegistryRejectsActiveAgeProvider(t *testing.T) {
+	_, err := NewRegistry(&config.Config{
 		Credential: config.CredentialConfig{
 			DefaultProvider: "local-age",
 			Provider: map[string]config.CredentialProviderConfig{
@@ -61,33 +61,5 @@ func TestNewRegistryBuildsNamedProviders(t *testing.T) {
 	}
 	if registry.DefaultProviderName() != "pass-local" {
 		t.Fatalf("default provider = %q", registry.DefaultProviderName())
-	}
-}
-
-func TestProviderSessionCapabilities(t *testing.T) {
-	tests := []struct {
-		name     string
-		provider Provider
-		want     string
-	}{
-		{name: "pass external", provider: &passProvider{}, want: config.ProviderSessionExternal},
-		{name: "1password agent", provider: &onePasswordProvider{}, want: config.ProviderSessionAgentOwned},
-		{name: "bitwarden external", provider: &bitwardenProvider{}, want: config.ProviderSessionExternal},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			capable, ok := tt.provider.(CapabilityProvider)
-			if !ok {
-				t.Fatalf("%T does not expose capabilities", tt.provider)
-			}
-			caps := capable.Capabilities()
-			if caps.ProviderSessionPolicy != tt.want {
-				t.Fatalf("session policy = %q, want %q", caps.ProviderSessionPolicy, tt.want)
-			}
-			if caps.SupportsResolvedSecretCache {
-				t.Fatalf("%T advertises resolved secret caching", tt.provider)
-			}
-		})
 	}
 }

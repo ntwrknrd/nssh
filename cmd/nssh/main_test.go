@@ -90,6 +90,41 @@ func TestInternalSyncPackageRemoved(t *testing.T) {
 	}
 }
 
+func TestInternalCLIResolvePackageRemoved(t *testing.T) {
+	root := repoRoot()
+	legacyImport := "github.com/ntwrknrd/nssh/internal/cli/" + "resolve"
+	if _, err := os.Stat(filepath.Join(root, "internal", "cli", "resolve")); !os.IsNotExist(err) {
+		t.Fatalf("internal/cli/resolve should move to internal/connect")
+	}
+
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "docs":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".go" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(data), legacyImport) {
+			t.Fatalf("%s still imports internal/cli/resolve", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRootCommandCutover(t *testing.T) {
 	root := newRootCmd()
 

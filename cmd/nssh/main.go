@@ -21,10 +21,10 @@ import (
 	"github.com/ntwrknrd/nssh/internal/cli/cp"
 	"github.com/ntwrknrd/nssh/internal/cli/inv"
 	"github.com/ntwrknrd/nssh/internal/cli/log"
-	"github.com/ntwrknrd/nssh/internal/cli/resolve"
 	"github.com/ntwrknrd/nssh/internal/cli/self"
 	"github.com/ntwrknrd/nssh/internal/cli/self/bench"
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/connect"
 	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/inventory"
 	invproviders "github.com/ntwrknrd/nssh/internal/inventory/providers"
@@ -399,7 +399,7 @@ func connectHost(hostname string, sshArgs []string) error {
 	// Resolve host, credentials, and config via shared resolver
 	configTimer := connector.StartTiming(connector.TimingConfigLoad)
 	explicitUser := extractExplicitUser(hostname, sshArgs)
-	resolved, err := resolve.ResolveHostForConnect(hostname, explicitUser)
+	resolved, err := connect.ResolveHostForConnect(hostname, explicitUser)
 	if err != nil {
 		return fmt.Errorf("resolve host: %w", err)
 	}
@@ -467,7 +467,7 @@ func connectHost(hostname string, sshArgs []string) error {
 			slog.Debug("retrying connection after compatibility fixes")
 
 			var retryPassword *secret.Secret
-			retryResolved, retryErr := resolve.ResolveHostForConnect(resolved.Hostname, resolved.Username, cfg)
+			retryResolved, retryErr := connect.ResolveHostForConnect(resolved.Hostname, resolved.Username, cfg)
 			if retryErr != nil {
 				slog.Warn("credential re-resolution failed", "err", retryErr)
 			} else if retryResolved.Credential != nil {
@@ -527,7 +527,7 @@ func handleCompatibilityFix(hostname, includeFile string) bool {
 		if cfg, err := config.LoadDefault(); err == nil && cfg != nil {
 			testCfg.UseSystemKnownHosts = cfg.SSH.Security.CompatPersistProbes
 		}
-		if resolved, err := resolve.ResolveHostForConnect(hostEntry.Host, hostEntry.User()); err == nil && resolved.Credential != nil {
+		if resolved, err := connect.ResolveHostForConnect(hostEntry.Host, hostEntry.User()); err == nil && resolved.Credential != nil {
 			testCfg.Password = resolved.Credential.Password
 		}
 
@@ -829,7 +829,7 @@ func refreshProvidersOnce(hostname string) bool {
 		return false
 	}
 	runner := remoteexec.NewSSHRunner(func(host string) (*remoteexec.HostInfo, error) {
-		resolved, err := resolve.ResolveHostForConnect(host, "", cfg)
+		resolved, err := connect.ResolveHostForConnect(host, "", cfg)
 		if err != nil {
 			return nil, err
 		}

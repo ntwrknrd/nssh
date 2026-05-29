@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	cliresolve "github.com/ntwrknrd/nssh/internal/cli/resolve"
 	"github.com/ntwrknrd/nssh/internal/config"
+	clireconnect "github.com/ntwrknrd/nssh/internal/connect"
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 )
@@ -43,14 +43,14 @@ func TestRunCpUsesSharedResolvePath(t *testing.T) {
 	}()
 
 	var gotQuery, gotUser string
-	resolveHostForConnect = func(query, explicitUser string, cfg ...*config.Config) (*cliresolve.ResolvedHost, error) {
+	resolveHostForConnect = func(query, explicitUser string, cfg ...*config.Config) (*clireconnect.ResolvedHost, error) {
 		gotQuery = query
 		gotUser = explicitUser
-		return &cliresolve.ResolvedHost{
+		return &clireconnect.ResolvedHost{
 			Hostname:  query,
 			Username:  "resolved-user",
 			HostEntry: &sshconfig.HostEntry{Host: query},
-			Credential: &cliresolve.ResolvedCredential{
+			Credential: &clireconnect.ResolvedCredential{
 				Username: "resolved-user",
 				Password: secret.NewFromString("secret"),
 			},

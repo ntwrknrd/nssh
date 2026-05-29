@@ -107,52 +107,8 @@ func (p *onePasswordProvider) GetHost(host string) (*Record, error) {
 	return p.get(scopeHost, host)
 }
 
-func (p *onePasswordProvider) HasHostCredential(host string) bool {
-	return strings.TrimSpace(p.refForScope(scopeHost, host).Ref) != ""
-}
-
-func (p *onePasswordProvider) SetHost(host string, record *Record) error {
-	return p.set(scopeHost, host, record)
-}
-
-func (p *onePasswordProvider) RemoveHost(host string) (bool, error) {
-	return p.remove(scopeHost, host)
-}
-
 func (p *onePasswordProvider) GetGroup(group string) (*Record, error) {
 	return p.get(scopeGroup, group)
-}
-
-func (p *onePasswordProvider) SetGroup(group string, record *Record) error {
-	return p.set(scopeGroup, group, record)
-}
-
-func (p *onePasswordProvider) RemoveGroup(group string) (bool, error) {
-	return p.remove(scopeGroup, group)
-}
-
-func (p *onePasswordProvider) Status() Status {
-	if p.runner == nil {
-		p.runner = opCLIRunner{}
-	}
-	if _, err := p.runner.Run(context.Background(), nil, "--version"); err != nil {
-		return Status{Type: config.CredentialProvider1Password, Available: false, Detail: err.Error()}
-	}
-	return Status{Type: config.CredentialProvider1Password, Available: true, Detail: "1Password vault " + p.vault}
-}
-
-func (p *onePasswordProvider) Capabilities() Capabilities {
-	session := strings.TrimSpace(p.session)
-	if session == "" {
-		session = config.ProviderSessionAgentOwned
-	}
-	return Capabilities{
-		ProviderSessionPolicy: session,
-		SupportsHostCRUD:      true,
-		SupportsGroupCRUD:     true,
-		SupportsSecretRefs:    true,
-		SupportsStatusCheck:   true,
-	}
 }
 
 type credentialScope string
@@ -169,21 +125,7 @@ func (p *onePasswordProvider) get(scope credentialScope, name string) (*Record, 
 		}
 		return p.getRef(ref)
 	}
-	if p.usesAgentSession() {
-		return p.agentGet(scope, name, config.CredentialRefConfig{})
-	}
-	item, err := p.getItem(scope, name)
-	if err != nil {
-		return nil, err
-	}
-	if item == nil {
-		return nil, nil
-	}
-	username, password := itemField(item, "username"), itemField(item, "password")
-	if username == "" && password == "" {
-		return nil, nil
-	}
-	return &Record{Username: username, Secret: secret.NewFromString(password), Ref: itemTitle(scope, name)}, nil
+	return nil, nil
 }
 
 func (p *onePasswordProvider) usesAgentSession() bool {
@@ -375,66 +317,6 @@ func (p *onePasswordProvider) itemCacheKey(ref string) string {
 	return "credential:1password:item:" + hex.EncodeToString(sum[:])
 }
 
-func (p *onePasswordProvider) set(scope credentialScope, name string, record *Record) error {
-	if record == nil || record.Secret == nil {
-		return errors.New("1Password credential requires a secret value")
-	}
-	password := ""
-	if err := record.Secret.UseString(func(s string) error {
-		password = s
-		return nil
-	}); err != nil {
-		return err
-	}
-	item := buildItem(itemTitle(scope, name), record.Username, password)
-	data, err := json.Marshal(item)
-	if err != nil {
-		return fmt.Errorf("marshal 1Password item: %w", err)
-	}
-
-	existing, err := p.getItem(scope, name)
-	if err != nil {
-		return err
-	}
-	if existing == nil {
-		args := append([]string{"item", "create"}, p.scopeArgs()...)
-		args = append(args, "-")
-		if _, err = p.run(context.Background(), data, args...); err != nil {
-			return err
-		}
-		p.putCachedItem(item.Title, &item)
-		return nil
-	}
-
-	args := append([]string{"item", "edit", itemTitle(scope, name)}, p.scopeArgs()...)
-	args = append(args, "-")
-	if _, err = p.run(context.Background(), data, args...); err != nil {
-		return err
-	}
-	p.putCachedItem(item.Title, &item)
-	return nil
-}
-
-func (p *onePasswordProvider) remove(scope credentialScope, name string) (bool, error) {
-	existing, err := p.getItem(scope, name)
-	if err != nil {
-		return false, err
-	}
-	if existing == nil {
-		return false, nil
-	}
-	args := append([]string{"item", "delete", itemTitle(scope, name)}, p.scopeArgs()...)
-	_, err = p.run(context.Background(), nil, args...)
-	if err == nil {
-		p.putCachedItem(itemTitle(scope, name), nil)
-	}
-	return err == nil, err
-}
-
-func (p *onePasswordProvider) getItem(scope credentialScope, name string) (*onePasswordItem, error) {
-	return p.getItemByRef(itemTitle(scope, name))
-}
-
 func (p *onePasswordProvider) getItemByRef(ref string) (*onePasswordItem, error) {
 	if item, ok := p.getCachedItem(ref); ok {
 		return item, nil
@@ -550,21 +432,6 @@ func (p *onePasswordProvider) scopeArgs() []string {
 		args = append(args, "--account", p.account)
 	}
 	return args
-}
-
-func itemTitle(scope credentialScope, name string) string {
-	return "nssh " + string(scope) + " " + name
-}
-
-func buildItem(title, username, password string) onePasswordItem {
-	return onePasswordItem{
-		Title:    title,
-		Category: "LOGIN",
-		Fields: []onePasswordField{
-			{ID: "username", Type: "STRING", Purpose: "USERNAME", Label: "username", Value: username},
-			{ID: "password", Type: "CONCEALED", Purpose: "PASSWORD", Label: "password", Value: password},
-		},
-	}
 }
 
 func itemField(item *onePasswordItem, label string) string {
