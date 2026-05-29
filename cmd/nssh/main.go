@@ -15,19 +15,15 @@ import (
 	"strings"
 	"time"
 
-	"filippo.io/age"
 	"github.com/ntwrknrd/nssh/internal/agent"
 	"github.com/ntwrknrd/nssh/internal/cli"
+	agentcmd "github.com/ntwrknrd/nssh/internal/cli/agent"
 	"github.com/ntwrknrd/nssh/internal/cli/cp"
-	"github.com/ntwrknrd/nssh/internal/cli/cred"
 	"github.com/ntwrknrd/nssh/internal/cli/inv"
-	"github.com/ntwrknrd/nssh/internal/cli/lock"
 	"github.com/ntwrknrd/nssh/internal/cli/log"
 	"github.com/ntwrknrd/nssh/internal/cli/resolve"
 	"github.com/ntwrknrd/nssh/internal/cli/self"
 	"github.com/ntwrknrd/nssh/internal/cli/self/bench"
-	clisession "github.com/ntwrknrd/nssh/internal/cli/session"
-	"github.com/ntwrknrd/nssh/internal/cli/unlock"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/inventory"
@@ -36,11 +32,9 @@ import (
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
-	"github.com/ntwrknrd/nssh/internal/ssh/recording"
 	"github.com/ntwrknrd/nssh/internal/ssh/remoteexec"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
-	"github.com/ntwrknrd/nssh/internal/vault"
 	"github.com/spf13/cobra"
 )
 
@@ -52,12 +46,10 @@ var (
 	// subcommands lists known subcommand names for routing
 	subcommands = map[string]bool{
 		"inv":                true,
-		"cred":               true,
+		"agent":              true,
 		"log":                true,
 		"cp":                 true,
 		"self":               true,
-		"lock":               true,
-		"unlock":             true,
 		"connect":            true,
 		"smart-connect":      true,
 		"__list-subcommands": true,
@@ -212,18 +204,13 @@ and record sessions.`,
 	// Add subcommands
 	rootCmd.AddCommand(newConnectCmd())
 	rootCmd.AddCommand(newSmartConnectCmd())
+	agentCmd := agentcmd.NewCmd()
+	ui.ApplyStyledHelp(agentCmd)
+	rootCmd.AddCommand(agentCmd)
 	rootCmd.AddCommand(newInvCmd())
-	rootCmd.AddCommand(newCredCmd())
 	rootCmd.AddCommand(newLogCmd())
 	rootCmd.AddCommand(newCpCmd())
 	rootCmd.AddCommand(newSelfCmd())
-
-	lockCmd := lock.NewCmd()
-	unlockCmd := unlock.NewCmd()
-	ui.ApplyStyledHelp(lockCmd)
-	ui.ApplyStyledHelp(unlockCmd)
-	rootCmd.AddCommand(lockCmd)
-	rootCmd.AddCommand(unlockCmd)
 
 	rootCmd.AddCommand(newListSubcommandsCmd())
 
@@ -540,12 +527,8 @@ func handleCompatibilityFix(hostname, includeFile string) bool {
 		if cfg, err := config.LoadDefault(); err == nil && cfg != nil {
 			testCfg.UseSystemKnownHosts = cfg.SSH.Security.CompatPersistProbes
 		}
-		mgr, err := clisession.NewManager(vault.Auto())
-		if err == nil {
-			cred, _ := mgr.ResolveCredential(hostname, includeFile, hostEntry.User())
-			if cred != nil {
-				testCfg.Password = cred.Password
-			}
+		if resolved, err := resolve.ResolveHostForConnect(hostEntry.Host, hostEntry.User()); err == nil && resolved.Credential != nil {
+			testCfg.Password = resolved.Credential.Password
 		}
 
 		// Test via the host alias, not raw HostName, so host-specific config
@@ -684,13 +667,6 @@ func newInvCmd() *cobra.Command {
 	return cmd
 }
 
-// newCredCmd creates the cred subcommand for managing credentials.
-func newCredCmd() *cobra.Command {
-	cmd := cred.NewCmd()
-	ui.ApplyStyledHelpRecursive(cmd)
-	return cmd
-}
-
 // newLogCmd creates the log subcommand for managing session recordings.
 func newLogCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -752,7 +728,6 @@ func newSelfCmd() *cobra.Command {
 	cmd.AddCommand(self.NewUninstallCmd())
 	cmd.AddCommand(self.NewResetCmd())
 	cmd.AddCommand(self.NewVersionCmd())
-	cmd.AddCommand(self.NewRekeyCmd())
 	cmd.AddCommand(self.NewCfgCmd())
 	cmd.AddCommand(newBenchCmd())
 
@@ -769,7 +744,7 @@ func newListSubcommandsCmd() *cobra.Command {
 		Hidden: true,
 		Run: func(cmd *cobra.Command, args []string) {
 			// Print one subcommand per line (fish splits on newlines)
-			for _, subcmd := range []string{"inv", "cred", "log", "cp", "self", "lock", "unlock", "connect"} {
+			for _, subcmd := range []string{"inv", "agent", "log", "cp", "self", "connect"} {
 				fmt.Println(subcmd)
 			}
 		},
@@ -919,7 +894,13 @@ func runAgentMode() {
 
 	if os.Getenv("NSSH_AGENT_CACHE_ONLY") == "1" {
 		_ = dataPipe.Close()
+		cfg, err := config.LoadDefault()
+		if err != nil {
+			signalError(err.Error())
+		}
 		agentCfg := agent.DefaultRuntimeConfig()
+		agentCfg.Agent = &cfg.Agent
+		agentCfg.Archive = &cfg.Logging.Session.Archive
 		agentCfg.ReadyPipe = readyPipe
 		if err := agent.Run(agent.NewCacheOnlyProvider(), agentCfg); err != nil {
 			if readyPipe != nil {
@@ -931,67 +912,26 @@ func runAgentMode() {
 		return
 	}
 
-	// Load config for agent settings
-	cfg, err := config.LoadDefault()
-	if err != nil {
-		signalError("failed to load config: " + err.Error())
-	}
-
-	paths := config.DefaultPaths()
-
-	// Read identity from pipe directly into memguard-protected memory.
-	// Age X25519 identity is 74 bytes: "AGE-SECRET-KEY-1" + 58 chars.
-	// We use 256 as max to handle any whitespace/newlines.
-	identitySecret, err := secret.NewFromReader(dataPipe, 256)
-	_ = dataPipe.Close()
-	if err != nil {
-		signalError("failed to read identity: " + err.Error())
-	}
-
-	// Parse the age identity from secure memory.
-	var identity *age.X25519Identity
-	if err := identitySecret.UseString(func(s string) error {
-		var parseErr error
-		identity, parseErr = age.ParseX25519Identity(strings.TrimSpace(s))
-		return parseErr
-	}); err != nil {
-		identitySecret.Destroy()
-		signalError("failed to parse identity: " + err.Error())
-	}
-	identitySecret.Destroy()
-	provider := agent.NewSoftwareProvider(identity)
-
-	// Resolve recording paths for the archiver (honors recording config/env)
-	recordingSettings := recording.LoadRecordingSettings()
-
-	// Set up agent config - pass config.AgentConfig directly
-	agentCfg := agent.RuntimeConfig{
-		Agent:        &cfg.Agent,
-		Archive:      &cfg.Logging.Session.Archive,
-		Logger:       slog.Default(),
-		ReadyPipe:    readyPipe, // Signal readiness after socket creation
-		RecordingDir: recordingSettings.Directory,
-	}
-
-	// Set up audit logger
-	logger, err := logging.NewAuditLogger(slog.LevelInfo, &cfg.Logging.Audit, paths.StateDir)
-	if err == nil {
-		agentCfg.Logger = logger.Logger
-		defer func() { _ = logger.Close() }()
-	}
-
-	// Run the agent (blocks until shutdown)
-	// Note: agent.Run() signals readiness via cfg.ReadyPipe after socket creation.
-	// If agent.Run() returns an error, it means it failed before signaling readiness,
-	// so we need to signal the error to the parent process via the ready pipe.
-	if err := agent.Run(provider, agentCfg); err != nil {
-		// Signal error to parent - the pipe is still open because agent.Run()
-		// failed before it could signal readiness
-		if readyPipe != nil {
-			_, _ = readyPipe.WriteString("err:" + err.Error() + "\n")
-			_ = readyPipe.Close()
+	if os.Getenv("NSSH_AGENT_RUNTIME") == "1" {
+		_ = dataPipe.Close()
+		cfg, err := config.LoadDefault()
+		if err != nil {
+			signalError(err.Error())
 		}
-		//nolint:gocritic // os.Exit is intentional here; logger.Close() is deferred in parent scope
-		os.Exit(1)
+		agentCfg := agent.DefaultRuntimeConfig()
+		agentCfg.Agent = &cfg.Agent
+		agentCfg.Archive = &cfg.Logging.Session.Archive
+		agentCfg.ReadyPipe = readyPipe
+		if err := agent.Run(agent.NewConfiguredRuntimeProvider(cfg), agentCfg); err != nil {
+			if readyPipe != nil {
+				_, _ = readyPipe.WriteString("err:" + err.Error() + "\n")
+				_ = readyPipe.Close()
+			}
+			os.Exit(1)
+		}
+		return
 	}
+
+	_ = dataPipe.Close()
+	signalError("agent runtime mode is required")
 }

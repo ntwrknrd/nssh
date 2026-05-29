@@ -13,7 +13,7 @@ func newImportCmd() *cobra.Command {
 	var group string
 	cmd := &cobra.Command{
 		Use:   "import FILE.csv",
-		Short: "Import local inventory from CSV",
+		Short: "Import inventory from CSV",
 		Long:  "Import local-provider inventory from a CSV file.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

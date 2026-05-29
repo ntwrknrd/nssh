@@ -58,13 +58,13 @@ func TestPreprocessArgs(t *testing.T) {
 func TestRootCommandCutover(t *testing.T) {
 	root := newRootCmd()
 
-	for _, name := range []string{"inv", "cred", "connect", "cp", "self", "lock", "unlock"} {
+	for _, name := range []string{"agent", "inv", "connect", "cp", "self"} {
 		if cmd, _, err := root.Find([]string{name}); err != nil || cmd == root || cmd.Name() != name {
 			t.Fatalf("expected public command %q, got cmd=%v err=%v", name, cmd, err)
 		}
 	}
 
-	for _, removed := range []string{"host", "ctx", "sync"} {
+	for _, removed := range []string{"host", "ctx", "sync", "cred", "lock", "unlock"} {
 		if cmd, _, err := root.Find([]string{removed}); err == nil && cmd != root && cmd.Name() == removed {
 			t.Fatalf("removed command %q is still registered", removed)
 		}
@@ -89,14 +89,8 @@ func TestHardwareKeySurfacesAreRemoved(t *testing.T) {
 		t.Fatal("self reinstall should expose --release")
 	}
 
-	rekey, _, err := root.Find([]string{"self", "rekey"})
-	if err != nil {
-		t.Fatalf("find self rekey: %v", err)
-	}
-	for _, flag := range []string{"hardware", "software"} {
-		if rekey.Flags().Lookup(flag) != nil {
-			t.Fatalf("self rekey should not expose --%s", flag)
-		}
+	if cmd, _, err := root.Find([]string{"self", "rekey"}); err == nil && cmd.Name() == "rekey" {
+		t.Fatal("self rekey should not be registered after age vault removal")
 	}
 }
 
@@ -120,7 +114,6 @@ func TestSelfHelpDoesNotTruncate(t *testing.T) {
 	for _, path := range [][]string{
 		{"self"},
 		{"self", "reinstall"},
-		{"self", "rekey"},
 	} {
 		cmd, _, err := root.Find(path)
 		if err != nil {
@@ -231,6 +224,9 @@ func TestInvSetHelpShowsGroupModeAndExplicitUsage(t *testing.T) {
 		"nssh inv set HOST",
 		"nssh inv set -g GROUP",
 		"nssh inv set HOST -g GROUP",
+		"--credential-provider STRING",
+		"--credential-ref STRING",
+		"--credential-clear",
 		"-g, --group STRING",
 	} {
 		if !strings.Contains(help, want) {
@@ -239,64 +235,5 @@ func TestInvSetHelpShowsGroupModeAndExplicitUsage(t *testing.T) {
 	}
 	if strings.Contains(help, "nssh inv set HOST [flags]") {
 		t.Fatalf("help still has vague [flags] usage:\n%s", help)
-	}
-}
-
-func TestCredHelpShowsPositionalHostAndGroupShorthand(t *testing.T) {
-	root := newRootCmd()
-	cases := []struct {
-		path     []string
-		required []string
-		rejected []string
-	}{
-		{
-			path: []string{"cred", "get"},
-			required: []string{
-				"nssh cred get HOST",
-				"nssh cred get -g GROUP",
-				"-g, --group STRING",
-				"-r, --reveal-secret",
-			},
-			rejected: []string{"--host", "--show-secret", "..."},
-		},
-		{
-			path: []string{"cred", "set"},
-			required: []string{
-				"nssh cred set HOST",
-				"nssh cred set -g GROUP",
-				"-g, --group STRING",
-				"--username STRING",
-			},
-			rejected: []string{"--host", "..."},
-		},
-		{
-			path: []string{"cred", "rm"},
-			required: []string{
-				"nssh cred rm HOST",
-				"nssh cred rm -g GROUP",
-				"-g, --group STRING",
-			},
-			rejected: []string{"--host", "..."},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(strings.Join(tc.path, " "), func(t *testing.T) {
-			cmd, _, err := root.Find(tc.path)
-			if err != nil {
-				t.Fatalf("find %v: %v", tc.path, err)
-			}
-			help := ui.RenderStyledHelp(cmd, ui.StyledHelpConfig{ShowGlobalFlags: true, Width: 80})
-			for _, want := range tc.required {
-				if !strings.Contains(help, want) {
-					t.Fatalf("help missing %q:\n%s", want, help)
-				}
-			}
-			for _, reject := range tc.rejected {
-				if strings.Contains(help, reject) {
-					t.Fatalf("help contains %q:\n%s", reject, help)
-				}
-			}
-		})
 	}
 }

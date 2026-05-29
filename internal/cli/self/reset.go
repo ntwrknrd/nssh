@@ -8,11 +8,9 @@ import (
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/agent"
-	clisession "github.com/ntwrknrd/nssh/internal/cli/session"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/ui"
-	"github.com/ntwrknrd/nssh/internal/vault"
 	"github.com/spf13/cobra"
 )
 
@@ -47,8 +45,7 @@ func NewResetCmd() *cobra.Command {
 		Long: `Reset nssh by deleting all configuration and credentials.
 
 This command permanently deletes:
-- Your nssh identity (age keypair)
-- All stored credentials
+- nssh provider configuration and local state
 - Session recordings
 - nssh configuration
 
@@ -83,12 +80,7 @@ func runReset(dryRun, force bool) error {
 
 	// Show deletion summary
 	ui.SubSection("The following will be permanently deleted")
-	ui.Deletion("Your nssh identity (age keypair)")
-	if summary.HostCount > 0 || summary.ContextCount > 0 {
-		ui.Deletion("All stored credentials (%d hosts across %d contexts)", summary.HostCount, summary.ContextCount)
-	} else {
-		ui.Deletion("All stored credentials")
-	}
+	ui.Deletion("nssh provider configuration and local state")
 	if summary.RecordingCount > 0 {
 		ui.Deletion("Session recordings (%d files)", summary.RecordingCount)
 	} else {
@@ -176,7 +168,7 @@ func runReset(dryRun, force bool) error {
 		}
 	}
 
-	// Data directory (vault, backups)
+	// Data directory
 	if DirExists(summary.DataDir) {
 		if err := os.RemoveAll(summary.DataDir); err != nil {
 			ui.Warning("Failed to remove %s: %v", AbbreviatePath(summary.DataDir), err)
@@ -186,7 +178,7 @@ func runReset(dryRun, force bool) error {
 		}
 	}
 
-	// Config directory (identity, config)
+	// Config directory
 	if DirExists(summary.ConfigDir) {
 		if err := os.RemoveAll(summary.ConfigDir); err != nil {
 			ui.Warning("Failed to remove %s: %v", AbbreviatePath(summary.ConfigDir), err)
@@ -216,18 +208,6 @@ func enumerateDeletions(paths *config.Paths) ResetSummary {
 		ConfigDir: paths.ConfigDir,
 		DataDir:   paths.DataDir,
 		StateDir:  paths.StateDir,
-	}
-
-	// Try to count hosts and contexts from vault (best effort)
-	// This may fail if vault is locked or doesn't exist
-	mgr, err := clisession.NewManager(vault.Auto(), vault.WithPaths(paths))
-	if err == nil {
-		if contexts, err := mgr.ListContexts(); err == nil {
-			summary.ContextCount = len(contexts)
-		}
-		if hosts, err := mgr.ListHostsWithCredentials(); err == nil {
-			summary.HostCount = len(hosts)
-		}
 	}
 
 	// Count recordings

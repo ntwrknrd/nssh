@@ -1,7 +1,7 @@
 # ~/.ssh/work_hosts
 #
 # Work environment SSH hosts.
-# This file is referenced by the "work" context in ~/.local/share/nssh/credentials.age
+# Credential fallback is configured through inventory.group.work.auth.
 
 Host legacy-switch
   HostName legacy-switch.example.com

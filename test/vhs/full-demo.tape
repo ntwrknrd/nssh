@@ -59,15 +59,7 @@ Sleep 500ms
 Enter
 Sleep 500ms
 
-# Unlock the vault for subsequent commands
-Sleep 200ms
-Type "nssh unlock"
-Enter
-
-# Enter passphrase
-Sleep 200ms
-Type "thisisatestpass"
-Enter
+# Provider authentication is owned by the configured credential provider.
 
 # Pause for user to review
 Sleep 10s
@@ -100,15 +92,9 @@ Type "nssh inv set ssh-pwd.demo.local --group test --user testuser"
 Sleep 300ms
 Enter
 
-# Save password as a host credential
-Type "nssh cred set --host ssh-pwd.demo.local --username testuser"
+# Map host auth to an existing provider item
+Type "nssh inv set ssh-pwd.demo.local --credential-provider pass-local --credential-ref nssh/hosts/ssh-pwd.demo.local --credential-username testuser"
 Sleep 300ms
-Enter
-Sleep 500ms
-Type "testpass"
-Enter
-Sleep 500ms
-Type "testpass"
 Enter
 Sleep 1s
 

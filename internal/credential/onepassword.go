@@ -17,17 +17,30 @@ import (
 )
 
 type onePasswordProvider struct {
-	account   string
-	vault     string
-	hostRefs  map[string]config.CredentialRefConfig
-	groupRefs map[string]config.CredentialRefConfig
-	runner    opRunner
-	cache     bool
+	name           string
+	account        string
+	vault          string
+	session        string
+	hostRefs       map[string]config.CredentialRefConfig
+	groupRefs      map[string]config.CredentialRefConfig
+	runner         opRunner
+	cache          bool
+	autoStartAgent bool
 }
 
 type opRunner interface {
 	Run(ctx context.Context, stdin []byte, args ...string) ([]byte, error)
 }
+
+type agentProviderClient interface {
+	ProviderRequest(agent.ProviderRequest) (*agent.ProviderResponse, error)
+	Close() error
+}
+
+var (
+	connectProviderAgent = func() (agentProviderClient, error) { return agent.Connect() }
+	spawnRuntimeAgent    = agent.SpawnRuntime
+)
 
 type opCLIRunner struct{}
 
@@ -57,13 +70,24 @@ type cachedOnePasswordItem struct {
 }
 
 func newOnePasswordProvider(cfg config.CredentialConfig) Provider {
+	return newOnePasswordProviderNamed("", cfg)
+}
+
+func newOnePasswordProviderNamed(name string, cfg config.CredentialConfig) Provider {
+	session := strings.TrimSpace(cfg.Config.Session)
+	if session == "" {
+		session = config.ProviderSessionAgentOwned
+	}
 	return &onePasswordProvider{
-		account:   cfg.Config.Account,
-		vault:     cfg.Config.Vault,
-		hostRefs:  cfg.Host,
-		groupRefs: cfg.Group,
-		runner:    opCLIRunner{},
-		cache:     true,
+		name:           name,
+		account:        cfg.Config.Account,
+		vault:          cfg.Config.Vault,
+		session:        session,
+		hostRefs:       cfg.Host,
+		groupRefs:      cfg.Group,
+		runner:         opCLIRunner{},
+		cache:          false,
+		autoStartAgent: true,
 	}
 }
 
@@ -117,6 +141,20 @@ func (p *onePasswordProvider) Status() Status {
 	return Status{Type: config.CredentialProvider1Password, Available: true, Detail: "1Password vault " + p.vault}
 }
 
+func (p *onePasswordProvider) Capabilities() Capabilities {
+	session := strings.TrimSpace(p.session)
+	if session == "" {
+		session = config.ProviderSessionAgentOwned
+	}
+	return Capabilities{
+		ProviderSessionPolicy: session,
+		SupportsHostCRUD:      true,
+		SupportsGroupCRUD:     true,
+		SupportsSecretRefs:    true,
+		SupportsStatusCheck:   true,
+	}
+}
+
 type credentialScope string
 
 const (
@@ -126,7 +164,13 @@ const (
 
 func (p *onePasswordProvider) get(scope credentialScope, name string) (*Record, error) {
 	if ref := p.refForScope(scope, name); ref.Ref != "" {
+		if p.usesAgentSession() {
+			return p.agentGet(scope, name, ref)
+		}
 		return p.getRef(ref)
+	}
+	if p.usesAgentSession() {
+		return p.agentGet(scope, name, config.CredentialRefConfig{})
 	}
 	item, err := p.getItem(scope, name)
 	if err != nil {
@@ -140,6 +184,41 @@ func (p *onePasswordProvider) get(scope credentialScope, name string) (*Record, 
 		return nil, nil
 	}
 	return &Record{Username: username, Secret: secret.NewFromString(password), Ref: itemTitle(scope, name)}, nil
+}
+
+func (p *onePasswordProvider) usesAgentSession() bool {
+	return p.name != "" && strings.TrimSpace(p.session) == config.ProviderSessionAgentOwned
+}
+
+func (p *onePasswordProvider) agentGet(scope credentialScope, name string, ref config.CredentialRefConfig) (*Record, error) {
+	client, err := connectProviderAgent()
+	if errors.Is(err, agent.ErrAgentNotRunning) && p.autoStartAgent {
+		if spawnErr := spawnRuntimeAgent(); spawnErr != nil {
+			return nil, spawnErr
+		}
+		client, err = connectProviderAgent()
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = client.Close() }()
+
+	resp, err := client.ProviderRequest(agent.ProviderRequest{
+		Provider:    p.name,
+		Action:      "get",
+		Scope:       string(scope),
+		Name:        name,
+		Ref:         ref.Ref,
+		Username:    ref.Username,
+		UsernameRef: ref.UsernameRef,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || !resp.Found {
+		return nil, nil
+	}
+	return &Record{Username: resp.Username, Secret: secret.NewFromString(string(resp.Secret)), Ref: resp.Ref}, nil
 }
 
 func (p *onePasswordProvider) getRef(ref config.CredentialRefConfig) (*Record, error) {

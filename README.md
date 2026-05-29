@@ -26,13 +26,13 @@ SSH wrapper for power users: manage hosts and credentials, inject passwords auto
 
 - **Interactive PTY connector** - In-process password injection without external tools (see [ARCHITECTURE.md](docs/ARCHITECTURE.md#pty-connector-architecture))
 - **Fuzzy host selection** - Exact matches connect instantly; partial matches use `fzf` for interactive filtering
-- **Agent-based credential management** - Background daemon holds decrypted credentials with configurable idle/lifetime timeouts and passphrase-protected keys
-- **Age-encrypted vault** - Context-aware storage with domain-based resolution and host-specific overrides; passwords never in plaintext or CLI args (streamed directly through the PTY connector)
+- **Provider-backed credentials** - Pass is the default local provider; 1Password and Bitwarden are supported through provider-owned authentication
+- **Agent runtime** - Background daemon brokers provider sessions and metadata cache with configurable idle/lifetime timeouts
 - **SSH config management** - Create, remove, sort, and update host entries in SSH config files with automatic alphabetical sorting, timestamped backups, and indexed lookups across SSH 'Include' config files
 - **Legacy device compatibility** - Auto-detects SSH algorithm mismatches and applies KEX/cipher/MAC fixes for older network equipment (see [ARCHITECTURE.md](docs/ARCHITECTURE.md#ssh-compatibility-detection-and-remediation))
 - **Shell integration** - History tracking (Bash/Zsh/Fish) and tab completion for hostnames, contexts, and commands
 - **Session recording & playback** - Automatic asciinema integration with host-based filtering, idle time limiting, automatic archival, and comprehensive session management via `nssh log` CLI (list/play/upload/export/delete with pattern matching and interactive selection)
-- **File transfers** - Standard SCP CLI with credential vault integration (see [USER_GUIDE.md](docs/USER_GUIDE.md#nssh-cp-scp-wrapper))
+- **File transfers** - Standard SCP CLI with shared credential resolution (see [USER_GUIDE.md](docs/USER_GUIDE.md#connecting))
 - **Host key pinning** - Pin-on-first-use security model with configurable trust-on-first-use fallback
 
 ## Installation
@@ -57,7 +57,7 @@ Initialize nssh (interactive setup)
 nssh self init
 ```
 
-The `init` command guides you through: passphrase creation, SSH config setup, shell integration, include file creation, and optional context credential setup. **TIP:** After installation, run `nssh self status`
+The `init` command guides you through: credential provider selection, SSH config setup, shell integration, and include file creation. **TIP:** After installation, run `nssh self status`
 
 For detailed instructions & manual setup options see [Getting Started](docs/USER_GUIDE.md#getting-started).
 
@@ -92,8 +92,6 @@ nssh is built on the shoulders of exceptional open-source tools and communities.
 - [creack/pty](https://github.com/creack/pty) (MIT) - PTY handling
 - [Cobra](https://github.com/spf13/cobra) (Apache-2.0) - CLI framework
 - [Charm](https://github.com/charmbracelet) (MIT) - Terminal UI libraries (Huh, Lipgloss, Bubble Tea)
-- [age](https://github.com/FiloSottile/age) (BSD-3-Clause) - Modern file encryption
-- [memguard](https://github.com/awnumar/memguard) (Apache-2.0) - Secure memory management
 
 **License Compatibility:**
 This project is licensed under [GNU GPL-3.0](https://github.com/ntwrknrd/nssh/blob/main/LICENSE), which is compatible with all the above dependencies.

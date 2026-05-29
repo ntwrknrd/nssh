@@ -1,7 +1,7 @@
 # nssh User Guide
 
-`nssh` wraps SSH with inventory management, credential injection, session
-recording, and a small set of installation tools.
+`nssh` wraps SSH with inventory management, provider-backed credential
+injection, session recording, and installation tools.
 
 ## First Setup
 
@@ -15,9 +15,9 @@ nssh self status
 New installs use:
 
 - `~/.config/nssh/config.toml` for nssh configuration
-- `~/.local/share/nssh/credentials.age` for the default age-backed credential provider
-- `~/.local/state/nssh/` for runtime state
+- `~/.local/state/nssh/` for runtime state and recordings
 - `~/.ssh/nssh.d/` for nssh-managed SSH config include files
+- Pass, 1Password, or Bitwarden for credential storage
 
 `~/.ssh/config` should include the managed inventory directory:
 
@@ -40,17 +40,6 @@ nssh inv doctor
 nssh inv status
 ```
 
-Use `-s`/`--select` to filter inventory rows. Plain terms search visible row
-values; `field:value` terms are exact matches. Multiple terms are combined with
-AND.
-
-```bash
-nssh inv list -s cbb
-nssh inv list -s group:cbb
-nssh inv list -s 'group:cbb user:admin'
-nssh inv list -s provider:netbox-prod
-```
-
 Groups are inventory placement buckets:
 
 ```bash
@@ -63,92 +52,81 @@ nssh inv rm -g lab
 Local-provider hosts are written to `~/.ssh/nssh.d/provider_local.conf`.
 External-provider hosts are generated into provider-owned files, such as
 `~/.ssh/nssh.d/provider_netbox-prod.conf`.
-Use `nssh inv status` to inspect cache age, route ownership, and output files;
-use `nssh inv status --refresh` to refresh external-provider caches.
 
-External provider setup is not managed by CLI CRUD. Configure providers in
-`config.toml`:
+Set the SSH login user on the inventory group when every host in that group
+uses the same account. Provider refresh writes this into generated SSH config.
 
 ```toml
-[inventory]
-default_group = "lab"
-
-# Empty table is enough to declare a local group.
-[inventory.group.lab]
-
-[inventory.provider.netbox-prod]
-type = "netbox"
-
-[inventory.provider.netbox-prod.config]
-base_url = "https://netbox.example.com"
-token_env = "NETBOX_TOKEN"
-
-[[inventory.provider.netbox-prod.route]]
-group = "lab"
+[inventory.group.custcbb]
+default_user = "netops"
 ```
 
 ## Credentials
 
-Credentials are managed with `nssh cred`. Credential records attach only to a
-host or a group.
+Credentials are stored and inspected in the selected password manager. `nssh`
+stores only inventory auth mappings: which provider item should be used for a
+host or group.
 
 ```bash
-nssh cred status
-nssh cred set switch1 --username admin
-nssh cred link switch1 --ref "Existing 1Password Item"
-nssh cred get switch1
-nssh cred rm switch1
-
-nssh cred set -g lab --username admin
-nssh cred link -g lab --ref "Network Shared Admin"
-nssh cred get -g lab
-nssh cred rm -g lab
+nssh inv set switch1 --credential-provider op-network --credential-ref "Existing 1Password Item"
+nssh inv set switch1 --credential-clear
+nssh inv get switch1
+nssh inv get -g lab
 ```
 
 Credential resolution order during connect:
 
-1. Host credential override
-2. Group credential fallback
+1. Host auth override
+2. Inventory group auth mapping
 3. SSH config defaults and key authentication
 
-`nssh cred get <host>` shows the effective credential source for that host. If
-no host override exists, it reports the inventory group and any group
-fallback credential that would be used.
+`nssh inv get <host>` shows the effective auth mapping for that host. It never
+prints the target password.
 
-The active credential backend is selected globally:
+Pass is the default provider:
 
 ```toml
 [credential]
-type = "age"
+default_provider = "pass-local"
+
+[credential.provider.pass-local]
+type = "pass"
+
+[credential.provider.pass-local.config]
+command = "pass"
+prefix = "nssh"
+
+[inventory.group.default.auth]
+provider = "pass-local"
+ref = "nssh/groups/default"
 ```
 
-For 1Password:
+The auth mapping points at the password record. The SSH username belongs to
+inventory group config unless the provider item must override it.
+
+1Password and Bitwarden can be added as named providers:
 
 ```toml
-[credential]
+[credential.provider.op-network]
 type = "1password"
 
-[credential.config]
-account = ""
+[credential.provider.op-network.config]
 vault = "Network"
+session = "agent"
+
+[credential.provider.bw-team]
+type = "bitwarden"
+
+[credential.provider.bw-team.config]
+session = "external"
 ```
 
-1Password items are deterministic:
+Provider authentication stays with the provider. Pass uses GPG/pass, 1Password
+uses `op`, and Bitwarden uses `bw`; nssh does not store provider tokens.
 
-- `nssh host <host>`
-- `nssh group <group>`
-
-Use `cred link` when an existing 1Password item should be the credential source
-instead of a deterministic nssh-owned item. `--ref` may be an item name/ID or an
-`op://` secret reference. If `--ref` is an `op://.../password` reference, nssh
-uses the sibling `op://.../username` reference unless `--username` or
-`--username-ref` is provided.
-
-```bash
-nssh cred link -g lab --ref "Network Shared Admin"
-nssh cred link switch1 --ref "op://Network/Switch 1/password"
-nssh cred link switch1 --ref "op://Network/Switch 1/password" --username netops
-```
+There is no automated migration from prior local encrypted credential files.
+Create the equivalent records in the password manager, then map inventory
+groups or host overrides to those provider item refs.
 
 ## Connecting
 
@@ -164,20 +142,29 @@ If lookup misses, `nssh` refreshes eligible stale inventory providers once,
 retries lookup, and only then offers to create a local inventory host with
 `nssh inv set`.
 
-## Vault Session
-
-Unlock credentials for the current session:
+`nssh cp` uses the same host and credential resolution path as SSH:
 
 ```bash
-nssh unlock
-nssh lock
+nssh cp switch1:/tmp/file ./file
+nssh cp ./file switch1:/tmp/file
 ```
 
-Headless unlock is available when needed:
+## Agent
+
+`nssh agent` manages the background runtime used for provider sessions and
+metadata cache.
 
 ```bash
-printf '%s\n' "$PASSPHRASE" | nssh unlock --stdin
+nssh agent status
+nssh agent stop
+nssh agent restart
+nssh agent doctor
 ```
+
+There is no primary unlock/lock workflow. Provider authentication happens when
+the provider CLI requires it. For `session = "agent"` providers, nssh starts
+the runtime agent on the first provider request by default. Set
+`agent.auto_start = false` to require manual startup with `nssh agent restart`.
 
 ## Session Logs
 

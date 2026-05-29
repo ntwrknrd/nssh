@@ -3,14 +3,12 @@ $ nssh --help
 │   nssh [host] [flags]               Smart connect to host                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
+│   agent                             Manage nssh agent                        │
 │   connect                           Connect to host                          │
 │   cp                                Copy files via SCP                       │
-│   cred                              Manage credentials                       │
 │   inv                               Manage inventory                         │
-│   lock                              Lock credential vault                    │
 │   log                               Manage session recordings                │
 │   self                              Manage nssh                              │
-│   unlock                            Unlock credential vault                  │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

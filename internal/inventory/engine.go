@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 )
@@ -17,7 +18,7 @@ type Plan struct {
 
 // Reconcile routes discovered objects into groups and diffs desired state
 // against current provider state.
-func Reconcile(objects []Object, routes []config.InventoryRouteConfig, providerName string, current *ProviderState) *Plan {
+func Reconcile(objects []Object, routes []config.InventoryRouteConfig, providerName string, current *ProviderState, groups ...map[string]config.GroupConfig) *Plan {
 	plan := &Plan{}
 	desired := make(map[string]*ProviderHost)
 	for i := range objects {
@@ -28,6 +29,7 @@ func Reconcile(objects []Object, routes []config.InventoryRouteConfig, providerN
 			continue
 		}
 		host := objectToProviderHost(obj, route.Group)
+		host.Username = groupDefaultUser(route.Group, groups...)
 		desired[host.ObjectID] = host
 	}
 
@@ -59,6 +61,13 @@ func Reconcile(objects []Object, routes []config.InventoryRouteConfig, providerN
 		}
 	}
 	return plan
+}
+
+func groupDefaultUser(group string, groups ...map[string]config.GroupConfig) string {
+	if len(groups) == 0 || groups[0] == nil {
+		return ""
+	}
+	return strings.TrimSpace(groups[0][group].DefaultUser)
 }
 
 func objectToProviderHost(obj *Object, group string) *ProviderHost {

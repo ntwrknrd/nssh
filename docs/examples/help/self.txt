@@ -7,7 +7,6 @@ $ nssh self --help
 │   cfg                               Manage configuration                     │
 │   init                              Initialize configuration                 │
 │   reinstall                         Install latest from GitHub               │
-│   rekey                             Rotate keys                              │
 │   reset                             Reset configuration                      │
 │   status                            Show status                              │
 │   uninstall                         Uninstall nssh                           │

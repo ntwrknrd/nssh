@@ -5,10 +5,10 @@ $ nssh inv --help
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
 │   doctor                            Check inventory health                   │
 │   get                               Show inventory details                   │
-│   import                            Import local inventory from CSV          │
+│   import                            Import inventory from CSV                │
 │   list                              List inventory                           │
-│   rm                                Remove local inventory                   │
-│   set                               Create or update local inventory         │
+│   rm                                Remove inventory entries                 │
+│   set                               Create or update inventory               │
 │   status                            Show inventory provider status           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮

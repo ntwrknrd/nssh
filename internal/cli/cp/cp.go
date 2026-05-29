@@ -5,15 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 
 	"github.com/creack/pty"
-	clisession "github.com/ntwrknrd/nssh/internal/cli/session"
+	"github.com/ntwrknrd/nssh/internal/cli/resolve"
 	"github.com/ntwrknrd/nssh/internal/secret"
-	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
-	"github.com/ntwrknrd/nssh/internal/vault"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -175,47 +172,21 @@ func runCp(source, dest string, recursive, preserve, quiet, verbose bool) error 
 		return err
 	}
 
-	// Resolve host from SSH config
-	parser := sshconfig.NewParser()
-	hostEntry, err := parser.FindHost(hostSearch)
+	resolved, err := resolveHostForConnect(hostSearch, user)
 	if err != nil {
-		ui.Error("Failed to get host details: %s", err)
+		ui.Error("Failed to resolve host: %s", err)
 		return err
 	}
-	if hostEntry == nil {
+	if resolved.HostEntry == nil {
 		ui.Error("Host not found: %s", hostSearch)
 		return fmt.Errorf("host not found: %s", hostSearch)
 	}
 
-	includeFile := filepath.Base(hostEntry.SourceFile)
-
-	// Resolve credentials
-	mgr, err := clisession.NewManager(vault.Auto())
-	if err != nil {
-		ui.Error("Failed to load credentials: %s", err)
-		return err
-	}
-
-	_ = clisession.TryUnlockIfTTY(mgr)
-
 	var password *secret.Secret
-	var scpUser string
-
-	if user != "" {
-		scpUser = user
-	} else if hostEntry != nil && hostEntry.User() != "" {
-		scpUser = hostEntry.User()
+	if resolved.Credential != nil {
+		password = resolved.Credential.Password
 	}
-
-	// Resolve credential using the Host identifier (how credentials are indexed in the vault)
-	// inventory host credentials are keyed by Host, not by HostName
-	cred, _ := mgr.ResolveCredential(hostSearch, filepath.Base(includeFile), scpUser)
-	if cred != nil {
-		if scpUser == "" {
-			scpUser = cred.Username
-		}
-		password = cred.Password
-	}
+	scpUser := resolved.Username
 
 	// Build remote spec using the Host identifier (hostSearch) so SSH config applies
 	// SSH config directives (ProxyJump, Port, IdentityFile, etc.) match on Host
@@ -248,8 +219,12 @@ func runCp(source, dest string, recursive, preserve, quiet, verbose bool) error 
 	}
 
 	// Run SCP with PTY for password injection
-	return runScpWithPty(args, password)
+	return runScp(args, password)
 }
+
+var resolveHostForConnect = resolve.ResolveHostForConnect
+
+var runScp = runScpWithPty
 
 var passwordPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)password:\s*$`),

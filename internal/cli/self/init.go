@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,14 +13,10 @@ import (
 	"runtime"
 	"strings"
 
-	clisession "github.com/ntwrknrd/nssh/internal/cli/session"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/shell"
 	"github.com/ntwrknrd/nssh/internal/ui"
-	"github.com/ntwrknrd/nssh/internal/vault"
-	"github.com/ntwrknrd/nssh/internal/vault/software"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 // InitOptions configures the behavior of runInit.
@@ -134,24 +129,10 @@ func runInit(opts InitOptions) error {
 
 	// Install example config if none exists (skip in quiet mode)
 	if !opts.Quiet {
-		if err := ensureExampleConfig(paths, opts.DryRun, opts.Yes); err != nil {
+		if err := ensureInitConfig(paths, opts); err != nil {
 			ui.Warning("Config setup: %v", err)
 		}
-	}
-
-	// Setup credential protection (skip in quiet mode - reinstall only refreshes shell)
-	if !opts.Quiet {
-		if !opts.DryRun {
-			cfg, err := config.LoadDefault()
-			if err != nil {
-				return fmt.Errorf("load config: %w", err)
-			}
-			if err := setupCredentialProtection(paths, cfg, opts.Yes); err != nil {
-				return fmt.Errorf("failed to setup credential protection: %w", err)
-			}
-		} else {
-			ui.Info("Credential protection: would be configured (dry run)")
-		}
+		ui.Info("Credential provider authentication is owned by Pass, 1Password, or Bitwarden.")
 	}
 
 	// Ensure SSH config has Include directive for nssh.d (silent in quiet mode)
@@ -431,201 +412,6 @@ func RunInitQuiet(dryRun bool) error {
 	})
 }
 
-// SecurityState represents the current state of credential protection.
-type SecurityState int
-
-// Security states for credential protection detection.
-const (
-	StateNewInstall           SecurityState = iota // No existing credentials
-	StateLegacyNeedsMigration                      // Unprotected legacy storage detected
-	StateAlreadyInitialized                        // Protected storage already configured
-)
-
-// detectSecurityState determines the current credential protection state.
-func detectSecurityState(paths *config.Paths) SecurityState {
-	pubKeyPath := filepath.Join(paths.ConfigDir, "age.pub")
-
-	// Check for protected storage first (age.pub exists = already initialized)
-	if _, err := os.Stat(pubKeyPath); err == nil {
-		return StateAlreadyInitialized
-	}
-
-	// Check all known legacy key locations
-	for _, keyPath := range legacyKeyPaths() {
-		if _, err := os.Stat(keyPath); err == nil {
-			return StateLegacyNeedsMigration
-		}
-	}
-
-	return StateNewInstall
-}
-
-// credentialsExist checks if a credentials file exists at the expected location.
-func credentialsExist(paths *config.Paths) bool {
-	_, err := os.Stat(paths.CredentialsFile)
-	return err == nil
-}
-
-// verifyCurrentSetupCanDecrypt attempts to decrypt credentials with the current setup.
-// Returns nil if successful, error otherwise.
-func verifyCurrentSetupCanDecrypt(paths *config.Paths) error {
-	mgr, err := clisession.NewManager(
-		vault.Auto(),
-		vault.WithPaths(paths),
-	)
-	if err != nil {
-		return fmt.Errorf("create manager: %w", err)
-	}
-
-	// Try to list contexts (triggers decryption)
-	_, err = mgr.ListContexts()
-	return err
-}
-
-func isVaultLockedError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, software.ErrNeedsUnlock) {
-		return true
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "vault locked")
-}
-
-func canPromptForUnlock(skipPrompts bool) bool {
-	if skipPrompts {
-		return false
-	}
-	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
-}
-
-// setupCredentialProtection handles credential protection initialization.
-func setupCredentialProtection(paths *config.Paths, cfg *config.Config, skipPrompts bool) error {
-	state := detectSecurityState(paths)
-
-	// Handle already initialized case - init is for first-time setup only
-	if state == StateAlreadyInitialized {
-		// Verify we can actually decrypt credentials with current setup
-		if credentialsExist(paths) {
-			if err := verifyCurrentSetupCanDecrypt(paths); err != nil {
-				if isVaultLockedError(err) {
-					ui.Warning("Credential protection is already configured but locked.")
-
-					// Offer to unlock interactively when possible.
-					if canPromptForUnlock(skipPrompts) {
-						ui.Info("Unlock now to verify access?")
-						proceed, perr := ui.Confirm("Unlock now?", true)
-						if perr != nil {
-							return fmt.Errorf("prompt unlock: %w", perr)
-						}
-						if proceed {
-							unlockMgr, merr := clisession.NewManager(vault.Auto())
-							if merr != nil {
-								ui.Warning("Unlock failed: %v", merr)
-							} else if uerr := clisession.Unlock(unlockMgr, false); uerr != nil {
-								ui.Warning("Unlock failed: %v", uerr)
-							} else if verr := verifyCurrentSetupCanDecrypt(paths); verr == nil {
-								ui.Success("Credential protection: already configured")
-								return nil
-							}
-						}
-					} else {
-						ui.Info("Run 'nssh unlock' to unlock the session.")
-					}
-
-					ui.Success("Credential protection: already configured (locked)")
-					return nil
-				}
-				// Current setup can't decrypt - check if legacy key can help
-				legacyKey := findExistingLegacyKey()
-				if legacyKey != "" {
-					ui.Warning("Current keys cannot decrypt credentials, but legacy key found")
-					ui.Info("Removing broken keys and attempting migration from legacy key...")
-					// Remove the broken keys so migration can create new ones
-					_ = os.Remove(filepath.Join(paths.ConfigDir, "age.pub"))
-					_ = os.Remove(filepath.Join(paths.ConfigDir, "age.key.enc"))
-					// Switch to migration path
-					state = StateLegacyNeedsMigration
-				} else {
-					ui.Error("Current keys cannot decrypt credentials: %v", err)
-					ui.Error("No legacy key found to recover from")
-					fmt.Println()
-					ui.Info("Options:")
-					fmt.Println("  1. Locate your original age key and copy it to ~/.config/nssh/age.key")
-					fmt.Println("  2. Use 'nssh self reset' to start fresh (credentials will be lost)")
-					return fmt.Errorf("broken state: credentials exist but cannot be decrypted")
-				}
-			} else {
-				ui.Success("Credential protection: already configured")
-				fmt.Println()
-				ui.Info("To rotate keys: nssh self rekey")
-				ui.Info("To start fresh: nssh self reset")
-				return nil
-			}
-		} else {
-			ui.Success("Credential protection: already configured")
-			fmt.Println()
-			ui.Info("To rotate keys: nssh self rekey")
-			ui.Info("To start fresh: nssh self reset")
-			return nil
-		}
-	}
-
-	// CRITICAL: Check for orphaned credentials before proceeding.
-	// If credentials exist but no key is found, block init to prevent data loss.
-	if state == StateNewInstall {
-		if err := checkOrphanedCredentials(); err != nil {
-			return err
-		}
-	}
-
-	// Handle migration from legacy key (always migrates to software mode)
-	if state == StateLegacyNeedsMigration {
-		ui.Info("Migrating from legacy unprotected storage...")
-		if err := migrateLegacyToSoftware(paths, cfg); err != nil {
-			return fmt.Errorf("migration failed: %w", err)
-		}
-		ui.Success("Migration complete")
-		return nil
-	}
-
-	// New install - initialize software credential protection.
-	ui.SubSection("Credential Protection")
-	return initSoftwareMode(paths, cfg)
-}
-
-// initSoftwareMode initializes passphrase-protected credentials.
-// Supports NSSH_PASSPHRASE env var for non-interactive initialization (CI/testing).
-func initSoftwareMode(paths *config.Paths, cfg *config.Config) error {
-	ksCfg := software.Config{
-		ConfigDir:           paths.ConfigDir,
-		DataDir:             paths.DataDir,
-		StateDir:            paths.StateDir,
-		ScryptWorkFactor:    cfg.Agent.Security.Software.ScryptWorkFactor,
-		PassphraseMinLength: cfg.Agent.Security.Software.PassphraseMinLength,
-	}
-
-	ks, err := software.New(ksCfg)
-	if err != nil {
-		return fmt.Errorf("create store: %w", err)
-	}
-
-	// Check for non-interactive passphrase (CI/testing)
-	// Note: force=false since setupCredentialProtection handles state checking
-	if passphrase := os.Getenv("NSSH_PASSPHRASE"); passphrase != "" {
-		if err := ks.InitializeWithPassphrase([]byte(passphrase), false); err != nil {
-			return err
-		}
-	} else {
-		if err := promptAndInitialize(ks); err != nil {
-			return err
-		}
-	}
-
-	ui.Success("Credentials protected with passphrase")
-	return nil
-}
-
 // ensureSSHConfigInclude ensures ~/.ssh/config has an Include directive for nssh.d.
 // This is required for SSH to read host entries created by nssh.
 func ensureSSHConfigInclude(paths *config.Paths) error {
@@ -675,6 +461,45 @@ func showNextSteps() {
 	ui.NumberedList(steps)
 	fmt.Println()
 	ui.Info("Run 'nssh --help' for more commands")
+}
+
+func ensureInitConfig(paths *config.Paths, opts InitOptions) error {
+	var existing *config.Config
+	if _, err := os.Stat(paths.ConfigFile); err == nil {
+		cfg, loadErr := config.Load(paths.ConfigFile)
+		if loadErr != nil {
+			return loadErr
+		}
+		existing = cfg
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	req := initPlanRequest{
+		Yes:      opts.Yes,
+		Existing: existing,
+	}
+	if !opts.Yes {
+		var err error
+		req, err = promptInitPlanRequest(uiInitPrompter{}, existing)
+		if err != nil {
+			return err
+		}
+	}
+	plan, err := buildInitPlan(req)
+	if err != nil {
+		return err
+	}
+
+	ui.Info("%s", plan.Summary())
+	if opts.DryRun {
+		return nil
+	}
+	if err := applyInitPlan(paths, plan); err != nil {
+		return err
+	}
+	ui.Success("Config file: %s", AbbreviatePath(paths.ConfigFile))
+	return nil
 }
 
 // ensureExampleConfig copies the example config to the config directory if none exists.

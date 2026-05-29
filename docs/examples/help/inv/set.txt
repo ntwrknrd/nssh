@@ -1,10 +1,15 @@
 $ nssh inv set --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh inv set HOST                 Create or update local inventory         │
+│   nssh inv set HOST                 Create or update inventory               │
 │   nssh inv set -g GROUP                                                      │
 │   nssh inv set HOST -g GROUP                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
+│   --credential-clear                clear host auth override                 │
+│   --credential-provider STRING      credential provider instance for ho...   │
+│   --credential-ref STRING           credential provider item or secret ...   │
+│   --credential-username STRING      literal SSH username for credential...   │
+│   --credential-username-ref STRING  provider secret reference for SSH u...   │
 │   -g, --group STRING                target group                             │
 │   --hostname STRING                 SSH HostName                             │
 │   --port INT                        SSH Port                                 │

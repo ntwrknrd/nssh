@@ -156,8 +156,6 @@ func runUninstall(keepConfig, keepRecordings, dryRun, yes bool) error {
 		ui.SubSection("Configuration")
 		configFiles := []string{
 			paths.ConfigFile,
-			paths.CredentialsFile,
-			paths.AgeKeyFile,
 		}
 
 		for _, cfgFile := range configFiles {

@@ -12,7 +12,6 @@ import (
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
-	"github.com/ntwrknrd/nssh/internal/vault"
 	"github.com/spf13/cobra"
 )
 
@@ -118,16 +117,13 @@ func runStatus() error {
 	// Configuration
 	ui.SubSection("Configuration")
 	printFileStatus(paths.ConfigFile, "Config file")
-	printFileStatus(paths.CredentialsFile, "Credentials")
-	printFileStatus(filepath.Join(paths.ConfigDir, "age.pub"), "Public key")
-
-	// Detect mode from filesystem and show appropriate key file
-	detectedMode, detectErr := vault.DetectSecurityMode(paths.ConfigDir)
-	if detectErr == nil {
-		printFileStatus(filepath.Join(paths.ConfigDir, "age.key.enc"), "Encrypted key")
-		ui.StatusLineNeutral("Security mode", detectedMode)
+	if cfg, err := config.LoadDefault(); err == nil {
+		ui.StatusLineNeutral("Default provider", cfg.Credential.DefaultProvider)
+		ui.StatusLineNeutral("Provider instances", fmt.Sprintf("%d", len(cfg.Credential.Provider)))
+		ui.StatusLineNeutral("Host auth overrides", fmt.Sprintf("%d", len(cfg.Inventory.Host)))
+		ui.StatusLineNeutral("Group auth mappings", fmt.Sprintf("%d", inventoryGroupAuthCount(cfg)))
 	} else {
-		ui.StatusLineNeutral("Security mode", "not initialized")
+		ui.StatusLineNeutral("Credential providers", "config unavailable: "+err.Error())
 	}
 
 	// SSH Config (with inventory hosts count)
@@ -196,23 +192,36 @@ func runStatus() error {
 		if status, err := client.Status(); err == nil {
 			if status.Mode == agent.ModeCache {
 				ui.StatusLineNeutral("Status", "credential cache active")
+			} else if status.Mode == agent.ModeRuntime {
+				printStatus(true, "Status", "provider runtime active")
 			} else {
-				printStatus(true, "Status", "unlocked")
+				printStatus(true, "Status", status.Mode)
 			}
 			ui.StatusLineNeutral("Idle in", formatDuration(status.RemainingIdle))
 			ui.StatusLineNeutral("Ends in", formatDuration(status.RemainingLife))
 		} else {
-			// If we cannot read status, treat the agent as locked and avoid showing
-			// expiry data that might be stale.
-			printStatus(false, "Status", "locked")
+			printStatus(false, "Status", "not running")
 		}
 		_ = client.Close()
 	} else {
-		printStatus(false, "Status", "locked")
+		printStatus(false, "Status", "not running")
 	}
 
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil
+}
+
+func inventoryGroupAuthCount(cfg *config.Config) int {
+	if cfg == nil {
+		return 0
+	}
+	count := 0
+	for _, group := range cfg.Inventory.Group {
+		if group.Auth.IsSet() {
+			count++
+		}
+	}
+	return count
 }
 
 func printStatus(ok bool, label, value string) {

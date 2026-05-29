@@ -1,6 +1,6 @@
 $ nssh inv rm --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh inv rm HOST                  Remove local inventory                   │
+│   nssh inv rm HOST                  Remove inventory entries                 │
 │   nssh inv rm -g GROUP                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮

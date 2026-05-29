@@ -10,6 +10,9 @@
 
 [agent]
 
+# Auto-start runtime agent on first provider-session request
+# auto_start = true
+
 # Idle timeout - terminate agent after inactivity (1s-24h)
 # Env: NSSH_AGENT_IDLE_TIMEOUT
 # idle_timeout = "1h"
@@ -24,49 +27,37 @@
 # max_lifetime = "24h"
 
 # ============================================================================
-# [agent.security]
-# ============================================================================
-
-[agent.security]
-
-# ============================================================================
-# [agent.security.software]
-# ============================================================================
-
-[agent.security.software]
-
-# Initial lockout duration after threshold reached (1m-1h)
-# Duration doubles with each subsequent lockout (exponential backoff)
-# lockout_duration = "5m"
-
-# Failed unlock attempts before lockout triggers (3-100)
-# lockout_threshold = 10
-
-# Maximum lockout duration - caps exponential backoff (5m-24h)
-# max_lockout_duration = "1h"
-
-# Minimum passphrase length for credentials (8-128)
-# passphrase_min_length = 12
-
-# scrypt work factor for key derivation, 2^N iterations (14-22)
-# Higher = more secure but slower unlock
-# scrypt_work_factor = 18
-
-# ============================================================================
 # [credential]
 # ============================================================================
 
 [credential]
 
-# Active credential provider backend. Exactly one backend is active globally.
-# Supported: "age", "1password"
-# type = "age"
+# Default provider used by inventory auth mappings that omit provider.
+default_provider = "pass-local"
 
-# Required when type = "1password"
-# [credential.config]
+[credential.provider.pass-local]
+type = "pass"
+
+  [credential.provider.pass-local.config]
+  command = "pass"
+  prefix = "nssh"
+
+# 1Password provider example.
+# [credential.provider.op-network]
+# type = "1password"
+#
+#   [credential.provider.op-network.config]
 # account = ""
 # vault = "Network"
-
+# session = "agent"
+#
+# Bitwarden provider example.
+# [credential.provider.bw-lab]
+# type = "bitwarden"
+#
+#   [credential.provider.bw-lab.config]
+# session = "external"
+#
 # ============================================================================
 # [inventory]
 # ============================================================================
@@ -77,7 +68,18 @@
 # default_group = "default"
 
 # Local groups label hosts in the implicit provider_local.conf inventory.
-# [inventory.group.default]
+[inventory.group.default]
+# default_user = "netops"
+
+  [inventory.group.default.auth]
+  provider = "pass-local"
+  ref = "nssh/groups/default"
+
+# Host auth override example.
+# [inventory.host.edge01.auth]
+# provider = "pass-local"
+# ref = "nssh/hosts/edge01"
+# username = "netops"
 
 # External inventory providers are configured here, not through CLI CRUD.
 # [inventory.provider.netbox-prod]

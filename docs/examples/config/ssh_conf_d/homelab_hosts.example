@@ -1,7 +1,7 @@
 # ~/.ssh/homelab_hosts
 #
 # Homelab environment SSH hosts.
-# This file is referenced by the "homelab" context in ~/.local/share/nssh/credentials.age
+# Credential fallback is configured through inventory.group.homelab.auth.
 
 Host k3s-a
   HostName k3s-a.lan.example.net

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -84,16 +85,16 @@ type sessionState struct {
 	mu                sync.RWMutex
 }
 
-type secretCache struct {
+type metadataCache struct {
 	mu   sync.RWMutex
 	data map[string][]byte
 }
 
-func newSecretCache() *secretCache {
-	return &secretCache{data: make(map[string][]byte)}
+func newMetadataCache() *metadataCache {
+	return &metadataCache{data: make(map[string][]byte)}
 }
 
-func (c *secretCache) get(key string) ([]byte, bool) {
+func (c *metadataCache) get(key string) ([]byte, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -104,11 +105,39 @@ func (c *secretCache) get(key string) ([]byte, bool) {
 	return append([]byte(nil), value...), true
 }
 
-func (c *secretCache) put(key string, value []byte) {
+func (c *metadataCache) put(key string, value []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.data[key] = append([]byte(nil), value...)
+}
+
+func (c *metadataCache) delete(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.data, key)
+}
+
+func (c *metadataCache) deletePrefix(prefix string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key := range c.data {
+		if strings.HasPrefix(key, prefix) {
+			delete(c.data, key)
+		}
+	}
+}
+
+func (c *metadataCache) clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.data = make(map[string][]byte)
+}
+
+func (c *metadataCache) count() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.data)
 }
 
 // stripMonotonic removes the monotonic component from a time.Time value.
@@ -145,7 +174,7 @@ func (s *sessionState) extendIdleDeadline() {
 	}
 }
 
-func (s *sessionState) status(mode string) StatusInfo {
+func (s *sessionState) status(mode string, metadataEntries, providerSessions int) StatusInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -161,11 +190,13 @@ func (s *sessionState) status(mode string) StatusInfo {
 	}
 
 	return StatusInfo{
-		Mode:          mode,
-		IdleTimeout:   int64(s.idleTimeout.Seconds()),
-		MaxLifetime:   int64(s.maxLifetime.Seconds()),
-		RemainingLife: int64(remainingLife.Seconds()),
-		RemainingIdle: int64(remainingIdle.Seconds()),
+		Mode:                 mode,
+		IdleTimeout:          int64(s.idleTimeout.Seconds()),
+		MaxLifetime:          int64(s.maxLifetime.Seconds()),
+		RemainingLife:        int64(remainingLife.Seconds()),
+		RemainingIdle:        int64(remainingIdle.Seconds()),
+		MetadataCacheEntries: metadataEntries,
+		ProviderSessions:     providerSessions,
 	}
 }
 
@@ -219,7 +250,7 @@ func Run(provider Provider, cfg RuntimeConfig) error {
 // Handles multiple requests per connection until client disconnects or lock.
 // The activityCh is used to signal the main loop that activity occurred,
 // allowing it to reset the idle timer for long-lived connections.
-func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger, shutdown chan<- string, state *sessionState, activityCh chan<- struct{}, cache *secretCache) {
+func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger, shutdown chan<- string, state *sessionState, activityCh chan<- struct{}, cache *metadataCache) {
 	defer func() { _ = conn.Close() }()
 
 	// Verify peer credentials
@@ -292,25 +323,12 @@ func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger
 
 		case OpStatus:
 			// Status checks don't count as activity - they're just observing state
-			statusData, _ := json.Marshal(state.status(provider.Mode()))
-			resp = Response{ID: req.ID, OK: true, Data: statusData}
-
-		case OpDecrypt:
-			// Signal activity for decrypt operations to reset idle timer
-			signalActivity()
-			plaintext, err := provider.Decrypt(req.Data)
-			if err != nil {
-				logger.Warn("decrypt failed", "err", err)
-				resp = Response{ID: req.ID, OK: false, Err: err.Error()}
-			} else {
-				logger.Debug("decrypt success", "ciphertext_len", len(req.Data))
-				resp = Response{ID: req.ID, OK: true, Data: plaintext}
+			sessionCount := 0
+			if p, ok := provider.(interface{ SessionCount() int }); ok {
+				sessionCount = p.SessionCount()
 			}
-
-		case OpRecipient:
-			// Signal activity for recipient requests (used during encryption)
-			signalActivity()
-			resp = Response{ID: req.ID, OK: true, Data: []byte(provider.Recipient())}
+			statusData, _ := json.Marshal(state.status(provider.Mode(), cache.count(), sessionCount))
+			resp = Response{ID: req.ID, OK: true, Data: statusData}
 
 		case OpCacheGet:
 			signalActivity()
@@ -321,6 +339,49 @@ func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger
 			signalActivity()
 			cache.put(req.Key, req.Data)
 			resp = Response{ID: req.ID, OK: true}
+
+		case OpMetadataGet:
+			signalActivity()
+			data, found := cache.get(req.Key)
+			resp = Response{ID: req.ID, OK: true, Found: found, Data: data}
+
+		case OpMetadataPut:
+			signalActivity()
+			cache.put(req.Key, req.Data)
+			resp = Response{ID: req.ID, OK: true}
+
+		case OpMetadataDelete:
+			signalActivity()
+			cache.delete(req.Key)
+			resp = Response{ID: req.ID, OK: true}
+
+		case OpMetadataDeletePrefix:
+			signalActivity()
+			cache.deletePrefix(req.Key)
+			resp = Response{ID: req.ID, OK: true}
+
+		case OpMetadataClear:
+			signalActivity()
+			cache.clear()
+			resp = Response{ID: req.ID, OK: true}
+
+		case OpProviderRequest:
+			signalActivity()
+			sessionProvider, ok := provider.(SessionProvider)
+			if !ok {
+				resp = Response{ID: req.ID, OK: false, Err: "agent provider does not support provider requests"}
+				break
+			}
+			if req.Provider == nil {
+				resp = Response{ID: req.ID, OK: false, Err: "provider request is required"}
+				break
+			}
+			providerResp, err := sessionProvider.HandleProviderRequest(context.Background(), *req.Provider)
+			if err != nil {
+				resp = Response{ID: req.ID, OK: false, Err: err.Error()}
+			} else {
+				resp = Response{ID: req.ID, OK: true, Provider: &providerResp}
+			}
 
 		case OpLock:
 			logger.Info("agent stopping", "reason", "lock_command")
@@ -478,7 +539,7 @@ func runAgent(ctx context.Context, provider Provider, cfg RuntimeConfig, extendS
 	connSem := semaphore.NewWeighted(maxConcurrentConnections)
 	defer func() { _ = provider.Close() }()
 
-	cache := newSecretCache()
+	cache := newMetadataCache()
 	activityCh := make(chan struct{}, 1)
 	shutdown := make(chan string, 1)
 

@@ -1,6 +1,6 @@
 $ nssh inv import --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh inv import FILE.csv [flags]  Import local inventory from CSV          │
+│   nssh inv import FILE.csv [flags]  Import inventory from CSV                │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
 │   --group STRING                    target group                             │

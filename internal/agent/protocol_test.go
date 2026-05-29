@@ -28,14 +28,6 @@ func TestRequest_JSON(t *testing.T) {
 			req:  Request{Version: 1, Op: OpStatus, ID: "req-123"},
 		},
 		{
-			name: "decrypt with data",
-			req:  Request{Version: 1, Op: OpDecrypt, Data: []byte("ciphertext")},
-		},
-		{
-			name: "recipient",
-			req:  Request{Version: 1, Op: OpRecipient},
-		},
-		{
 			name: "lock",
 			req:  Request{Version: 1, Op: OpLock},
 		},
@@ -124,7 +116,7 @@ func TestResponse_JSON(t *testing.T) {
 
 func TestStatusInfo_JSON(t *testing.T) {
 	info := StatusInfo{
-		Mode:          ModeSoftware,
+		Mode:          ModeRuntime,
 		IdleTimeout:   3600,
 		MaxLifetime:   86400,
 		RemainingLife: 43200,
@@ -169,8 +161,6 @@ func TestOpConstants(t *testing.T) {
 	}{
 		{"OpHello", OpHello, "hello"},
 		{"OpStatus", OpStatus, "status"},
-		{"OpDecrypt", OpDecrypt, "decrypt"},
-		{"OpRecipient", OpRecipient, "recipient"},
 		{"OpLock", OpLock, "lock"},
 	}
 

@@ -27,6 +27,8 @@ type Config struct {
 
 // AgentConfig holds agent daemon lifecycle settings.
 type AgentConfig struct {
+	// AutoStart starts the runtime agent on first provider-session request (default true)
+	AutoStart bool `toml:"auto_start"`
 	// IdleTimeout is how long the agent waits without activity before terminating (default 1h)
 	IdleTimeout Duration `toml:"idle_timeout"`
 	// ActivityIncrement is how much to extend the idle deadline on activity (default 15m)
@@ -37,9 +39,7 @@ type AgentConfig struct {
 	Security AgentSecurityConfig `toml:"security"`
 }
 
-// AgentSecurityConfig holds credential protection settings.
-// Note: Security mode is detected from filesystem state (age.key.enc), not from
-// config. See vault.DetectSecurityMode().
+// AgentSecurityConfig holds local agent lifecycle security settings.
 type AgentSecurityConfig struct {
 	// Software holds settings specific to software mode
 	Software SoftwareSecurityConfig `toml:"software"`
@@ -208,6 +208,7 @@ func DefaultConfig() *Config {
 	paths := DefaultPaths()
 	return &Config{
 		Agent: AgentConfig{
+			AutoStart:         true,
 			IdleTimeout:       Duration(1 * time.Hour),
 			ActivityIncrement: Duration(15 * time.Minute),
 			MaxLifetime:       Duration(24 * time.Hour),
@@ -228,12 +229,27 @@ func DefaultConfig() *Config {
 			},
 		},
 		Credential: CredentialConfig{
-			Type: CredentialProviderAge,
+			DefaultProvider: "pass-local",
+			Provider: map[string]CredentialProviderConfig{
+				"pass-local": {
+					Type: CredentialProviderPass,
+					Config: CredentialProviderDetailConfig{
+						Command: "pass",
+						Prefix:  "nssh",
+						Session: ProviderSessionExternal,
+					},
+				},
+			},
 		},
 		Inventory: InventoryConfig{
 			DefaultGroup: "default",
 			Group: map[string]GroupConfig{
-				"default": {},
+				"default": {
+					Auth: InventoryAuthConfig{
+						Provider: "pass-local",
+						Ref:      "nssh/groups/default",
+					},
+				},
 			},
 		},
 		Logging: LoggingConfig{
@@ -383,6 +399,9 @@ func (c *Config) Validate() error {
 	if err := c.Inventory.Validate(); err != nil {
 		return err
 	}
+	if err := c.validateInventoryAuthProviders(); err != nil {
+		return err
+	}
 	if err := c.Logging.Audit.Validate(); err != nil {
 		return err
 	}
@@ -394,6 +413,37 @@ func (c *Config) Validate() error {
 	}
 	if len(c.Sync.Sources) > 0 {
 		return legacySyncSourcesError()
+	}
+	return nil
+}
+
+func (c *Config) validateInventoryAuthProviders() error {
+	for group, cfg := range c.Inventory.Group {
+		if err := validateInventoryAuthProvider("inventory.group."+group+".auth", cfg.Auth, c.Credential); err != nil {
+			return err
+		}
+	}
+	for host, cfg := range c.Inventory.Host {
+		if err := validateInventoryAuthProvider("inventory.host."+host+".auth", cfg.Auth, c.Credential); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateInventoryAuthProvider(scope string, auth InventoryAuthConfig, credential CredentialConfig) error {
+	if !auth.IsSet() {
+		return nil
+	}
+	provider := strings.TrimSpace(auth.Provider)
+	if provider == "" {
+		if credential.DefaultProvider == "" {
+			return fmt.Errorf("%s.provider requires credential.default_provider when omitted", scope)
+		}
+		return nil
+	}
+	if _, ok := credential.Provider[provider]; !ok {
+		return fmt.Errorf("%s.provider references unknown provider %q", scope, provider)
 	}
 	return nil
 }

@@ -57,12 +57,14 @@ func runGet(hostName string) error {
 		return fmt.Errorf("host %q not found", hostName)
 	}
 	meta := metadataForHost(host, cfg, config.DefaultPaths(), index)
-	ui.PrintKeyValue("Host", host.Host)
-	ui.PrintKeyValue("HostName", host.HostName)
-	ui.PrintKeyValue("User", valueOrDash(host.User()))
-	ui.PrintKeyValue("Port", host.Port())
-	ui.PrintKeyValue("Provider", meta.Owner)
-	ui.PrintKeyValue("Group", meta.Group)
+	auth := effectiveInventoryAuth(cfg, host.Host, meta.Group)
+	printInventoryDisplaySections(inventoryDisplaySections(
+		inventoryHostSSHDisplayRows(host.Host, host.HostName, valueOrDash(host.User()), host.Port()),
+		append([]inventoryDisplayRow{
+			{Label: "Provider", Value: meta.Owner},
+			{Label: "Group", Value: meta.Group},
+		}, inventoryAuthDisplayRows(auth)...),
+	))
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
@@ -79,8 +81,16 @@ func runGetGroup(name string) error {
 		ui.CommandEnd(ui.StatusError)
 		return fmt.Errorf("group %q not found", name)
 	}
-	ui.PrintKeyValue("Group", name)
-	ui.PrintKeyValue("Domain Suffix", fmt.Sprintf("%v", group.DomainSuffix))
+	auth := inventoryAuthViewFromAuth("group "+name, group.Auth, cfg.Credential.DefaultProvider)
+	if !group.Auth.IsSet() {
+		auth = inventoryAuthView{Source: "-", Provider: "-", Ref: "-", Username: "-", UsernameRef: "-"}
+	}
+	printInventoryDisplaySections(inventoryDisplaySections(
+		inventoryGroupSSHDisplayRows(fmt.Sprintf("%v", group.DomainSuffix), valueOrDash(group.DefaultUser)),
+		append([]inventoryDisplayRow{
+			{Label: "Group", Value: name},
+		}, inventoryAuthDisplayRows(auth)...),
+	))
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }

@@ -5,6 +5,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	cliresolve "github.com/ntwrknrd/nssh/internal/cli/resolve"
+	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/secret"
+	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 )
 
 func TestBareCpPrintsHelp(t *testing.T) {
@@ -26,6 +31,55 @@ func TestBareCpPrintsHelp(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestRunCpUsesSharedResolvePath(t *testing.T) {
+	oldResolve := resolveHostForConnect
+	oldRunScp := runScp
+	defer func() {
+		resolveHostForConnect = oldResolve
+		runScp = oldRunScp
+	}()
+
+	var gotQuery, gotUser string
+	resolveHostForConnect = func(query, explicitUser string, cfg ...*config.Config) (*cliresolve.ResolvedHost, error) {
+		gotQuery = query
+		gotUser = explicitUser
+		return &cliresolve.ResolvedHost{
+			Hostname:  query,
+			Username:  "resolved-user",
+			HostEntry: &sshconfig.HostEntry{Host: query},
+			Credential: &cliresolve.ResolvedCredential{
+				Username: "resolved-user",
+				Password: secret.NewFromString("secret"),
+			},
+		}, nil
+	}
+	var scpArgs []string
+	var gotPassword string
+	runScp = func(args []string, password *secret.Secret) error {
+		scpArgs = append([]string(nil), args...)
+		if password != nil {
+			_ = password.UseString(func(s string) error {
+				gotPassword = s
+				return nil
+			})
+		}
+		return nil
+	}
+
+	if err := runCp("edge01:/tmp/file", "./file", false, false, false, false); err != nil {
+		t.Fatalf("runCp: %v", err)
+	}
+	if gotQuery != "edge01" || gotUser != "" {
+		t.Fatalf("resolve query=%q user=%q", gotQuery, gotUser)
+	}
+	if strings.Join(scpArgs, " ") != "resolved-user@edge01:/tmp/file ./file" {
+		t.Fatalf("scp args = %#v", scpArgs)
+	}
+	if gotPassword != "secret" {
+		t.Fatalf("password = %q", gotPassword)
 	}
 }
 

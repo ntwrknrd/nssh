@@ -11,6 +11,7 @@ import (
 type RefreshOptions struct {
 	Now            time.Time
 	WriteSSHConfig bool
+	Groups         map[string]config.GroupConfig
 }
 
 // RefreshResult reports one provider refresh outcome.
@@ -47,7 +48,7 @@ func RefreshProvider(
 		return RefreshResult{Provider: name, Err: err}
 	}
 
-	plan := Reconcile(objects, cfg.Route, name, current)
+	plan := Reconcile(objects, cfg.Route, name, current, opts.Groups)
 	allHosts := make(map[string]*ProviderHost)
 	if current != nil {
 		for id, host := range current.Objects {

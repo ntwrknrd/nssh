@@ -14,7 +14,7 @@ func newRemoveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "rm NAME",
 		Aliases: []string{"remove"},
-		Short:   "Remove local inventory",
+		Short:   "Remove inventory entries",
 		Long:    "Remove a local-provider host or group.",
 		Args:    cobra.MaximumNArgs(1),
 		Annotations: map[string]string{

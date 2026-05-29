@@ -3,7 +3,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -12,28 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"filippo.io/age"
-
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/secret"
 )
-
-// testIdentity generates a new age identity for testing.
-func testIdentity(t *testing.T) *age.X25519Identity {
-	t.Helper()
-	identity, err := age.GenerateX25519Identity()
-	if err != nil {
-		t.Fatalf("generate test identity: %v", err)
-	}
-	return identity
-}
-
-// testIdentitySecret wraps a test identity in a secret.Secret.
-func testIdentitySecret(t *testing.T) (*secret.Secret, *age.X25519Identity) {
-	t.Helper()
-	identity := testIdentity(t)
-	return secret.NewFromString(identity.String()), identity
-}
 
 // testSocketPath returns a unique socket path for testing.
 // Uses /tmp with short names to avoid Unix socket path length limits (~104 chars on macOS).
@@ -50,10 +29,10 @@ func testSocketPath(t *testing.T) string {
 
 // startTestAgent starts an agent with short timeouts for testing.
 // Returns cancel function and done channel.
-func startTestAgent(t *testing.T, identity *age.X25519Identity) (cancel func(), done <-chan struct{}) {
+func startTestAgent(t *testing.T) (cancel func(), done <-chan struct{}) {
 	t.Helper()
 
-	provider := NewSoftwareProvider(identity)
+	provider := NewRuntimeProvider()
 	cfg := RuntimeConfig{
 		Agent: &config.AgentConfig{
 			IdleTimeout: config.Duration(30 * time.Second),
@@ -68,10 +47,10 @@ func startTestAgent(t *testing.T, identity *age.X25519Identity) (cancel func(), 
 }
 
 // startTestAgentWithConfig starts an agent with custom config.
-func startTestAgentWithConfig(t *testing.T, identity *age.X25519Identity, cfg RuntimeConfig) (cancel func(), done <-chan struct{}) {
+func startTestAgentWithConfig(t *testing.T, cfg RuntimeConfig) (cancel func(), done <-chan struct{}) {
 	t.Helper()
 
-	provider := NewSoftwareProvider(identity)
+	provider := NewRuntimeProvider()
 	if cfg.Logger == nil {
 		cfg.Logger = testLogger()
 	}
@@ -126,21 +105,4 @@ func waitDone(t *testing.T, done <-chan struct{}, timeout time.Duration) bool {
 	case <-time.After(timeout):
 		return false
 	}
-}
-
-// encryptTestData encrypts plaintext for decryption testing.
-func encryptTestData(t *testing.T, recipient age.Recipient, plaintext []byte) []byte {
-	t.Helper()
-	var buf bytes.Buffer
-	w, err := age.Encrypt(&buf, recipient)
-	if err != nil {
-		t.Fatalf("encrypt: %v", err)
-	}
-	if _, err := w.Write(plaintext); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	return buf.Bytes()
 }

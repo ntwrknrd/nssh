@@ -45,25 +45,6 @@ func (c *Client) Hello() (string, error) {
 	return string(resp.Data), nil
 }
 
-// Decrypt sends ciphertext to the agent for decryption.
-// Returns the plaintext on success.
-func (c *Client) Decrypt(ciphertext []byte) ([]byte, error) {
-	resp, err := c.request(Request{Version: ProtocolVersion, Op: OpDecrypt, Data: ciphertext})
-	if err != nil {
-		return nil, err
-	}
-	return resp.Data, nil
-}
-
-// Recipient returns the agent's age public key for encryption.
-func (c *Client) Recipient() (string, error) {
-	resp, err := c.request(Request{Version: ProtocolVersion, Op: OpRecipient})
-	if err != nil {
-		return "", err
-	}
-	return string(resp.Data), nil
-}
-
 // CacheGet returns cached data from the running agent.
 func (c *Client) CacheGet(key string) (bool, []byte, error) {
 	resp, err := c.request(Request{Version: ProtocolVersion, Op: OpCacheGet, Key: key})
@@ -80,6 +61,48 @@ func (c *Client) CacheGet(key string) (bool, []byte, error) {
 func (c *Client) CachePut(key string, data []byte) error {
 	_, err := c.request(Request{Version: ProtocolVersion, Op: OpCachePut, Key: key, Data: data})
 	return err
+}
+
+func (c *Client) MetadataGet(key string) (bool, []byte, error) {
+	resp, err := c.request(Request{Version: ProtocolVersion, Op: OpMetadataGet, Key: key})
+	if err != nil {
+		return false, nil, err
+	}
+	if !resp.Found {
+		return false, nil, nil
+	}
+	return true, resp.Data, nil
+}
+
+func (c *Client) MetadataPut(key string, data []byte) error {
+	_, err := c.request(Request{Version: ProtocolVersion, Op: OpMetadataPut, Key: key, Data: data})
+	return err
+}
+
+func (c *Client) MetadataDelete(key string) error {
+	_, err := c.request(Request{Version: ProtocolVersion, Op: OpMetadataDelete, Key: key})
+	return err
+}
+
+func (c *Client) MetadataDeletePrefix(prefix string) error {
+	_, err := c.request(Request{Version: ProtocolVersion, Op: OpMetadataDeletePrefix, Key: prefix})
+	return err
+}
+
+func (c *Client) MetadataClear() error {
+	_, err := c.request(Request{Version: ProtocolVersion, Op: OpMetadataClear})
+	return err
+}
+
+func (c *Client) ProviderRequest(req ProviderRequest) (*ProviderResponse, error) {
+	resp, err := c.request(Request{Version: ProtocolVersion, Op: OpProviderRequest, Provider: &req})
+	if err != nil {
+		return nil, err
+	}
+	if resp.Provider == nil {
+		return &ProviderResponse{}, nil
+	}
+	return resp.Provider, nil
 }
 
 // Status returns session status including timing information.

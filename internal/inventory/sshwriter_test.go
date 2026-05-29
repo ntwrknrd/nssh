@@ -11,6 +11,7 @@ func TestGenerateProviderSSHConfigUsesInventoryHeader(t *testing.T) {
 		Patterns: []string{"edge01"},
 		Group:    "custcbb",
 		HostName: "edge01.custcbb.local",
+		Username: "chris.jones",
 	}}, "netbox-prod", "netbox", true)
 
 	if !strings.HasPrefix(content, providerSSHConfigHeader) {
@@ -24,5 +25,8 @@ func TestGenerateProviderSSHConfigUsesInventoryHeader(t *testing.T) {
 	}
 	if !strings.Contains(content, "# Group: custcbb") {
 		t.Fatalf("missing group comment: %q", content)
+	}
+	if !strings.Contains(content, "  User chris.jones\n") {
+		t.Fatalf("missing user directive: %q", content)
 	}
 }

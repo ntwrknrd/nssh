@@ -239,6 +239,7 @@ func refreshProviderCaches(cfg *config.Config, providerName string) map[string]s
 		result := inventory.RefreshProvider(ctx, name, providerCfg, provider, runner, inventory.RefreshOptions{
 			Now:            now,
 			WriteSSHConfig: true,
+			Groups:         cfg.Inventory.Group,
 		})
 		cancel()
 		if result.Err != nil {

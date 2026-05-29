@@ -32,7 +32,13 @@ func TestRefreshProviderWritesStateWithoutCredentials(t *testing.T) {
 		ObjectID: "device:1",
 		Name:     "edge01",
 		HostName: "edge01.custcbb.local",
-	}}}, nil, RefreshOptions{Now: now, WriteSSHConfig: false})
+	}}}, nil, RefreshOptions{
+		Now:            now,
+		WriteSSHConfig: false,
+		Groups: map[string]config.GroupConfig{
+			"custcbb": {DefaultUser: "chris.jones"},
+		},
+	})
 	if result.Err != nil {
 		t.Fatalf("refresh: %v", result.Err)
 	}
@@ -45,6 +51,9 @@ func TestRefreshProviderWritesStateWithoutCredentials(t *testing.T) {
 	}
 	if state.Objects["device:1"].Group != "custcbb" {
 		t.Fatalf("group = %q", state.Objects["device:1"].Group)
+	}
+	if state.Objects["device:1"].Username != "chris.jones" {
+		t.Fatalf("username = %q", state.Objects["device:1"].Username)
 	}
 	if !state.LastRefresh.Equal(now) {
 		t.Fatalf("last_refresh = %v", state.LastRefresh)

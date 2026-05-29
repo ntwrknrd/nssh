@@ -1,31 +1,27 @@
-// Package agent implements the nssh credential agent daemon.
+// Package agent implements the nssh background runtime daemon.
 //
-// The agent is a background process that holds decrypted credentials in memory,
-// providing secure credential access without requiring repeated passphrase entry.
-// It communicates with nssh clients via a Unix domain socket using a JSON-based
-// protocol.
+// The agent communicates with nssh clients over a Unix domain socket using a
+// JSON protocol. It brokers provider-session requests, stores non-secret
+// metadata cache entries, owns socket lifecycle checks, and runs recording
+// archival tasks.
 //
 // # Lifecycle
 //
-// The agent is spawned by [Spawn] when the vault is unlocked, and terminates
-// automatically based on configurable timeouts:
+// The agent terminates automatically based on configurable timeouts:
 //
 //   - Idle timeout: terminates after period of inactivity (default 1h)
 //   - Max lifetime: hard cap regardless of activity (default 24h)
-//   - Manual lock: terminated via "nssh lock" command
-//
-// # Credential Protection
-//
-// The agent uses a software provider that holds a passphrase-protected age
-// identity in memory after unlock.
+//   - Stop request: terminated by the internal lock protocol operation used by
+//     `nssh agent stop`
 //
 // # Protocol
 //
 // Clients communicate via JSON messages over the Unix socket. Operations include:
 //
-//   - OpDecrypt: decrypt age-encrypted credential data
-//   - OpStatus: query agent status and remaining lifetime
+//   - OpStatus: query runtime status and remaining lifetime
 //   - OpLock: terminate the agent session
+//   - OpProviderRequest: broker a provider-scoped request
+//   - Metadata cache operations for non-secret state
 //
 // # Background Tasks
 //
@@ -33,18 +29,4 @@
 //
 //   - Recording archival: monitors live session recordings and archives them
 //   - Connection handling: serves client requests with concurrency limits
-//
-// # Example
-//
-// Typical usage pattern (handled by the unlock command):
-//
-//	// Spawn agent with software provider
-//	if err := agent.Spawn(identity); err != nil {
-//	    return err
-//	}
-//
-//	// Later, check if agent is running
-//	if agent.IsRunning() {
-//	    // Use agent for decryption via session package
-//	}
 package agent

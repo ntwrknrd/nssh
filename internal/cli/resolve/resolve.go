@@ -5,18 +5,26 @@ package resolve
 
 import (
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 
-	clisession "github.com/ntwrknrd/nssh/internal/cli/session"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/credential"
 	"github.com/ntwrknrd/nssh/internal/inventory"
+	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
-	"github.com/ntwrknrd/nssh/internal/ui"
-	"github.com/ntwrknrd/nssh/internal/vault"
 )
+
+const (
+	CredSourceHost  = "host"
+	CredSourceGroup = "group"
+)
+
+type ResolvedCredential struct {
+	Username string
+	Password *secret.Secret
+	Source   string
+}
 
 // ResolvedHost holds the result of host resolution: everything needed to
 // connect or run a remote command.
@@ -26,8 +34,7 @@ type ResolvedHost struct {
 	Username    string
 	IncludeFile string
 	HostEntry   *sshconfig.HostEntry
-	Credential  *vault.ResolvedCredential
-	Manager     *vault.Manager
+	Credential  *ResolvedCredential
 	Config      *config.Config
 }
 
@@ -65,32 +72,34 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 		includeFile = filepath.Base(host.SourceFile)
 	}
 
-	// Resolve username: explicit > SSH config > nssh default
+	group := resolveGroup(hostEntry, includeFile, c)
+
+	// Resolve username: explicit > SSH config > inventory group default > nssh default
 	username := explicitUser
 	if username == "" && hostEntry != nil {
 		username = hostEntry.User()
+	}
+	if username == "" && group != "" {
+		username = strings.TrimSpace(c.Inventory.Group[group].DefaultUser)
 	}
 	if username == "" {
 		username = c.Host.Defaults.DefaultUser
 	}
 
-	group := resolveGroup(hostEntry, includeFile, c)
-
 	// Resolve credentials
-	var cred *vault.ResolvedCredential
-	var mgr *vault.Manager
-	provider, err := credentialProviderForConnect(c, &mgr)
+	var cred *ResolvedCredential
+	registry, err := credential.NewRegistry(c)
 	if err != nil {
-		slog.Debug("credential provider not available", "err", err)
+		slog.Debug("credential registry not available", "err", err)
 	} else {
-		cred, err = resolveTargetCredential(provider, hostname, group, username)
+		cred, err = resolveBoundCredential(c, registry, hostname, group, username)
 		if err != nil {
 			slog.Warn("credential resolution failed", "err", err)
 		}
 	}
 
 	// Update username from resolved credential
-	if cred != nil {
+	if cred != nil && cred.Username != "" {
 		username = cred.Username
 	}
 
@@ -101,40 +110,84 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 		IncludeFile: includeFile,
 		HostEntry:   hostEntry,
 		Credential:  cred,
-		Manager:     mgr,
 		Config:      c,
 	}, nil
 }
 
-func credentialProviderForConnect(cfg *config.Config, mgrOut **vault.Manager) (credential.Provider, error) {
-	if cfg == nil {
-		cfg = config.DefaultConfig()
-	}
-	credCfg := cfg.Credential
-	if err := credCfg.Validate(); err != nil {
-		return nil, err
-	}
-	if credCfg.Type != config.CredentialProviderAge {
-		return credential.NewProvider(cfg)
-	}
-
-	mgr, err := clisession.NewManager(vault.Auto())
-	if err != nil {
-		return nil, err
-	}
-	if err := clisession.TryUnlockIfTTY(mgr); err != nil {
-		if err == ui.ErrInterrupted {
-			os.Exit(130)
-		}
-		slog.Warn("unlock failed", "err", err)
-	}
-	if mgrOut != nil {
-		*mgrOut = mgr
-	}
-	return credential.NewAgeProvider(mgr), nil
+type providerRegistry interface {
+	Provider(name string) credential.Provider
+	DefaultProviderName() string
 }
 
-func resolveTargetCredential(provider credential.Provider, hostname, group, username string) (*vault.ResolvedCredential, error) {
+func resolveBoundCredential(cfg *config.Config, registry providerRegistry, hostname, group, username string) (*ResolvedCredential, error) {
+	if cfg == nil || registry == nil {
+		return nil, nil
+	}
+	if ref, ok := cfg.Inventory.Host[hostname]; ok && ref.Auth.IsSet() {
+		providerName := bindingProvider(ref.Auth.CredentialRef(), registry.DefaultProviderName())
+		provider := registry.Provider(providerName)
+		return resolveScopedCredential(provider, scopeHost, hostname, username)
+	}
+	if group == "" {
+		return nil, nil
+	}
+	if ref, ok := cfg.Inventory.Group[group]; ok && ref.Auth.IsSet() {
+		providerName := bindingProvider(ref.Auth.CredentialRef(), registry.DefaultProviderName())
+		provider := registry.Provider(providerName)
+		return resolveScopedCredential(provider, scopeGroup, group, username)
+	}
+	return nil, nil
+}
+
+type credentialScope string
+
+const (
+	scopeHost  credentialScope = "host"
+	scopeGroup credentialScope = "group"
+)
+
+func bindingProvider(ref config.CredentialRefConfig, defaultProvider string) string {
+	if strings.TrimSpace(ref.Provider) != "" {
+		return ref.Provider
+	}
+	return defaultProvider
+}
+
+func resolveScopedCredential(provider credential.Provider, scope credentialScope, name, username string) (*ResolvedCredential, error) {
+	if provider == nil {
+		return nil, nil
+	}
+	var (
+		record *credential.Record
+		err    error
+		source string
+	)
+	switch scope {
+	case scopeHost:
+		record, err = provider.GetHost(name)
+		source = CredSourceHost
+	case scopeGroup:
+		record, err = provider.GetGroup(name)
+		source = CredSourceGroup
+	}
+	if err != nil || record == nil {
+		return nil, err
+	}
+	if !credentialMatchesUser(record, username) {
+		return nil, nil
+	}
+	recordUsername := record.Username
+	if recordUsername == "" {
+		recordUsername = username
+	}
+	return &ResolvedCredential{
+		Username: recordUsername,
+		Password: record.Secret,
+		Source:   source,
+	}, nil
+}
+
+func resolveTargetCredential(provider credential.Provider, hostname, group, username string) (*ResolvedCredential, error) {
 	if provider == nil {
 		return nil, nil
 	}
@@ -144,10 +197,14 @@ func resolveTargetCredential(provider credential.Provider, hostname, group, user
 			return nil, err
 		}
 		if credentialMatchesUser(hostCred, username) {
-			return &vault.ResolvedCredential{
-				Username: hostCred.Username,
+			recordUsername := hostCred.Username
+			if recordUsername == "" {
+				recordUsername = username
+			}
+			return &ResolvedCredential{
+				Username: recordUsername,
 				Password: hostCred.Secret,
-				Source:   vault.CredSourceHost,
+				Source:   CredSourceHost,
 			}, nil
 		}
 	}
@@ -161,10 +218,14 @@ func resolveTargetCredential(provider credential.Provider, hostname, group, user
 	if !credentialMatchesUser(groupCred, username) {
 		return nil, nil
 	}
-	return &vault.ResolvedCredential{
-		Username: groupCred.Username,
+	recordUsername := groupCred.Username
+	if recordUsername == "" {
+		recordUsername = username
+	}
+	return &ResolvedCredential{
+		Username: recordUsername,
 		Password: groupCred.Secret,
-		Source:   vault.CredSourceGroup,
+		Source:   CredSourceGroup,
 	}, nil
 }
 
@@ -177,7 +238,7 @@ func credentialMatchesUser(record *credential.Record, username string) bool {
 	if record == nil {
 		return false
 	}
-	return username == "" || record.Username == username
+	return username == "" || record.Username == "" || record.Username == username
 }
 
 func resolveGroup(hostEntry *sshconfig.HostEntry, includeFile string, cfg *config.Config) string {

@@ -18,10 +18,15 @@ func newSetCmd() *cobra.Command {
 	var hostname string
 	var user string
 	var port int
+	var credentialProvider string
+	var credentialRef string
+	var credentialUsername string
+	var credentialUsernameRef string
+	var credentialClear bool
 	cmd := &cobra.Command{
 		Use:   "set HOST",
-		Short: "Create or update local inventory",
-		Long:  "Create or update a local-provider host or group.",
+		Short: "Create or update inventory",
+		Long:  "Create or update a managed host, group, or host auth override.",
 		Args:  cobra.MaximumNArgs(1),
 		Annotations: map[string]string{
 			ui.UsageLinesAnnotation: "nssh inv set HOST\nnssh inv set -g GROUP\nnssh inv set HOST -g GROUP",
@@ -33,13 +38,27 @@ func newSetCmd() *cobra.Command {
 			if len(args) != 1 {
 				return fmt.Errorf("host is required")
 			}
-			return runSetHost(args[0], group, hostname, user, port, cmd.Flags().Changed("port"))
+			authPatch := hostAuthPatch{
+				Clear: credentialClear,
+				Auth: config.InventoryAuthConfig{
+					Provider:    credentialProvider,
+					Ref:         credentialRef,
+					Username:    credentialUsername,
+					UsernameRef: credentialUsernameRef,
+				},
+			}
+			return runSetHost(args[0], group, hostname, user, port, cmd.Flags().Changed("port"), authPatch)
 		},
 	}
 	cmd.Flags().StringVarP(&group, "group", "g", "", "target group")
 	cmd.Flags().StringVar(&hostname, "hostname", "", "SSH HostName")
 	cmd.Flags().StringVar(&user, "user", "", "SSH User")
 	cmd.Flags().IntVar(&port, "port", 0, "SSH Port")
+	cmd.Flags().StringVar(&credentialProvider, "credential-provider", "", "credential provider instance for host auth override")
+	cmd.Flags().StringVar(&credentialRef, "credential-ref", "", "credential provider item or secret reference")
+	cmd.Flags().StringVar(&credentialUsername, "credential-username", "", "literal SSH username for credential lookup")
+	cmd.Flags().StringVar(&credentialUsernameRef, "credential-username-ref", "", "provider secret reference for SSH username")
+	cmd.Flags().BoolVar(&credentialClear, "credential-clear", false, "clear host auth override")
 	return cmd
 }
 
@@ -95,7 +114,7 @@ func validateGroupName(group string) error {
 	return nil
 }
 
-func runSetHost(host, group, hostname, user string, port int, portSet bool) error {
+func runSetHost(host, group, hostname, user string, port int, portSet bool, authPatch hostAuthPatch) error {
 	if group != "" {
 		if err := validateGroupName(group); err != nil {
 			return err
@@ -107,18 +126,35 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool) erro
 		ui.CommandEnd(ui.StatusError)
 		return err
 	}
-	if err := upsertLocalHost(sshconfig.NewParser(), cfg, config.DefaultPaths(), hostPatch{
-		Host:     host,
-		Group:    group,
-		HostName: hostname,
-		User:     user,
-		Port:     port,
-		PortSet:  portSet,
-	}); err != nil {
+	if err := authPatch.Validate(cfg); err != nil {
 		ui.CommandEnd(ui.StatusError)
 		return err
 	}
-	ui.Info("Credentials are managed separately with: nssh cred set %s", host)
+	parser := sshconfig.NewParser()
+	if group != "" || hostname != "" || user != "" || portSet || !authPatch.HasChange() {
+		if err := upsertLocalHost(parser, cfg, config.DefaultPaths(), hostPatch{
+			Host:     host,
+			Group:    group,
+			HostName: hostname,
+			User:     user,
+			Port:     port,
+			PortSet:  portSet,
+		}); err != nil {
+			ui.CommandEnd(ui.StatusError)
+			return err
+		}
+	}
+	if authPatch.HasChange() {
+		if err := applyHostAuthPatch(parser, cfg, config.DefaultPaths(), host, authPatch); err != nil {
+			ui.CommandEnd(ui.StatusError)
+			return err
+		}
+		if err := config.Save(config.DefaultPaths().ConfigFile, cfg); err != nil {
+			ui.CommandEnd(ui.StatusError)
+			return err
+		}
+		stopAgentAfterInventoryAuthMutation()
+	}
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }

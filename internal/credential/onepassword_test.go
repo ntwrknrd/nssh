@@ -29,6 +29,24 @@ type fakeOPOut struct {
 	err  error
 }
 
+type fakeAgentProviderClient struct {
+	reqs []agent.ProviderRequest
+	resp *agent.ProviderResponse
+	err  error
+}
+
+func (f *fakeAgentProviderClient) ProviderRequest(req agent.ProviderRequest) (*agent.ProviderResponse, error) {
+	f.reqs = append(f.reqs, req)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.resp, nil
+}
+
+func (f *fakeAgentProviderClient) Close() error {
+	return nil
+}
+
 func (f *fakeOPRunner) Run(_ context.Context, stdin []byte, args ...string) ([]byte, error) {
 	f.calls = append(f.calls, fakeOPCall{args: append([]string(nil), args...), stdin: string(stdin)})
 	if len(f.outs) == 0 {
@@ -221,6 +239,171 @@ func TestOnePasswordGetHostCachesMissingDeterministicItem(t *testing.T) {
 	}
 	if len(runner.calls) != 1 {
 		t.Fatalf("cached miss made more op calls: %d", len(runner.calls))
+	}
+}
+
+func TestOnePasswordAgentSessionRoutesGetThroughAgent(t *testing.T) {
+	socketPath := fmt.Sprintf("/tmp/nssh-cred-%d-%d.sock", os.Getpid(), time.Now().UnixNano())
+	t.Cleanup(func() { _ = os.Remove(socketPath) })
+	restore := agent.SetSocketPathForTest(socketPath)
+	defer restore()
+
+	runner := &fakeOPRunner{outs: []fakeOPOut{{
+		data: `{"title":"nssh host edge01","fields":[{"label":"username","value":"admin"},{"label":"password","value":"secret"}]}`,
+	}}}
+	provider := agent.NewRuntimeProvider()
+	provider.Register1Password("op-network", agent.OnePasswordSessionConfig{
+		Account: "ntwrknrd",
+		Vault:   "Network",
+		Runner:  runner,
+	})
+	cancel, done := agent.RunInBackground(context.Background(), provider, agent.DefaultRuntimeConfig())
+	defer func() {
+		cancel()
+		<-done
+	}()
+	waitForCredentialAgent(t)
+
+	op := &onePasswordProvider{
+		name:    "op-network",
+		account: "ntwrknrd",
+		vault:   "Network",
+		session: config.ProviderSessionAgentOwned,
+		cache:   true,
+	}
+	got, err := op.GetHost("edge01")
+	if err != nil {
+		t.Fatalf("GetHost: %v", err)
+	}
+	if got == nil || got.Username != "admin" || revealTestSecret(t, got) != "secret" {
+		t.Fatalf("record = %+v secret=%q", got, revealTestSecret(t, got))
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("op calls = %d, want 1", len(runner.calls))
+	}
+
+	client, err := agent.Connect()
+	if err != nil {
+		t.Fatalf("agent connect: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	status, err := client.Status()
+	if err != nil {
+		t.Fatalf("agent status: %v", err)
+	}
+	if status.MetadataCacheEntries != 0 {
+		t.Fatalf("1Password agent request stored metadata entries = %d", status.MetadataCacheEntries)
+	}
+}
+
+func TestOnePasswordAgentSessionRepeatedRequestsUseAgentProcess(t *testing.T) {
+	socketPath := fmt.Sprintf("/tmp/nssh-cred-%d-%d.sock", os.Getpid(), time.Now().UnixNano())
+	t.Cleanup(func() { _ = os.Remove(socketPath) })
+	restore := agent.SetSocketPathForTest(socketPath)
+	defer restore()
+
+	runner := &fakeOPRunner{outs: []fakeOPOut{
+		{data: `{"title":"nssh host edge01","fields":[{"label":"username","value":"admin"},{"label":"password","value":"one"}]}`},
+		{data: `{"title":"nssh host edge02","fields":[{"label":"username","value":"admin"},{"label":"password","value":"two"}]}`},
+	}}
+	provider := agent.NewRuntimeProvider()
+	provider.Register1Password("op-network", agent.OnePasswordSessionConfig{Vault: "Network", Runner: runner})
+	cancel, done := agent.RunInBackground(context.Background(), provider, agent.DefaultRuntimeConfig())
+	defer func() {
+		cancel()
+		<-done
+	}()
+	waitForCredentialAgent(t)
+
+	first := &onePasswordProvider{name: "op-network", vault: "Network", session: config.ProviderSessionAgentOwned, cache: true}
+	second := &onePasswordProvider{name: "op-network", vault: "Network", session: config.ProviderSessionAgentOwned, cache: true}
+	if _, err := first.GetHost("edge01"); err != nil {
+		t.Fatalf("first GetHost: %v", err)
+	}
+	if _, err := second.GetHost("edge02"); err != nil {
+		t.Fatalf("second GetHost: %v", err)
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("op calls = %d, want 2 through same agent runner", len(runner.calls))
+	}
+}
+
+func TestOnePasswordAgentSessionAutoStartsRuntimeAgent(t *testing.T) {
+	restoreConnect := connectProviderAgent
+	restoreSpawn := spawnRuntimeAgent
+	defer func() {
+		connectProviderAgent = restoreConnect
+		spawnRuntimeAgent = restoreSpawn
+	}()
+
+	spawnCalls := 0
+	connectCalls := 0
+	client := &fakeAgentProviderClient{resp: &agent.ProviderResponse{
+		Found:    true,
+		Username: "admin",
+		Secret:   []byte("secret"),
+		Ref:      "nssh host edge01",
+	}}
+	connectProviderAgent = func() (agentProviderClient, error) {
+		connectCalls++
+		if connectCalls == 1 {
+			return nil, agent.ErrAgentNotRunning
+		}
+		return client, nil
+	}
+	spawnRuntimeAgent = func() error {
+		spawnCalls++
+		return nil
+	}
+
+	op := &onePasswordProvider{
+		name:           "op-network",
+		session:        config.ProviderSessionAgentOwned,
+		autoStartAgent: true,
+	}
+	got, err := op.GetHost("edge01")
+	if err != nil {
+		t.Fatalf("GetHost: %v", err)
+	}
+	if spawnCalls != 1 {
+		t.Fatalf("spawn calls = %d, want 1", spawnCalls)
+	}
+	if got == nil || got.Username != "admin" || revealTestSecret(t, got) != "secret" {
+		t.Fatalf("record = %+v secret=%q", got, revealTestSecret(t, got))
+	}
+	if len(client.reqs) != 1 || client.reqs[0].Provider != "op-network" {
+		t.Fatalf("agent requests = %+v", client.reqs)
+	}
+}
+
+func TestOnePasswordAgentSessionAutoStartCanBeDisabled(t *testing.T) {
+	restoreConnect := connectProviderAgent
+	restoreSpawn := spawnRuntimeAgent
+	defer func() {
+		connectProviderAgent = restoreConnect
+		spawnRuntimeAgent = restoreSpawn
+	}()
+
+	spawnCalls := 0
+	connectProviderAgent = func() (agentProviderClient, error) {
+		return nil, agent.ErrAgentNotRunning
+	}
+	spawnRuntimeAgent = func() error {
+		spawnCalls++
+		return nil
+	}
+
+	op := &onePasswordProvider{
+		name:           "op-network",
+		session:        config.ProviderSessionAgentOwned,
+		autoStartAgent: false,
+	}
+	_, err := op.GetHost("edge01")
+	if !errors.Is(err, agent.ErrAgentNotRunning) {
+		t.Fatalf("GetHost error = %v, want ErrAgentNotRunning", err)
+	}
+	if spawnCalls != 0 {
+		t.Fatalf("spawn calls = %d, want 0", spawnCalls)
 	}
 }
 

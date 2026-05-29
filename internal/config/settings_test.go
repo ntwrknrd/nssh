@@ -52,6 +52,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Agent.Security.Software.PassphraseMinLength != 12 {
 		t.Errorf("default agent.security.software.passphrase_min_length = %d, want 12", cfg.Agent.Security.Software.PassphraseMinLength)
 	}
+	if !cfg.Agent.AutoStart {
+		t.Error("default agent.auto_start = false, want true")
+	}
 }
 
 func TestLoad_NonexistentFile(t *testing.T) {
@@ -81,6 +84,9 @@ default_user = "admin"
 
 [logging.audit]
 max_backup_files = 20
+
+[agent]
+auto_start = false
 `
 	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
 		t.Fatal(err)
@@ -105,6 +111,9 @@ max_backup_files = 20
 	}
 	if cfg.Logging.Audit.MaxBackupFiles != 20 {
 		t.Errorf("logging.audit.max_backup_files = %d, want 20", cfg.Logging.Audit.MaxBackupFiles)
+	}
+	if cfg.Agent.AutoStart {
+		t.Error("agent.auto_start = true, want false")
 	}
 }
 

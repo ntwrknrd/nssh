@@ -3,7 +3,6 @@
 package agent
 
 import (
-	"bytes"
 	"encoding/json"
 	"net"
 	"os"
@@ -20,9 +19,7 @@ func TestDaemon_StartsAndListensOnSocket(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer func() {
 		cancel()
 		<-done
@@ -47,8 +44,6 @@ func TestDaemon_IdleTimeout(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
 	cfg := RuntimeConfig{
 		Agent: &config.AgentConfig{
 			IdleTimeout: config.Duration(200 * time.Millisecond),
@@ -57,7 +52,7 @@ func TestDaemon_IdleTimeout(t *testing.T) {
 		Logger: testLogger(),
 		Clock:  newFakeClock(time.Now()),
 	}
-	cancel, done := startTestAgentWithConfig(t, identity, cfg)
+	cancel, done := startTestAgentWithConfig(t, cfg)
 	defer cancel()
 
 	if !waitForSocket(t, 5*time.Second) {
@@ -76,8 +71,6 @@ func TestDaemon_MaxLifetime(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
 	cfg := RuntimeConfig{
 		Agent: &config.AgentConfig{
 			IdleTimeout: config.Duration(10 * time.Second),
@@ -86,7 +79,7 @@ func TestDaemon_MaxLifetime(t *testing.T) {
 		Logger: testLogger(),
 		Clock:  newFakeClock(time.Now()),
 	}
-	cancel, done := startTestAgentWithConfig(t, identity, cfg)
+	cancel, done := startTestAgentWithConfig(t, cfg)
 	defer cancel()
 
 	if !waitForSocket(t, 5*time.Second) {
@@ -121,8 +114,6 @@ func TestDaemon_ActivityResetsIdleTimeout(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
 	cfg := RuntimeConfig{
 		Agent: &config.AgentConfig{
 			IdleTimeout: config.Duration(300 * time.Millisecond),
@@ -131,15 +122,13 @@ func TestDaemon_ActivityResetsIdleTimeout(t *testing.T) {
 		Logger: testLogger(),
 		Clock:  newFakeClock(time.Now()),
 	}
-	cancel, done := startTestAgentWithConfig(t, identity, cfg)
+	cancel, done := startTestAgentWithConfig(t, cfg)
 	defer cancel()
 
 	if !waitForSocket(t, 5*time.Second) {
 		t.Fatal("agent did not start in time")
 	}
 
-	plaintext := []byte("test")
-	ciphertext := encryptTestData(t, identity.Recipient(), plaintext)
 	fc := cfg.Clock.(*fakeClock)
 
 	// Send activity periodically to reset idle timer using fake clock
@@ -148,10 +137,10 @@ func TestDaemon_ActivityResetsIdleTimeout(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Connect() error = %v", err)
 		}
-		_, err = client.Decrypt(ciphertext)
+		_, _, err = client.MetadataGet("activity")
 		_ = client.Close()
 		if err != nil {
-			t.Fatalf("Decrypt() error = %v", err)
+			t.Fatalf("MetadataGet() error = %v", err)
 		}
 
 		fc.Advance(200 * time.Millisecond) // less than idle timeout, should keep alive
@@ -175,9 +164,7 @@ func TestDaemon_LockCommandTerminatesAgent(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer cancel()
 
 	if !waitForSocket(t, 5*time.Second) {
@@ -208,9 +195,7 @@ func TestDaemon_ConcurrentConnections(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer func() {
 		cancel()
 		<-done
@@ -236,7 +221,7 @@ func TestDaemon_ConcurrentConnections(t *testing.T) {
 			defer func() { _ = client.Close() }()
 
 			mode, err := client.Hello()
-			if err == nil && mode == ModeSoftware {
+			if err == nil && mode == ModeRuntime {
 				mu.Lock()
 				successes++
 				mu.Unlock()
@@ -255,9 +240,7 @@ func TestDaemon_RejectsAtMaxConnections(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer func() {
 		cancel()
 		<-done
@@ -313,9 +296,7 @@ func testSignalShutdown(t *testing.T, sig syscall.Signal) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer cancel()
 
 	if !waitForSocket(t, 5*time.Second) {
@@ -339,9 +320,7 @@ func TestDaemon_ProtocolVersionMismatch(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer func() {
 		cancel()
 		<-done
@@ -383,9 +362,7 @@ func TestDaemon_MalformedJSON(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer func() {
 		cancel()
 		<-done
@@ -429,9 +406,7 @@ func TestDaemon_UnknownOperation(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer func() {
 		cancel()
 		<-done
@@ -484,9 +459,7 @@ func TestDaemon_StaleSocketCleanup(t *testing.T) {
 	if err := os.WriteFile(socketPath, []byte("stale"), 0600); err != nil {
 		t.Fatalf("create stale file: %v", err)
 	}
-
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer func() {
 		cancel()
 		<-done
@@ -508,8 +481,8 @@ func TestDaemon_StaleSocketCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Hello() error = %v", err)
 	}
-	if mode != ModeSoftware {
-		t.Errorf("Hello() = %q, want %q", mode, ModeSoftware)
+	if mode != ModeRuntime {
+		t.Errorf("Hello() = %q, want %q", mode, ModeRuntime)
 	}
 }
 
@@ -517,8 +490,6 @@ func TestDaemon_StatusDoesNotResetIdleTimer(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
 	cfg := RuntimeConfig{
 		Agent: &config.AgentConfig{
 			// Idle timeout longer than loop duration (3 * 100ms = 300ms)
@@ -529,7 +500,7 @@ func TestDaemon_StatusDoesNotResetIdleTimer(t *testing.T) {
 		Logger: testLogger(),
 		Clock:  newFakeClock(time.Now()),
 	}
-	cancel, done := startTestAgentWithConfig(t, identity, cfg)
+	cancel, done := startTestAgentWithConfig(t, cfg)
 	defer cancel()
 
 	if !waitForSocket(t, 5*time.Second) {
@@ -560,12 +531,10 @@ func TestDaemon_StatusDoesNotResetIdleTimer(t *testing.T) {
 	}
 }
 
-func TestDaemon_DecryptResetsIdleTimer(t *testing.T) {
+func TestDaemon_MetadataGetResetsIdleTimer(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
 	cfg := RuntimeConfig{
 		Agent: &config.AgentConfig{
 			IdleTimeout: config.Duration(200 * time.Millisecond),
@@ -573,17 +542,14 @@ func TestDaemon_DecryptResetsIdleTimer(t *testing.T) {
 		},
 		Logger: testLogger(),
 	}
-	cancel, done := startTestAgentWithConfig(t, identity, cfg)
+	cancel, done := startTestAgentWithConfig(t, cfg)
 	defer cancel()
 
 	if !waitForSocket(t, 5*time.Second) {
 		t.Fatal("agent did not start in time")
 	}
 
-	plaintext := []byte("test")
-	ciphertext := encryptTestData(t, identity.Recipient(), plaintext)
-
-	// Send decrypt requests periodically to reset idle timer
+	// Send metadata requests periodically to reset idle timer
 	for i := 0; i < 5; i++ {
 		time.Sleep(150 * time.Millisecond) // Less than idle timeout
 
@@ -592,13 +558,10 @@ func TestDaemon_DecryptResetsIdleTimer(t *testing.T) {
 			t.Fatalf("Connect() #%d error = %v", i, err)
 		}
 
-		result, err := client.Decrypt(ciphertext)
+		_, _, err = client.MetadataGet("activity")
 		_ = client.Close()
 		if err != nil {
-			t.Fatalf("Decrypt() #%d error = %v", i, err)
-		}
-		if !bytes.Equal(result, plaintext) {
-			t.Errorf("Decrypt() #%d = %q, want %q", i, result, plaintext)
+			t.Fatalf("MetadataGet() #%d error = %v", i, err)
 		}
 	}
 

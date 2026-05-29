@@ -3,7 +3,6 @@
 package agent
 
 import (
-	"bytes"
 	"os"
 	"testing"
 	"time"
@@ -20,8 +19,7 @@ func TestSpawn_IsRunning(t *testing.T) {
 	}
 
 	// Start an agent
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer func() {
 		cancel()
 		<-done
@@ -161,12 +159,8 @@ func TestSpawn_FullCycle(t *testing.T) {
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
 
-	// Create identity secret
-	identitySecret, identity := testIdentitySecret(t)
-	defer identitySecret.Destroy()
-
 	// Use RunInBackground as proxy for testing agent startup
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer cancel()
 
 	if !waitForSocket(t, 5*time.Second) {
@@ -184,20 +178,8 @@ func TestSpawn_FullCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Hello() error = %v", err)
 	}
-	if mode != ModeSoftware {
-		t.Errorf("Hello() = %q, want %q", mode, ModeSoftware)
-	}
-
-	// Test decryption works
-	plaintext := []byte("spawn test data")
-	ciphertext := encryptTestData(t, identity.Recipient(), plaintext)
-
-	result, err := client.Decrypt(ciphertext)
-	if err != nil {
-		t.Fatalf("Decrypt() error = %v", err)
-	}
-	if !bytes.Equal(result, plaintext) {
-		t.Errorf("Decrypt() = %q, want %q", result, plaintext)
+	if mode != ModeRuntime {
+		t.Errorf("Hello() = %q, want %q", mode, ModeRuntime)
 	}
 
 	// Cleanup

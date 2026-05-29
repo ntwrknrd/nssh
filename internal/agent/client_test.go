@@ -3,7 +3,6 @@
 package agent
 
 import (
-	"bytes"
 	"errors"
 	"testing"
 	"time"
@@ -32,8 +31,7 @@ func TestClient_Connect_Success(t *testing.T) {
 	defer restore()
 
 	// Start a test agent
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer cancel()
 
 	// Wait for agent to be ready
@@ -57,9 +55,7 @@ func TestClient_Hello(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer func() {
 		cancel()
 		<-done
@@ -79,44 +75,8 @@ func TestClient_Hello(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Hello() error = %v", err)
 	}
-	if mode != ModeSoftware {
-		t.Errorf("Hello() = %q, want %q", mode, ModeSoftware)
-	}
-}
-
-func TestClient_Decrypt(t *testing.T) {
-	socketPath := testSocketPath(t)
-	restore := SetSocketPathForTest(socketPath)
-	defer restore()
-
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
-	defer func() {
-		cancel()
-		<-done
-	}()
-
-	if !waitForSocket(t, 5*time.Second) {
-		t.Fatal("agent did not start in time")
-	}
-
-	client, err := Connect()
-	if err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
-	defer func() { _ = client.Close() }()
-
-	// Encrypt some data
-	plaintext := []byte("secret message")
-	ciphertext := encryptTestData(t, identity.Recipient(), plaintext)
-
-	// Decrypt via agent
-	got, err := client.Decrypt(ciphertext)
-	if err != nil {
-		t.Fatalf("Decrypt() error = %v", err)
-	}
-	if !bytes.Equal(got, plaintext) {
-		t.Errorf("Decrypt() = %q, want %q", got, plaintext)
+	if mode != ModeRuntime {
+		t.Errorf("Hello() = %q, want %q", mode, ModeRuntime)
 	}
 }
 
@@ -124,9 +84,7 @@ func TestClient_CachePutGet(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer func() {
 		cancel()
 		<-done
@@ -162,45 +120,10 @@ func TestClient_CachePutGet(t *testing.T) {
 	}
 }
 
-func TestClient_Recipient(t *testing.T) {
-	socketPath := testSocketPath(t)
-	restore := SetSocketPathForTest(socketPath)
-	defer restore()
-
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
-	defer func() {
-		cancel()
-		<-done
-	}()
-
-	if !waitForSocket(t, 5*time.Second) {
-		t.Fatal("agent did not start in time")
-	}
-
-	client, err := Connect()
-	if err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
-	defer func() { _ = client.Close() }()
-
-	recipient, err := client.Recipient()
-	if err != nil {
-		t.Fatalf("Recipient() error = %v", err)
-	}
-
-	want := identity.Recipient().String()
-	if recipient != want {
-		t.Errorf("Recipient() = %q, want %q", recipient, want)
-	}
-}
-
 func TestClient_Status(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
 	cfg := RuntimeConfig{
 		Agent: &config.AgentConfig{
 			IdleTimeout: config.Duration(30 * time.Second),
@@ -208,7 +131,7 @@ func TestClient_Status(t *testing.T) {
 		},
 		Logger: testLogger(),
 	}
-	cancel, done := startTestAgentWithConfig(t, identity, cfg)
+	cancel, done := startTestAgentWithConfig(t, cfg)
 	defer func() {
 		cancel()
 		<-done
@@ -229,8 +152,8 @@ func TestClient_Status(t *testing.T) {
 		t.Fatalf("Status() error = %v", err)
 	}
 
-	if status.Mode != ModeSoftware {
-		t.Errorf("Status.Mode = %q, want %q", status.Mode, ModeSoftware)
+	if status.Mode != ModeRuntime {
+		t.Errorf("Status.Mode = %q, want %q", status.Mode, ModeRuntime)
 	}
 	if status.IdleTimeout != 30 {
 		t.Errorf("Status.IdleTimeout = %d, want 30", status.IdleTimeout)
@@ -250,9 +173,7 @@ func TestClient_Lock(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer cancel()
 
 	if !waitForSocket(t, 5*time.Second) {
@@ -288,9 +209,7 @@ func TestClient_Close(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
-
-	identity := testIdentity(t)
-	cancel, done := startTestAgent(t, identity)
+	cancel, done := startTestAgent(t)
 	defer func() {
 		cancel()
 		<-done

@@ -7,16 +7,35 @@ import (
 )
 
 const (
-	CredentialProviderAge       = "age"
+	CredentialProviderPass      = "pass"
 	CredentialProvider1Password = "1password"
+	CredentialProviderBitwarden = "bitwarden"
 )
 
-// CredentialConfig selects the single active credential provider backend.
+const (
+	ProviderSessionExternal   = "external"
+	ProviderSessionAgentOwned = "agent"
+	ProviderSessionNone       = "none"
+)
+
+// CredentialConfig defines named credential provider instances.
 type CredentialConfig struct {
+	DefaultProvider string                              `toml:"default_provider"`
+	Provider        map[string]CredentialProviderConfig `toml:"provider"`
+
+	// Host and Group are legacy credential binding tables. Auth mappings now
+	// live under inventory.host and inventory.group.
+	Host  map[string]CredentialRefConfig `toml:"host"`
+	Group map[string]CredentialRefConfig `toml:"group"`
+
 	Type   string                         `toml:"type"`
 	Config CredentialProviderDetailConfig `toml:"config"`
-	Host   map[string]CredentialRefConfig `toml:"host"`
-	Group  map[string]CredentialRefConfig `toml:"group"`
+}
+
+// CredentialProviderConfig configures one named credential provider instance.
+type CredentialProviderConfig struct {
+	Type   string                         `toml:"type"`
+	Config CredentialProviderDetailConfig `toml:"config"`
 }
 
 // CredentialProviderDetailConfig holds backend-specific credential provider
@@ -24,6 +43,9 @@ type CredentialConfig struct {
 type CredentialProviderDetailConfig struct {
 	Account string `toml:"account"`
 	Vault   string `toml:"vault"`
+	Command string `toml:"command"`
+	Prefix  string `toml:"prefix"`
+	Session string `toml:"session"`
 }
 
 // CredentialRefConfig maps a host or group credential scope to an existing
@@ -31,6 +53,7 @@ type CredentialProviderDetailConfig struct {
 // ID/name or a provider URI. Username can be literal or resolved from
 // UsernameRef.
 type CredentialRefConfig struct {
+	Provider    string `toml:"provider"`
 	Ref         string `toml:"ref"`
 	Username    string `toml:"username"`
 	UsernameRef string `toml:"username_ref"`
@@ -40,12 +63,29 @@ type CredentialRefConfig struct {
 type InventoryConfig struct {
 	DefaultGroup string                             `toml:"default_group"`
 	Group        map[string]GroupConfig             `toml:"group"`
+	Host         map[string]InventoryHostConfig     `toml:"host"`
 	Provider     map[string]InventoryProviderConfig `toml:"provider"`
 }
 
 // GroupConfig describes a logical inventory group.
 type GroupConfig struct {
-	DomainSuffix []string `toml:"domain_suffix"`
+	DomainSuffix []string            `toml:"domain_suffix"`
+	DefaultUser  string              `toml:"default_user"`
+	Auth         InventoryAuthConfig `toml:"auth"`
+}
+
+// InventoryHostConfig stores host-level inventory metadata outside provider
+// generated SSH config.
+type InventoryHostConfig struct {
+	Auth InventoryAuthConfig `toml:"auth"`
+}
+
+// InventoryAuthConfig maps an inventory host or group to a credential item.
+type InventoryAuthConfig struct {
+	Provider    string `toml:"provider"`
+	Ref         string `toml:"ref"`
+	Username    string `toml:"username"`
+	UsernameRef string `toml:"username_ref"`
 }
 
 // InventoryProviderConfig configures one named external inventory provider.
@@ -80,52 +120,113 @@ var bareKeySafeName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // Validate checks credential provider configuration.
 func (c *CredentialConfig) Validate() error {
-	c.Type = strings.ToLower(strings.TrimSpace(c.Type))
-	if c.Type == "" {
-		c.Type = CredentialProviderAge
+	if strings.TrimSpace(c.Type) != "" {
+		return fmt.Errorf("credential.type is no longer supported; configure credential.provider instead")
+	}
+	if len(c.Host) > 0 {
+		return fmt.Errorf("credential.host is no longer supported; configure inventory.host.<host>.auth instead")
+	}
+	if len(c.Group) > 0 {
+		return fmt.Errorf("credential.group is no longer supported; configure inventory.group.<group>.auth instead")
 	}
 
-	switch c.Type {
-	case CredentialProviderAge:
-		return nil
-	case CredentialProvider1Password:
-		if strings.TrimSpace(c.Config.Vault) == "" {
-			return fmt.Errorf("credential.config.vault is required for %q", CredentialProvider1Password)
-		}
-	default:
-		return fmt.Errorf("unsupported credential provider %q", c.Type)
+	c.DefaultProvider = strings.TrimSpace(c.DefaultProvider)
+	zeroConfig := c.DefaultProvider == "" && len(c.Provider) == 0
+	if zeroConfig {
+		c.DefaultProvider = "pass-local"
 	}
-	for host, ref := range c.Host {
-		if strings.TrimSpace(host) == "" {
-			return fmt.Errorf("credential.host has empty host")
-		}
-		if err := ref.Validate("credential.host." + host); err != nil {
-			return err
+	if c.Provider == nil {
+		c.Provider = make(map[string]CredentialProviderConfig)
+	}
+	if zeroConfig {
+		c.Provider["pass-local"] = CredentialProviderConfig{
+			Type: CredentialProviderPass,
+			Config: CredentialProviderDetailConfig{
+				Command: "pass",
+				Prefix:  "nssh",
+				Session: ProviderSessionExternal,
+			},
 		}
 	}
-	for group, ref := range c.Group {
-		if strings.TrimSpace(group) == "" {
-			return fmt.Errorf("credential.group has empty group")
-		}
-		if err := validateBareKeySafe("credential.group", group); err != nil {
+	for name, provider := range c.Provider {
+		if err := validateBareKeySafe("credential.provider", name); err != nil {
 			return err
 		}
-		if err := ref.Validate("credential.group." + group); err != nil {
+		if err := provider.Validate(name); err != nil {
 			return err
+		}
+		c.Provider[name] = provider
+	}
+	if c.DefaultProvider != "" {
+		if _, ok := c.Provider[c.DefaultProvider]; !ok {
+			return fmt.Errorf("credential.default_provider references unknown provider %q", c.DefaultProvider)
 		}
 	}
 	return nil
 }
 
+// Validate checks one credential provider instance.
+func (c *CredentialProviderConfig) Validate(name string) error {
+	c.Type = strings.ToLower(strings.TrimSpace(c.Type))
+	switch c.Type {
+	case CredentialProviderPass:
+		if strings.TrimSpace(c.Config.Command) == "" {
+			c.Config.Command = "pass"
+		}
+		if strings.TrimSpace(c.Config.Prefix) == "" {
+			c.Config.Prefix = "nssh"
+		}
+		if strings.TrimSpace(c.Config.Session) == "" {
+			c.Config.Session = ProviderSessionExternal
+		}
+	case CredentialProvider1Password:
+		if strings.TrimSpace(c.Config.Vault) == "" {
+			return fmt.Errorf("credential.provider.%s.config.vault is required for %q", name, CredentialProvider1Password)
+		}
+		if strings.TrimSpace(c.Config.Session) == "" {
+			c.Config.Session = ProviderSessionAgentOwned
+		}
+	case CredentialProviderBitwarden:
+		if strings.TrimSpace(c.Config.Session) == "" {
+			c.Config.Session = ProviderSessionExternal
+		}
+	default:
+		return fmt.Errorf("unsupported credential provider %q", c.Type)
+	}
+	if err := validateProviderSessionPolicy("credential.provider."+name+".config.session", c.Config.Session); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Validate checks a credential reference mapping.
-func (c CredentialRefConfig) Validate(scope string) error {
+func (c *CredentialRefConfig) Validate(scope, defaultProvider string, providers map[string]CredentialProviderConfig) error {
+	c.Provider = strings.TrimSpace(c.Provider)
 	if strings.TrimSpace(c.Ref) == "" {
 		return fmt.Errorf("%s.ref is required", scope)
 	}
 	if strings.TrimSpace(c.Username) != "" && strings.TrimSpace(c.UsernameRef) != "" {
 		return fmt.Errorf("%s.username and username_ref are mutually exclusive", scope)
 	}
+	if c.Provider == "" {
+		if defaultProvider == "" {
+			return fmt.Errorf("%s.provider requires credential.default_provider when omitted", scope)
+		}
+		return nil
+	}
+	if _, ok := providers[c.Provider]; !ok {
+		return fmt.Errorf("%s.provider references unknown provider %q", scope, c.Provider)
+	}
 	return nil
+}
+
+func validateProviderSessionPolicy(scope, policy string) error {
+	switch strings.ToLower(strings.TrimSpace(policy)) {
+	case ProviderSessionExternal, ProviderSessionAgentOwned, ProviderSessionNone:
+		return nil
+	default:
+		return fmt.Errorf("%s has invalid provider session policy %q", scope, policy)
+	}
 }
 
 // Validate checks inventory group and provider configuration.
@@ -147,6 +248,22 @@ func (c *InventoryConfig) Validate() error {
 		if err := validateBareKeySafe("inventory.group", name); err != nil {
 			return err
 		}
+		group := c.Group[name]
+		group.DefaultUser = strings.TrimSpace(group.DefaultUser)
+		if err := group.Auth.Validate("inventory.group." + name + ".auth"); err != nil {
+			return err
+		}
+		c.Group[name] = group
+	}
+
+	for name, host := range c.Host {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("inventory.host has empty host")
+		}
+		if err := host.Auth.Validate("inventory.host." + name + ".auth"); err != nil {
+			return err
+		}
+		c.Host[name] = host
 	}
 
 	for name, provider := range c.Provider {
@@ -159,6 +276,42 @@ func (c *InventoryConfig) Validate() error {
 	}
 
 	return nil
+}
+
+// Validate checks one inventory auth mapping.
+func (c *InventoryAuthConfig) Validate(scope string) error {
+	c.Provider = strings.TrimSpace(c.Provider)
+	c.Ref = strings.TrimSpace(c.Ref)
+	c.Username = strings.TrimSpace(c.Username)
+	c.UsernameRef = strings.TrimSpace(c.UsernameRef)
+	if !c.IsSet() {
+		return nil
+	}
+	if c.Ref == "" {
+		return fmt.Errorf("%s.ref is required", scope)
+	}
+	if c.Username != "" && c.UsernameRef != "" {
+		return fmt.Errorf("%s.username and username_ref are mutually exclusive", scope)
+	}
+	return nil
+}
+
+// IsSet reports whether the auth mapping contains any configured value.
+func (c InventoryAuthConfig) IsSet() bool {
+	return strings.TrimSpace(c.Provider) != "" ||
+		strings.TrimSpace(c.Ref) != "" ||
+		strings.TrimSpace(c.Username) != "" ||
+		strings.TrimSpace(c.UsernameRef) != ""
+}
+
+// CredentialRef converts inventory auth metadata into provider ref metadata.
+func (c InventoryAuthConfig) CredentialRef() CredentialRefConfig {
+	return CredentialRefConfig{
+		Provider:    c.Provider,
+		Ref:         c.Ref,
+		Username:    c.Username,
+		UsernameRef: c.UsernameRef,
+	}
 }
 
 // Validate checks a single inventory provider.

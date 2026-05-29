@@ -8,14 +8,13 @@ import (
 
 func TestNeedsVaultUnlockPreflight(t *testing.T) {
 	ageCfg := config.DefaultConfig()
-	ageCfg.Credential.Type = config.CredentialProviderAge
-	if !needsVaultUnlockPreflight(ageCfg) {
-		t.Fatal("age credential provider should unlock vault before benchmark")
+	ageCfg.Credential.Type = "age"
+	if needsVaultUnlockPreflight(ageCfg) {
+		t.Fatal("benchmarks should not unlock the local vault")
 	}
 
 	onePasswordCfg := config.DefaultConfig()
-	onePasswordCfg.Credential.Type = config.CredentialProvider1Password
 	if needsVaultUnlockPreflight(onePasswordCfg) {
-		t.Fatal("1Password credential provider should not unlock local vault before benchmark")
+		t.Fatal("provider-backed credentials should authenticate through providers")
 	}
 }
