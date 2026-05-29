@@ -18,8 +18,8 @@ func (m *Manager) GetGroupCredential(group string) (*Credential, error) {
 		}
 	}
 
-	// Transitional read support for released context credentials until upgrade
-	// migrates them into group credential records.
+	// Legacy context credentials are still readable as group credentials for
+	// existing local age stores.
 	if ctx := data.Contexts[group]; ctx != nil && ctx.Credential != nil {
 		return ctx.Credential, nil
 	}

@@ -134,17 +134,17 @@ func testCredentialInventory(t *testing.T, group, host string) (*config.Config, 
 		t.Fatal(err)
 	}
 	configFile := filepath.Join(sshDir, "config")
-	groupFile := filepath.Join(includeDir, "local_"+group+".conf")
+	groupFile := filepath.Join(includeDir, "provider_local.conf")
 	if err := os.WriteFile(configFile, []byte("Include "+groupFile+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(groupFile, []byte("Host "+host+"\n  HostName "+host+".example.com\n"), 0600); err != nil {
+	if err := os.WriteFile(groupFile, []byte("Host "+host+"\n  # Group: "+group+"\n  HostName "+host+".example.com\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		DefaultGroup: group,
 		Group: map[string]config.GroupConfig{
-			group: {LocalFile: filepath.Base(groupFile)},
+			group: {},
 		},
 	}}
 	parser := sshconfig.NewParserWithPaths(configFile, filepath.Join(tmpDir, "backups"), 5)

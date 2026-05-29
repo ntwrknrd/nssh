@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -30,15 +29,12 @@ type = "1password"
 default_group = "lab"
 
   [inventory.group.lab]
-  local_file = "local_lab.conf"
 
   [inventory.group.custcbb]
   domain_suffix = [".custcbb.local"]
-  local_file = "local_custcbb.conf"
 
   [inventory.provider.netbox-prod]
   type = "netbox"
-  refresh_interval = "15m"
 
     [inventory.provider.netbox-prod.config]
     base_url = "https://netbox.example.com"
@@ -53,7 +49,6 @@ default_group = "lab"
 
   [inventory.provider.nre-netlab01]
   type = "containerlab"
-  refresh_interval = "1m"
 
     [inventory.provider.nre-netlab01.config]
     jump_host = "nre-netlab01"
@@ -91,16 +86,13 @@ default_group = "lab"
 	if cfg.Inventory.DefaultGroup != "lab" {
 		t.Fatalf("inventory.default_group = %q", cfg.Inventory.DefaultGroup)
 	}
-	if got := cfg.Inventory.Group["custcbb"].LocalFile; got != "local_custcbb.conf" {
-		t.Fatalf("custcbb.local_file = %q", got)
+	if got := cfg.Inventory.Group["custcbb"].DomainSuffix; len(got) != 1 || got[0] != ".custcbb.local" {
+		t.Fatalf("custcbb.domain_suffix = %v", got)
 	}
 
 	nb := cfg.Inventory.Provider["netbox-prod"]
 	if nb.Type != ProviderNetBox {
 		t.Fatalf("netbox type = %q", nb.Type)
-	}
-	if nb.RefreshInterval.Duration() != 15*time.Minute {
-		t.Fatalf("refresh interval = %v", nb.RefreshInterval.Duration())
 	}
 	if nb.Config.BaseURL != "https://netbox.example.com" {
 		t.Fatalf("base_url = %q", nb.Config.BaseURL)
@@ -160,16 +152,6 @@ func TestInventoryConfigValidation(t *testing.T) {
 					"default": {},
 				},
 			},
-		},
-		{
-			name: "local file must stay inside nssh include dir",
-			cfg: InventoryConfig{
-				DefaultGroup: "cbb",
-				Group: map[string]GroupConfig{
-					"cbb": {LocalFile: "conf.d/cbb_hosts"},
-				},
-			},
-			wantErr: "local_file must be a filename",
 		},
 		{
 			name: "containerlab requires jump host",
@@ -291,7 +273,6 @@ func TestLoadInventoryGroupsDoNotRetainDefaultGroupWhenConfigDefinesGroups(t *te
 default_group = "cbb"
 
   [inventory.group.cbb]
-  local_file = "local_cbb.conf"
 `
 	if err := os.WriteFile(path, []byte(input), 0600); err != nil {
 		t.Fatalf("write config: %v", err)

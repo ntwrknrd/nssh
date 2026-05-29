@@ -42,7 +42,6 @@ func runGet(hostName string) error {
 		ui.CommandEnd(ui.StatusError)
 		return err
 	}
-	refreshStaleProvidersBestEffort(cfg)
 	index, err := inventory.BuildProviderIndex()
 	if err != nil {
 		ui.CommandEnd(ui.StatusError)
@@ -81,7 +80,6 @@ func runGetGroup(name string) error {
 		return fmt.Errorf("group %q not found", name)
 	}
 	ui.PrintKeyValue("Group", name)
-	ui.PrintKeyValue("Local File", group.LocalFile)
 	ui.PrintKeyValue("Domain Suffix", fmt.Sprintf("%v", group.DomainSuffix))
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil

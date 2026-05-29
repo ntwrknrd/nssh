@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/inventory"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 )
 
@@ -16,18 +17,18 @@ func TestVisitDoctorFindingsEmitsBeforeCheckingLaterHosts(t *testing.T) {
 		{
 			Host:       "edge01",
 			HostName:   "edge01.example.com",
-			SourceFile: filepath.Join("nssh.d", "local_lab.conf"),
+			SourceFile: filepath.Join("nssh.d", "provider_local.conf"),
 		},
 		{
 			Host:       "edge02",
 			HostName:   "edge02.example.com",
-			SourceFile: filepath.Join("nssh.d", "local_lab.conf"),
+			SourceFile: filepath.Join("nssh.d", "provider_local.conf"),
 		},
 	}
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		DefaultGroup: "lab",
 		Group: map[string]config.GroupConfig{
-			"lab": {LocalFile: "local_lab.conf"},
+			"lab": {},
 		},
 	}}
 	paths := &config.Paths{SSHConfigDir: t.TempDir()}
@@ -265,7 +266,7 @@ func newDoctorFixture(t *testing.T, localContent string) (*sshconfig.Parser, *co
 	if err := os.WriteFile(mainConfig, []byte("Include nssh.d/*\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	localFile := filepath.Join(nsshDir, "local_lab.conf")
+	localFile := filepath.Join(nsshDir, filepath.Base(inventory.LocalProviderIncludeFile()))
 	if err := os.WriteFile(localFile, []byte(localContent), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +274,7 @@ func newDoctorFixture(t *testing.T, localContent string) (*sshconfig.Parser, *co
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		DefaultGroup: "lab",
 		Group: map[string]config.GroupConfig{
-			"lab": {LocalFile: "local_lab.conf"},
+			"lab": {},
 		},
 	}}
 	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}

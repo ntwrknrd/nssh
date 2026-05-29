@@ -3,9 +3,7 @@ package bench
 import (
 	"fmt"
 
-	clisession "github.com/ntwrknrd/nssh/internal/cli/session"
 	"github.com/ntwrknrd/nssh/internal/ui"
-	"github.com/ntwrknrd/nssh/internal/vault"
 	"github.com/spf13/cobra"
 )
 
@@ -56,10 +54,7 @@ func runSSHBenchmark(host string, warmups, samples int, simpleOnly bool) error {
 		return fmt.Errorf("--warmups must be >= 0")
 	}
 
-	// Unlock vault before running benchmark (subprocess won't have TTY)
-	if mgr, err := clisession.NewManager(vault.Auto()); err == nil {
-		_ = clisession.TryUnlockIfTTY(mgr)
-	}
+	runVaultUnlockPreflight()
 
 	ui.CommandStart("SSH BENCHMARK")
 

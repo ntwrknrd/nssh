@@ -341,6 +341,7 @@ func coloredRuler(title string, color lipgloss.Color) string {
 
 // CommandStart prints the header banner for a command (cyan-colored).
 func CommandStart(title string) {
+	fmt.Println()
 	fmt.Println(coloredRuler(title, ColorCyan))
 	fmt.Println()
 }

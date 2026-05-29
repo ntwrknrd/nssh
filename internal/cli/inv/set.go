@@ -78,7 +78,7 @@ func ensureGroup(cfg *config.Config, group string) bool {
 	if _, ok := cfg.Inventory.Group[group]; ok {
 		return false
 	}
-	cfg.Inventory.Group[group] = config.GroupConfig{LocalFile: "local_" + group + ".conf"}
+	cfg.Inventory.Group[group] = config.GroupConfig{}
 	return true
 }
 

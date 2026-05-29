@@ -194,11 +194,5 @@ func resolveGroup(hostEntry *sshconfig.HostEntry, includeFile string, cfg *confi
 			}
 		}
 	}
-	base := filepath.Base(includeFile)
-	for name, group := range cfg.Inventory.Group {
-		if filepath.Base(group.LocalFile) == base {
-			return name
-		}
-	}
-	return cfg.Inventory.DefaultGroup
+	return inventory.LocalHostGroup(hostEntry, cfg.Inventory.DefaultGroup)
 }

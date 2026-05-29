@@ -1,8 +1,6 @@
 package cred
 
 import (
-	"path/filepath"
-
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/credential"
 	"github.com/ntwrknrd/nssh/internal/inventory"
@@ -126,13 +124,7 @@ func credentialGroupForHost(cfg *config.Config, parser *sshconfig.Parser, host s
 			}
 		}
 	}
-	base := filepath.Base(hostEntry.SourceFile)
-	for name, group := range cfg.Inventory.Group {
-		if filepath.Base(group.LocalFile) == base {
-			return name, nil
-		}
-	}
-	return cfg.Inventory.DefaultGroup, nil
+	return inventory.LocalHostGroup(hostEntry, cfg.Inventory.DefaultGroup), nil
 }
 
 func printCredentialView(view *credentialView, showSecret bool) {

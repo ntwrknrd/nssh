@@ -51,7 +51,6 @@ func runList(selectPattern string) error {
 		ui.CommandEnd(ui.StatusError)
 		return err
 	}
-	refreshStaleProvidersBestEffort(cfg)
 	index, err := inventory.BuildProviderIndex()
 	if err != nil {
 		ui.CommandEnd(ui.StatusError)
@@ -142,14 +141,10 @@ func runListGroups() error {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	table := ui.NewTable("Group", "Local File", "Domain Suffix")
+	table := ui.NewTable("Group", "Domain Suffix")
 	for _, name := range names {
 		group := cfg.Inventory.Group[name]
-		localFile := group.LocalFile
-		if localFile == "" {
-			localFile = "-"
-		}
-		table.AddRow(name, localFile, fmt.Sprintf("%v", group.DomainSuffix))
+		table.AddRow(name, fmt.Sprintf("%v", group.DomainSuffix))
 	}
 	table.Render()
 	ui.InfoWithMargin(table.LeftMargin(), "Total: %d groups", len(names))

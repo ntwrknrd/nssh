@@ -102,18 +102,3 @@ func providerStrictHostKeyChecking(cfg config.InventoryProviderConfig) bool {
 	}
 	return true
 }
-
-// ProviderIsStale reports whether normal inventory use may refresh a provider.
-func ProviderIsStale(state *ProviderState, cfg config.InventoryProviderConfig, now time.Time) bool {
-	interval := cfg.RefreshInterval.Duration()
-	if state == nil {
-		return interval > 0
-	}
-	if interval <= 0 {
-		return false
-	}
-	if state.LastRefresh.IsZero() {
-		return true
-	}
-	return now.Sub(state.LastRefresh) >= interval
-}

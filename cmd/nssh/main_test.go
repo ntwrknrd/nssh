@@ -197,26 +197,3 @@ func TestCredHelpShowsPositionalHostAndGroupShorthand(t *testing.T) {
 		})
 	}
 }
-
-func TestSelfUpgradeHiddenButCallable(t *testing.T) {
-	root := newRootCmd()
-	cmd, _, err := root.Find([]string{"self", "upgrade"})
-	if err != nil {
-		t.Fatalf("find self upgrade: %v", err)
-	}
-	if cmd == nil || cmd.Name() != "upgrade" {
-		t.Fatalf("self upgrade command = %v", cmd)
-	}
-	if !cmd.Hidden {
-		t.Fatal("self upgrade should be hidden")
-	}
-
-	selfCmd, _, err := root.Find([]string{"self"})
-	if err != nil {
-		t.Fatalf("find self: %v", err)
-	}
-	help := ui.RenderStyledHelp(selfCmd, ui.StyledHelpConfig{ShowGlobalFlags: true, Width: 80})
-	if strings.Contains(help, "upgrade") {
-		t.Fatalf("self help exposes hidden upgrade command:\n%s", help)
-	}
-}

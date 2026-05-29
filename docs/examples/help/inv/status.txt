@@ -3,7 +3,7 @@ $ nssh inv status --help
 │   nssh inv status [provider] [fl... Show inventory provider status           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
-│   --check                           perform a live health check without...   │
+│   --refresh                         refresh external provider caches be...   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

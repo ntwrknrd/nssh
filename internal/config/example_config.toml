@@ -80,14 +80,12 @@
 # Default local inventory group for new hosts.
 # default_group = "default"
 
-# Local groups own local-provider SSH host placement.
+# Local groups label hosts in the implicit provider_local.conf inventory.
 # [inventory.group.default]
-# local_file = "local_default.conf"
 
 # External inventory providers are configured here, not through CLI CRUD.
 # [inventory.provider.netbox-prod]
 # type = "netbox"
-# refresh_interval = "15m"
 #
 #   [inventory.provider.netbox-prod.config]
 #   base_url = "https://netbox.example.com"

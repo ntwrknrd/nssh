@@ -10,7 +10,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 )
 
-func TestUpsertLocalHostCreatesInGroupLocalFile(t *testing.T) {
+func TestUpsertLocalHostWritesSingleLocalProviderFile(t *testing.T) {
 	tmp := t.TempDir()
 	sshDir := filepath.Join(tmp, ".ssh")
 	if err := os.MkdirAll(filepath.Join(sshDir, "nssh.d"), 0700); err != nil {
@@ -25,7 +25,7 @@ func TestUpsertLocalHostCreatesInGroupLocalFile(t *testing.T) {
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		DefaultGroup: "lab",
 		Group: map[string]config.GroupConfig{
-			"lab": {LocalFile: "local_lab.conf"},
+			"lab": {},
 		},
 	}}
 	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
@@ -42,12 +42,12 @@ func TestUpsertLocalHostCreatesInGroupLocalFile(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(sshDir, "nssh.d", "local_lab.conf"))
+	content, err := os.ReadFile(filepath.Join(sshDir, "nssh.d", "provider_local.conf"))
 	if err != nil {
 		t.Fatalf("read local file: %v", err)
 	}
 	got := string(content)
-	for _, want := range []string{"Host edge01", "HostName edge01.lab.local", "User admin", "Port 2222"} {
+	for _, want := range []string{"# Group: lab", "Host edge01", "HostName edge01.lab.local", "User admin", "Port 2222"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
 		}
@@ -73,7 +73,7 @@ func TestUpsertLocalHostRefusesProviderOwnedHost(t *testing.T) {
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		DefaultGroup: "lab",
 		Group: map[string]config.GroupConfig{
-			"lab": {LocalFile: "local_lab.conf"},
+			"lab": {},
 		},
 		Provider: map[string]config.InventoryProviderConfig{
 			"netbox-prod": {
@@ -103,7 +103,7 @@ func TestRemoveLocalHostRemovesOnlyLocalHosts(t *testing.T) {
 	if err := os.WriteFile(mainConfig, []byte("Include nssh.d/*\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	localFile := filepath.Join(sshDir, "nssh.d", "local_lab.conf")
+	localFile := filepath.Join(sshDir, "nssh.d", "provider_local.conf")
 	if err := os.WriteFile(localFile, []byte("Host edge01\n  HostName edge01.lab.local\n\nHost edge02\n  HostName edge02.lab.local\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestRemoveLocalHostRemovesOnlyLocalHosts(t *testing.T) {
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		DefaultGroup: "lab",
 		Group: map[string]config.GroupConfig{
-			"lab": {LocalFile: "local_lab.conf"},
+			"lab": {},
 		},
 	}}
 	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
@@ -150,7 +150,7 @@ func TestInventoryHostsIgnoresNonNsshIncludes(t *testing.T) {
 	if err := os.WriteFile(mainConfig, []byte("Include nssh.d/*\nInclude conf.d/*\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(sshDir, "nssh.d", "local_lab.conf"), []byte("Host managed\n  HostName managed.example.com\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(sshDir, "nssh.d", "provider_local.conf"), []byte("Host managed\n  HostName managed.example.com\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(sshDir, "conf.d", "legacy_hosts"), []byte("Host legacy\n  HostName legacy.example.com\n"), 0600); err != nil {
@@ -161,7 +161,7 @@ func TestInventoryHostsIgnoresNonNsshIncludes(t *testing.T) {
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		DefaultGroup: "lab",
 		Group: map[string]config.GroupConfig{
-			"lab": {LocalFile: "local_lab.conf"},
+			"lab": {},
 		},
 	}}
 	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
@@ -268,7 +268,7 @@ func TestRemoveLocalHostIgnoresNonInventoryIncludes(t *testing.T) {
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		DefaultGroup: "lab",
 		Group: map[string]config.GroupConfig{
-			"lab": {LocalFile: "local_lab.conf"},
+			"lab": {},
 		},
 	}}
 	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
@@ -289,7 +289,7 @@ func TestRemoveLocalHostIgnoresNonInventoryIncludes(t *testing.T) {
 	}
 }
 
-func TestImportLocalCSVAddsHostsToGroupFile(t *testing.T) {
+func TestImportLocalCSVAddsHostsToLocalProviderFile(t *testing.T) {
 	tmp := t.TempDir()
 	sshDir := filepath.Join(tmp, ".ssh")
 	if err := os.MkdirAll(filepath.Join(sshDir, "nssh.d"), 0700); err != nil {
@@ -308,7 +308,7 @@ func TestImportLocalCSVAddsHostsToGroupFile(t *testing.T) {
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		DefaultGroup: "lab",
 		Group: map[string]config.GroupConfig{
-			"lab": {LocalFile: "local_lab.conf"},
+			"lab": {},
 		},
 	}}
 	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
@@ -320,7 +320,7 @@ func TestImportLocalCSVAddsHostsToGroupFile(t *testing.T) {
 	if result.Added != 2 || result.Skipped != 0 || result.Failed != 0 {
 		t.Fatalf("result = %+v", result)
 	}
-	content, err := os.ReadFile(filepath.Join(sshDir, "nssh.d", "local_lab.conf"))
+	content, err := os.ReadFile(filepath.Join(sshDir, "nssh.d", "provider_local.conf"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,26 +328,26 @@ func TestImportLocalCSVAddsHostsToGroupFile(t *testing.T) {
 	if strings.Index(got, "Host edge01") > strings.Index(got, "Host edge02") {
 		t.Fatalf("hosts not sorted:\n%s", got)
 	}
-	for _, want := range []string{"Host edge01", "HostName edge01.lab.local", "User netops", "Host edge02", "Port 2222"} {
+	for _, want := range []string{"# Group: lab", "Host edge01", "HostName edge01.lab.local", "User netops", "Host edge02", "Port 2222"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
 		}
 	}
 }
 
-func TestEnsureGroupAssignsDeterministicLocalFile(t *testing.T) {
+func TestEnsureGroupCreatesMetadataOnlyGroup(t *testing.T) {
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		DefaultGroup: "default",
 		Group: map[string]config.GroupConfig{
-			"default": {LocalFile: "local_default.conf"},
+			"default": {},
 		},
 	}}
 	created := ensureGroup(cfg, "lab")
 	if !created {
 		t.Fatal("expected group creation")
 	}
-	if cfg.Inventory.Group["lab"].LocalFile != "local_lab.conf" {
-		t.Fatalf("local_file = %q", cfg.Inventory.Group["lab"].LocalFile)
+	if len(cfg.Inventory.Group["lab"].DomainSuffix) != 0 {
+		t.Fatalf("group config = %+v, want metadata-only group", cfg.Inventory.Group["lab"])
 	}
 	if ensureGroup(cfg, "lab") {
 		t.Fatal("expected existing group to be preserved")

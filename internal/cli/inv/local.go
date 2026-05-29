@@ -55,14 +55,10 @@ func upsertLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config
 	if groupName == "" {
 		groupName = cfg.Inventory.DefaultGroup
 	}
-	group, ok := cfg.Inventory.Group[groupName]
-	if !ok {
+	if _, ok := cfg.Inventory.Group[groupName]; !ok {
 		return fmt.Errorf("group %q not found", groupName)
 	}
-	if strings.TrimSpace(group.LocalFile) == "" {
-		return fmt.Errorf("group %q has no local_file; local hosts can only be added to local inventory groups", groupName)
-	}
-	targetFile := localFilePath(paths, group.LocalFile)
+	targetFile := localFilePath(paths, inventory.LocalProviderIncludeFile())
 
 	existing, existingCfg, err := findInventoryHostWithLocation(parser, cfg, paths, patch.Host)
 	if err != nil {
@@ -84,6 +80,7 @@ func upsertLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config
 		host = sshconfig.CreateHostEntry(patch.Host, patch.HostName, patch.User, port, false, targetFile)
 	}
 	host.SourceFile = targetFile
+	inventory.SetLocalHostGroup(host, groupName)
 
 	if existingCfg != nil && existingCfg.Path != targetFile {
 		existingCfg.Hosts = sshconfig.RemoveHost(existingCfg.Hosts, patch.Host)
@@ -279,7 +276,7 @@ func inventoryFiles(cfg *config.Config, paths *config.Paths) ([]string, error) {
 		return nil, err
 	}
 	seen := make(map[string]bool)
-	files := make([]string, 0, len(cfg.Inventory.Group)+len(cfg.Inventory.Provider))
+	files := make([]string, 0, 1+len(cfg.Inventory.Provider))
 	add := func(path string) {
 		clean := filepath.Clean(path)
 		if seen[clean] {
@@ -288,12 +285,7 @@ func inventoryFiles(cfg *config.Config, paths *config.Paths) ([]string, error) {
 		seen[clean] = true
 		files = append(files, clean)
 	}
-	for _, group := range cfg.Inventory.Group {
-		if strings.TrimSpace(group.LocalFile) == "" {
-			continue
-		}
-		add(localFilePath(paths, group.LocalFile))
-	}
+	add(localFilePath(paths, inventory.LocalProviderIncludeFile()))
 	for name := range cfg.Inventory.Provider {
 		add(localFilePath(paths, inventory.ProviderIncludeFile(name)))
 	}
@@ -326,14 +318,12 @@ func metadataForHost(host *sshconfig.HostEntry, cfg *config.Config, paths *confi
 			return hostMetadata{Owner: name, Group: "-"}
 		}
 	}
-	for name, group := range cfg.Inventory.Group {
-		if samePath(host.SourceFile, localFilePath(paths, group.LocalFile)) {
-			return hostMetadata{Owner: "local", Group: name}
-		}
-	}
 	group := cfg.Inventory.DefaultGroup
 	if group == "" {
 		group = "default"
+	}
+	if samePath(host.SourceFile, localFilePath(paths, inventory.LocalProviderIncludeFile())) {
+		return hostMetadata{Owner: inventory.LocalProviderName, Group: inventory.LocalHostGroup(host, group)}
 	}
 	return hostMetadata{Owner: "local", Group: group}
 }

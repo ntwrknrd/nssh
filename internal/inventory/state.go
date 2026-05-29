@@ -7,14 +7,21 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ssh/compat"
+	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 )
 
 // StateVersion is the current provider state format.
 const StateVersion = 1
+
+const (
+	LocalProviderName = "local"
+	localGroupComment = "# Group: "
+)
 
 var stateDirOverride string
 
@@ -63,6 +70,56 @@ func providerStatePath(provider string) string {
 // ProviderIncludeFile returns the deterministic provider-owned SSH config file.
 func ProviderIncludeFile(provider string) string {
 	return filepath.Join("nssh.d", "provider_"+provider+".conf")
+}
+
+// LocalProviderIncludeFile returns the implicit local provider SSH config file.
+func LocalProviderIncludeFile() string {
+	return ProviderIncludeFile(LocalProviderName)
+}
+
+// SetLocalHostGroup records the logical local group inside a Host block.
+func SetLocalHostGroup(host *sshconfig.HostEntry, group string) {
+	if host == nil || strings.TrimSpace(group) == "" {
+		return
+	}
+	lines := make([]string, 0, len(host.Lines)+1)
+	for _, line := range host.Lines {
+		if strings.HasPrefix(strings.TrimSpace(line), localGroupComment) {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		patterns := host.Patterns
+		if len(patterns) == 0 && host.Host != "" {
+			patterns = []string{host.Host}
+		}
+		lines = append(lines, "Host "+strings.Join(patterns, " ")+"\n")
+	}
+	comment := "  " + localGroupComment + strings.TrimSpace(group) + "\n"
+	insertAt := 1
+	if len(lines) < insertAt {
+		insertAt = len(lines)
+	}
+	lines = append(lines[:insertAt], append([]string{comment}, lines[insertAt:]...)...)
+	host.Lines = lines
+}
+
+// LocalHostGroup returns the group marker from a local-provider Host block.
+func LocalHostGroup(host *sshconfig.HostEntry, fallback string) string {
+	if host == nil {
+		return fallback
+	}
+	for _, line := range host.Lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, localGroupComment) {
+			group := strings.TrimSpace(strings.TrimPrefix(trimmed, localGroupComment))
+			if group != "" {
+				return group
+			}
+		}
+	}
+	return fallback
 }
 
 // LoadProviderState loads state for a provider. Missing state returns nil.

@@ -46,15 +46,13 @@ type InventoryConfig struct {
 // GroupConfig describes a logical inventory group.
 type GroupConfig struct {
 	DomainSuffix []string `toml:"domain_suffix"`
-	LocalFile    string   `toml:"local_file"`
 }
 
 // InventoryProviderConfig configures one named external inventory provider.
 type InventoryProviderConfig struct {
-	Type            string                        `toml:"type"`
-	RefreshInterval Duration                      `toml:"refresh_interval"`
-	Config          InventoryProviderDetailConfig `toml:"config"`
-	Route           []InventoryRouteConfig        `toml:"route"`
+	Type   string                        `toml:"type"`
+	Config InventoryProviderDetailConfig `toml:"config"`
+	Route  []InventoryRouteConfig        `toml:"route"`
 }
 
 // InventoryProviderDetailConfig holds implementation-specific provider config.
@@ -145,12 +143,9 @@ func (c *InventoryConfig) Validate() error {
 	if _, ok := c.Group[c.DefaultGroup]; !ok {
 		c.Group[c.DefaultGroup] = GroupConfig{}
 	}
-	for name, group := range c.Group {
+	for name := range c.Group {
 		if err := validateBareKeySafe("inventory.group", name); err != nil {
 			return err
-		}
-		if strings.TrimSpace(group.LocalFile) != "" && strings.ContainsAny(group.LocalFile, `/\`) {
-			return fmt.Errorf("inventory.group.%s.local_file must be a filename under ~/.ssh/nssh.d", name)
 		}
 	}
 
@@ -204,8 +199,4 @@ func validateBareKeySafe(scope, name string) error {
 		return fmt.Errorf("%s name %q must be TOML bare-key safe: letters, numbers, underscores, and dashes", scope, name)
 	}
 	return nil
-}
-
-func defaultLocalGroupFile(group string) string {
-	return "local_" + group + ".conf"
 }

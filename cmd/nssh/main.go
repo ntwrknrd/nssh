@@ -741,13 +741,13 @@ func newSelfCmd() *cobra.Command {
 		Use:   "self",
 		Short: "Manage nssh installation",
 		Long:  "Manage nssh installation, shell integration, and updates.",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
 	cmd.AddCommand(self.NewInitCmd())
 	cmd.AddCommand(self.NewStatusCmd())
-	cmd.AddCommand(self.NewUpgradeCmd())
 	cmd.AddCommand(self.NewReinstallCmd())
 	cmd.AddCommand(self.NewUninstallCmd())
 	cmd.AddCommand(self.NewResetCmd())
@@ -816,7 +816,7 @@ func resolveHostname(hostname string) (string, error) {
 	if hostname == "" {
 		return "", fmt.Errorf("no hosts found in SSH config")
 	}
-	if refreshStaleProvidersForLookup(hostname) {
+	if refreshProvidersForLookup(hostname) {
 		result, err = parser.MatchHost(hostname)
 		if err != nil {
 			slog.Debug("failed to match host after provider refresh", "err", err)
@@ -843,9 +843,9 @@ func resolveHostname(hostname string) (string, error) {
 	return "", &cli.HostNotFoundError{Hostname: hostname}
 }
 
-var refreshStaleProvidersForLookup = refreshStaleProvidersOnce
+var refreshProvidersForLookup = refreshProvidersOnce
 
-func refreshStaleProvidersOnce(hostname string) bool {
+func refreshProvidersOnce(hostname string) bool {
 	cfg, err := config.LoadDefault()
 	if err != nil {
 		slog.Debug("skip provider refresh on lookup miss: config load failed", "host", hostname, "err", err)
@@ -869,14 +869,6 @@ func refreshStaleProvidersOnce(hostname string) bool {
 	refreshed := false
 	now := time.Now().UTC()
 	for name, providerCfg := range cfg.Inventory.Provider {
-		state, err := inventory.LoadProviderState(name)
-		if err != nil {
-			slog.Warn("skip provider refresh: state load failed", "provider", name, "err", err)
-			continue
-		}
-		if !inventory.ProviderIsStale(state, providerCfg, now) {
-			continue
-		}
 		provider, err := invproviders.New(providerCfg.Type)
 		if err != nil {
 			slog.Warn("skip provider refresh: provider unavailable", "provider", name, "err", err)

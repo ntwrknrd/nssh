@@ -233,9 +233,7 @@ func DefaultConfig() *Config {
 		Inventory: InventoryConfig{
 			DefaultGroup: "default",
 			Group: map[string]GroupConfig{
-				"default": {
-					LocalFile: "local_default.conf",
-				},
+				"default": {},
 			},
 		},
 		Logging: LoggingConfig{
@@ -401,7 +399,7 @@ func (c *Config) Validate() error {
 }
 
 func legacySyncSourcesError() error {
-	return fmt.Errorf("sync.sources is no longer supported; use inventory.provider config and run 'nssh self upgrade'")
+	return fmt.Errorf("sync.sources is no longer supported; configure inventory.provider instead")
 }
 
 // Validate checks AgentConfig values are within acceptable bounds.

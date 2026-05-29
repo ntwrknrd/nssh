@@ -256,8 +256,6 @@ func newAuto(cfg *managerConfig) (*Manager, error) {
 	}
 
 	// Load config for audit logger settings and software store config.
-	// Callers such as self upgrade can inject legacy-tolerant config while
-	// migrating data that normal command validation must reject.
 	appCfg, err := loadManagerConfig(cfg)
 	if err != nil {
 		return nil, err

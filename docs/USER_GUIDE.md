@@ -60,9 +60,11 @@ nssh inv set -g lab
 nssh inv rm -g lab
 ```
 
-Local-provider hosts are written to the configured group file, such as
-`~/.ssh/nssh.d/local_lab.conf`. External-provider hosts are generated into
-provider-owned files, such as `~/.ssh/nssh.d/provider_netbox-prod.conf`.
+Local-provider hosts are written to `~/.ssh/nssh.d/provider_local.conf`.
+External-provider hosts are generated into provider-owned files, such as
+`~/.ssh/nssh.d/provider_netbox-prod.conf`.
+Use `nssh inv status` to inspect cache age, route ownership, and output files;
+use `nssh inv status --refresh` to refresh external-provider caches.
 
 External provider setup is not managed by CLI CRUD. Configure providers in
 `config.toml`:
@@ -71,12 +73,11 @@ External provider setup is not managed by CLI CRUD. Configure providers in
 [inventory]
 default_group = "lab"
 
+# Empty table is enough to declare a local group.
 [inventory.group.lab]
-local_file = "local_lab.conf"
 
 [inventory.provider.netbox-prod]
 type = "netbox"
-refresh_interval = "15m"
 
 [inventory.provider.netbox-prod.config]
 base_url = "https://netbox.example.com"
@@ -188,16 +189,3 @@ nssh log play <id>
 nssh log export <id>
 nssh log delete <id>
 ```
-
-## Upgrade
-
-The inventory/credential cutover is a breaking data migration. After installing
-the cutover release, run:
-
-```bash
-nssh self upgrade
-```
-
-`self upgrade` is interactive-only. It backs up config and credential files,
-maps old context metadata to inventory groups, and migrates old context
-credentials into group credential records.
