@@ -61,7 +61,7 @@ nssh host -p 2222     -> nssh smart-connect host -p 2222
 Key files:
 
 - `cmd/nssh/main.go` (root command, argument preprocessing, connect orchestration)
-- `internal/cli/*` (subcommands: `host`, `ctx`, `log`, `cp`, `self`, `lock`, `unlock`)
+- `internal/cli/*` (subcommands: `inv`, `cred`, `log`, `cp`, `self`, `lock`, `unlock`)
 
 ### Subsystems
 
@@ -78,11 +78,12 @@ Layered runtime flow:
 ### Config and Paths
 
 XDG-style paths (`internal/config/paths.go`):
+
 - `~/.config/nssh/config.toml`
 - `~/.local/share/nssh/credentials.age`
 - `~/.local/state/nssh/casts/`
 - `~/.local/share/nssh/backups/`
-- `~/.ssh/config` and `~/.ssh/conf.d/*`
+- `~/.ssh/config` and `~/.ssh/nssh.d/*`
 
 Config schema in `internal/config/settings.go` supports TOML and environment overrides.
 
@@ -145,6 +146,7 @@ SSH receives a real TTY (`-tt`) for normal interactive authentication.
 ### Prompt Detection Pipeline
 
 Ring buffer (2048 bytes default) with tiered checks (`internal/ssh/connector/patterns.go`):
+
 1. Suffix checks (`bytes.HasSuffix`)
 2. Contains checks (`bytes.Contains`)
 3. Regex (only when needed)
@@ -209,7 +211,7 @@ This section outlines what happens during a typical `nssh <host>` invocation.
    - Match on derived short ID (e.g., "router" from "router.example.com")
    - Prefix/contains matches across Host and HostName
    - Multiple matches -> interactive fuzzy select
-   - No matches -> raise HostNotFoundError (spawns host add)
+   - No matches -> refresh stale inventory providers once, then raise HostNotFoundError
 
 4. Recording decision (internal/ssh/connector/recording_wrapper.go):
    - Load recording settings (config + env)
@@ -237,7 +239,7 @@ This section outlines what happens during a typical `nssh <host>` invocation.
 
 ### Host Not Found Behavior
 
-`HostNotFoundError` triggers `nssh host add <hostname>`.
+`HostNotFoundError` triggers local inventory creation with `nssh inv set <hostname>`.
 
 ### Multiple Matches Behavior
 
@@ -253,7 +255,7 @@ Interactive "detect then apply" workflow for legacy SSH servers.
 
 ### Detection Sources
 
-1. **Proactive**: during host add/edit via `ssh -vv ... -- exit`
+1. **Proactive**: during inventory changes via `ssh -vv ... -- exit`
 2. **Reactive**: after failed connection
 
 ### Probe Design
@@ -274,7 +276,7 @@ The decrypted JSON structure (see `internal/vault/manager.go`) is:
 
 ```json
 {
-  "contexts": {
+  "groups": {
     "work": {
       "git_include_file": "work.conf",
       "domain": "corp.example.com",
@@ -294,7 +296,7 @@ The decrypted JSON structure (see `internal/vault/manager.go`) is:
 Notes:
 
 - Host entries store a list of credentials; one may be marked `default:true`
-- Contexts can be referenced by SSH include file (basename) and/or by domain
+- Groups can be referenced by SSH include file (basename) and/or by domain
 - Passwords are plaintext only in decrypted JSON (the `.age` file protects them
   at rest)
 
@@ -306,8 +308,8 @@ Agent daemon holds age identity in memory; vault delegates decrypt over Unix soc
 
 Resolution order: username detection → include-file resolution → domain resolution → nil (SSH proceeds with keys).
 
-**With username**: exact match in host credentials → context credential → nil.
-**Without username**: host default → context credential → nil.
+**With username**: exact match in host credentials → group credential → nil.
+**Without username**: host default → group credential → nil.
 
 ### Secret Handling in Memory
 
@@ -355,7 +357,7 @@ Internal packages with stable boundaries for contributors. Not for third-party i
 
 **SSH Config Parser** (`internal/ssh/sshconfig`): `*Parser`, `*HostEntry`, `*ParsedConfig`. Methods: `FindIncludeFiles()`, `GetAllHosts()`, `FindHost()`, `MatchHost()`, `ParseFile()`, `WriteFile()`, `ApplyCompatFixes()`, `ApplyAuthType()`.
 
-**Vault Manager** (`internal/vault`): `*vault.Manager` (via `internal/session`). Methods: `NeedsUnlock()`, `ResolveCredential()`, `ResolveCredentialWithDomain()`, `GetHostCredentials()`, `GetContextByIncludeFile()`.
+**Vault Manager** (`internal/vault`): `*vault.Manager` (via `internal/session`). Methods: `NeedsUnlock()`, `ResolveCredential()`, `ResolveCredentialWithDomain()`, `GetHostCredentials()`, `GetGroupByIncludeFile()`.
 
 ### Agent IPC Protocol
 

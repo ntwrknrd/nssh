@@ -1,0 +1,15 @@
+$ nssh cred get --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh cred get HOST                Show credentials                         │
+│   nssh cred get -g GROUP                                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│   -g, --group STRING                group credential scope                   │
+│   -r, --reveal-secret               reveal password in plain text            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Options ─────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose                     Print debug messages                     │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

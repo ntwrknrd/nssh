@@ -8,6 +8,7 @@ import (
 const (
 	CredSourceHost        = "host"
 	CredSourceContext     = "context"
+	CredSourceGroup       = "group"
 	CredSourceSyncClass   = "sync-class"
 	CredSourceSyncDefault = "sync-default"
 	CredSourceSyncContext = "sync-context"

@@ -545,7 +545,7 @@ func (p *PassphraseStore) Identity() (age.Identity, error) {
 }
 
 // Recipient returns the public key for encryption WITHOUT requiring unlock.
-// This allows `nssh host add` and `nssh ctx set` to encrypt new credentials
+// This allows `nssh cred set` to encrypt new credentials
 // even when the session is locked.
 func (p *PassphraseStore) Recipient() (age.Recipient, error) {
 	pubKey, err := os.ReadFile(p.pubKeyPath)

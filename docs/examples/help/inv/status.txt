@@ -1,0 +1,13 @@
+$ nssh inv status --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh inv status [provider] [fl... Show inventory provider status           │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│   --check                           perform a live health check without...   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Options ─────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose                     Print debug messages                     │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

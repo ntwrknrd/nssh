@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -14,6 +16,18 @@ type Table struct {
 	headers    []string
 	rows       [][]string
 	footerRows [][]string // footer rows rendered with separator border
+}
+
+// StreamTable renders rows as they are added. Column widths must be known up
+// front because already-printed rows cannot be resized.
+type StreamTable struct {
+	headers        []string
+	preferredWidth []int
+	widths         []int
+	writer         io.Writer
+	margin         int
+	started        bool
+	rows           int
 }
 
 // Truncate shortens a string to maxWidth display width, adding ellipsis if needed.
@@ -52,6 +66,183 @@ func NewTable(headers ...string) *Table {
 		headers: headers,
 		rows:    make([][]string, 0),
 	}
+}
+
+// NewStreamTable creates a table that writes each row immediately.
+func NewStreamTable(headers ...string) *StreamTable {
+	widths := make([]int, len(headers))
+	for i, header := range headers {
+		widths[i] = runewidth.StringWidth(header)
+	}
+	return &StreamTable{
+		headers:        headers,
+		preferredWidth: widths,
+		writer:         os.Stdout,
+	}
+}
+
+// WithColumnWidths sets preferred content widths for each column.
+func (t *StreamTable) WithColumnWidths(widths ...int) *StreamTable {
+	for i := range t.preferredWidth {
+		if i < len(widths) && widths[i] > t.preferredWidth[i] {
+			t.preferredWidth[i] = widths[i]
+		}
+	}
+	return t
+}
+
+// WithWriter directs table output to writer. It is mainly useful in tests.
+func (t *StreamTable) WithWriter(writer io.Writer) *StreamTable {
+	if writer != nil {
+		t.writer = writer
+	}
+	return t
+}
+
+// AddRow writes a row immediately, starting the table if needed.
+func (t *StreamTable) AddRow(cells ...string) {
+	if !t.started {
+		t.start()
+	}
+	row := make([]string, len(t.headers))
+	for i := range row {
+		if i < len(cells) {
+			row[i] = cells[i]
+		}
+	}
+	fmt.Fprintln(t.writer, t.prefix()+t.renderRow(row, false))
+	t.rows++
+}
+
+// Close writes the bottom border if the table was started.
+func (t *StreamTable) Close() {
+	if !t.started {
+		return
+	}
+	fmt.Fprintln(t.writer, t.prefix()+t.renderBorder("╰", "┴", "╯"))
+	t.started = false
+}
+
+// RowCount returns the number of streamed data rows.
+func (t *StreamTable) RowCount() int {
+	return t.rows
+}
+
+// LeftMargin returns the left margin used for centered streaming output.
+func (t *StreamTable) LeftMargin() int {
+	return t.margin
+}
+
+func (t *StreamTable) start() {
+	termW := termWidth()
+	t.widths = fitStreamColumnWidths(t.headers, t.preferredWidth, termW)
+	tableWidth := streamTableWidth(t.widths)
+	t.margin = (termW - tableWidth) / 2
+	if t.margin < 0 {
+		t.margin = 0
+	}
+	fmt.Fprintln(t.writer, t.prefix()+t.renderBorder("╭", "┬", "╮"))
+	fmt.Fprintln(t.writer, t.prefix()+t.renderRow(t.headers, true))
+	fmt.Fprintln(t.writer, t.prefix()+t.renderBorder("├", "┼", "┤"))
+	t.started = true
+}
+
+func (t *StreamTable) prefix() string {
+	if t.margin <= 0 {
+		return ""
+	}
+	return strings.Repeat(" ", t.margin)
+}
+
+func (t *StreamTable) renderBorder(left, middle, right string) string {
+	borderStyle := lipgloss.NewStyle().Foreground(ColorDim)
+	var sb strings.Builder
+	sb.WriteString(borderStyle.Render(left))
+	for i, width := range t.widths {
+		sb.WriteString(borderStyle.Render(strings.Repeat("─", width+2)))
+		if i == len(t.widths)-1 {
+			sb.WriteString(borderStyle.Render(right))
+		} else {
+			sb.WriteString(borderStyle.Render(middle))
+		}
+	}
+	return sb.String()
+}
+
+func (t *StreamTable) renderRow(cells []string, header bool) string {
+	borderStyle := lipgloss.NewStyle().Foreground(ColorDim)
+	cellStyle := lipgloss.NewStyle().Foreground(ColorWhite)
+	if header {
+		cellStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+	}
+	var sb strings.Builder
+	sb.WriteString(borderStyle.Render("│"))
+	for i, width := range t.widths {
+		cell := ""
+		if i < len(cells) {
+			cell = Truncate(cells[i], width)
+		}
+		padding := width - runewidth.StringWidth(cell)
+		if padding < 0 {
+			padding = 0
+		}
+		sb.WriteString(" ")
+		sb.WriteString(cellStyle.Render(cell))
+		sb.WriteString(strings.Repeat(" ", padding))
+		sb.WriteString(" ")
+		sb.WriteString(borderStyle.Render("│"))
+	}
+	return sb.String()
+}
+
+func fitStreamColumnWidths(headers []string, preferred []int, termW int) []int {
+	widths := make([]int, len(headers))
+	minWidths := make([]int, len(headers))
+	for i, header := range headers {
+		headerWidth := runewidth.StringWidth(header)
+		minWidths[i] = headerWidth
+		widths[i] = headerWidth
+		if i < len(preferred) && preferred[i] > widths[i] {
+			widths[i] = preferred[i]
+		}
+	}
+
+	available := termW - streamTableOverhead(len(widths))
+	if available <= 0 {
+		return widths
+	}
+	for sumInts(widths) > available {
+		shrinkIdx := -1
+		for i, width := range widths {
+			if width <= minWidths[i] {
+				continue
+			}
+			if shrinkIdx == -1 || width > widths[shrinkIdx] {
+				shrinkIdx = i
+			}
+		}
+		if shrinkIdx == -1 {
+			break
+		}
+		widths[shrinkIdx]--
+	}
+	return widths
+}
+
+func streamTableWidth(widths []int) int {
+	return sumInts(widths) + streamTableOverhead(len(widths))
+}
+
+func streamTableOverhead(cols int) int {
+	return cols*2 + cols + 1
+}
+
+func sumInts(values []int) int {
+	total := 0
+	for _, value := range values {
+		total += value
+	}
+	return total
 }
 
 // AddRow adds a row to the table.

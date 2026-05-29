@@ -51,7 +51,9 @@ provider = "netbox"
     manufacturer = ["Arista"]
 `
 
-	var cfg Config
+	var cfg struct {
+		Sync SyncConfig `toml:"sync"`
+	}
 	if _, err := toml.Decode(input, &cfg); err != nil {
 		t.Fatalf("decode: %v", err)
 	}

@@ -68,10 +68,6 @@ To start fresh, use 'nssh self reset'.`,
 
 func runInit(opts InitOptions) error {
 	paths := config.DefaultPaths()
-	cfg, err := config.LoadDefault()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
 
 	// Header (skip in quiet mode)
 	if !opts.Quiet {
@@ -147,6 +143,10 @@ func runInit(opts InitOptions) error {
 	// Setup credential protection (skip in quiet mode - reinstall only refreshes shell)
 	if !opts.Quiet {
 		if !opts.DryRun {
+			cfg, err := config.LoadDefault()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
 			if err := setupCredentialProtection(paths, cfg, opts.Yes); err != nil {
 				return fmt.Errorf("failed to setup credential protection: %w", err)
 			}
@@ -155,7 +155,7 @@ func runInit(opts InitOptions) error {
 		}
 	}
 
-	// Ensure SSH config has Include directive for conf.d (silent in quiet mode)
+	// Ensure SSH config has Include directive for nssh.d (silent in quiet mode)
 	if !opts.DryRun {
 		if err := ensureSSHConfigInclude(paths); err != nil {
 			ui.Warning("SSH config setup: %v", err)
@@ -668,19 +668,19 @@ func initSoftwareMode(paths *config.Paths, cfg *config.Config) error {
 	return nil
 }
 
-// ensureSSHConfigInclude ensures ~/.ssh/config has an Include directive for conf.d.
+// ensureSSHConfigInclude ensures ~/.ssh/config has an Include directive for nssh.d.
 // This is required for SSH to read host entries created by nssh.
 func ensureSSHConfigInclude(paths *config.Paths) error {
-	confD := filepath.Join(paths.SSHConfigDir, "conf.d")
+	nsshD := filepath.Join(paths.SSHConfigDir, "nssh.d")
 	sshConfig := paths.SSHConfigFile
 
-	// Create conf.d directory
-	if err := os.MkdirAll(confD, 0700); err != nil {
-		return fmt.Errorf("create conf.d: %w", err)
+	// Create nssh.d directory
+	if err := os.MkdirAll(nsshD, 0700); err != nil {
+		return fmt.Errorf("create nssh.d: %w", err)
 	}
 
 	// Check if Include directive already exists
-	includeDirective := fmt.Sprintf("Include %s/*", confD)
+	includeDirective := fmt.Sprintf("Include %s/*", nsshD)
 
 	content, err := os.ReadFile(sshConfig)
 	if err != nil && !os.IsNotExist(err) {
@@ -689,8 +689,8 @@ func ensureSSHConfigInclude(paths *config.Paths) error {
 
 	// Check if Include directive is already present
 	if strings.Contains(string(content), includeDirective) ||
-		strings.Contains(string(content), "Include ~/.ssh/conf.d/*") ||
-		strings.Contains(string(content), "Include conf.d/*") {
+		strings.Contains(string(content), "Include ~/.ssh/nssh.d/*") ||
+		strings.Contains(string(content), "Include nssh.d/*") {
 		return nil // Already configured
 	}
 
@@ -709,8 +709,8 @@ func showNextSteps() {
 	ui.SubSection("Next Steps")
 
 	steps := []string{
-		"Create a context: nssh ctx add <name>",
-		"Add your first host: nssh host add",
+		"Create a group: nssh inv set -g <name>",
+		"Add your first host: nssh inv set <host>",
 		"Connect: nssh <hostname>",
 	}
 

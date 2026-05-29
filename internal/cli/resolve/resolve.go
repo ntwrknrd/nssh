@@ -11,9 +11,9 @@ import (
 
 	clisession "github.com/ntwrknrd/nssh/internal/cli/session"
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/inventory"
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
-	intsync "github.com/ntwrknrd/nssh/internal/sync"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/ntwrknrd/nssh/internal/vault"
 )
@@ -74,6 +74,8 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 		username = c.Host.Defaults.DefaultUser
 	}
 
+	group := resolveGroup(hostEntry, includeFile, c)
+
 	// Resolve credentials
 	var cred *vault.ResolvedCredential
 	mgr, err := clisession.NewManager(vault.Auto())
@@ -88,38 +90,9 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 			slog.Warn("unlock failed", "err", err)
 		}
 
-		// Single vault resolution call -- split result by source
-		var hostCred, contextCred *vault.ResolvedCredential
-		if includeFile != "" {
-			resolved, resolveErr := mgr.ResolveCredential(hostname, includeFile, username)
-			if resolveErr != nil {
-				slog.Warn("credential resolution failed", "err", resolveErr)
-			} else if resolved != nil {
-				if resolved.Source == vault.CredSourceHost {
-					hostCred = resolved
-				} else {
-					contextCred = resolved
-				}
-			}
-		}
-
-		// Step 1: host-specific override
-		cred = hostCred
-
-		// Steps 2-4: sync credential (class, default, context)
-		if cred == nil && len(c.Sync.Sources) > 0 {
-			cred = resolveSyncCredential(mgr, hostname, username)
-		}
-
-		// Steps 5-6: legacy include-file context + domain fallback
-		if cred == nil {
-			cred = contextCred
-			if cred == nil {
-				cred, err = mgr.ResolveCredentialWithDomain(hostname, username)
-				if err != nil {
-					slog.Warn("domain credential resolution failed", "err", err)
-				}
-			}
+		cred, err = resolveTargetCredential(mgr, hostname, group, username)
+		if err != nil {
+			slog.Warn("credential resolution failed", "err", err)
 		}
 	}
 
@@ -140,75 +113,77 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 	}, nil
 }
 
-// resolveSyncCredential checks the sync index for the hostname and tries
-// class-specific then default sync credentials. Returns nil if the host
-// is not sync-managed or no sync credential is configured.
-func resolveSyncCredential(mgr *vault.Manager, hostname, username string) *vault.ResolvedCredential {
-	syncIndex, err := intsync.BuildSyncIndex()
+func resolveTargetCredential(mgr *vault.Manager, hostname, group, username string) (*vault.ResolvedCredential, error) {
+	if mgr == nil {
+		return nil, nil
+	}
+	hostCreds, err := mgr.GetHostCredentials(hostname)
 	if err != nil {
-		slog.Debug("sync index unavailable", "err", err)
-		return nil
+		return nil, err
 	}
+	if cred := selectHostCredential(hostCreds, username); cred != nil {
+		return &vault.ResolvedCredential{
+			Username: cred.Username,
+			Password: secret.NewFromString(cred.Password),
+			Source:   vault.CredSourceHost,
+		}, nil
+	}
+	if group == "" {
+		return nil, nil
+	}
+	groupCred, err := mgr.GetGroupCredential(group)
+	if err != nil || groupCred == nil {
+		return nil, err
+	}
+	if username != "" && groupCred.Username != username {
+		return nil, nil
+	}
+	return &vault.ResolvedCredential{
+		Username: groupCred.Username,
+		Password: secret.NewFromString(groupCred.Password),
+		Source:   vault.CredSourceGroup,
+	}, nil
+}
 
-	info := syncIndex[hostname]
-	if info == nil {
-		return nil
-	}
-
-	sv, err := mgr.GetSyncSource(info.Source)
-	if err != nil {
-		slog.Warn("sync credential lookup failed", "err", err)
-		return nil
-	}
-	if sv == nil {
-		return nil
-	}
-
-	// Try class credential first, then default
-	if info.CredentialClass != "" && sv.ClassCredentials != nil {
-		if c := sv.ClassCredentials[info.CredentialClass]; c != nil {
-			return toResolvedCredential(c, username, vault.CredSourceSyncClass)
+func selectHostCredential(creds []vault.Credential, username string) *vault.Credential {
+	for i := range creds {
+		if username != "" && creds[i].Username == username {
+			return &creds[i]
 		}
 	}
-	if sv.DefaultCredential != nil {
-		return toResolvedCredential(sv.DefaultCredential, username, vault.CredSourceSyncDefault)
+	if username != "" {
+		return nil
 	}
-
-	// Step 4: sync-managed context credential
-	// Context credentials own both username and password (unlike class/default
-	// which share a password across devices and take the username from the SSH
-	// config chain). Build the result directly to match legacy context behavior
-	// in vault.ResolveCredential.
-	if info.Context != "" {
-		ctx, err := mgr.GetContext(info.Context)
-		if err != nil {
-			slog.Warn("sync context lookup failed", "err", err)
-		} else if ctx != nil && ctx.Credential != nil {
-			return &vault.ResolvedCredential{
-				Username: ctx.Credential.Username,
-				Password: secret.NewFromString(ctx.Credential.Password),
-				Source:   vault.CredSourceSyncContext,
-			}
+	for i := range creds {
+		if creds[i].Default {
+			return &creds[i]
 		}
 	}
-
+	if len(creds) > 0 {
+		return &creds[0]
+	}
 	return nil
 }
 
-// toResolvedCredential builds a ResolvedCredential from a vault entry.
-// Sync credentials are class-based (shared password across a device class),
-// so the username comes from the normal resolution chain (SSH config, nssh
-// defaults) rather than the stored credential. The caller-provided username
-// takes precedence when set; the credential's own username is only used as
-// a fallback for non-sync credential sources.
-func toResolvedCredential(cred *vault.Credential, username, source string) *vault.ResolvedCredential {
-	u := cred.Username
-	if username != "" {
-		u = username
+func resolveGroup(hostEntry *sshconfig.HostEntry, includeFile string, cfg *config.Config) string {
+	if hostEntry == nil {
+		return ""
 	}
-	return &vault.ResolvedCredential{
-		Username: u,
-		Password: secret.NewFromString(cred.Password),
-		Source:   source,
+	if idx, err := inventory.BuildProviderIndex(); err == nil {
+		if info := idx[hostEntry.Host]; info != nil {
+			return info.Group
+		}
+		for _, pattern := range hostEntry.Patterns {
+			if info := idx[pattern]; info != nil {
+				return info.Group
+			}
+		}
 	}
+	base := filepath.Base(includeFile)
+	for name, group := range cfg.Inventory.Group {
+		if filepath.Base(group.LocalFile) == base {
+			return name
+		}
+	}
+	return cfg.Inventory.DefaultGroup
 }

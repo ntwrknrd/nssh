@@ -4,12 +4,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"filippo.io/age"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/secret"
-	intsync "github.com/ntwrknrd/nssh/internal/sync"
 	"github.com/ntwrknrd/nssh/internal/vault"
 )
 
@@ -47,114 +45,50 @@ func newTestManager(t *testing.T) *vault.Manager {
 	return mgr
 }
 
-func TestResolveSyncContext(t *testing.T) {
-	// Isolate state directory
-	stateDir := t.TempDir()
-	intsync.SetStateDir(stateDir)
-	t.Cleanup(func() { intsync.SetStateDir("") })
-
+func TestResolveTargetCredentialHostOverridesGroup(t *testing.T) {
 	mgr := newTestManager(t)
-
-	// Create vault contexts with credentials
-	if err := mgr.CreateContext("lab", "lab_hosts", "", nil); err != nil {
-		t.Fatalf("create lab context: %v", err)
+	if err := mgr.SetGroupCredential("lab", "groupuser", secret.NewFromString("grouppass")); err != nil {
+		t.Fatalf("set group credential: %v", err)
 	}
-	if err := mgr.AddContextCredential("lab", "labuser", secret.NewFromString("labpass"), false); err != nil {
-		t.Fatalf("add lab credential: %v", err)
+	if err := mgr.AddHostCredential("edge01", "hostuser", secret.NewFromString("hostpass")); err != nil {
+		t.Fatalf("add host credential: %v", err)
 	}
-	if err := mgr.CreateContext("prod", "prod_hosts", "", nil); err != nil {
-		t.Fatalf("create prod context: %v", err)
-	}
-	if err := mgr.AddContextCredential("prod", "produser", secret.NewFromString("prodpass"), false); err != nil {
-		t.Fatalf("add prod credential: %v", err)
+	if err := mgr.SetHostDefaultCredential("edge01", "hostuser"); err != nil {
+		t.Fatalf("set host default: %v", err)
 	}
 
-	// Create sync source with class credential "ceos"
-	if err := mgr.SetSyncSourceClassCredential("test-lab", "ceos", &vault.Credential{
-		Username: "ceosadmin",
-		Password: "ceospass",
-	}); err != nil {
-		t.Fatalf("set class credential: %v", err)
+	cred, err := resolveTargetCredential(mgr, "edge01", "lab", "")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
 	}
-
-	// Save sync state with two hosts in different contexts
-	state := &intsync.SourceState{
-		Version:  intsync.StateVersion,
-		Source:   "test-lab",
-		Provider: "containerlab",
-		LastSync: time.Now().UTC(),
-		Objects: map[string]*intsync.ManagedHost{
-			"lab1/host-a": {
-				ObjectID:        "lab1/host-a",
-				Host:            "clab-host-a",
-				Context:         "lab",
-				HostName:        "172.20.0.2",
-				CredentialClass: "ceos",
-			},
-			"lab1/host-b": {
-				ObjectID:        "lab1/host-b",
-				Host:            "clab-host-b",
-				Context:         "prod",
-				HostName:        "172.20.0.3",
-				CredentialClass: "ceos",
-			},
-		},
-	}
-	if err := intsync.SaveSourceState(state); err != nil {
-		t.Fatalf("save state: %v", err)
-	}
-
-	// Phase 1: Class credential takes priority over context
-	cred := resolveSyncCredential(mgr, "clab-host-a", "")
 	if cred == nil {
-		t.Fatal("expected credential for host-a, got nil")
-	} else if cred.Source != vault.CredSourceSyncClass {
-		t.Errorf("phase 1: source = %q, want %q", cred.Source, vault.CredSourceSyncClass)
+		t.Fatal("expected credential")
+	}
+	if cred.Source != vault.CredSourceHost {
+		t.Fatalf("source = %q, want host", cred.Source)
+	}
+	if cred.Username != "hostuser" {
+		t.Fatalf("username = %q", cred.Username)
+	}
+}
+
+func TestResolveTargetCredentialFallsBackToGroup(t *testing.T) {
+	mgr := newTestManager(t)
+	if err := mgr.SetGroupCredential("lab", "groupuser", secret.NewFromString("grouppass")); err != nil {
+		t.Fatalf("set group credential: %v", err)
 	}
 
-	// Phase 2: Remove class credential -- context should win
-	// Delete and recreate with non-matching class to keep sync source entry alive
-	if err := mgr.DeleteSyncSource("test-lab"); err != nil {
-		t.Fatalf("delete sync source: %v", err)
+	cred, err := resolveTargetCredential(mgr, "edge01", "lab", "")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
 	}
-	if err := mgr.SetSyncSourceClassCredential("test-lab", "other", &vault.Credential{
-		Username: "placeholder",
-		Password: "placeholder",
-	}); err != nil {
-		t.Fatalf("recreate sync source: %v", err)
+	if cred == nil {
+		t.Fatal("expected credential")
 	}
-
-	// host-a should resolve to "lab" context credential.
-	// Pass a non-empty username (simulating SSH config / defaults already
-	// resolved) to verify context credential owns the username and is NOT
-	// overwritten by the pre-resolved value.
-	credA := resolveSyncCredential(mgr, "clab-host-a", "sshdefault")
-	if credA == nil {
-		t.Fatal("expected credential for host-a after class removal, got nil")
-	} else {
-		if credA.Source != vault.CredSourceSyncContext {
-			t.Errorf("host-a: source = %q, want %q", credA.Source, vault.CredSourceSyncContext)
-		}
-		if credA.Username != "labuser" {
-			t.Errorf("host-a: username = %q, want %q (context must own username)", credA.Username, "labuser")
-		}
+	if cred.Source != vault.CredSourceGroup {
+		t.Fatalf("source = %q, want group", cred.Source)
 	}
-
-	// host-b should resolve to "prod" context credential
-	credB := resolveSyncCredential(mgr, "clab-host-b", "sshdefault")
-	if credB == nil {
-		t.Fatal("expected credential for host-b, got nil")
-	} else {
-		if credB.Source != vault.CredSourceSyncContext {
-			t.Errorf("host-b: source = %q, want %q", credB.Source, vault.CredSourceSyncContext)
-		}
-		if credB.Username != "produser" {
-			t.Errorf("host-b: username = %q, want %q (context must own username)", credB.Username, "produser")
-		}
-
-		// Different contexts must yield different credentials
-		if credA.Username == credB.Username {
-			t.Errorf("expected different usernames, both got %q", credA.Username)
-		}
+	if cred.Username != "groupuser" {
+		t.Fatalf("username = %q", cred.Username)
 	}
 }

@@ -57,16 +57,44 @@
 # scrypt_work_factor = 18
 
 # ============================================================================
-# [host.defaults]
+# [credential]
 # ============================================================================
 
-[host.defaults]
+[credential]
 
-# Default context for new hosts (used by `nssh host add`)
-# default_context = ""
+# Active credential provider backend. Exactly one backend is active globally.
+# Supported: "age", "1password"
+# type = "age"
 
-# Default SSH username for new hosts
-# default_user = ""
+# Required when type = "1password"
+# [credential.config]
+# account = ""
+# vault = "Network"
+
+# ============================================================================
+# [inventory]
+# ============================================================================
+
+[inventory]
+
+# Default local inventory group for new hosts.
+# default_group = "default"
+
+# Local groups own local-provider SSH host placement.
+# [inventory.group.default]
+# local_file = "local_default.conf"
+
+# External inventory providers are configured here, not through CLI CRUD.
+# [inventory.provider.netbox-prod]
+# type = "netbox"
+# refresh_interval = "15m"
+#
+#   [inventory.provider.netbox-prod.config]
+#   base_url = "https://netbox.example.com"
+#   token_env = "NETBOX_TOKEN"
+#
+#   [[inventory.provider.netbox-prod.route]]
+#   group = "default"
 
 # ============================================================================
 # [logging.audit]

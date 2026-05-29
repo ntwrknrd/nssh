@@ -1,0 +1,14 @@
+$ nssh inv list --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh inv list [flags]             List inventory                           │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│   -g, --groups                      list groups                              │
+│   -s, --select STRING               filter by text or field:value            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Options ─────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose                     Print debug messages                     │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

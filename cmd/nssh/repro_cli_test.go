@@ -43,13 +43,13 @@ func TestPreprocessArgs_SSHFlagsAfterHostname(t *testing.T) {
 		},
 		{
 			name:     "known subcommand passes through unchanged",
-			args:     []string{"host", "list"},
-			expected: []string{"host", "list"},
+			args:     []string{"inv", "list"},
+			expected: []string{"inv", "list"},
 		},
 		{
 			name:     "global flag with subcommand passes through",
-			args:     []string{"-v", "host", "list"},
-			expected: []string{"-v", "host", "list"},
+			args:     []string{"-v", "inv", "list"},
+			expected: []string{"-v", "inv", "list"},
 		},
 		{
 			name:     "hostname only",

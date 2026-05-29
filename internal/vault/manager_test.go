@@ -54,6 +54,32 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 	return mgr, tmpDir
 }
 
+func TestNewManagerAutoWithAppConfigAllowsLegacySyncSources(t *testing.T) {
+	tmpDir := t.TempDir()
+	paths := &config.Paths{
+		ConfigDir:       tmpDir,
+		DataDir:         tmpDir,
+		StateDir:        tmpDir,
+		ConfigFile:      filepath.Join(tmpDir, "config.toml"),
+		CredentialsFile: filepath.Join(tmpDir, "credentials.age"),
+		BackupDir:       filepath.Join(tmpDir, "backups"),
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "piv.json"), []byte("{}"), 0600); err != nil {
+		t.Fatalf("write piv keystore marker: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Sync.Sources = []config.SyncSourceConfig{{Name: "legacy"}}
+
+	mgr, err := NewManager(Auto(), WithPaths(paths), WithAppConfig(cfg))
+	if err != nil {
+		t.Fatalf("NewManager Auto with legacy app config: %v", err)
+	}
+	if got := mgr.ModeString(); got != "piv" {
+		t.Fatalf("mode = %q, want piv", got)
+	}
+}
+
 func TestManagerCreateContext(t *testing.T) {
 	mgr, _ := setupTestManager(t)
 
