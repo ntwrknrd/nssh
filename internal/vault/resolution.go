@@ -4,11 +4,20 @@ import (
 	"github.com/ntwrknrd/nssh/internal/secret"
 )
 
+// Credential source constants.
+const (
+	CredSourceHost        = "host"
+	CredSourceContext     = "context"
+	CredSourceSyncClass   = "sync-class"
+	CredSourceSyncDefault = "sync-default"
+	CredSourceSyncContext = "sync-context"
+)
+
 // ResolvedCredential represents a resolved username/password pair.
 type ResolvedCredential struct {
 	Username string
 	Password *secret.Secret
-	Source   string // "host", "context", or "default"
+	Source   string // CredSource* constant
 }
 
 // ResolveCredential resolves credentials for a host using the resolution algorithm.
@@ -52,22 +61,22 @@ func (m *Manager) ResolveCredential(host, gitIncludeFile, username string) (*Res
 		// Check host-specific credentials first
 		for _, cred := range hostCreds {
 			if cred.Username == username {
-				m.auditInfo("vault_resolve", "host", host, "username", username, "source", "host")
+				m.auditInfo("vault_resolve", "host", host, "username", username, "source", CredSourceHost)
 				return &ResolvedCredential{
 					Username: cred.Username,
 					Password: secret.NewFromString(cred.Password),
-					Source:   "host",
+					Source:   CredSourceHost,
 				}, nil
 			}
 		}
 
 		// Check context credential
 		if contextCred != nil && contextCred.Username == username {
-			m.auditInfo("vault_resolve", "host", host, "username", username, "source", "context")
+			m.auditInfo("vault_resolve", "host", host, "username", username, "source", CredSourceContext)
 			return &ResolvedCredential{
 				Username: contextCred.Username,
 				Password: secret.NewFromString(contextCred.Password),
-				Source:   "context",
+				Source:   CredSourceContext,
 			}, nil
 		}
 
@@ -77,22 +86,22 @@ func (m *Manager) ResolveCredential(host, gitIncludeFile, username string) (*Res
 	// No username specified: find credential with default=true
 	for _, cred := range hostCreds {
 		if cred.Default {
-			m.auditInfo("vault_resolve", "host", host, "username", cred.Username, "source", "host_default")
+			m.auditInfo("vault_resolve", "host", host, "username", cred.Username, "source", CredSourceHost)
 			return &ResolvedCredential{
 				Username: cred.Username,
 				Password: secret.NewFromString(cred.Password),
-				Source:   "host",
+				Source:   CredSourceHost,
 			}, nil
 		}
 	}
 
 	// Fall back to context credential
 	if contextCred != nil {
-		m.auditInfo("vault_resolve", "host", host, "username", contextCred.Username, "source", "context_default")
+		m.auditInfo("vault_resolve", "host", host, "username", contextCred.Username, "source", CredSourceContext)
 		return &ResolvedCredential{
 			Username: contextCred.Username,
 			Password: secret.NewFromString(contextCred.Password),
-			Source:   "context",
+			Source:   CredSourceContext,
 		}, nil
 	}
 
@@ -122,11 +131,11 @@ func (m *Manager) ResolveCredentialWithDomain(host, username string) (*ResolvedC
 	if username != "" {
 		for _, cred := range hostCreds {
 			if cred.Username == username {
-				m.auditInfo("vault_resolve", "host", host, "username", username, "source", "host")
+				m.auditInfo("vault_resolve", "host", host, "username", username, "source", CredSourceHost)
 				return &ResolvedCredential{
 					Username: cred.Username,
 					Password: secret.NewFromString(cred.Password),
-					Source:   "host",
+					Source:   CredSourceHost,
 				}, nil
 			}
 		}
@@ -136,11 +145,11 @@ func (m *Manager) ResolveCredentialWithDomain(host, username string) (*ResolvedC
 	if username == "" {
 		for _, cred := range hostCreds {
 			if cred.Default {
-				m.auditInfo("vault_resolve", "host", host, "username", cred.Username, "source", "host_default")
+				m.auditInfo("vault_resolve", "host", host, "username", cred.Username, "source", CredSourceHost)
 				return &ResolvedCredential{
 					Username: cred.Username,
 					Password: secret.NewFromString(cred.Password),
-					Source:   "host",
+					Source:   CredSourceHost,
 				}, nil
 			}
 		}
@@ -157,20 +166,20 @@ func (m *Manager) ResolveCredentialWithDomain(host, username string) (*ResolvedC
 			if username != "" {
 				// Check if context credential matches requested username
 				if ctx.Credential.Username == username {
-					m.auditInfo("vault_resolve", "host", host, "username", username, "source", "context_domain")
+					m.auditInfo("vault_resolve", "host", host, "username", username, "source", CredSourceContext)
 					return &ResolvedCredential{
 						Username: ctx.Credential.Username,
 						Password: secret.NewFromString(ctx.Credential.Password),
-						Source:   "context",
+						Source:   CredSourceContext,
 					}, nil
 				}
 			} else {
 				// No username specified, use context credential
-				m.auditInfo("vault_resolve", "host", host, "username", ctx.Credential.Username, "source", "context_domain")
+				m.auditInfo("vault_resolve", "host", host, "username", ctx.Credential.Username, "source", CredSourceContext)
 				return &ResolvedCredential{
 					Username: ctx.Credential.Username,
 					Password: secret.NewFromString(ctx.Credential.Password),
-					Source:   "context",
+					Source:   CredSourceContext,
 				}, nil
 			}
 		}

@@ -64,7 +64,7 @@ func buildBinary(t *testing.T) string {
 	t.Helper()
 
 	binPath := filepath.Join(t.TempDir(), "nssh")
-	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/nssh")
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", binPath, "./cmd/nssh")
 	cmd.Dir = repoRoot()
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Failed to build binary: %v\n%s", err, output)

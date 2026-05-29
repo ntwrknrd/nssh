@@ -136,7 +136,7 @@ func runPrune() error {
 	byFile := make(map[string][]removal)
 	for _, idx := range indices {
 		c := candidates[idx]
-		byFile[c.host.SourceFile] = append(byFile[c.host.SourceFile], removal{host: c.host, reason: c.reason})
+		byFile[c.host.SourceFile] = append(byFile[c.host.SourceFile], removal(c))
 	}
 
 	// Process each file
