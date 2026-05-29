@@ -11,8 +11,8 @@ import (
 
 	clisession "github.com/ntwrknrd/nssh/internal/cli/session"
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/credential"
 	"github.com/ntwrknrd/nssh/internal/inventory"
-	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/ntwrknrd/nssh/internal/vault"
@@ -78,19 +78,12 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 
 	// Resolve credentials
 	var cred *vault.ResolvedCredential
-	mgr, err := clisession.NewManager(vault.Auto())
+	var mgr *vault.Manager
+	provider, err := credentialProviderForConnect(c, &mgr)
 	if err != nil {
-		slog.Debug("vault not available", "err", err)
+		slog.Debug("credential provider not available", "err", err)
 	} else {
-		// Auto-prompt for unlock if needed and TTY is available
-		if err := clisession.TryUnlockIfTTY(mgr); err != nil {
-			if err == ui.ErrInterrupted {
-				os.Exit(130)
-			}
-			slog.Warn("unlock failed", "err", err)
-		}
-
-		cred, err = resolveTargetCredential(mgr, hostname, group, username)
+		cred, err = resolveTargetCredential(provider, hostname, group, username)
 		if err != nil {
 			slog.Warn("credential resolution failed", "err", err)
 		}
@@ -113,56 +106,71 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 	}, nil
 }
 
-func resolveTargetCredential(mgr *vault.Manager, hostname, group, username string) (*vault.ResolvedCredential, error) {
-	if mgr == nil {
-		return nil, nil
+func credentialProviderForConnect(cfg *config.Config, mgrOut **vault.Manager) (credential.Provider, error) {
+	if cfg == nil {
+		cfg = config.DefaultConfig()
 	}
-	hostCreds, err := mgr.GetHostCredentials(hostname)
+	credCfg := cfg.Credential
+	if err := credCfg.Validate(); err != nil {
+		return nil, err
+	}
+	if credCfg.Type != config.CredentialProviderAge {
+		return credential.NewProvider(cfg)
+	}
+
+	mgr, err := clisession.NewManager(vault.Auto())
 	if err != nil {
 		return nil, err
 	}
-	if cred := selectHostCredential(hostCreds, username); cred != nil {
+	if err := clisession.TryUnlockIfTTY(mgr); err != nil {
+		if err == ui.ErrInterrupted {
+			os.Exit(130)
+		}
+		slog.Warn("unlock failed", "err", err)
+	}
+	if mgrOut != nil {
+		*mgrOut = mgr
+	}
+	return credential.NewAgeProvider(mgr), nil
+}
+
+func resolveTargetCredential(provider credential.Provider, hostname, group, username string) (*vault.ResolvedCredential, error) {
+	if provider == nil {
+		return nil, nil
+	}
+	hostCred, err := provider.GetHost(hostname)
+	if err != nil {
+		return nil, err
+	}
+	if credentialMatchesUser(hostCred, username) {
 		return &vault.ResolvedCredential{
-			Username: cred.Username,
-			Password: secret.NewFromString(cred.Password),
+			Username: hostCred.Username,
+			Password: hostCred.Secret,
 			Source:   vault.CredSourceHost,
 		}, nil
 	}
 	if group == "" {
 		return nil, nil
 	}
-	groupCred, err := mgr.GetGroupCredential(group)
+	groupCred, err := provider.GetGroup(group)
 	if err != nil || groupCred == nil {
 		return nil, err
 	}
-	if username != "" && groupCred.Username != username {
+	if !credentialMatchesUser(groupCred, username) {
 		return nil, nil
 	}
 	return &vault.ResolvedCredential{
 		Username: groupCred.Username,
-		Password: secret.NewFromString(groupCred.Password),
+		Password: groupCred.Secret,
 		Source:   vault.CredSourceGroup,
 	}, nil
 }
 
-func selectHostCredential(creds []vault.Credential, username string) *vault.Credential {
-	for i := range creds {
-		if username != "" && creds[i].Username == username {
-			return &creds[i]
-		}
+func credentialMatchesUser(record *credential.Record, username string) bool {
+	if record == nil {
+		return false
 	}
-	if username != "" {
-		return nil
-	}
-	for i := range creds {
-		if creds[i].Default {
-			return &creds[i]
-		}
-	}
-	if len(creds) > 0 {
-		return &creds[0]
-	}
-	return nil
+	return username == "" || record.Username == username
 }
 
 func resolveGroup(hostEntry *sshconfig.HostEntry, includeFile string, cfg *config.Config) string {

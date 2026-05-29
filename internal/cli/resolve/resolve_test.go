@@ -1,63 +1,57 @@
 package resolve
 
 import (
-	"path/filepath"
-	"strings"
 	"testing"
 
-	"filippo.io/age"
-	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/credential"
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/vault"
 )
 
-const testAgeKey = `# created: 2025-11-29T19:01:23-05:00
-# public key: age16g638l7m76qr7v4qwyhmnqt0yj5gzxxc740u34t2hh59rmc6av4qzajq74
-AGE-SECRET-KEY-1K5WWGTS4U7ZTST0PN4E4SN3XK0YFLY9KZNN4H272FRYPE5G6M4ZQ7Y7ED6
-`
+type fakeCredentialProvider struct {
+	hosts  map[string]*credential.Record
+	groups map[string]*credential.Record
+}
 
-func newTestManager(t *testing.T) *vault.Manager {
-	t.Helper()
-	tmpDir := t.TempDir()
+func (p fakeCredentialProvider) GetHost(host string) (*credential.Record, error) {
+	return p.hosts[host], nil
+}
 
-	identities, err := age.ParseIdentities(strings.NewReader(testAgeKey))
-	if err != nil {
-		t.Fatalf("parse test key: %v", err)
-	}
-	identity := identities[0].(*age.X25519Identity)
+func (p fakeCredentialProvider) SetHost(string, *credential.Record) error {
+	return nil
+}
 
-	paths := &config.Paths{
-		CredentialsFile: filepath.Join(tmpDir, "credentials.age"),
-		ConfigDir:       tmpDir,
-		DataDir:         tmpDir,
-		StateDir:        tmpDir,
-		BackupDir:       filepath.Join(tmpDir, "backups"),
-	}
+func (p fakeCredentialProvider) RemoveHost(string) (bool, error) {
+	return false, nil
+}
 
-	mgr, err := vault.NewManager(
-		vault.Provided(identity),
-		vault.WithPaths(paths),
-		vault.WithMaxBackups(5),
-	)
-	if err != nil {
-		t.Fatalf("create manager: %v", err)
-	}
-	return mgr
+func (p fakeCredentialProvider) GetGroup(group string) (*credential.Record, error) {
+	return p.groups[group], nil
+}
+
+func (p fakeCredentialProvider) SetGroup(string, *credential.Record) error {
+	return nil
+}
+
+func (p fakeCredentialProvider) RemoveGroup(string) (bool, error) {
+	return false, nil
+}
+
+func (p fakeCredentialProvider) Status() credential.Status {
+	return credential.Status{Type: "fake", Available: true}
 }
 
 func TestResolveTargetCredentialHostOverridesGroup(t *testing.T) {
-	mgr := newTestManager(t)
-	if err := mgr.SetGroupCredential("lab", "groupuser", secret.NewFromString("grouppass")); err != nil {
-		t.Fatalf("set group credential: %v", err)
-	}
-	if err := mgr.AddHostCredential("edge01", "hostuser", secret.NewFromString("hostpass")); err != nil {
-		t.Fatalf("add host credential: %v", err)
-	}
-	if err := mgr.SetHostDefaultCredential("edge01", "hostuser"); err != nil {
-		t.Fatalf("set host default: %v", err)
+	provider := fakeCredentialProvider{
+		hosts: map[string]*credential.Record{
+			"edge01": {Username: "hostuser", Secret: secret.NewFromString("hostpass")},
+		},
+		groups: map[string]*credential.Record{
+			"lab": {Username: "groupuser", Secret: secret.NewFromString("grouppass")},
+		},
 	}
 
-	cred, err := resolveTargetCredential(mgr, "edge01", "lab", "")
+	cred, err := resolveTargetCredential(provider, "edge01", "lab", "")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -73,12 +67,14 @@ func TestResolveTargetCredentialHostOverridesGroup(t *testing.T) {
 }
 
 func TestResolveTargetCredentialFallsBackToGroup(t *testing.T) {
-	mgr := newTestManager(t)
-	if err := mgr.SetGroupCredential("lab", "groupuser", secret.NewFromString("grouppass")); err != nil {
-		t.Fatalf("set group credential: %v", err)
+	provider := fakeCredentialProvider{
+		hosts: map[string]*credential.Record{},
+		groups: map[string]*credential.Record{
+			"lab": {Username: "groupuser", Secret: secret.NewFromString("grouppass")},
+		},
 	}
 
-	cred, err := resolveTargetCredential(mgr, "edge01", "lab", "")
+	cred, err := resolveTargetCredential(provider, "edge01", "lab", "")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -89,6 +85,31 @@ func TestResolveTargetCredentialFallsBackToGroup(t *testing.T) {
 		t.Fatalf("source = %q, want group", cred.Source)
 	}
 	if cred.Username != "groupuser" {
+		t.Fatalf("username = %q", cred.Username)
+	}
+}
+
+func TestResolveTargetCredentialRespectsExplicitUsername(t *testing.T) {
+	provider := fakeCredentialProvider{
+		hosts: map[string]*credential.Record{
+			"edge01": {Username: "hostuser", Secret: secret.NewFromString("hostpass")},
+		},
+		groups: map[string]*credential.Record{
+			"lab": {Username: "requested", Secret: secret.NewFromString("grouppass")},
+		},
+	}
+
+	cred, err := resolveTargetCredential(provider, "edge01", "lab", "requested")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if cred == nil {
+		t.Fatal("expected credential")
+	}
+	if cred.Source != vault.CredSourceGroup {
+		t.Fatalf("source = %q, want group", cred.Source)
+	}
+	if cred.Username != "requested" {
 		t.Fatalf("username = %q", cred.Username)
 	}
 }
