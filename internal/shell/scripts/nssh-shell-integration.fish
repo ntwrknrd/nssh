@@ -18,7 +18,7 @@ function nssh --description "SSH to network equipment with password management"
     end
 
     # Detect top-level subcommands (fall back to defaults if lookup fails)
-    set -l subcommands host ctx log cp benchmark self help version completion
+    set -l subcommands inv cred log cp self lock unlock connect
     set -l detected (command $nssh_cmd __list-subcommands 2>/dev/null)
     if test $status -eq 0 -a (count $detected) -gt 0
         set subcommands $detected
