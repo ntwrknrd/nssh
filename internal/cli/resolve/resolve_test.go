@@ -41,6 +41,21 @@ func (p fakeCredentialProvider) Status() credential.Status {
 	return credential.Status{Type: "fake", Available: true}
 }
 
+type fakeIndexedCredentialProvider struct {
+	fakeCredentialProvider
+	indexedHosts map[string]bool
+	hostGets     int
+}
+
+func (p *fakeIndexedCredentialProvider) GetHost(host string) (*credential.Record, error) {
+	p.hostGets++
+	return p.fakeCredentialProvider.GetHost(host)
+}
+
+func (p *fakeIndexedCredentialProvider) HasHostCredential(host string) bool {
+	return p.indexedHosts[host]
+}
+
 func TestResolveTargetCredentialHostOverridesGroup(t *testing.T) {
 	provider := fakeCredentialProvider{
 		hosts: map[string]*credential.Record{
@@ -86,6 +101,29 @@ func TestResolveTargetCredentialFallsBackToGroup(t *testing.T) {
 	}
 	if cred.Username != "groupuser" {
 		t.Fatalf("username = %q", cred.Username)
+	}
+}
+
+func TestResolveTargetCredentialSkipsUnindexedHostLookup(t *testing.T) {
+	provider := &fakeIndexedCredentialProvider{
+		fakeCredentialProvider: fakeCredentialProvider{
+			hosts: map[string]*credential.Record{},
+			groups: map[string]*credential.Record{
+				"lab": {Username: "groupuser", Secret: secret.NewFromString("grouppass")},
+			},
+		},
+		indexedHosts: map[string]bool{},
+	}
+
+	cred, err := resolveTargetCredential(provider, "edge02", "lab", "")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if provider.hostGets != 0 {
+		t.Fatalf("host lookups = %d, want 0", provider.hostGets)
+	}
+	if cred == nil || cred.Source != vault.CredSourceGroup || cred.Username != "groupuser" {
+		t.Fatalf("credential = %+v", cred)
 	}
 }
 

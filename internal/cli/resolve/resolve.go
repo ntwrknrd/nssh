@@ -138,16 +138,18 @@ func resolveTargetCredential(provider credential.Provider, hostname, group, user
 	if provider == nil {
 		return nil, nil
 	}
-	hostCred, err := provider.GetHost(hostname)
-	if err != nil {
-		return nil, err
-	}
-	if credentialMatchesUser(hostCred, username) {
-		return &vault.ResolvedCredential{
-			Username: hostCred.Username,
-			Password: hostCred.Secret,
-			Source:   vault.CredSourceHost,
-		}, nil
+	if shouldQueryHostCredential(provider, hostname) {
+		hostCred, err := provider.GetHost(hostname)
+		if err != nil {
+			return nil, err
+		}
+		if credentialMatchesUser(hostCred, username) {
+			return &vault.ResolvedCredential{
+				Username: hostCred.Username,
+				Password: hostCred.Secret,
+				Source:   vault.CredSourceHost,
+			}, nil
+		}
 	}
 	if group == "" {
 		return nil, nil
@@ -164,6 +166,11 @@ func resolveTargetCredential(provider credential.Provider, hostname, group, user
 		Password: groupCred.Secret,
 		Source:   vault.CredSourceGroup,
 	}, nil
+}
+
+func shouldQueryHostCredential(provider credential.Provider, hostname string) bool {
+	indexed, ok := provider.(credential.HostCredentialIndex)
+	return !ok || indexed.HasHostCredential(hostname)
 }
 
 func credentialMatchesUser(record *credential.Record, username string) bool {

@@ -3,6 +3,7 @@ package cred
 import (
 	"fmt"
 
+	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/credential"
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ui"
@@ -40,7 +41,7 @@ func newSetCmd() *cobra.Command {
 				if err := provider.SetHost(scope.Host, record); err != nil {
 					return err
 				}
-				if _, err := clearCredentialLinkForScope(scope); err != nil {
+				if err := updateCredentialLinkAfterSet(scope); err != nil {
 					return err
 				}
 				ui.Success("Credential saved for host %s", scope.Host)
@@ -49,7 +50,7 @@ func newSetCmd() *cobra.Command {
 			if err := provider.SetGroup(scope.Group, record); err != nil {
 				return err
 			}
-			if _, err := clearCredentialLinkForScope(scope); err != nil {
+			if err := updateCredentialLinkAfterSet(scope); err != nil {
 				return err
 			}
 			ui.Success("Credential saved for group %s", scope.Group)
@@ -59,4 +60,26 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&group, "group", "g", "", "group credential scope")
 	cmd.Flags().StringVar(&username, "username", "", "SSH username")
 	return cmd
+}
+
+func updateCredentialLinkAfterSet(scope credentialScope) error {
+	cfg, err := config.LoadDefault()
+	if err != nil {
+		return err
+	}
+	if cfg.Credential.Type == config.CredentialProvider1Password {
+		if err := setCredentialLink(cfg, scope, config.CredentialRefConfig{Ref: deterministicOnePasswordItemRef(scope)}); err != nil {
+			return err
+		}
+		return config.Save(config.DefaultPaths().ConfigFile, cfg)
+	}
+	_, err = clearCredentialLinkForScope(scope)
+	return err
+}
+
+func deterministicOnePasswordItemRef(scope credentialScope) string {
+	if scope.Host != "" {
+		return "nssh host " + scope.Host
+	}
+	return "nssh group " + scope.Group
 }

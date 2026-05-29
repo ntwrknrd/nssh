@@ -34,6 +34,12 @@ type Provider interface {
 	Status() Status
 }
 
+// HostCredentialIndex marks providers that can cheaply tell whether a host
+// override relationship exists without probing the backing secret manager.
+type HostCredentialIndex interface {
+	HasHostCredential(host string) bool
+}
+
 // NewProvider constructs the single active credential backend selected by
 // config. The backend is global; records never select their own provider.
 func NewProvider(cfg *config.Config) (Provider, error) {

@@ -64,6 +64,24 @@ func (c *Client) Recipient() (string, error) {
 	return string(resp.Data), nil
 }
 
+// CacheGet returns cached data from the running agent.
+func (c *Client) CacheGet(key string) (bool, []byte, error) {
+	resp, err := c.request(Request{Version: ProtocolVersion, Op: OpCacheGet, Key: key})
+	if err != nil {
+		return false, nil, err
+	}
+	if !resp.Found {
+		return false, nil, nil
+	}
+	return true, resp.Data, nil
+}
+
+// CachePut stores data in the running agent cache.
+func (c *Client) CachePut(key string, data []byte) error {
+	_, err := c.request(Request{Version: ProtocolVersion, Op: OpCachePut, Key: key, Data: data})
+	return err
+}
+
 // Status returns session status including timing information.
 func (c *Client) Status() (*StatusInfo, error) {
 	resp, err := c.request(Request{Version: ProtocolVersion, Op: OpStatus})

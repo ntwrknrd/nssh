@@ -927,6 +927,20 @@ func runAgentMode() {
 		signalError("missing pipe file descriptors")
 	}
 
+	if os.Getenv("NSSH_AGENT_CACHE_ONLY") == "1" {
+		_ = dataPipe.Close()
+		agentCfg := agent.DefaultRuntimeConfig()
+		agentCfg.ReadyPipe = readyPipe
+		if err := agent.Run(agent.NewCacheOnlyProvider(), agentCfg); err != nil {
+			if readyPipe != nil {
+				_, _ = readyPipe.WriteString("err:" + err.Error() + "\n")
+				_ = readyPipe.Close()
+			}
+			os.Exit(1)
+		}
+		return
+	}
+
 	// Load config for agent settings
 	cfg, err := config.LoadDefault()
 	if err != nil {

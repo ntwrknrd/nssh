@@ -203,7 +203,11 @@ func runStatus() error {
 	ui.SubSection("Session")
 	if client, err := agent.Connect(); err == nil {
 		if status, err := client.Status(); err == nil {
-			printStatus(true, "Status", "unlocked")
+			if status.Mode == agent.ModeCache {
+				ui.StatusLineNeutral("Status", "credential cache active")
+			} else {
+				printStatus(true, "Status", "unlocked")
+			}
 			ui.StatusLineNeutral("Idle in", formatDuration(status.RemainingIdle))
 			ui.StatusLineNeutral("Ends in", formatDuration(status.RemainingLife))
 		} else {

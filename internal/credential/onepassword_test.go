@@ -3,9 +3,13 @@ package credential
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/ntwrknrd/nssh/internal/agent"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/secret"
 )
@@ -123,6 +127,103 @@ func TestOnePasswordGetHostReadsConfiguredSecretRefs(t *testing.T) {
 	}
 }
 
+func TestOnePasswordGetHostCachesConfiguredSecretRefs(t *testing.T) {
+	socketPath := fmt.Sprintf("/tmp/nssh-cred-%d-%d.sock", os.Getpid(), time.Now().UnixNano())
+	t.Cleanup(func() { _ = os.Remove(socketPath) })
+	restore := agent.SetSocketPathForTest(socketPath)
+	defer restore()
+
+	cancel, done := agent.RunInBackground(context.Background(), agent.NewCacheOnlyProvider(), agent.DefaultRuntimeConfig())
+	defer func() {
+		cancel()
+		<-done
+	}()
+	waitForCredentialAgent(t)
+
+	runner := &fakeOPRunner{outs: []fakeOPOut{
+		{data: "netops"},
+		{data: "secret"},
+	}}
+	provider := &onePasswordProvider{
+		vault: "Network",
+		hostRefs: map[string]config.CredentialRefConfig{
+			"edge01": {
+				Ref:         "op://Network/Edge 01/password",
+				UsernameRef: "op://Network/Edge 01/username",
+			},
+		},
+		runner: runner,
+		cache:  true,
+	}
+
+	first, err := provider.GetHost("edge01")
+	if err != nil {
+		t.Fatalf("first GetHost: %v", err)
+	}
+	if first == nil || first.Username != "netops" || revealTestSecret(t, first) != "secret" {
+		t.Fatalf("first record = %+v", first)
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("first calls = %d, want 2", len(runner.calls))
+	}
+
+	second, err := provider.GetHost("edge01")
+	if err != nil {
+		t.Fatalf("second GetHost: %v", err)
+	}
+	if second == nil || second.Username != "netops" || revealTestSecret(t, second) != "secret" {
+		t.Fatalf("second record = %+v", second)
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("cached lookup made more op calls: %d", len(runner.calls))
+	}
+}
+
+func TestOnePasswordGetHostCachesMissingDeterministicItem(t *testing.T) {
+	socketPath := fmt.Sprintf("/tmp/nssh-cred-%d-%d.sock", os.Getpid(), time.Now().UnixNano())
+	t.Cleanup(func() { _ = os.Remove(socketPath) })
+	restore := agent.SetSocketPathForTest(socketPath)
+	defer restore()
+
+	cancel, done := agent.RunInBackground(context.Background(), agent.NewCacheOnlyProvider(), agent.DefaultRuntimeConfig())
+	defer func() {
+		cancel()
+		<-done
+	}()
+	waitForCredentialAgent(t)
+
+	runner := &fakeOPRunner{outs: []fakeOPOut{
+		{data: "not found", err: errors.New("exit status 1")},
+	}}
+	provider := &onePasswordProvider{
+		vault:  "Network",
+		runner: runner,
+		cache:  true,
+	}
+
+	first, err := provider.GetHost("edge01")
+	if err != nil {
+		t.Fatalf("first GetHost: %v", err)
+	}
+	if first != nil {
+		t.Fatalf("first record = %+v, want nil", first)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("first calls = %d, want 1", len(runner.calls))
+	}
+
+	second, err := provider.GetHost("edge01")
+	if err != nil {
+		t.Fatalf("second GetHost: %v", err)
+	}
+	if second != nil {
+		t.Fatalf("second record = %+v, want nil", second)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("cached miss made more op calls: %d", len(runner.calls))
+	}
+}
+
 func TestOnePasswordSetHostCreatesDeterministicItemWhenMissing(t *testing.T) {
 	runner := &fakeOPRunner{outs: []fakeOPOut{
 		{data: "not found", err: errors.New("exit status 1")},
@@ -145,6 +246,20 @@ func TestOnePasswordSetHostCreatesDeterministicItemWhenMissing(t *testing.T) {
 			t.Fatalf("missing %s in stdin: %s", want, runner.calls[1].stdin)
 		}
 	}
+}
+
+func waitForCredentialAgent(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		client, err := agent.Connect()
+		if err == nil {
+			_ = client.Close()
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("agent did not start in time")
 }
 
 func revealTestSecret(t *testing.T, record *Record) string {

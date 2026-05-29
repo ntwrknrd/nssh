@@ -59,3 +59,12 @@ func TestClearCredentialLinkRemovesOnlyTargetScope(t *testing.T) {
 		t.Fatalf("group ref was removed: %+v", cfg.Credential.Group)
 	}
 }
+
+func TestDeterministicOnePasswordItemRef(t *testing.T) {
+	if got := deterministicOnePasswordItemRef(credentialScope{Host: "edge01"}); got != "nssh host edge01" {
+		t.Fatalf("host ref = %q", got)
+	}
+	if got := deterministicOnePasswordItemRef(credentialScope{Group: "custcbb"}); got != "nssh group custcbb" {
+		t.Fatalf("group ref = %q", got)
+	}
+}
