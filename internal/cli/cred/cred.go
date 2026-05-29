@@ -28,6 +28,7 @@ func NewCmd() *cobra.Command {
 		},
 	}
 	cmd.AddCommand(newGetCmd())
+	cmd.AddCommand(newLinkCmd())
 	cmd.AddCommand(newSetCmd())
 	cmd.AddCommand(newRemoveCmd())
 	cmd.AddCommand(newStatusCmd())

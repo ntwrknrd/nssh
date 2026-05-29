@@ -1,13 +1,13 @@
-$ nssh cred --help
+$ nssh cred link --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh cred [flags]                 Manage credentials                       │
+│   nssh cred link HOST --ref REF     Link existing credentials                │
+│   nssh cred link -g GROUP --ref REF                                          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────╮
-│   get                               Show credentials                         │
-│   link                              Link existing credentials                │
-│   rm                                Remove credentials                       │
-│   set                               Create or update credentials             │
-│   status                            Show credential provider status          │
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│   -g, --group STRING                group credential scope                   │
+│   --ref STRING                      provider item or secret reference        │
+│   --username STRING                 literal SSH username                     │
+│   --username-ref STRING             provider secret reference for SSH u...   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

@@ -40,10 +40,16 @@ func newSetCmd() *cobra.Command {
 				if err := provider.SetHost(scope.Host, record); err != nil {
 					return err
 				}
+				if _, err := clearCredentialLinkForScope(scope); err != nil {
+					return err
+				}
 				ui.Success("Credential saved for host %s", scope.Host)
 				return nil
 			}
 			if err := provider.SetGroup(scope.Group, record); err != nil {
+				return err
+			}
+			if _, err := clearCredentialLinkForScope(scope); err != nil {
 				return err
 			}
 			ui.Success("Credential saved for group %s", scope.Group)

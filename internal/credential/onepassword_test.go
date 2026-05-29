@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/secret"
 )
 
@@ -65,6 +66,63 @@ func TestOnePasswordGetHostReadsDeterministicItem(t *testing.T) {
 	}
 }
 
+func TestOnePasswordGetGroupReadsConfiguredItemRef(t *testing.T) {
+	runner := &fakeOPRunner{outs: []fakeOPOut{{
+		data: `{"title":"Network Shared Admin","fields":[{"label":"username","value":"netops"},{"label":"password","value":"secret"}]}`,
+	}}}
+	provider := &onePasswordProvider{
+		vault: "Network",
+		groupRefs: map[string]config.CredentialRefConfig{
+			"custcbb": {Ref: "Network Shared Admin"},
+		},
+		runner: runner,
+	}
+
+	got, err := provider.GetGroup("custcbb")
+	if err != nil {
+		t.Fatalf("GetGroup: %v", err)
+	}
+	gotSecret := revealTestSecret(t, got)
+	if got == nil || got.Username != "netops" || gotSecret != "secret" || got.Ref != "Network Shared Admin" {
+		t.Fatalf("record = %+v secret=%q", got, gotSecret)
+	}
+	wantArgs := []string{"item", "get", "Network Shared Admin", "--vault", "Network", "--format", "json", "--reveal"}
+	if strings.Join(runner.calls[0].args, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("args = %#v", runner.calls[0].args)
+	}
+}
+
+func TestOnePasswordGetHostReadsConfiguredSecretRefs(t *testing.T) {
+	runner := &fakeOPRunner{outs: []fakeOPOut{
+		{data: "netops"},
+		{data: "secret"},
+	}}
+	provider := &onePasswordProvider{
+		hostRefs: map[string]config.CredentialRefConfig{
+			"edge01": {
+				Ref:         "op://Network/Edge 01/password",
+				UsernameRef: "op://Network/Edge 01/username",
+			},
+		},
+		runner: runner,
+	}
+
+	got, err := provider.GetHost("edge01")
+	if err != nil {
+		t.Fatalf("GetHost: %v", err)
+	}
+	gotSecret := revealTestSecret(t, got)
+	if got == nil || got.Username != "netops" || gotSecret != "secret" || got.Ref != "op://Network/Edge 01/password" {
+		t.Fatalf("record = %+v secret=%q", got, gotSecret)
+	}
+	if strings.Join(runner.calls[0].args, " ") != "read op://Network/Edge 01/username" {
+		t.Fatalf("username ref args = %#v", runner.calls[0].args)
+	}
+	if strings.Join(runner.calls[1].args, " ") != "read op://Network/Edge 01/password" {
+		t.Fatalf("password ref args = %#v", runner.calls[1].args)
+	}
+}
+
 func TestOnePasswordSetHostCreatesDeterministicItemWhenMissing(t *testing.T) {
 	runner := &fakeOPRunner{outs: []fakeOPOut{
 		{data: "not found", err: errors.New("exit status 1")},
@@ -87,6 +145,21 @@ func TestOnePasswordSetHostCreatesDeterministicItemWhenMissing(t *testing.T) {
 			t.Fatalf("missing %s in stdin: %s", want, runner.calls[1].stdin)
 		}
 	}
+}
+
+func revealTestSecret(t *testing.T, record *Record) string {
+	t.Helper()
+	if record == nil || record.Secret == nil {
+		return ""
+	}
+	value := ""
+	if err := record.Secret.UseString(func(s string) error {
+		value = s
+		return nil
+	}); err != nil {
+		t.Fatalf("secret: %v", err)
+	}
+	return value
 }
 
 func TestOnePasswordSetGroupEditsExistingItem(t *testing.T) {

@@ -14,9 +14,11 @@ import (
 )
 
 type onePasswordProvider struct {
-	account string
-	vault   string
-	runner  opRunner
+	account   string
+	vault     string
+	hostRefs  map[string]config.CredentialRefConfig
+	groupRefs map[string]config.CredentialRefConfig
+	runner    opRunner
 }
 
 type opRunner interface {
@@ -39,8 +41,14 @@ type onePasswordField struct {
 	Value   string `json:"value"`
 }
 
-func newOnePasswordProvider(cfg config.CredentialProviderDetailConfig) Provider {
-	return &onePasswordProvider{account: cfg.Account, vault: cfg.Vault, runner: opCLIRunner{}}
+func newOnePasswordProvider(cfg config.CredentialConfig) Provider {
+	return &onePasswordProvider{
+		account:   cfg.Config.Account,
+		vault:     cfg.Config.Vault,
+		hostRefs:  cfg.Host,
+		groupRefs: cfg.Group,
+		runner:    opCLIRunner{},
+	}
 }
 
 func (opCLIRunner) Run(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
@@ -97,6 +105,9 @@ const (
 )
 
 func (p *onePasswordProvider) get(scope credentialScope, name string) (*Record, error) {
+	if ref := p.refForScope(scope, name); ref.Ref != "" {
+		return p.getRef(ref)
+	}
 	item, err := p.getItem(scope, name)
 	if err != nil {
 		return nil, err
@@ -109,6 +120,46 @@ func (p *onePasswordProvider) get(scope credentialScope, name string) (*Record, 
 		return nil, nil
 	}
 	return &Record{Username: username, Secret: secret.NewFromString(password), Ref: itemTitle(scope, name)}, nil
+}
+
+func (p *onePasswordProvider) getRef(ref config.CredentialRefConfig) (*Record, error) {
+	if isOnePasswordSecretRef(ref.Ref) {
+		username, err := p.resolveUsername(ref)
+		if err != nil {
+			return nil, err
+		}
+		password, err := p.readSecretRef(ref.Ref)
+		if err != nil {
+			return nil, err
+		}
+		if username == "" && password == "" {
+			return nil, nil
+		}
+		return &Record{Username: username, Secret: secret.NewFromString(password), Ref: ref.Ref}, nil
+	}
+
+	item, err := p.getItemByRef(ref.Ref)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil {
+		return nil, nil
+	}
+	username := strings.TrimSpace(ref.Username)
+	if username == "" && ref.UsernameRef != "" {
+		username, err = p.readSecretRef(ref.UsernameRef)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if username == "" {
+		username = itemField(item, "username")
+	}
+	password := itemField(item, "password")
+	if username == "" && password == "" {
+		return nil, nil
+	}
+	return &Record{Username: username, Secret: secret.NewFromString(password), Ref: ref.Ref}, nil
 }
 
 func (p *onePasswordProvider) set(scope credentialScope, name string, record *Record) error {
@@ -159,7 +210,11 @@ func (p *onePasswordProvider) remove(scope credentialScope, name string) (bool, 
 }
 
 func (p *onePasswordProvider) getItem(scope credentialScope, name string) (*onePasswordItem, error) {
-	args := append([]string{"item", "get", itemTitle(scope, name)}, p.scopeArgs()...)
+	return p.getItemByRef(itemTitle(scope, name))
+}
+
+func (p *onePasswordProvider) getItemByRef(ref string) (*onePasswordItem, error) {
+	args := append([]string{"item", "get", ref}, p.scopeArgs()...)
 	args = append(args, "--format", "json", "--reveal")
 	out, err := p.run(context.Background(), nil, args...)
 	if err != nil {
@@ -170,9 +225,45 @@ func (p *onePasswordProvider) getItem(scope credentialScope, name string) (*oneP
 	}
 	var item onePasswordItem
 	if err := json.Unmarshal(out, &item); err != nil {
-		return nil, fmt.Errorf("parse 1Password item %q: %w", itemTitle(scope, name), err)
+		return nil, fmt.Errorf("parse 1Password item %q: %w", ref, err)
 	}
 	return &item, nil
+}
+
+func (p *onePasswordProvider) readSecretRef(ref string) (string, error) {
+	args := []string{"read", ref}
+	if p.account != "" {
+		args = append(args, "--account", p.account)
+	}
+	out, err := p.run(context.Background(), nil, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (p *onePasswordProvider) resolveUsername(ref config.CredentialRefConfig) (string, error) {
+	if ref.Username != "" {
+		return ref.Username, nil
+	}
+	usernameRef := ref.UsernameRef
+	if usernameRef == "" {
+		usernameRef = siblingSecretRef(ref.Ref, "username")
+	}
+	if usernameRef == "" {
+		return "", nil
+	}
+	return p.readSecretRef(usernameRef)
+}
+
+func (p *onePasswordProvider) refForScope(scope credentialScope, name string) config.CredentialRefConfig {
+	if scope == scopeHost && p.hostRefs != nil {
+		return p.hostRefs[name]
+	}
+	if scope == scopeGroup && p.groupRefs != nil {
+		return p.groupRefs[name]
+	}
+	return config.CredentialRefConfig{}
 }
 
 func (p *onePasswordProvider) run(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
@@ -223,4 +314,17 @@ func isItemNotFound(out []byte, err error) bool {
 		strings.Contains(text, "isn't an item") ||
 		strings.Contains(text, "is not an item") ||
 		strings.Contains(text, "does not exist")
+}
+
+func isOnePasswordSecretRef(ref string) bool {
+	return strings.HasPrefix(strings.TrimSpace(ref), "op://")
+}
+
+func siblingSecretRef(ref, field string) string {
+	ref = strings.TrimSpace(ref)
+	idx := strings.LastIndex(ref, "/")
+	if idx == -1 || idx == len(ref)-1 {
+		return ""
+	}
+	return ref[:idx+1] + field
 }

@@ -91,8 +91,9 @@ Config schema in `internal/config/settings.go` supports TOML and environment ove
 
 The credential system has two layers:
 
-- **Vault** (`internal/vault`): owns on-disk encrypted data, backups, and
-  resolution logic
+- **Credential provider** (`internal/credential`): resolves host/group records
+  through the active backend (`age`, `1password`, and future providers)
+- **Vault** (`internal/vault`): owns age-backed encrypted data and backups
 - **Agent** (`internal/agent`): holds a decrypt session in memory and serves
   decrypt operations over a Unix domain socket
 
@@ -297,6 +298,8 @@ Notes:
 
 - Host entries store a list of credentials; one may be marked `default:true`
 - Groups can be referenced by SSH include file (basename) and/or by domain
+- External credential providers may store non-secret host/group references in
+  config, such as `credential.group.<group>.ref`
 - Passwords are plaintext only in decrypted JSON (the `.age` file protects them
   at rest)
 
@@ -306,7 +309,7 @@ Agent daemon holds age identity in memory; vault delegates decrypt over Unix soc
 
 ### Resolution Rules (Connect Time)
 
-Resolution order: username detection → include-file resolution → domain resolution → nil (SSH proceeds with keys).
+Resolution order: username detection → inventory group resolution → active credential provider → nil (SSH proceeds with keys).
 
 **With username**: exact match in host credentials → group credential → nil.
 **Without username**: host default → group credential → nil.

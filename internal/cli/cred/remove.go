@@ -20,6 +20,12 @@ func newRemoveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if removed, err := clearCredentialLinkForScope(scope); err != nil {
+				return err
+			} else if removed {
+				ui.Success("Credential link removed")
+				return nil
+			}
 			provider, err := activeWritableProvider()
 			if err != nil {
 				return err

@@ -15,6 +15,8 @@ const (
 type CredentialConfig struct {
 	Type   string                         `toml:"type"`
 	Config CredentialProviderDetailConfig `toml:"config"`
+	Host   map[string]CredentialRefConfig `toml:"host"`
+	Group  map[string]CredentialRefConfig `toml:"group"`
 }
 
 // CredentialProviderDetailConfig holds backend-specific credential provider
@@ -22,6 +24,16 @@ type CredentialConfig struct {
 type CredentialProviderDetailConfig struct {
 	Account string `toml:"account"`
 	Vault   string `toml:"vault"`
+}
+
+// CredentialRefConfig maps a host or group credential scope to an existing
+// external secret object. Ref is provider-specific but should be a stable item
+// ID/name or a provider URI. Username can be literal or resolved from
+// UsernameRef.
+type CredentialRefConfig struct {
+	Ref         string `toml:"ref"`
+	Username    string `toml:"username"`
+	UsernameRef string `toml:"username_ref"`
 }
 
 // InventoryConfig holds group metadata and external inventory provider config.
@@ -82,10 +94,40 @@ func (c *CredentialConfig) Validate() error {
 		if strings.TrimSpace(c.Config.Vault) == "" {
 			return fmt.Errorf("credential.config.vault is required for %q", CredentialProvider1Password)
 		}
-		return nil
 	default:
 		return fmt.Errorf("unsupported credential provider %q", c.Type)
 	}
+	for host, ref := range c.Host {
+		if strings.TrimSpace(host) == "" {
+			return fmt.Errorf("credential.host has empty host")
+		}
+		if err := ref.Validate("credential.host." + host); err != nil {
+			return err
+		}
+	}
+	for group, ref := range c.Group {
+		if strings.TrimSpace(group) == "" {
+			return fmt.Errorf("credential.group has empty group")
+		}
+		if err := validateBareKeySafe("credential.group", group); err != nil {
+			return err
+		}
+		if err := ref.Validate("credential.group." + group); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Validate checks a credential reference mapping.
+func (c CredentialRefConfig) Validate(scope string) error {
+	if strings.TrimSpace(c.Ref) == "" {
+		return fmt.Errorf("%s.ref is required", scope)
+	}
+	if strings.TrimSpace(c.Username) != "" && strings.TrimSpace(c.UsernameRef) != "" {
+		return fmt.Errorf("%s.username and username_ref are mutually exclusive", scope)
+	}
+	return nil
 }
 
 // Validate checks inventory group and provider configuration.

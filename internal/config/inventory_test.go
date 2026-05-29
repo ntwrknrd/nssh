@@ -19,6 +19,13 @@ type = "1password"
   account = "ntwrknrd"
   vault = "Network"
 
+  [credential.group.custcbb]
+  ref = "Network Shared Admin"
+
+  [credential.host.edge01]
+  ref = "op://Network/Edge 01/password"
+  username_ref = "op://Network/Edge 01/username"
+
 [inventory]
 default_group = "lab"
 
@@ -74,6 +81,12 @@ default_group = "lab"
 	}
 	if cfg.Credential.Config.Vault != "Network" {
 		t.Fatalf("credential.config.vault = %q", cfg.Credential.Config.Vault)
+	}
+	if cfg.Credential.Group["custcbb"].Ref != "Network Shared Admin" {
+		t.Fatalf("credential.group.custcbb.ref = %q", cfg.Credential.Group["custcbb"].Ref)
+	}
+	if cfg.Credential.Host["edge01"].UsernameRef != "op://Network/Edge 01/username" {
+		t.Fatalf("credential.host.edge01.username_ref = %q", cfg.Credential.Host["edge01"].UsernameRef)
 	}
 	if cfg.Inventory.DefaultGroup != "lab" {
 		t.Fatalf("inventory.default_group = %q", cfg.Inventory.DefaultGroup)

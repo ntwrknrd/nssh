@@ -49,7 +49,7 @@ func NewProvider(cfg *config.Config) (Provider, error) {
 	case config.CredentialProviderAge:
 		return newAgeProvider(), nil
 	case config.CredentialProvider1Password:
-		return newOnePasswordProvider(credCfg.Config), nil
+		return newOnePasswordProvider(credCfg), nil
 	default:
 		return nil, fmt.Errorf("unsupported credential provider %q", credCfg.Type)
 	}

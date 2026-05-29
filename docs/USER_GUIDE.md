@@ -94,10 +94,12 @@ host or a group.
 ```bash
 nssh cred status
 nssh cred set switch1 --username admin
+nssh cred link switch1 --ref "Existing 1Password Item"
 nssh cred get switch1
 nssh cred rm switch1
 
 nssh cred set -g lab --username admin
+nssh cred link -g lab --ref "Network Shared Admin"
 nssh cred get -g lab
 nssh cred rm -g lab
 ```
@@ -134,6 +136,18 @@ vault = "Network"
 
 - `nssh host <host>`
 - `nssh group <group>`
+
+Use `cred link` when an existing 1Password item should be the credential source
+instead of a deterministic nssh-owned item. `--ref` may be an item name/ID or an
+`op://` secret reference. If `--ref` is an `op://.../password` reference, nssh
+uses the sibling `op://.../username` reference unless `--username` or
+`--username-ref` is provided.
+
+```bash
+nssh cred link -g lab --ref "Network Shared Admin"
+nssh cred link switch1 --ref "op://Network/Switch 1/password"
+nssh cred link switch1 --ref "op://Network/Switch 1/password" --username netops
+```
 
 ## Connecting
 
