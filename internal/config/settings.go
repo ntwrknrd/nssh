@@ -18,7 +18,6 @@ type Config struct {
 	Inventory  InventoryConfig  `toml:"inventory"`
 	Logging    LoggingConfig    `toml:"logging"`
 	SSH        SSHConfig        `toml:"ssh"`
-	Sync       SyncConfig       `toml:"-"`
 }
 
 // ============================================================================
@@ -410,9 +409,6 @@ func (c *Config) Validate() error {
 	}
 	if err := c.SSH.Security.Validate(); err != nil {
 		return err
-	}
-	if len(c.Sync.Sources) > 0 {
-		return legacySyncSourcesError()
 	}
 	return nil
 }

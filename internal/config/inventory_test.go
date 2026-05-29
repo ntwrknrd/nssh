@@ -498,11 +498,10 @@ provider = "containerlab"
 	}
 }
 
-func TestSaveDoesNotEmitLegacySyncConfig(t *testing.T) {
+func TestSaveDoesNotEmitLegacySyncTable(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.toml")
 	cfg := DefaultConfig()
-	cfg.Sync.Sources = []SyncSourceConfig{{Name: "legacy"}}
 
 	if err := Save(path, cfg); err != nil {
 		t.Fatalf("Save: %v", err)

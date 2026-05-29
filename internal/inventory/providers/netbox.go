@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/sync"
+	"github.com/ntwrknrd/nssh/internal/inventory"
 )
 
 const (
@@ -77,23 +77,21 @@ type netboxDeviceType struct {
 
 // Discover fetches all NetBox devices and normalizes them into inventory
 // objects for routing and reconciliation.
-func (p *NetBoxProvider) Discover(ctx context.Context, source config.SyncSourceConfig, _ sync.RemoteRunner) ([]sync.InventoryObject, error) {
-	if source.NetBox == nil {
-		return nil, fmt.Errorf("netbox config missing for source %q", source.Name)
-	}
+func (p *NetBoxProvider) Discover(ctx context.Context, providerName string, cfg config.InventoryProviderConfig, _ inventory.RemoteRunner) ([]inventory.Object, error) {
 	var err error
-	tokenEnv := source.NetBox.TokenEnv
+	netboxCfg := cfg.Config
+	tokenEnv := netboxCfg.TokenEnv
 	if tokenEnv == "" {
 		tokenEnv = defaultNetBoxTokenEnv
 	}
-	envFile := source.NetBox.EnvFile
+	envFile := netboxCfg.EnvFile
 	if envFile == "" {
 		envFile = defaultNetBoxEnvFile
 	}
 
-	baseURL := strings.TrimSpace(source.NetBox.BaseURL)
+	baseURL := strings.TrimSpace(netboxCfg.BaseURL)
 	if baseURL == "" {
-		urlEnv := source.NetBox.URLEnv
+		urlEnv := netboxCfg.URLEnv
 		if urlEnv == "" {
 			urlEnv = defaultNetBoxURLEnv
 		}
@@ -109,24 +107,24 @@ func (p *NetBoxProvider) Discover(ctx context.Context, source config.SyncSourceC
 	}
 
 	slog.Debug("netbox discovery start",
-		"source", source.Name,
+		"provider", providerName,
 		"base_url", baseURL,
-		"url_env", source.NetBox.URLEnv,
+		"url_env", netboxCfg.URLEnv,
 		"token_env", tokenEnv,
 		"env_file", envFile,
 	)
 
-	query := buildNetBoxDeviceQuery(ctx, p.Client, baseURL, token, source.Routes)
-	slog.Debug("netbox discovery filters", "source", source.Name, "query", query.Encode())
+	query := buildNetBoxDeviceQuery(ctx, p.Client, baseURL, token, cfg.Route)
+	slog.Debug("netbox discovery filters", "provider", providerName, "query", query.Encode())
 
 	devices, err := p.fetchDevices(ctx, baseURL, token, query)
 	if err != nil {
 		return nil, err
 	}
 
-	slog.Debug("netbox discovery complete", "source", source.Name, "devices", len(devices))
+	slog.Debug("netbox discovery complete", "provider", providerName, "devices", len(devices))
 
-	return NormalizeNetBoxDevices(devices, source.Name), nil
+	return NormalizeNetBoxDevices(devices, providerName), nil
 }
 
 func (p *NetBoxProvider) fetchDevices(ctx context.Context, baseURL, token string, query url.Values) ([]netboxDevice, error) {
@@ -193,8 +191,8 @@ func (p *NetBoxProvider) fetchDevices(ctx context.Context, baseURL, token string
 }
 
 // NormalizeNetBoxDevices converts NetBox devices to the common inventory model.
-func NormalizeNetBoxDevices(devices []netboxDevice, sourceName string) []sync.InventoryObject {
-	objects := make([]sync.InventoryObject, 0, len(devices))
+func NormalizeNetBoxDevices(devices []netboxDevice, providerName string) []inventory.Object {
+	objects := make([]inventory.Object, 0, len(devices))
 	for i := range devices {
 		dev := &devices[i]
 		name := strings.TrimSpace(dev.Name)
@@ -236,17 +234,14 @@ func NormalizeNetBoxDevices(devices []netboxDevice, sourceName string) []sync.In
 			hostName = fqdn
 		}
 
-		objects = append(objects, sync.InventoryObject{
-			Provider:        config.ProviderNetBox,
-			Source:          sourceName,
-			ObjectID:        strconv.Itoa(dev.ID),
-			ObjectType:      "device",
-			Name:            name,
-			FQDN:            fqdn,
-			HostName:        hostName,
-			UsesPassword:    false,
-			CredentialClass: "",
-			Attributes:      attrs,
+		objects = append(objects, inventory.Object{
+			Provider:   providerName,
+			ObjectID:   strconv.Itoa(dev.ID),
+			ObjectType: "device",
+			Name:       name,
+			FQDN:       fqdn,
+			HostName:   hostName,
+			Attributes: attrs,
 		})
 	}
 
@@ -290,7 +285,7 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
-func buildNetBoxDeviceQuery(ctx context.Context, client *http.Client, baseURL, token string, routes []config.SyncRouteConfig) url.Values {
+func buildNetBoxDeviceQuery(ctx context.Context, client *http.Client, baseURL, token string, routes []config.InventoryRouteConfig) url.Values {
 	if len(routes) == 0 {
 		return nil
 	}
@@ -310,7 +305,7 @@ func buildNetBoxDeviceQuery(ctx context.Context, client *http.Client, baseURL, t
 	return query
 }
 
-func addUnionQueryFilter(query url.Values, routes []config.SyncRouteConfig, routeField, queryField string) {
+func addUnionQueryFilter(query url.Values, routes []config.InventoryRouteConfig, routeField, queryField string) {
 	values, ok := unionRouteMatchValues(routes, routeField)
 	if !ok {
 		return
@@ -320,7 +315,7 @@ func addUnionQueryFilter(query url.Values, routes []config.SyncRouteConfig, rout
 	}
 }
 
-func addResolvedReferenceQueryFilter(ctx context.Context, client *http.Client, baseURL, token string, query url.Values, routes []config.SyncRouteConfig, routeField, queryField, endpoint string) {
+func addResolvedReferenceQueryFilter(ctx context.Context, client *http.Client, baseURL, token string, query url.Values, routes []config.InventoryRouteConfig, routeField, queryField, endpoint string) {
 	values, ok := unionRouteMatchValues(routes, routeField)
 	if !ok {
 		return
@@ -332,7 +327,7 @@ func addResolvedReferenceQueryFilter(ctx context.Context, client *http.Client, b
 	}
 }
 
-func addDomainSuffixRegexFilter(query url.Values, routes []config.SyncRouteConfig) {
+func addDomainSuffixRegexFilter(query url.Values, routes []config.InventoryRouteConfig) {
 	suffixes, ok := unionRouteMatchValues(routes, "domain_suffix")
 	if !ok || len(suffixes) == 0 {
 		return
@@ -353,7 +348,7 @@ func addDomainSuffixRegexFilter(query url.Values, routes []config.SyncRouteConfi
 	query.Set("name__iregex", "^[A-Za-z0-9._-]+(?:"+strings.Join(patterns, "|")+")$")
 }
 
-func unionRouteMatchValues(routes []config.SyncRouteConfig, field string) ([]string, bool) {
+func unionRouteMatchValues(routes []config.InventoryRouteConfig, field string) ([]string, bool) {
 	values := make(map[string]struct{})
 	for _, route := range routes {
 		matches := route.Match[field]

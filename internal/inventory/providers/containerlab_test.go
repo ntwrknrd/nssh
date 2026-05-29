@@ -107,11 +107,8 @@ func TestParseContainerlabJSON(t *testing.T) {
 
 	// Check first object
 	obj := objects[0]
-	if obj.Provider != "containerlab" {
+	if obj.Provider != "test-lab" {
 		t.Errorf("provider = %q", obj.Provider)
-	}
-	if obj.Source != "test-lab" {
-		t.Errorf("source = %q", obj.Source)
 	}
 	if obj.ObjectID != "dfz/core01" {
 		t.Errorf("object_id = %q", obj.ObjectID)
@@ -125,16 +122,13 @@ func TestParseContainerlabJSON(t *testing.T) {
 	if obj.ProxyJump != "nre-netlab01" {
 		t.Errorf("proxy_jump = %q", obj.ProxyJump)
 	}
-	if !obj.UsesPassword {
-		t.Error("uses_password should be true")
-	}
-	if obj.CredentialClass != "ceos" {
-		t.Errorf("credential_class = %q", obj.CredentialClass)
-	}
 
 	// Check attributes
 	if obj.Attributes["kind"][0] != "ceos" {
 		t.Errorf("attr kind = %v", obj.Attributes["kind"])
+	}
+	if obj.Attributes["credential_class"][0] != "ceos" {
+		t.Errorf("attr credential_class = %v", obj.Attributes["credential_class"])
 	}
 	if obj.Attributes["lab"][0] != "dfz" {
 		t.Errorf("attr lab = %v", obj.Attributes["lab"])
@@ -145,8 +139,8 @@ func TestParseContainerlabJSON(t *testing.T) {
 
 	// Check vjunos object
 	spine := objects[2]
-	if spine.CredentialClass != "vjunos" {
-		t.Errorf("spine credential_class = %q", spine.CredentialClass)
+	if spine.Attributes["credential_class"][0] != "vjunos" {
+		t.Errorf("spine credential_class = %q", spine.Attributes["credential_class"][0])
 	}
 }
 

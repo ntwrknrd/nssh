@@ -18,6 +18,17 @@ const (
 	ProviderSessionNone       = "none"
 )
 
+// Provider name constants.
+const (
+	ProviderContainerlab = "containerlab"
+	ProviderNetBox       = "netbox"
+)
+
+var supportedProviders = map[string]bool{
+	ProviderContainerlab: true,
+	ProviderNetBox:       true,
+}
+
 // CredentialConfig defines named credential provider instances.
 type CredentialConfig struct {
 	DefaultProvider string                              `toml:"default_provider"`

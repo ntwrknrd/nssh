@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/sync"
+	"github.com/ntwrknrd/nssh/internal/inventory"
 )
 
 // ContainerlabProvider discovers nodes from containerlab via a jump host.
@@ -36,16 +36,15 @@ type clabContainer struct {
 }
 
 // Discover connects to the configured jump host and runs containerlab inspect.
-func (p *ContainerlabProvider) Discover(ctx context.Context, source config.SyncSourceConfig, runner sync.RemoteRunner) ([]sync.InventoryObject, error) {
-	if source.Containerlab == nil {
-		return nil, fmt.Errorf("containerlab config missing for source %q", source.Name)
+func (p *ContainerlabProvider) Discover(ctx context.Context, providerName string, cfg config.InventoryProviderConfig, runner inventory.RemoteRunner) ([]inventory.Object, error) {
+	clabCfg := cfg.Config
+	if strings.TrimSpace(clabCfg.JumpHost) == "" {
+		return nil, fmt.Errorf("containerlab config missing jump_host for provider %q", providerName)
 	}
-
-	clabCfg := source.Containerlab
 
 	argv := []string{"containerlab", "inspect", "--all", "--format", "json"}
 
-	cmd := sync.RemoteCommand{
+	cmd := inventory.RemoteCommand{
 		Argv:    argv,
 		Sudo:    clabCfg.Sudo,
 		Timeout: 30 * time.Second,
@@ -59,18 +58,18 @@ func (p *ContainerlabProvider) Discover(ctx context.Context, source config.SyncS
 		return nil, fmt.Errorf("containerlab inspect exited %d: %s", result.ExitCode, string(result.Stderr))
 	}
 
-	return ParseContainerlabJSON(result.Stdout, source.Name, clabCfg.JumpHost)
+	return ParseContainerlabJSON(result.Stdout, providerName, clabCfg.JumpHost)
 }
 
 // ParseContainerlabJSON parses containerlab inspect JSON output and returns
 // normalized inventory objects.
-func ParseContainerlabJSON(data []byte, sourceName, jumpHost string) ([]sync.InventoryObject, error) {
+func ParseContainerlabJSON(data []byte, providerName, jumpHost string) ([]inventory.Object, error) {
 	containers, err := parseContainerlabInspect(data)
 	if err != nil {
 		return nil, fmt.Errorf("parse containerlab JSON: %w", err)
 	}
 
-	var objects []sync.InventoryObject
+	var objects []inventory.Object
 	for i := range containers {
 		c := &containers[i]
 		hostname := stripCIDR(c.IPv4Address)
@@ -84,21 +83,19 @@ func ParseContainerlabJSON(data []byte, sourceName, jumpHost string) ([]sync.Inv
 
 		objectID := containerObjectID(c)
 
-		obj := sync.InventoryObject{
-			Provider:        config.ProviderContainerlab,
-			Source:          sourceName,
-			ObjectID:        objectID,
-			ObjectType:      "node",
-			Name:            c.Name,
-			HostName:        hostname,
-			ProxyJump:       jumpHost,
-			UsesPassword:    true,
-			CredentialClass: c.Kind,
+		obj := inventory.Object{
+			Provider:   providerName,
+			ObjectID:   objectID,
+			ObjectType: "node",
+			Name:       c.Name,
+			HostName:   hostname,
+			ProxyJump:  jumpHost,
 			Attributes: map[string][]string{
-				"kind":  {c.Kind},
-				"lab":   {c.LabName},
-				"state": {c.State},
-				"image": {c.Image},
+				"kind":             {c.Kind},
+				"credential_class": {c.Kind},
+				"lab":              {c.LabName},
+				"state":            {c.State},
+				"image":            {c.Image},
 			},
 		}
 

@@ -57,11 +57,8 @@ func TestNormalizeNetBoxDevices(t *testing.T) {
 	}
 
 	obj := objects[0]
-	if obj.Provider != config.ProviderNetBox {
+	if obj.Provider != "netbox-prod" {
 		t.Fatalf("provider = %q", obj.Provider)
-	}
-	if obj.Source != "netbox-prod" {
-		t.Fatalf("source = %q", obj.Source)
 	}
 	if obj.ObjectID != "42" {
 		t.Fatalf("object_id = %q", obj.ObjectID)
@@ -155,25 +152,24 @@ func TestNetBoxProviderDiscover(t *testing.T) {
 	t.Setenv("NB_TEST_TOKEN", "test-token")
 
 	provider := &NetBoxProvider{Client: server.Client()}
-	source := config.SyncSourceConfig{
-		Name:     "netbox-prod",
-		Provider: config.ProviderNetBox,
-		NetBox: &config.NetBoxConfig{
+	providerCfg := config.InventoryProviderConfig{
+		Type: config.ProviderNetBox,
+		Config: config.InventoryProviderDetailConfig{
 			BaseURL:  server.URL,
 			TokenEnv: "NB_TEST_TOKEN",
 		},
-		Routes: []config.SyncRouteConfig{
+		Route: []config.InventoryRouteConfig{
 			{
-				Context: "custcbb",
-				Match: config.SyncRouteMatch{
+				Group: "custcbb",
+				Match: config.InventoryRouteMatch{
 					"manufacturer":  {"Juniper", "Arista"},
 					"tenant":        {"Expedient"},
 					"domain_suffix": {".custcbb.local"},
 				},
 			},
 			{
-				Context: "cbb",
-				Match: config.SyncRouteMatch{
+				Group: "cbb",
+				Match: config.InventoryRouteMatch{
 					"manufacturer":  {"Juniper", "Arista"},
 					"tenant":        {"Expedient"},
 					"domain_suffix": {".expedient.com"},
@@ -182,7 +178,7 @@ func TestNetBoxProviderDiscover(t *testing.T) {
 		},
 	}
 
-	objects, err := provider.Discover(context.Background(), source, nil)
+	objects, err := provider.Discover(context.Background(), "netbox-prod", providerCfg, nil)
 	if err != nil {
 		t.Fatalf("discover: %v", err)
 	}
@@ -198,16 +194,15 @@ func TestNetBoxProviderDiscoverMissingToken(t *testing.T) {
 	_ = os.Unsetenv("NB_MISSING")
 
 	provider := NewNetBoxProvider()
-	source := config.SyncSourceConfig{
-		Name:     "netbox-prod",
-		Provider: config.ProviderNetBox,
-		NetBox: &config.NetBoxConfig{
+	providerCfg := config.InventoryProviderConfig{
+		Type: config.ProviderNetBox,
+		Config: config.InventoryProviderDetailConfig{
 			BaseURL:  "https://netbox.example.com",
 			TokenEnv: "NB_MISSING",
 		},
 	}
 
-	_, err := provider.Discover(context.Background(), source, nil)
+	_, err := provider.Discover(context.Background(), "netbox-prod", providerCfg, nil)
 	if err == nil {
 		t.Fatal("expected missing token error")
 	}
@@ -236,17 +231,16 @@ func TestNetBoxProviderDiscoverLoadsTokenFromEnvFile(t *testing.T) {
 	}
 
 	provider := &NetBoxProvider{Client: server.Client()}
-	source := config.SyncSourceConfig{
-		Name:     "netbox-prod",
-		Provider: config.ProviderNetBox,
-		NetBox: &config.NetBoxConfig{
+	providerCfg := config.InventoryProviderConfig{
+		Type: config.ProviderNetBox,
+		Config: config.InventoryProviderDetailConfig{
 			URLEnv:   "NB_FILE_URL",
 			TokenEnv: "NB_FILE_TOKEN",
 			EnvFile:  envFile,
 		},
 	}
 
-	objects, err := provider.Discover(context.Background(), source, nil)
+	objects, err := provider.Discover(context.Background(), "netbox-prod", providerCfg, nil)
 	if err != nil {
 		t.Fatalf("discover: %v", err)
 	}
@@ -280,13 +274,12 @@ func TestNetBoxProviderDiscoverUsesDefaultEnvFileAndTokenName(t *testing.T) {
 	}
 
 	provider := &NetBoxProvider{Client: server.Client()}
-	source := config.SyncSourceConfig{
-		Name:     "netbox-prod",
-		Provider: config.ProviderNetBox,
-		NetBox:   &config.NetBoxConfig{},
+	providerCfg := config.InventoryProviderConfig{
+		Type:   config.ProviderNetBox,
+		Config: config.InventoryProviderDetailConfig{},
 	}
 
-	objects, err := provider.Discover(context.Background(), source, nil)
+	objects, err := provider.Discover(context.Background(), "netbox-prod", providerCfg, nil)
 	if err != nil {
 		t.Fatalf("discover: %v", err)
 	}
@@ -340,18 +333,18 @@ func TestBuildNetBoxDeviceQuery(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	query := buildNetBoxDeviceQuery(context.Background(), server.Client(), server.URL, "test-token", []config.SyncRouteConfig{
+	query := buildNetBoxDeviceQuery(context.Background(), server.Client(), server.URL, "test-token", []config.InventoryRouteConfig{
 		{
-			Context: "custcbb",
-			Match: config.SyncRouteMatch{
+			Group: "custcbb",
+			Match: config.InventoryRouteMatch{
 				"manufacturer":  {"Juniper", "Arista"},
 				"tenant":        {"Expedient"},
 				"domain_suffix": {".custcbb.local"},
 			},
 		},
 		{
-			Context: "cbb",
-			Match: config.SyncRouteMatch{
+			Group: "cbb",
+			Match: config.InventoryRouteMatch{
 				"manufacturer":  {"Arista", "Juniper"},
 				"tenant":        {"Expedient"},
 				"domain_suffix": {".expedient.com"},
@@ -371,16 +364,16 @@ func TestBuildNetBoxDeviceQuery(t *testing.T) {
 }
 
 func TestBuildNetBoxDeviceQuerySkipsPartialRouteFilters(t *testing.T) {
-	query := buildNetBoxDeviceQuery(context.Background(), nil, "https://netbox.example.com", "test-token", []config.SyncRouteConfig{
+	query := buildNetBoxDeviceQuery(context.Background(), nil, "https://netbox.example.com", "test-token", []config.InventoryRouteConfig{
 		{
-			Context: "custcbb",
-			Match: config.SyncRouteMatch{
+			Group: "custcbb",
+			Match: config.InventoryRouteMatch{
 				"manufacturer": {"Juniper"},
 			},
 		},
 		{
-			Context: "cbb",
-			Match:   config.SyncRouteMatch{},
+			Group: "cbb",
+			Match: config.InventoryRouteMatch{},
 		},
 	})
 

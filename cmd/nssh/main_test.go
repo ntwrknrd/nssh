@@ -55,6 +55,41 @@ func TestPreprocessArgs(t *testing.T) {
 	}
 }
 
+func TestInternalSyncPackageRemoved(t *testing.T) {
+	root := repoRoot()
+	legacyImport := "github.com/ntwrknrd/nssh/internal/" + "sync"
+	if _, err := os.Stat(filepath.Join(root, "internal", "sync")); !os.IsNotExist(err) {
+		t.Fatalf("internal/sync should be removed after inventory.provider superseded sync.sources")
+	}
+
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "docs":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".go" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(data), legacyImport) {
+			t.Fatalf("%s still imports internal/sync", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRootCommandCutover(t *testing.T) {
 	root := newRootCmd()
 
