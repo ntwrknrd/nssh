@@ -65,13 +65,13 @@ func TestApplyDoctorFixesRemovesSelectedLocalStaleHost(t *testing.T) {
 		"\n"+
 		"Host keep01\n"+
 		"  HostName keep01.example.com\n")
-	hosts, err := inventoryHosts(parser, cfg, paths, nil)
+	hosts, err := inventoryHosts(parser, cfg, paths)
 	if err != nil {
 		t.Fatalf("inventoryHosts: %v", err)
 	}
 	stale := findTestHost(t, hosts, "stale01")
 
-	applied, err := applyDoctorFixes(parser, cfg, paths, []doctorFinding{{
+	applied, err := applyDoctorFixes(parser, paths, []doctorFinding{{
 		Host:   stale.Host,
 		Group:  "lab",
 		Issue:  "stale-dns",
@@ -102,7 +102,7 @@ func TestApplyDoctorFixesRemovesOnlySelectedDuplicateBlock(t *testing.T) {
 		"\n"+
 		"Host edge01\n"+
 		"  HostName edge01-duplicate.example.com\n")
-	hosts, err := inventoryHosts(parser, cfg, paths, nil)
+	hosts, err := inventoryHosts(parser, cfg, paths)
 	if err != nil {
 		t.Fatalf("inventoryHosts: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestApplyDoctorFixesRemovesOnlySelectedDuplicateBlock(t *testing.T) {
 	}
 	duplicate := hosts[1]
 
-	applied, err := applyDoctorFixes(parser, cfg, paths, []doctorFinding{{
+	applied, err := applyDoctorFixes(parser, paths, []doctorFinding{{
 		Host:   duplicate.Host,
 		Group:  "lab",
 		Issue:  "duplicate",
@@ -140,13 +140,13 @@ func TestApplyDoctorFixesRenamesCNAMEAndPreservesAlias(t *testing.T) {
 		"Host old01\n"+
 		"  HostName old01.example.com\n"+
 		"  User admin\n")
-	hosts, err := inventoryHosts(parser, cfg, paths, nil)
+	hosts, err := inventoryHosts(parser, cfg, paths)
 	if err != nil {
 		t.Fatalf("inventoryHosts: %v", err)
 	}
 	old := findTestHost(t, hosts, "old01")
 
-	applied, err := applyDoctorFixes(parser, cfg, paths, []doctorFinding{{
+	applied, err := applyDoctorFixes(parser, paths, []doctorFinding{{
 		Host:   old.Host,
 		Group:  "lab",
 		Issue:  "cname-rename",
@@ -181,14 +181,14 @@ func TestApplyDoctorFixesMergesCNAMEIntoExistingLocalHost(t *testing.T) {
 		"\n"+
 		"Host new01\n"+
 		"  HostName new01.example.com\n")
-	hosts, err := inventoryHosts(parser, cfg, paths, nil)
+	hosts, err := inventoryHosts(parser, cfg, paths)
 	if err != nil {
 		t.Fatalf("inventoryHosts: %v", err)
 	}
 	old := findTestHost(t, hosts, "old01")
 	target := findTestHost(t, hosts, "new01")
 
-	applied, err := applyDoctorFixes(parser, cfg, paths, []doctorFinding{{
+	applied, err := applyDoctorFixes(parser, paths, []doctorFinding{{
 		Host:   old.Host,
 		Group:  "lab",
 		Issue:  "cname-rename",
@@ -224,7 +224,7 @@ func TestVisitDoctorFindingsDoesNotEmitStaleFixForDuplicateBlock(t *testing.T) {
 		"\n"+
 		"Host edge01\n"+
 		"  HostName edge01-duplicate.example.com\n")
-	hosts, err := inventoryHosts(parser, cfg, paths, nil)
+	hosts, err := inventoryHosts(parser, cfg, paths)
 	if err != nil {
 		t.Fatalf("inventoryHosts: %v", err)
 	}

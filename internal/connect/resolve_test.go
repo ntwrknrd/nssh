@@ -13,7 +13,6 @@ type fakeCredentialProvider struct {
 	hosts  map[string]*credential.Record
 	groups map[string]*credential.Record
 	err    error
-	name   string
 }
 
 func (p fakeCredentialProvider) GetHost(host string) (*credential.Record, error) {

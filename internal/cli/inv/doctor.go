@@ -72,7 +72,7 @@ func runDoctor() error {
 		ui.CommandEnd(ui.StatusError)
 		return err
 	}
-	hosts, err := inventoryHosts(sshconfig.NewParser(), cfg, config.DefaultPaths(), index)
+	hosts, err := inventoryHosts(sshconfig.NewParser(), cfg, config.DefaultPaths())
 	if err != nil {
 		ui.CommandEnd(ui.StatusError)
 		return err
@@ -110,7 +110,7 @@ func runDoctor() error {
 	}
 
 	ui.SubSection("Applying")
-	applied, err := applyDoctorFixes(sshconfig.NewParser(), cfg, config.DefaultPaths(), selected)
+	applied, err := applyDoctorFixes(sshconfig.NewParser(), config.DefaultPaths(), selected)
 	if err != nil {
 		ui.CommandEnd(ui.StatusError)
 		return err
@@ -118,14 +118,6 @@ func runDoctor() error {
 	ui.Success("Applied %d fix(es)", applied)
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil
-}
-
-func doctorFindings(hosts []*sshconfig.HostEntry, cfg *config.Config, paths *config.Paths, index map[string]*inventory.HostInfo) []doctorFinding {
-	var findings []doctorFinding
-	visitDoctorFindings(hosts, cfg, paths, index, doctorResolveTarget, func(finding doctorFinding) {
-		findings = append(findings, finding)
-	})
-	return findings
 }
 
 func visitDoctorFindings(
@@ -239,7 +231,8 @@ func doctorTableWidths(hosts []*sshconfig.HostEntry, cfg *config.Config, paths *
 
 func fixableDoctorFindings(findings []doctorFinding) []doctorFinding {
 	fixable := make([]doctorFinding, 0, len(findings))
-	for _, finding := range findings {
+	for i := range findings {
+		finding := findings[i]
 		if finding.fix.kind != doctorFixNone {
 			fixable = append(fixable, finding)
 		}
@@ -249,7 +242,8 @@ func fixableDoctorFindings(findings []doctorFinding) []doctorFinding {
 
 func selectDoctorFixes(findings []doctorFinding) ([]doctorFinding, error) {
 	options := make([]ui.FuzzySelectOption, len(findings))
-	for i, finding := range findings {
+	for i := range findings {
+		finding := findings[i]
 		options[i] = ui.FuzzySelectOption{
 			Label: fmt.Sprintf("%s %s", finding.Issue, finding.Host),
 			Value: i,
@@ -268,12 +262,9 @@ func selectDoctorFixes(findings []doctorFinding) ([]doctorFinding, error) {
 	return selected, nil
 }
 
-func applyDoctorFixes(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, findings []doctorFinding) (int, error) {
+func applyDoctorFixes(parser *sshconfig.Parser, paths *config.Paths, findings []doctorFinding) (int, error) {
 	if parser == nil {
 		parser = sshconfig.NewParser()
-	}
-	if cfg == nil {
-		cfg = config.DefaultConfig()
 	}
 	if paths == nil {
 		paths = config.DefaultPaths()
@@ -301,7 +292,8 @@ func applyDoctorFixes(parser *sshconfig.Parser, cfg *config.Config, paths *confi
 	}
 
 	applied := 0
-	for _, finding := range findings {
+	for i := range findings {
+		finding := findings[i]
 		switch finding.fix.kind {
 		case doctorFixNone:
 			continue

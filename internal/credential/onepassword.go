@@ -55,10 +55,6 @@ type onePasswordField struct {
 	Value   string `json:"value"`
 }
 
-func newOnePasswordProvider(cfg config.CredentialConfig) Provider {
-	return newOnePasswordProviderNamed("", cfg)
-}
-
 func newOnePasswordProviderNamed(name string, cfg config.CredentialConfig) Provider {
 	session := strings.TrimSpace(cfg.Config.Session)
 	if session == "" {

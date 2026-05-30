@@ -73,7 +73,8 @@ func runRemoveGroup(group string) error {
 		ui.CommandEnd(ui.StatusNoop)
 		return nil
 	}
-	for provider, providerCfg := range cfg.Inventory.Provider {
+	for provider := range cfg.Inventory.Provider {
+		providerCfg := cfg.Inventory.Provider[provider]
 		for _, route := range providerCfg.Route {
 			if route.Group == group {
 				ui.CommandEnd(ui.StatusError)
@@ -81,7 +82,7 @@ func runRemoveGroup(group string) error {
 			}
 		}
 	}
-	hosts, err := inventoryHosts(sshconfig.NewParser(), cfg, config.DefaultPaths(), nil)
+	hosts, err := inventoryHosts(sshconfig.NewParser(), cfg, config.DefaultPaths())
 	if err != nil {
 		ui.CommandEnd(ui.StatusError)
 		return err

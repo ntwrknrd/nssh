@@ -6,7 +6,7 @@ import (
 
 // BashZshIntegration contains the shell integration script for bash and zsh.
 // This script provides:
-// - Subcommand routing (detect host, ctx, etc. vs hostname)
+// - Subcommand routing (detect inv, agent, etc. vs hostname)
 // - Shell history integration (bash history -s, zsh print -s)
 // - Atuin integration if available
 // - Arrow output for connection commands (-> nssh hostname)

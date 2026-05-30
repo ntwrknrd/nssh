@@ -402,11 +402,6 @@ func sanitizeHostname(hostname string) string {
 	return re.ReplaceAllString(hostname, "_")
 }
 
-// SanitizeHostname is exported for use by other packages.
-func SanitizeHostname(hostname string) string {
-	return sanitizeHostname(hostname)
-}
-
 // formatSessionLabel creates a session label from a sequence number.
 func formatSessionLabel(sequence int) string {
 	return fmt.Sprintf("session-%03d", sequence)
@@ -721,25 +716,6 @@ func WriteIndex(castPath, hostname string, startedAt, finishedAt time.Time, exit
 	return os.Rename(tmpPath, indexPath)
 }
 
-// ListCastFiles returns all cast files in the recordings directory.
-func ListCastFiles(settings RecordingSettings) []string {
-	var files []string
-
-	if err := filepath.WalkDir(settings.Directory, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if !d.IsDir() && strings.HasSuffix(path, ".cast") {
-			files = append(files, path)
-		}
-		return nil
-	}); err != nil {
-		slog.Debug("failed to walk recordings directory", "dir", settings.Directory, "err", err)
-	}
-
-	return files
-}
-
 // ExtractSessionLabel extracts the session label from a cast path.
 func ExtractSessionLabel(castPath string) string {
 	matches := sessionFilePattern.FindStringSubmatch(filepath.Base(castPath))
@@ -941,32 +917,6 @@ func sortCastFilesByMtime(files []CastFileInfo) {
 			}
 		}
 	}
-}
-
-// CleanupStaleLocks removes stale lock directories.
-func CleanupStaleLocks(settings RecordingSettings) int {
-	removed := 0
-
-	if err := filepath.WalkDir(settings.Directory, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() && strings.HasSuffix(path, ".lock") {
-			if !isSessionLocked(path) {
-				if err := os.RemoveAll(path); err != nil {
-					slog.Debug("failed to remove stale lock", "path", path, "err", err)
-				} else {
-					removed++
-					slog.Debug("removed stale lock", "path", path)
-				}
-			}
-		}
-		return nil
-	}); err != nil {
-		slog.Debug("failed to walk for stale locks", "dir", settings.Directory, "err", err)
-	}
-
-	return removed
 }
 
 // expandPath expands ~ and environment variables in a path.

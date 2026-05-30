@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -170,36 +169,4 @@ func ParseMaxSize(s string) (int64, error) {
 	}
 
 	return val * multiplier, nil
-}
-
-// ListAuditLogs returns all audit log files in the state directory.
-func ListAuditLogs(stateDir string) ([]string, error) {
-	entries, err := os.ReadDir(stateDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var logs []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), "audit.log") {
-			logs = append(logs, filepath.Join(stateDir, e.Name()))
-		}
-	}
-
-	// Sort with main log first, then rotated files in order
-	sort.Slice(logs, func(i, j int) bool {
-		// audit.log comes first
-		if filepath.Base(logs[i]) == "audit.log" {
-			return true
-		}
-		if filepath.Base(logs[j]) == "audit.log" {
-			return false
-		}
-		return logs[i] < logs[j]
-	})
-
-	return logs, nil
 }

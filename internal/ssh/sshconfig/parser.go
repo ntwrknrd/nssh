@@ -114,11 +114,6 @@ func NewParserWithPaths(configFile, backupDir string, maxBackups int) *Parser {
 	}
 }
 
-// ConfigFile returns the main SSH config path.
-func (p *Parser) ConfigFile() string {
-	return p.configFile
-}
-
 // regex patterns
 var (
 	hostDirectiveRe = regexp.MustCompile(`(?i)^host\s+(.+)$`)

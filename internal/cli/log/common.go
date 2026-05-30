@@ -116,29 +116,6 @@ func FilterSessionsByPattern(sessions []recording.SessionRecord, pattern string)
 	return filtered, nil
 }
 
-// FilterSessionsByHost filters sessions by hostname and optional date.
-func FilterSessionsByHost(sessions []recording.SessionRecord, host, dateFilter string) []recording.SessionRecord {
-	hostLower := strings.ToLower(host)
-	var result []recording.SessionRecord
-
-	for _, session := range sessions {
-		if !strings.Contains(strings.ToLower(session.Host), hostLower) {
-			continue
-		}
-
-		if dateFilter != "*" && dateFilter != "" {
-			sessionDate := session.StartedAt.Format("2006-01-02")
-			if sessionDate != dateFilter {
-				continue
-			}
-		}
-
-		result = append(result, session)
-	}
-
-	return result
-}
-
 // buildSessionOption creates a display string for fzf selection.
 func buildSessionOption(idx int, record recording.SessionRecord) string {
 	seconds := recording.SessionDurationSeconds(record)

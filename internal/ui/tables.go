@@ -27,7 +27,6 @@ type StreamTable struct {
 	writer         io.Writer
 	margin         int
 	started        bool
-	rows           int
 }
 
 // Truncate shortens a string to maxWidth display width, adding ellipsis if needed.
@@ -110,8 +109,7 @@ func (t *StreamTable) AddRow(cells ...string) {
 			row[i] = cells[i]
 		}
 	}
-	fmt.Fprintln(t.writer, t.prefix()+t.renderRow(row, false))
-	t.rows++
+	_, _ = fmt.Fprintln(t.writer, t.prefix()+t.renderRow(row, false))
 }
 
 // Close writes the bottom border if the table was started.
@@ -119,18 +117,8 @@ func (t *StreamTable) Close() {
 	if !t.started {
 		return
 	}
-	fmt.Fprintln(t.writer, t.prefix()+t.renderBorder("╰", "┴", "╯"))
+	_, _ = fmt.Fprintln(t.writer, t.prefix()+t.renderBorder("╰", "┴", "╯"))
 	t.started = false
-}
-
-// RowCount returns the number of streamed data rows.
-func (t *StreamTable) RowCount() int {
-	return t.rows
-}
-
-// LeftMargin returns the left margin used for centered streaming output.
-func (t *StreamTable) LeftMargin() int {
-	return t.margin
 }
 
 func (t *StreamTable) start() {
@@ -141,9 +129,9 @@ func (t *StreamTable) start() {
 	if t.margin < 0 {
 		t.margin = 0
 	}
-	fmt.Fprintln(t.writer, t.prefix()+t.renderBorder("╭", "┬", "╮"))
-	fmt.Fprintln(t.writer, t.prefix()+t.renderRow(t.headers, true))
-	fmt.Fprintln(t.writer, t.prefix()+t.renderBorder("├", "┼", "┤"))
+	_, _ = fmt.Fprintln(t.writer, t.prefix()+t.renderBorder("╭", "┬", "╮"))
+	_, _ = fmt.Fprintln(t.writer, t.prefix()+t.renderRow(t.headers, true))
+	_, _ = fmt.Fprintln(t.writer, t.prefix()+t.renderBorder("├", "┼", "┤"))
 	t.started = true
 }
 
@@ -276,14 +264,6 @@ func (t *Table) Render() int {
 		fmt.Println(rendered)
 	}
 	return margin
-}
-
-// RenderLeft prints the table to stdout with left alignment (no centering).
-func (t *Table) RenderLeft() {
-	rendered := t.renderRaw()
-	if rendered != "" {
-		fmt.Println(rendered)
-	}
 }
 
 // LeftMargin returns the left margin that would be used for centering without printing.
@@ -638,69 +618,10 @@ func parseColumnWidths(separator string) []int {
 	return widths
 }
 
-// renderRaw renders the table without centering.
-func (t *Table) renderRaw() string {
-	if len(t.headers) == 0 {
-		return ""
-	}
-
-	// Header style - cyan and bold
-	headerStyle := lipgloss.NewStyle().
-		Foreground(ColorCyan).
-		Bold(true).
-		Padding(0, 1)
-
-	// Cell style - white text
-	cellStyle := lipgloss.NewStyle().
-		Foreground(ColorWhite).
-		Padding(0, 1)
-
-	// Border style
-	borderStyle := lipgloss.NewStyle().Foreground(ColorDim)
-
-	// Create the main table (without footer rows)
-	tbl := table.New().
-		Border(lipgloss.RoundedBorder()).
-		BorderStyle(borderStyle).
-		Headers(t.headers...).
-		Rows(t.rows...).
-		StyleFunc(func(row, col int) lipgloss.Style {
-			if row == table.HeaderRow {
-				return headerStyle
-			}
-			return cellStyle
-		})
-
-	rendered := tbl.String()
-
-	// If we have footer rows, manipulate the output to add separator and footer
-	if len(t.footerRows) > 0 {
-		rendered = t.insertFooterRows(rendered, t.footerRows, borderStyle)
-	}
-
-	return rendered
-}
-
-// RowCount returns the number of data rows (excluding header).
-func (t *Table) RowCount() int {
-	return len(t.rows)
-}
-
-// IsEmpty returns true if the table has no data rows.
-func (t *Table) IsEmpty() bool {
-	return len(t.rows) == 0
-}
-
 // TableHeader represents a column header with optional styling.
 type TableHeader struct {
 	Title string
 	Color string // not used currently, kept for API compatibility
-}
-
-// PrintTable prints a table with styled headers and returns the left margin.
-func PrintTable(headers []TableHeader, rows [][]string) int {
-	tbl := BuildTable(headers, rows)
-	return tbl.Render()
 }
 
 // BuildTable creates a table without printing it.
@@ -716,13 +637,4 @@ func BuildTable(headers []TableHeader, rows [][]string) *Table {
 	}
 
 	return tbl
-}
-
-// SimpleTable prints a quick table from headers and rows.
-func SimpleTable(headers []string, rows [][]string) {
-	table := NewTable(headers...)
-	for _, row := range rows {
-		table.AddRow(row...)
-	}
-	table.Render()
 }

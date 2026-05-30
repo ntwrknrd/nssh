@@ -166,7 +166,7 @@ func TestInventoryHostsIgnoresNonNsshIncludes(t *testing.T) {
 	}}
 	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
 
-	hosts, err := inventoryHosts(parser, cfg, paths, nil)
+	hosts, err := inventoryHosts(parser, cfg, paths)
 	if err != nil {
 		t.Fatalf("inventoryHosts: %v", err)
 	}

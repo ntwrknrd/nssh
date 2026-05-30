@@ -54,8 +54,6 @@ func runSSHBenchmark(host string, warmups, samples int, simpleOnly bool) error {
 		return fmt.Errorf("--warmups must be >= 0")
 	}
 
-	runVaultUnlockPreflight()
-
 	ui.CommandStart("SSH BENCHMARK")
 
 	fmt.Printf("  %s: %s\n", ui.Gray("Host"), ui.Cyan(host))

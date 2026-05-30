@@ -37,13 +37,6 @@ type TestConfig struct {
 	ConfigFile string
 }
 
-// DefaultTestConfig returns sensible defaults for connection testing.
-func DefaultTestConfig() TestConfig {
-	return TestConfig{
-		Timeout: 10 * time.Second,
-	}
-}
-
 // buildTestSSHArgs builds SSH arguments for a probe and returns a cleanup
 // function for any temporary resources (e.g., temp known_hosts).
 func buildTestSSHArgs(hostname, username string, cfg TestConfig) ([]string, func(), error) {

@@ -277,7 +277,8 @@ func (c *InventoryConfig) Validate() error {
 		c.Host[name] = host
 	}
 
-	for name, provider := range c.Provider {
+	for name := range c.Provider {
+		provider := c.Provider[name]
 		if err := validateBareKeySafe("inventory.provider", name); err != nil {
 			return err
 		}
@@ -317,12 +318,7 @@ func (c InventoryAuthConfig) IsSet() bool {
 
 // CredentialRef converts inventory auth metadata into provider ref metadata.
 func (c InventoryAuthConfig) CredentialRef() CredentialRefConfig {
-	return CredentialRefConfig{
-		Provider:    c.Provider,
-		Ref:         c.Ref,
-		Username:    c.Username,
-		UsernameRef: c.UsernameRef,
-	}
+	return CredentialRefConfig(c)
 }
 
 // Validate checks a single inventory provider.

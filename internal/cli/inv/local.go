@@ -226,7 +226,7 @@ func localFilePath(paths *config.Paths, localFile string) string {
 	return filepath.Join(paths.SSHConfigDir, "nssh.d", localFile)
 }
 
-func inventoryHosts(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, index map[string]*inventory.HostInfo) ([]*sshconfig.HostEntry, error) {
+func inventoryHosts(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths) ([]*sshconfig.HostEntry, error) {
 	if parser == nil {
 		parser = sshconfig.NewParser()
 	}

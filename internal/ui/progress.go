@@ -31,24 +31,6 @@ func NewProgressBar(label string, total int) *ProgressBar {
 	}
 }
 
-// WithWidth sets the bar width (default 30).
-func (p *ProgressBar) WithWidth(width int) *ProgressBar {
-	p.width = width
-	return p
-}
-
-// WithoutCount hides the count display.
-func (p *ProgressBar) WithoutCount() *ProgressBar {
-	p.showCount = false
-	return p
-}
-
-// WithoutPercent hides the percentage display.
-func (p *ProgressBar) WithoutPercent() *ProgressBar {
-	p.showPercent = false
-	return p
-}
-
 // Update sets the current progress value.
 func (p *ProgressBar) Update(current int) {
 	p.current = current
@@ -111,18 +93,7 @@ func (p *ProgressBar) Print() {
 	fmt.Print("\r" + p.Render())
 }
 
-// PrintLn renders the progress bar to stdout with newline (final state).
-func (p *ProgressBar) PrintLn() {
-	fmt.Println("\r" + p.Render())
-}
-
 // Clear clears the progress bar line.
 func (p *ProgressBar) Clear() {
 	fmt.Print("\r" + strings.Repeat(" ", termWidth()) + "\r")
-}
-
-// RenderProgress is a helper to render a simple one-line progress bar.
-// Returns the rendered string without printing.
-func RenderProgress(label string, current, total int) string {
-	return NewProgressBar(label, total).WithWidth(30).Render()
 }

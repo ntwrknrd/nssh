@@ -61,8 +61,6 @@ func runSCPBenchmark(host string, warmups, samples int, simpleOnly bool, fileSiz
 		return fmt.Errorf("--warmups must be >= 0")
 	}
 
-	runVaultUnlockPreflight()
-
 	ui.CommandStart("SCP BENCHMARK")
 
 	fmt.Printf("  %s: %s\n", ui.Gray("Host"), ui.Cyan(host))

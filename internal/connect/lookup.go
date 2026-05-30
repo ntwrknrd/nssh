@@ -103,7 +103,8 @@ func refreshProvidersOnce(hostname string) bool {
 
 	refreshed := false
 	now := time.Now().UTC()
-	for name, providerCfg := range cfg.Inventory.Provider {
+	for name := range cfg.Inventory.Provider {
+		providerCfg := cfg.Inventory.Provider[name]
 		provider, err := invproviders.New(providerCfg.Type)
 		if err != nil {
 			slog.Warn("skip provider refresh: provider unavailable", "provider", name, "err", err)

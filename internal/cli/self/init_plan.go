@@ -77,10 +77,11 @@ func (p *initPlan) Summary() string {
 		return ""
 	}
 
-	var lines []string
-	lines = append(lines, "Inventory sources: "+strings.Join(initInventorySummary(p.Config), ", "))
-	lines = append(lines, "Credential providers: "+strings.Join(initCredentialProviderSummary(p.Config), ", "))
-	lines = append(lines, "Credential assignment: "+strings.Join(initCredentialAssignmentSummary(p.Config), ", "))
+	lines := []string{
+		"Inventory sources: " + strings.Join(initInventorySummary(p.Config), ", "),
+		"Credential providers: " + strings.Join(initCredentialProviderSummary(p.Config), ", "),
+		"Credential assignment: " + strings.Join(initCredentialAssignmentSummary(p.Config), ", "),
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -141,7 +142,8 @@ func promptInitPlanRequest(prompter initPrompter, existing *config.Config) (init
 	}
 
 	providerOptions := make([]ui.SelectOption, 0, len(req.CredentialProviders))
-	for _, provider := range req.CredentialProviders {
+	for i := range req.CredentialProviders {
+		provider := &req.CredentialProviders[i]
 		providerOptions = append(providerOptions, ui.SelectOption{Label: provider.Name, Value: provider.Name})
 	}
 	for _, group := range groupsFromInventorySources(req.InventorySources) {
@@ -181,8 +183,8 @@ func buildInitPlan(req initPlanRequest) (*initPlan, error) {
 	}
 
 	cfg.Credential.Provider = make(map[string]config.CredentialProviderConfig)
-	for _, provider := range req.CredentialProviders {
-		if err := applyCredentialProvider(cfg, provider); err != nil {
+	for i := range req.CredentialProviders {
+		if err := applyCredentialProvider(cfg, req.CredentialProviders[i]); err != nil {
 			return nil, err
 		}
 	}
@@ -310,7 +312,8 @@ func credentialProviderOptions() []ui.SelectOption {
 
 func groupsFromInventorySources(sources []initInventorySourceRequest) []string {
 	seen := make(map[string]bool)
-	for _, source := range sources {
+	for i := range sources {
+		source := &sources[i]
 		for _, group := range source.Groups {
 			if group != "" {
 				seen[group] = true
@@ -329,7 +332,8 @@ func groupsFromInventorySources(sources []initInventorySourceRequest) []string {
 }
 
 func applyInventorySources(cfg *config.Config, sources []initInventorySourceRequest) error {
-	for _, source := range sources {
+	for i := range sources {
+		source := &sources[i]
 		switch source.Type {
 		case "", initInventoryLocal:
 			continue
@@ -378,7 +382,8 @@ func ensureInventoryGroups(cfg *config.Config, sources []initInventorySourceRequ
 		cfg.Inventory.DefaultGroup = "default"
 	}
 	cfg.Inventory.Group[cfg.Inventory.DefaultGroup] = config.GroupConfig{}
-	for _, source := range sources {
+	for i := range sources {
+		source := &sources[i]
 		for _, group := range source.Groups {
 			if group == "" {
 				continue

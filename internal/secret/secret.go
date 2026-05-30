@@ -2,7 +2,6 @@ package secret
 
 import (
 	"fmt"
-	"io"
 
 	"github.com/awnumar/memguard"
 )
@@ -37,56 +36,6 @@ func New(plaintext []byte) *Secret {
 // Prefer New() with []byte when possible.
 func NewFromString(s string) *Secret {
 	return &Secret{buf: memguard.NewBufferFromBytes([]byte(s))}
-}
-
-// NewFromLockedBuffer creates a Secret from an existing memguard LockedBuffer.
-// The Secret takes ownership of the buffer - caller must not use buf after this call.
-// This is useful when integrating with APIs that return LockedBuffer directly
-// (e.g., ui.PasswordSecure()).
-func NewFromLockedBuffer(buf *memguard.LockedBuffer) *Secret {
-	return &Secret{buf: buf}
-}
-
-// NewFromReader reads up to maxSize bytes from r directly into memguard-protected memory.
-// This avoids any intermediate unprotected memory allocations.
-// The reader is read until EOF or maxSize is reached.
-//
-// SECURITY: The data is read directly into memguard's locked buffer, ensuring
-// the secret never exists in unprotected memory (unlike reading into a []byte first).
-func NewFromReader(r io.Reader, maxSize int) (*Secret, error) {
-	// Pre-allocate the locked buffer at max size
-	buf := memguard.NewBuffer(maxSize)
-
-	// Read directly into the locked buffer
-	total := 0
-	for total < maxSize {
-		n, err := r.Read(buf.Bytes()[total:])
-		total += n
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			buf.Destroy()
-			return nil, fmt.Errorf("read into secure memory: %w", err)
-		}
-	}
-
-	if total == 0 {
-		buf.Destroy()
-		return nil, fmt.Errorf("read into secure memory: empty input")
-	}
-
-	// If we read less than maxSize, create a right-sized buffer
-	// by copying to a new buffer and destroying the oversized one.
-	// This is still secure as the copy is within memguard.
-	if total < maxSize {
-		rightSized := memguard.NewBuffer(total)
-		copy(rightSized.Bytes(), buf.Bytes()[:total])
-		buf.Destroy()
-		buf = rightSized
-	}
-
-	return &Secret{buf: buf}, nil
 }
 
 // Use provides temporary access to secret bytes via callback.

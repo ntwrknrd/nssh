@@ -257,24 +257,6 @@ func Dependencies() []Dependency {
 	return deps
 }
 
-// CheckDependencies returns (allRequired, allOptional) booleans.
-func CheckDependencies() (bool, bool) {
-	deps := Dependencies()
-	allRequired := true
-	allOptional := true
-
-	for _, dep := range deps {
-		if dep.Required && dep.Path == "" {
-			allRequired = false
-		}
-		if !dep.Required && dep.Path == "" {
-			allOptional = false
-		}
-	}
-
-	return allRequired, allOptional
-}
-
 // InstalledDependencyPaths returns paths to dependencies installed by nssh in ~/.local/bin.
 // Only returns paths that actually exist.
 func InstalledDependencyPaths() []string {
@@ -292,92 +274,4 @@ func InstalledDependencyPaths() []string {
 	}
 
 	return paths
-}
-
-// PackageManager represents a system package manager.
-type PackageManager struct {
-	Name       string   // e.g., "brew", "apt", "dnf", "pacman"
-	InstallCmd []string // e.g., ["brew", "install"]
-	Path       string   // resolved path to the package manager
-}
-
-// DetectPackageManager finds an available package manager.
-func DetectPackageManager() *PackageManager {
-	managers := []struct {
-		name       string
-		binary     string
-		installCmd []string
-	}{
-		// macOS
-		{"brew", "brew", []string{"brew", "install"}},
-		// Debian/Ubuntu
-		{"apt", "apt-get", []string{"sudo", "apt-get", "install", "-y"}},
-		// Fedora/RHEL
-		{"dnf", "dnf", []string{"sudo", "dnf", "install", "-y"}},
-		// Arch
-		{"pacman", "pacman", []string{"sudo", "pacman", "-S", "--noconfirm"}},
-	}
-
-	for _, m := range managers {
-		if path, err := exec.LookPath(m.binary); err == nil {
-			return &PackageManager{
-				Name:       m.name,
-				InstallCmd: m.installCmd,
-				Path:       path,
-			}
-		}
-	}
-
-	return nil
-}
-
-// PackageName returns the package name for a dependency on a given package manager.
-func (d Dependency) PackageName(pm *PackageManager) string {
-	// Map dependency binary names to package names
-	packages := map[string]map[string]string{
-		"ssh": {
-			"brew":   "openssh",
-			"apt":    "openssh-client",
-			"dnf":    "openssh-clients",
-			"pacman": "openssh",
-		},
-		"scp": {
-			// scp comes with the same package as ssh
-			"brew":   "openssh",
-			"apt":    "openssh-client",
-			"dnf":    "openssh-clients",
-			"pacman": "openssh",
-		},
-		"asciinema": {
-			"brew":   "asciinema",
-			"apt":    "asciinema",
-			"dnf":    "asciinema",
-			"pacman": "asciinema",
-		},
-		"agg": {
-			"brew":   "agg",
-			"pacman": "agg",
-			// apt/dnf: not available, use cargo install agg or npm install -g asciicast2gif
-		},
-		"fzf": {
-			"brew":   "fzf",
-			"apt":    "fzf",
-			"dnf":    "fzf",
-			"pacman": "fzf",
-		},
-	}
-
-	if pkgMap, ok := packages[d.Name]; ok {
-		if pkg, ok := pkgMap[pm.Name]; ok {
-			return pkg
-		}
-	}
-
-	// Default: use the binary name as package name
-	return d.Name
-}
-
-// InstallCommand returns the full command to install a package.
-func (pm *PackageManager) InstallCommand(packages ...string) []string {
-	return append(pm.InstallCmd, packages...)
 }

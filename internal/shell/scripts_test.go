@@ -30,7 +30,7 @@ func TestFallbackSubcommandsDoNotReserveHostnames(t *testing.T) {
 		"bash_zsh": BashZshIntegration,
 		"fish":     FishIntegration,
 	}
-	reservedHostnames := []string{"help", "version", "completion", "benchmark"}
+	reservedHostnames := []string{"help", "version", "completion", "benchmark", "cred", "lock", "unlock"}
 
 	for name, script := range tests {
 		t.Run(name, func(t *testing.T) {

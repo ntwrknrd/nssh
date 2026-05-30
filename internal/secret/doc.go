@@ -26,9 +26,8 @@
 //
 // # Creating Secrets
 //
-// Use [New] for byte slices (source is wiped), [NewFromString] for strings
-// (cannot wipe immutable strings), or [NewFromReader] to read from an io.Reader
-// with size limits.
+// Use [New] for byte slices (source is wiped), or [NewFromString] for strings
+// (cannot wipe immutable strings).
 //
 // # Important
 //

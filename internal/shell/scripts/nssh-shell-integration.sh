@@ -31,7 +31,7 @@ nssh() {
     fi
 
     # Detect top-level subcommands (fall back to defaults if lookup fails)
-    local -a subcommands=(inv cred log cp self lock unlock connect)
+    local -a subcommands=(inv agent log cp self connect)
     if [ -n "$BASH_VERSION" ]; then
         mapfile -t subcommands < <(command "$nssh_cmd" __list-subcommands 2>/dev/null) || true
     elif [ -n "$ZSH_VERSION" ]; then

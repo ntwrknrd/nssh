@@ -10,9 +10,8 @@ import (
 )
 
 type fakePassRunner struct {
-	calls   []fakePassCall
-	outs    []fakePassOut
-	missing bool
+	calls []fakePassCall
+	outs  []fakePassOut
 }
 
 type fakePassCall struct {

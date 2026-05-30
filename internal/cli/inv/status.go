@@ -226,7 +226,8 @@ func refreshProviderCaches(cfg *config.Config, providerName string) map[string]s
 	runner := newConfigOnlyRunner(parser)
 	now := time.Now().UTC()
 
-	for name, providerCfg := range cfg.Inventory.Provider {
+	for name := range cfg.Inventory.Provider {
+		providerCfg := cfg.Inventory.Provider[name]
 		if providerName != "" && providerName != name {
 			continue
 		}

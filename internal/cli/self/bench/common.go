@@ -177,21 +177,7 @@ func parseTimingOutput(output string) map[string]time.Duration {
 	return timings
 }
 
-// ComputeStats calculates statistics for a timing stage across all samples.
-func ComputeStats(samples []map[string]time.Duration, stageName string) StageStats {
-	var durations []time.Duration
-
-	for _, sample := range samples {
-		if d, ok := sample[stageName]; ok {
-			durations = append(durations, d)
-		}
-	}
-
-	return computeStatsFromDurations(stageName, durations)
-}
-
 // ComputeAllStats calculates statistics for all stages in a single pass.
-// This is more efficient than calling ComputeStats repeatedly.
 func ComputeAllStats(samples []map[string]time.Duration, stageNames []string) map[string]StageStats {
 	// Build duration slices for each stage in one pass
 	stageDurations := make(map[string][]time.Duration)

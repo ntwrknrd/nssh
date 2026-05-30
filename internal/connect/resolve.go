@@ -71,7 +71,7 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 		includeFile = filepath.Base(host.SourceFile)
 	}
 
-	group := resolveGroup(hostEntry, includeFile, c)
+	group := resolveGroup(hostEntry, c)
 
 	// Resolve username: explicit > SSH config > inventory group default > nssh default
 	username := explicitUser
@@ -193,7 +193,7 @@ func credentialMatchesUser(record *credential.Record, username string) bool {
 	return username == "" || record.Username == "" || record.Username == username
 }
 
-func resolveGroup(hostEntry *sshconfig.HostEntry, includeFile string, cfg *config.Config) string {
+func resolveGroup(hostEntry *sshconfig.HostEntry, cfg *config.Config) string {
 	if hostEntry == nil {
 		return ""
 	}

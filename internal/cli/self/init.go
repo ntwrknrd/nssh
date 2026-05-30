@@ -502,31 +502,6 @@ func ensureInitConfig(paths *config.Paths, opts InitOptions) error {
 	return nil
 }
 
-// ensureExampleConfig copies the example config to the config directory if none exists.
-func ensureExampleConfig(paths *config.Paths, dryRun, yes bool) error {
-	// Skip if config already exists
-	if _, err := os.Stat(paths.ConfigFile); err == nil {
-		return nil
-	}
-
-	// Confirm with user (unless --yes or non-interactive)
-	if !yes && !dryRun {
-		result, _ := ui.Confirm("Install example config file?", true)
-		if !result {
-			ui.Info("Config file: skipped (user declined)")
-			return nil
-		}
-	}
-
-	if !dryRun {
-		if err := os.WriteFile(paths.ConfigFile, []byte(config.ExampleConfig), 0644); err != nil {
-			return fmt.Errorf("write config: %w", err)
-		}
-	}
-	ui.Success("Config file: %s", AbbreviatePath(paths.ConfigFile))
-	return nil
-}
-
 // getLatestGitHubRelease fetches the latest release version from GitHub API.
 func getLatestGitHubRelease(owner, repo string) (string, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", owner, repo)
