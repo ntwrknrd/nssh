@@ -27,7 +27,6 @@ type ResetSummary struct {
 	DataDir        string
 	StateDir       string
 	HostCount      int
-	ContextCount   int
 	RecordingCount int
 	TotalBytes     int64
 }
@@ -42,7 +41,7 @@ func NewResetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "reset",
 		Short: "Reset configuration",
-		Long: `Reset nssh by deleting all configuration and credentials.
+		Long: `Reset nssh by deleting all configuration and local state.
 
 This command permanently deletes:
 - nssh provider configuration and local state

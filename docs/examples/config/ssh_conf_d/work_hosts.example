@@ -1,9 +1,10 @@
-# ~/.ssh/work_hosts
+# ~/.ssh/nssh.d/provider_local.conf
 #
-# Work environment SSH hosts.
+# Local-provider work hosts.
 # Credential fallback is configured through inventory.group.work.auth.
 
 Host legacy-switch
+  # Group: work
   HostName legacy-switch.example.com
   Port 22
   User alice
@@ -14,6 +15,7 @@ Host legacy-switch
   Ciphers +aes256-cbc,aes192-cbc,aes128-cbc
 
 Host switch
+  # Group: work
   HostName switch.example.com
   Port 22
   User alice
@@ -21,6 +23,7 @@ Host switch
   PreferredAuthentications keyboard-interactive
 
 Host server
+  # Group: work
   HostName server.example.com
   Port 22
   User alice
@@ -28,6 +31,7 @@ Host server
   PreferredAuthentications publickey,password,keyboard-interactive
 
 Host router
+  # Group: work
   HostName router.example.com
   Port 22
   User alice

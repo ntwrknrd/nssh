@@ -20,4 +20,4 @@ Host *
   GSSAPIAuthentication no
   IdentityAgent None
   IdentitiesOnly yes
-  IdentityFile ~/.ssh/id_ed25519_sk
+  IdentityFile ~/.ssh/id_ed25519

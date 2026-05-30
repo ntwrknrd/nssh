@@ -13,7 +13,7 @@ Primary packages:
 
 - `cmd/nssh`: root command, SSH connect path, agent runtime entrypoint
 - `internal/cli/inv`: inventory commands
-- `internal/cli/resolve`: shared SSH/SCP host and credential resolution
+- `internal/connect`: shared SSH/SCP host lookup and credential resolution
 - `internal/credential`: provider abstraction and provider implementations
 - `internal/agent`: background runtime, provider-session broker, socket
   lifecycle, and peer checks
@@ -84,8 +84,8 @@ responsibilities are:
 - hosting the background recording archive runner
 
 Protocol operations include `status`, `lock`, and `provider_request`. `lock` is
-the internal stop operation used by `nssh agent stop`; there is no public vault
-lock command.
+the internal stop operation used by `nssh agent stop`; there is no public
+password-manager lock/unlock workflow.
 
 ## Connection Flow
 
@@ -93,7 +93,7 @@ lock command.
 2. Host lookup checks SSH config and may refresh stale inventory providers once.
 3. Username is selected from explicit `user@host`, SSH config, or defaults.
 4. Inventory group is resolved from provider state or local SSH config comments.
-5. `internal/cli/resolve` selects the provider from host or group binding.
+5. `internal/connect` selects the provider from host or group binding.
 6. The PTY connector runs OpenSSH and injects the resolved password only when
    prompted.
 7. Optional recording wraps the outer connection and leaves connector behavior

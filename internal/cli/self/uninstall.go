@@ -30,7 +30,7 @@ This command removes:
 - Installed dependencies (asciinema, agg, fzf from ~/.local/bin)
 
 Optionally removes (unless --keep-config or --keep-recordings):
-- Config file and credentials
+- nssh config and local state
 - Session recordings
 
 Use --dry-run to preview what would be removed.`,
@@ -39,7 +39,7 @@ Use --dry-run to preview what would be removed.`,
 		},
 	}
 
-	cmd.Flags().BoolVar(&keepConfig, "keep-config", false, "keep config and credentials")
+	cmd.Flags().BoolVar(&keepConfig, "keep-config", false, "keep nssh config and local state")
 	cmd.Flags().BoolVar(&keepRecordings, "keep-recordings", false, "keep session recordings")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview changes without applying")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompts")
@@ -99,7 +99,7 @@ func runUninstall(keepConfig, keepRecordings, dryRun, yes bool) error {
 		}
 	}
 
-	// 3. Optionally remove config/credentials
+	// 3. Optionally remove config/local state
 	if !keepConfig {
 		ui.SubSection("Configuration")
 		configFiles := []string{

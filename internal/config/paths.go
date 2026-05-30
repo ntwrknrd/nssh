@@ -24,7 +24,7 @@ type Paths struct {
 	// RecordingsDir is where session recordings are stored (state, not data)
 	RecordingsDir string
 
-	// BackupDir is where credential backups are stored
+	// BackupDir is where local config and inventory backups are stored
 	BackupDir string
 
 	// SSHConfigDir is the user's SSH config directory

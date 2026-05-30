@@ -13,12 +13,12 @@
         ╭───────────────────┬──────────┬──────────┬──────────┬──────────┬──────────────────────────────────────────╮
         │ Stage             │ Mean     │ Median   │ Min      │ Max      │ Description                              │
         ├───────────────────┼──────────┼──────────┼──────────┼──────────┼──────────────────────────────────────────┤
-        │ startup           │ 18.2ms   │ 17.9ms   │ 19.0ms   │ 17.8ms   │ Go subprocess initialization             │
+        │ startup           │ 18.2ms   │ 17.9ms   │ 17.8ms   │ 19.0ms   │ Go subprocess initialization             │
         │ config_load       │ 98.33us  │ 100.00us │ 94.00us  │ 101.00us │ Load config.toml                         │
-        │ credential_lookup │ 766.67us │ 738.00us │ 697.00us │ 865.00us │ Vault credential resolution              │
+        │ credential_lookup │ 766.67us │ 738.00us │ 697.00us │ 865.00us │ Provider credential resolution           │
         │ pty_start         │ 1.1ms    │ 1.1ms    │ 999.00us │ 1.2ms    │ Spawn PTY + SSH process                  │
         │ first_read        │ 24.2ms   │ 25.9ms   │ 20.1ms   │ 26.5ms   │ Time to first SSH data (banner/prompt)   │
-        │ session_io        │ 630.00us │ 602.00us │ 644.00us │ 644.00us │ I/O after first read until session close │
+        │ session_io        │ 630.00us │ 602.00us │ 602.00us │ 644.00us │ I/O after first read until session close │
         ├───────────────────┼──────────┼──────────┼──────────┼──────────┼──────────────────────────────────────────┤
         │ total             │ 44.4ms   │ 45.6ms   │ 41.0ms   │ 46.4ms   │ End-to-end time                          │
         ╰───────────────────┴──────────┴──────────┴──────────┴──────────┴──────────────────────────────────────────╯

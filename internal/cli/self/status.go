@@ -37,7 +37,7 @@ func NewStatusCmd() *cobra.Command {
 - Version information
 - Binary location
 - Configuration files
-- Credentials and encryption setup
+- Credential provider mappings and inventory auth setup
 
 This helps diagnose setup issues and shows next steps for configuration.`,
 		RunE: func(cmd *cobra.Command, args []string) error {

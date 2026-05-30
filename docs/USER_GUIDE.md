@@ -52,6 +52,9 @@ nssh inv doctor
 nssh inv status
 ```
 
+CSV imports support `host`, `hostname`, `user`, `port`, and `group` columns.
+The `--group` flag overrides any `group` column in the file.
+
 Groups are inventory placement buckets:
 
 ```bash
@@ -140,9 +143,10 @@ session = "external"
 Provider authentication stays with the provider. Pass uses GPG/pass, 1Password
 uses `op`, and Bitwarden uses `bw`; nssh does not store provider tokens.
 
-There is no automated migration from prior local encrypted credential files.
-Create the equivalent records in the password manager, then map inventory
-groups or host overrides to those provider item refs.
+There is no automated migration from prior local encrypted credential files or
+old JSON credential examples. Create equivalent records in the password
+manager, then map inventory groups or host overrides to those provider item
+refs.
 
 ## Connecting
 

@@ -1,5 +1,10 @@
 # Provider-Backed Credentials Agent Implementation Plan
 
+**Status:** Completed for `release/0.3`. This file is retained as the
+implementation record; current user and architecture docs are
+[`docs/USER_GUIDE.md`](../../USER_GUIDE.md) and
+[`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace nssh's custom age-backed credential vault with provider-backed credentials using Pass, 1Password, and Bitwarden, while keeping an nssh agent only for background runtime state, provider-session brokering, and non-secret metadata caching.
@@ -729,11 +734,11 @@ No age migration/export workflow is in scope.
 - Users must manually recreate or import equivalent credentials in Pass,
   1Password, or Bitwarden before switching providers.
 
-Legacy context credentials:
+Legacy credential commands:
 
-- Do not preserve the old `ctx` command family as a long-term credential model.
-- If `ctx` is still needed for one release, mark it legacy in help text and
-  docs, but do not use it as a migration mechanism.
+- The old `ctx`, `host`, `lock`, and `unlock` command families have been
+  removed from the active CLI.
+- Do not reintroduce those commands as a provider migration mechanism.
 
 ## Implementation Tasks
 
@@ -1128,12 +1133,12 @@ Expected: pass.
 
 **Files:**
 
-- Modify: `internal/cli/resolve/resolve.go`
+- Modify: `internal/connect/resolve.go`
 - Modify: `internal/cli/cp/cp.go`
-- Modify: `internal/cli/self/bench/preflight.go`
-- Test: `internal/cli/resolve/resolve_test.go`
+- Modify: `internal/cli/self/bench/common.go`
+- Test: `internal/connect/resolve_test.go`
 - Test: `internal/cli/cp/cp_test.go`
-- Test: `internal/cli/self/bench/preflight_test.go`
+- Test: `internal/cli/self/bench`
 
 - [x] **Step 1: Write resolution tests**
 
@@ -1151,7 +1156,7 @@ Cover:
 Run:
 
 ```bash
-go test ./internal/cli/resolve ./internal/cli/cp ./internal/cli/self/bench -count=1
+go test ./internal/connect ./internal/cli/cp ./internal/cli/self/bench -count=1
 ```
 
 Expected: fail before `cp` and bench are refactored.
@@ -1171,18 +1176,18 @@ naturally if the provider requires it.
 Run:
 
 ```bash
-go test ./internal/cli/resolve ./internal/cli/cp ./internal/cli/self/bench -count=1
+go test ./internal/connect ./internal/cli/cp ./internal/cli/self/bench -count=1
 ```
 
 Expected: pass.
 
-### Task 9: Refactor Credential CRUD and Legacy Context Commands
+### Task 9: Refactor Credential Auth Mapping and Remove Legacy Commands
 
 **Files:**
 
-- Modify: `internal/cli/cred/*.go`
-- Modify: `internal/cli/host/*.go` where credential management still uses vault
-- Modify: `internal/cli/ctx/*.go`
+- Modify: `internal/cli/inv/auth.go`
+- Modify: `internal/cli/inv/get.go`
+- Modify: `internal/cli/inv/set.go`
 - Test: existing CLI tests plus new targeted tests
 
 - [x] **Step 1: Write CRUD tests**
@@ -1193,10 +1198,7 @@ Cover:
 - `inv set/get auth mapping --provider <name>` can choose or change a host/group
   provider binding
 - credential mutation invalidates cache
-- host edit credential menu shows and can change the credential provider
-  binding
-- legacy `ctx` commands are marked legacy or removed according to final user
-  decision before implementation
+- legacy `ctx`, `host`, `lock`, and `unlock` command surfaces are removed
 
 Run:
 
@@ -1208,8 +1210,9 @@ Expected: fail where code still assumes age vault.
 
 - [x] **Step 2: Route all credential CRUD through the credential registry**
 
-Do not instantiate `vault.Manager` for normal credential CRUD. Resolve the
-target provider instance from the host/group binding or explicit `--provider`.
+Do not instantiate `vault.Manager` for normal credential auth mapping. Resolve
+the target provider instance from the host/group binding or explicit
+`--credential-provider`.
 
 - [x] **Step 3: Invalidate cache after mutation**
 
@@ -1384,16 +1387,14 @@ Expected:
 - self status shows inventory sources, credential provider instances, bindings,
   and agent runtime state.
 
-## Open Decisions Before Coding
+## Resolved Decisions
 
-These are the only decisions an implementation agent should ask about before
-coding if they are still unresolved:
+These decisions were resolved during the `release/0.3` implementation:
 
-1. Should `nssh unlock` and `nssh lock` be removed immediately or retained as
-   one-release deprecation aliases?
-2. Should legacy `nssh ctx` commands be removed in the same refactor or marked
-   legacy for one release?
-3. Should `gopass` be accepted only as `credential.config.command = "gopass"`
-   under the `pass` provider, or rejected until explicitly requested?
+1. `nssh unlock` and `nssh lock` were removed instead of retained as
+   deprecation aliases.
+2. Legacy `nssh ctx` commands were removed in the same refactor.
+3. `gopass` can be configured as a Pass-compatible command with
+   `credential.provider.<name>.config.command`.
 
-Everything else in this document is decided enough to implement.
+Everything else in this document is retained as implementation history.

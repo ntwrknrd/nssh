@@ -43,26 +43,31 @@ gh release create v0.2.4 --title "v0.2.4" --notes "## What's New
 
 ## Architecture Overview
 
-nssh is an SSH wrapper providing host management, encrypted credential storage, automatic password injection, and session recording.
+nssh is an SSH wrapper providing inventory management, provider-backed credential resolution, automatic password injection, and session recording.
 
 ### Package Structure
 
-- `cmd/nssh/main.go` - Entry point, Cobra CLI setup, argument preprocessing for smart routing
-- `internal/config` - TOML config loading, XDG paths (`~/.config/nssh/`, `~/.local/share/nssh/`, `~/.local/state/nssh/`)
-- `internal/vault` - Age-encrypted credential vault, resolution logic (by include-file, domain, host)
-- `internal/agent` - Background daemon holding decrypted credentials, Unix socket IPC, idle/lifetime timeouts
+- `cmd/nssh/main.go` - Small entry point that delegates to `internal/app`
+- `internal/app` - Cobra root command, argument preprocessing for smart routing, and process exit handling
+- `internal/config` - TOML config loading, include merging, defaults, validation, and XDG paths
+- `internal/credential` - Provider registry and Pass, 1Password, and Bitwarden credential resolvers
+- `internal/agent` - Background runtime for provider-session brokering, Unix socket IPC, recording archival, and idle/lifetime timeouts
+- `internal/connect` - Shared SSH/SCP host lookup, inventory group resolution, and credential selection
 - `internal/ssh/connector` - PTY-based SSH execution, prompt detection (password, host-key), timing instrumentation
 - `internal/ssh/sshconfig` - SSH config parsing, include file discovery, host matching, mutations
-- `internal/ssh/recording` - Asciinema integration, session locking, index metadata
+- `internal/recording` - Asciinema planning, session locking, metadata, and archive policy
 - `internal/ssh/compat` - Legacy SSH algorithm detection and remediation
-- `internal/secret` - Memguard-protected secrets that panic on string formatting
-- `internal/cli/*` - Subcommand implementations (host, ctx, log, cp, self, lock, unlock)
+- `internal/secret` - Memguard-protected request-scoped password handling
+- `internal/inventory` - Local and external inventory provider state, route reconciliation, and generated SSH config
+- `internal/cli/*` - Subcommand implementations (`inv`, `agent`, `log`, `cp`, `self`)
 
 ### Key Design Patterns
 
 **Argument Preprocessing**: `preprocessArgs()` in main.go transforms `nssh hostname` to `nssh smart-connect hostname`, separating global flags from SSH passthrough flags.
 
-**Two-Layer Credential System**: Vault owns encrypted on-disk data; Agent holds decrypted session in memory via Unix socket. Commands can run with vault locked (will prompt or proceed without passwords).
+**Provider-Backed Credentials**: Password managers own storage and authentication. nssh stores only host/group auth mappings, resolves a provider record at connect time, and keeps the resulting secret request-scoped.
+
+**Agent Runtime**: The agent is not a password cache. It brokers agent-owned provider sessions, serves status/stop requests over a Unix socket, and hosts background recording archive work.
 
 **PTY Connector**: Ring buffer with tiered pattern matching (suffix -> contains -> regex) for prompt detection. Passwords held as `*secret.Secret`, accessed via `secret.Use()`.
 
@@ -70,7 +75,7 @@ nssh is an SSH wrapper providing host management, encrypted credential storage, 
 
 ### Exit Codes
 
-Centralized in `internal/exit/exit.go`: 0=success, 1=general, 2=connection, 3=auth, 4=host not found, 5=vault.
+Centralized in `internal/exit/exit.go`: 0=success, 1=general, 2=connection, 3=auth, 4=host not found, 126=not executable, 127=not found.
 
 ### Debugging
 

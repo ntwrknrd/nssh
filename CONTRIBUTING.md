@@ -19,14 +19,14 @@ make linux-arm64
 
 ## Guidelines
 
-- **Secrets**: Wrap passwords/keys in `*secret.Secret` - it panics on `%s`/`%v` to prevent leaks. Access via `secret.Use()`.
-- **Layering**: vault, agent, and ssh are independent subsystems - wire them through `internal/session`, not direct imports. Import tests enforce this.
-- **Exit codes**: Return errors via `internal/exit` (2=connection, 3=auth, 4=host not found, 5=vault) for scripting consistency.
+- **Secrets**: Wrap provider-resolved passwords in `*secret.Secret`. Access bytes only through `secret.Use()` and destroy secrets when done.
+- **Layering**: credential providers, agent runtime, inventory, connect, and SSH packages have explicit boundaries. Keep shared host and credential resolution in `internal/connect`.
+- **Exit codes**: Return errors via `internal/exit` (2=connection, 3=auth, 4=host not found, 126=not executable, 127=not found) for scripting consistency.
 - **UI**: Route user-facing output through `internal/ui/` for consistent styling.
 
 ## References
 
-- [Architecture](docs/ARCHITECTURE.md) - package layering, agent daemon, PTY connector design
+- [Architecture](docs/ARCHITECTURE.md) - package layering, provider credentials, agent runtime, PTY connector design
 - [GoDocs](https://pkg.go.dev/github.com/ntwrknrd/nssh/internal) - package reference
 
 ## Testing Your Changes

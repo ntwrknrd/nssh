@@ -1,9 +1,10 @@
-# ~/.ssh/homelab_hosts
+# ~/.ssh/nssh.d/provider_local.conf
 #
-# Homelab environment SSH hosts.
+# Local-provider homelab hosts.
 # Credential fallback is configured through inventory.group.homelab.auth.
 
 Host k3s-a
+  # Group: homelab
   HostName k3s-a.lan.example.net
   Port 22
   User root
@@ -11,6 +12,7 @@ Host k3s-a
   PasswordAuthentication no
 
 Host k3s-b
+  # Group: homelab
   HostName k3s-b.lan.example.net
   Port 22
   User root
@@ -18,6 +20,7 @@ Host k3s-b
   PasswordAuthentication no
 
 Host k3s-c
+  # Group: homelab
   HostName k3s-c.lan.example.net
   Port 22
   User root
@@ -25,6 +28,7 @@ Host k3s-c
   PasswordAuthentication no
 
 Host pve01
+  # Group: homelab
   HostName 192.0.2.100
   Port 22
   User root
@@ -32,6 +36,7 @@ Host pve01
   PasswordAuthentication no
 
 Host rpi-a
+  # Group: homelab
   HostName rpi-a.lan.example.net
   Port 22
   User alice

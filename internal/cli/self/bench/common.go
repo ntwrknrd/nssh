@@ -385,7 +385,7 @@ var TimingStageOrder = []string{
 // StageDescriptions provides human-readable descriptions for timing stages.
 var StageDescriptions = map[string]string{
 	connector.TimingConfigLoad:       "Load config.toml",
-	connector.TimingCredentialLookup: "Vault credential resolution",
+	connector.TimingCredentialLookup: "Provider credential resolution",
 	connector.TimingPTYStart:         "Spawn PTY + SSH process",
 	connector.TimingFirstRead:        "Time to first SSH data (banner/prompt)",
 	connector.TimingPasswordPrompt:   "Time to password prompt (from session start)",

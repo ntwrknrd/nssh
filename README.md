@@ -67,7 +67,7 @@ nssh self uninstall
 # add --dry-run to preview what would be removed
 ```
 
-This removes the binary, config, and recordings. Use `--keep-config` or `--keep-recordings` to preserve specific data.
+This removes the binary, nssh config, and recordings. It does not remove records from Pass, 1Password, or Bitwarden. Use `--keep-config` or `--keep-recordings` to preserve local nssh data.
 
 ## Learn More
 

@@ -4,7 +4,7 @@ $ nssh self uninstall --help
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
 │   --dry-run                         preview changes without applying         │
-│   --keep-config                     keep config and credentials              │
+│   --keep-config                     keep nssh config and local state         │
 │   --keep-recordings                 keep session recordings                  │
 │   -y, --yes                         skip confirmation prompts                │
 ╰──────────────────────────────────────────────────────────────────────────────╯

@@ -1,4 +1,4 @@
-host,hostname,user,port,context
+host,hostname,user,port,group
 switch-01,switch-01.example.com,alice,22,work
 switch-02,switch-02.example.com,alice,22,work
 switch-03,switch-03.example.com,alice,22,work

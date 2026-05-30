@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestExampleConfigInSync(t *testing.T) {
+func TestExampleConfigUsesDocsSource(t *testing.T) {
 	// Find project root from test file location
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -21,8 +21,14 @@ func TestExampleConfigInSync(t *testing.T) {
 		t.Fatalf("read docs config: %v", err)
 	}
 
+	packageCopy := filepath.Join(projectRoot, "internal", "config", "example_config.toml")
+	if _, err := os.Stat(packageCopy); err == nil {
+		t.Fatalf("internal package config copy exists: %s", packageCopy)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat package config copy: %v", err)
+	}
+
 	if ExampleConfig != string(docsContent) {
-		t.Errorf("embedded config out of sync with docs/examples/config/config.example.toml\n" +
-			"Run: cp docs/examples/config/config.example.toml internal/config/example_config.toml")
+		t.Errorf("embedded config does not match docs/examples/config/config.example.toml")
 	}
 }
