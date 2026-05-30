@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ntwrknrd/nssh/internal/app"
 	"github.com/spf13/cobra"
 )
 
@@ -123,7 +124,7 @@ func TestHelpSnapshots(t *testing.T) {
 	binPath := buildBinary(t)
 
 	// Discover all commands from Cobra structure
-	rootCmd := newRootCmd()
+	rootCmd := app.NewRootCmd(app.Options{Version: "test"})
 	cases := discoverCommands(rootCmd, nil)
 
 	// Add root command

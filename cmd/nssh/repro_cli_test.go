@@ -3,6 +3,8 @@ package main
 import (
 	"reflect"
 	"testing"
+
+	"github.com/ntwrknrd/nssh/internal/app"
 )
 
 func TestPreprocessArgs_SSHFlagsAfterHostname(t *testing.T) {
@@ -70,9 +72,9 @@ func TestPreprocessArgs_SSHFlagsAfterHostname(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := preprocessArgs(tt.args)
+			result := app.PreprocessArgs(tt.args)
 			if !reflect.DeepEqual(result, tt.expected) {
-				t.Errorf("preprocessArgs(%v) = %v, want %v", tt.args, result, tt.expected)
+				t.Errorf("app.PreprocessArgs(%v) = %v, want %v", tt.args, result, tt.expected)
 			}
 		})
 	}

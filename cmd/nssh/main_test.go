@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ntwrknrd/nssh/internal/app"
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
 
@@ -47,9 +48,9 @@ func TestPreprocessArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := preprocessArgs(tt.in)
+			got := app.PreprocessArgs(tt.in)
 			if !reflect.DeepEqual(got, tt.out) {
-				t.Fatalf("preprocessArgs(%v) = %v, want %v", tt.in, got, tt.out)
+				t.Fatalf("app.PreprocessArgs(%v) = %v, want %v", tt.in, got, tt.out)
 			}
 		})
 	}
@@ -126,7 +127,7 @@ func TestInternalCLIResolvePackageRemoved(t *testing.T) {
 }
 
 func TestRootCommandCutover(t *testing.T) {
-	root := newRootCmd()
+	root := app.NewRootCmd(app.Options{Version: "test"})
 
 	for _, name := range []string{"agent", "inv", "connect", "cp", "self"} {
 		if cmd, _, err := root.Find([]string{name}); err != nil || cmd == root || cmd.Name() != name {
@@ -142,7 +143,7 @@ func TestRootCommandCutover(t *testing.T) {
 }
 
 func TestHardwareKeySurfacesAreRemoved(t *testing.T) {
-	root := newRootCmd()
+	root := app.NewRootCmd(app.Options{Version: "test"})
 
 	if cmd, _, err := root.Find([]string{"self", "piv"}); err == nil && cmd.Name() == "piv" {
 		t.Fatal("self piv command should not be registered")
@@ -180,7 +181,7 @@ func TestBuildAndInstallSurfacesDoNotMentionHardwareOrCGO(t *testing.T) {
 }
 
 func TestSelfHelpDoesNotTruncate(t *testing.T) {
-	root := newRootCmd()
+	root := app.NewRootCmd(app.Options{Version: "test"})
 	for _, path := range [][]string{
 		{"self"},
 		{"self", "reinstall"},
@@ -197,7 +198,7 @@ func TestSelfHelpDoesNotTruncate(t *testing.T) {
 }
 
 func TestSelfHelpUsesApprovedCommandDescriptions(t *testing.T) {
-	root := newRootCmd()
+	root := app.NewRootCmd(app.Options{Version: "test"})
 	cmd, _, err := root.Find([]string{"self"})
 	if err != nil {
 		t.Fatalf("find self: %v", err)
@@ -217,7 +218,7 @@ func TestSelfHelpUsesApprovedCommandDescriptions(t *testing.T) {
 }
 
 func TestSelfReinstallHelpSaysGitHubPackage(t *testing.T) {
-	root := newRootCmd()
+	root := app.NewRootCmd(app.Options{Version: "test"})
 	cmd, _, err := root.Find([]string{"self", "reinstall"})
 	if err != nil {
 		t.Fatalf("find self reinstall: %v", err)
@@ -236,7 +237,7 @@ func TestSelfReinstallHelpSaysGitHubPackage(t *testing.T) {
 }
 
 func TestInvListHelpShowsSelectionFlags(t *testing.T) {
-	root := newRootCmd()
+	root := app.NewRootCmd(app.Options{Version: "test"})
 	cmd, _, err := root.Find([]string{"inv", "list"})
 	if err != nil {
 		t.Fatalf("find inv list: %v", err)
@@ -261,7 +262,7 @@ func TestInvListHelpShowsSelectionFlags(t *testing.T) {
 }
 
 func TestInvGetHelpShowsGroupShorthandAndExplicitUsage(t *testing.T) {
-	root := newRootCmd()
+	root := app.NewRootCmd(app.Options{Version: "test"})
 	cmd, _, err := root.Find([]string{"inv", "get"})
 	if err != nil {
 		t.Fatalf("find inv get: %v", err)
@@ -283,7 +284,7 @@ func TestInvGetHelpShowsGroupShorthandAndExplicitUsage(t *testing.T) {
 }
 
 func TestInvSetHelpShowsGroupModeAndExplicitUsage(t *testing.T) {
-	root := newRootCmd()
+	root := app.NewRootCmd(app.Options{Version: "test"})
 	cmd, _, err := root.Find([]string{"inv", "set"})
 	if err != nil {
 		t.Fatalf("find inv set: %v", err)

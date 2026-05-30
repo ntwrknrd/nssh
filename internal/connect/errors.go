@@ -1,5 +1,4 @@
-// Package cli provides CLI subcommand implementations and shared utilities.
-package cli
+package connect
 
 // HostNotFoundError indicates a host was not found and carries the hostname
 // for potential use in spawning local inventory creation.
