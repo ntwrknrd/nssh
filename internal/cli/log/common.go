@@ -2,7 +2,6 @@
 package log
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,59 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ntwrknrd/nssh/internal/ssh/recording"
+	"github.com/ntwrknrd/nssh/internal/recording"
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
-
-// sessionUpdatedTimestamp returns the mtime of a cast file.
-func sessionUpdatedTimestamp(record recording.SessionRecord) time.Time {
-	info, err := os.Stat(record.CastPath)
-	if err != nil {
-		return record.FinishedAt
-	}
-	return info.ModTime()
-}
-
-// LoadSessions returns all session records sorted by modification time (newest first).
-func LoadSessions(settings recording.RecordingSettings) []recording.SessionRecord {
-	return LoadSessionsLimit(settings, 0)
-}
-
-// LoadSessionsLimit returns session records, limiting to the N most recent.
-// When limit > 0, uses lazy loading to only parse metadata for top N files.
-// Records are pre-sorted by mtime (newest first).
-func LoadSessionsLimit(settings recording.RecordingSettings, limit int) []recording.SessionRecord {
-	return recording.IterSessionRecordsLimit(settings, limit)
-}
-
-// sessionDurationSeconds calculates the duration of a session in seconds.
-func sessionDurationSeconds(record recording.SessionRecord) int {
-	// Try to read from index file first
-	indexPath := strings.TrimSuffix(record.CastPath, ".cast") + ".index.json"
-	if data, err := os.ReadFile(indexPath); err == nil {
-		var payload recording.IndexPayload
-		if json.Unmarshal(data, &payload) == nil {
-			var total int
-			for i := range payload.Sessions {
-				session := &payload.Sessions[i]
-				duration := session.FinishedAt.Sub(session.StartedAt)
-				if duration > 0 {
-					total += int(duration.Seconds())
-				}
-			}
-			if total > 0 {
-				return total
-			}
-		}
-	}
-
-	// Fallback to record timestamps
-	duration := record.FinishedAt.Sub(record.StartedAt)
-	if duration > 0 {
-		return int(duration.Seconds())
-	}
-	return 0
-}
 
 // formatDuration formats seconds as MM:SS or HH:MM:SS.
 func formatDuration(seconds int) string {
@@ -109,11 +58,11 @@ func PrintSessions(records []recording.SessionRecord, filter string) {
 	localTZ := time.Now().Location()
 
 	for _, record := range records {
-		mtime := sessionUpdatedTimestamp(record)
+		mtime := recording.SessionUpdatedTimestamp(record)
 		mtimeLocal := mtime.In(localTZ)
 		mtimeStr := mtimeLocal.Format("2006-01-02T15:04:05")
 
-		seconds := sessionDurationSeconds(record)
+		seconds := recording.SessionDurationSeconds(record)
 		durationStr := formatDuration(seconds)
 
 		sessionLabel := record.SessionLabel
@@ -157,7 +106,7 @@ func FilterSessionsByPattern(sessions []recording.SessionRecord, pattern string)
 	var filtered []recording.SessionRecord
 	for _, session := range sessions {
 		startDate := session.StartedAt.In(localTZ).Format("2006-01-02")
-		mtimeDate := sessionUpdatedTimestamp(session).In(localTZ).Format("2006-01-02")
+		mtimeDate := recording.SessionUpdatedTimestamp(session).In(localTZ).Format("2006-01-02")
 		castDisplay := homeReplace(session.CastPath)
 		if MatchesPattern(re, session.Host, session.SessionLabel, startDate, mtimeDate, castDisplay) {
 			filtered = append(filtered, session)
@@ -192,7 +141,7 @@ func FilterSessionsByHost(sessions []recording.SessionRecord, host, dateFilter s
 
 // buildSessionOption creates a display string for fzf selection.
 func buildSessionOption(idx int, record recording.SessionRecord) string {
-	seconds := sessionDurationSeconds(record)
+	seconds := recording.SessionDurationSeconds(record)
 	durationStr := formatDuration(seconds)
 	startedLocal := record.StartedAt.Local()
 	startedStr := startedLocal.Format("2006-01-02 15:04:05")

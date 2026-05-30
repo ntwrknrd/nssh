@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/exit"
-	"github.com/ntwrknrd/nssh/internal/ssh/recording"
+	"github.com/ntwrknrd/nssh/internal/recording"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -40,7 +40,7 @@ Format is automatically inferred from the output file extension:
 
 func runExport(yes, dryRun bool) error {
 	settings := recording.LoadRecordingSettings()
-	sessions := LoadSessions(settings)
+	sessions := recording.IterSessionRecords(settings)
 
 	ui.CommandStart("EXPORT RECORDING")
 

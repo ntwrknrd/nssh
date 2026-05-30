@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/ntwrknrd/nssh/internal/ssh/recording"
+	"github.com/ntwrknrd/nssh/internal/recording"
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
 

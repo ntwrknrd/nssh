@@ -1,4 +1,4 @@
-package logging
+package audit
 
 import (
 	"context"
@@ -18,16 +18,16 @@ const (
 	maxRotatedFiles     = 3                // Keep audit.log.1, .2, .3
 )
 
-// AuditLogger wraps slog with dual output: stderr and audit file.
-type AuditLogger struct {
+// Logger wraps slog with dual output: stderr and audit file.
+type Logger struct {
 	*slog.Logger
 	auditFile *os.File
 }
 
-// NewAuditLogger creates a logger that writes to both stderr and audit file.
+// NewLogger creates a logger that writes to both stderr and audit file.
 // stderrLevel controls stderr verbosity; audit file always logs Info+.
 // Performs rotation check on startup if audit file exceeds MaxFileSize.
-func NewAuditLogger(stderrLevel slog.Level, audit *config.AuditConfig, stateDir string) (*AuditLogger, error) {
+func NewLogger(stderrLevel slog.Level, audit *config.AuditConfig, stateDir string) (*Logger, error) {
 	handlers := []slog.Handler{
 		slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: stderrLevel}),
 	}
@@ -58,7 +58,7 @@ func NewAuditLogger(stderrLevel slog.Level, audit *config.AuditConfig, stateDir 
 		}))
 	}
 
-	return &AuditLogger{
+	return &Logger{
 		Logger:    slog.New(&multiHandler{handlers: handlers}),
 		auditFile: auditFile,
 	}, nil
@@ -94,7 +94,7 @@ func rotateIfNeeded(path string, maxSize int64) error {
 }
 
 // Close closes the audit file if open.
-func (a *AuditLogger) Close() error {
+func (a *Logger) Close() error {
 	if a.auditFile != nil {
 		return a.auditFile.Close()
 	}

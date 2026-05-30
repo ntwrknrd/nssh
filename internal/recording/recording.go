@@ -53,6 +53,42 @@ type SessionRecord struct {
 	SessionLabel string
 }
 
+// SessionUpdatedTimestamp returns the mtime of a cast file.
+func SessionUpdatedTimestamp(record SessionRecord) time.Time {
+	info, err := os.Stat(record.CastPath)
+	if err != nil {
+		return record.FinishedAt
+	}
+	return info.ModTime()
+}
+
+// SessionDurationSeconds calculates the duration of a session in seconds.
+func SessionDurationSeconds(record SessionRecord) int {
+	indexPath := strings.TrimSuffix(record.CastPath, ".cast") + ".index.json"
+	if data, err := os.ReadFile(indexPath); err == nil {
+		var payload IndexPayload
+		if json.Unmarshal(data, &payload) == nil {
+			var total int
+			for i := range payload.Sessions {
+				session := &payload.Sessions[i]
+				duration := session.FinishedAt.Sub(session.StartedAt)
+				if duration > 0 {
+					total += int(duration.Seconds())
+				}
+			}
+			if total > 0 {
+				return total
+			}
+		}
+	}
+
+	duration := record.FinishedAt.Sub(record.StartedAt)
+	if duration > 0 {
+		return int(duration.Seconds())
+	}
+	return 0
+}
+
 // RecordingPlan describes how to record a session.
 type RecordingPlan struct {
 	Enabled       bool

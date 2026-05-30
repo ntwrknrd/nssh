@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/exit"
-	"github.com/ntwrknrd/nssh/internal/ssh/recording"
+	"github.com/ntwrknrd/nssh/internal/recording"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -41,9 +41,9 @@ func runList(selectPattern string, lastN int) error {
 	// This avoids loading all session metadata when only a few are needed
 	var sessions []recording.SessionRecord
 	if lastN > 0 && selectPattern == "" {
-		sessions = LoadSessionsLimit(settings, lastN)
+		sessions = recording.IterSessionRecordsLimit(settings, lastN)
 	} else {
-		sessions = LoadSessions(settings)
+		sessions = recording.IterSessionRecords(settings)
 	}
 
 	if selectPattern != "" {
@@ -58,7 +58,7 @@ func runList(selectPattern string, lastN int) error {
 		var filtered []recording.SessionRecord
 		for _, s := range sessions {
 			startDate := s.StartedAt.In(localTZ).Format("2006-01-02")
-			mtimeDate := sessionUpdatedTimestamp(s).In(localTZ).Format("2006-01-02")
+			mtimeDate := recording.SessionUpdatedTimestamp(s).In(localTZ).Format("2006-01-02")
 			if MatchesPattern(pattern, s.Host, s.SessionLabel, startDate, mtimeDate) {
 				filtered = append(filtered, s)
 			}

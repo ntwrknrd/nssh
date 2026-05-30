@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ntwrknrd/nssh/internal/audit"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/inventory"
-	"github.com/ntwrknrd/nssh/internal/logging"
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
@@ -64,20 +64,20 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string) error {
 	return connErr
 }
 
-func newConnectAudit(cfg *config.Config) *logging.AuditLogger {
+func newConnectAudit(cfg *config.Config) *audit.Logger {
 	if cfg == nil || !cfg.Logging.Audit.Enabled {
 		return nil
 	}
 	paths := config.DefaultPaths()
-	audit, err := logging.NewAuditLogger(slog.LevelError, &cfg.Logging.Audit, paths.StateDir)
+	logger, err := audit.NewLogger(slog.LevelError, &cfg.Logging.Audit, paths.StateDir)
 	if err != nil {
 		slog.Warn("failed to initialize audit logger", "err", err)
 		return nil
 	}
-	return audit
+	return logger
 }
 
-func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *logging.AuditLogger) error {
+func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger) error {
 	conn := newConnector(resolved, sshArgs, cfg)
 	connErr := conn.Run(ctx)
 

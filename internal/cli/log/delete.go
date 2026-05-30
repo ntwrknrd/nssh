@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/exit"
-	"github.com/ntwrknrd/nssh/internal/ssh/recording"
+	"github.com/ntwrknrd/nssh/internal/recording"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -79,11 +79,11 @@ func runDelete(selectPattern string, olderThan int, yes, dryRun bool) error {
 func deleteOlderThan(settings recording.RecordingSettings, days int, dryRun bool) error {
 	cutoff := time.Now().AddDate(0, 0, -days)
 
-	sessions := LoadSessions(settings)
+	sessions := recording.IterSessionRecords(settings)
 	var toDelete []recording.SessionRecord
 
 	for _, session := range sessions {
-		mtime := sessionUpdatedTimestamp(session)
+		mtime := recording.SessionUpdatedTimestamp(session)
 		if mtime.Before(cutoff) {
 			toDelete = append(toDelete, session)
 		}
@@ -116,7 +116,7 @@ func deleteOlderThan(settings recording.RecordingSettings, days int, dryRun bool
 }
 
 func deleteByPattern(settings recording.RecordingSettings, pattern string, yes, dryRun bool) error {
-	sessions := LoadSessions(settings)
+	sessions := recording.IterSessionRecords(settings)
 
 	pattern = ExpandDateShortcut(pattern)
 	filtered, err := FilterSessionsByPattern(sessions, pattern)
@@ -162,7 +162,7 @@ func deleteByPattern(settings recording.RecordingSettings, pattern string, yes, 
 }
 
 func deleteInteractive(settings recording.RecordingSettings, yes, dryRun bool) error {
-	sessions := LoadSessions(settings)
+	sessions := recording.IterSessionRecords(settings)
 
 	if len(sessions) == 0 {
 		ui.Warning("No recordings found in %s", settings.Directory)

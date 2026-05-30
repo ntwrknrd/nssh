@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/exit"
-	"github.com/ntwrknrd/nssh/internal/ssh/recording"
+	"github.com/ntwrknrd/nssh/internal/recording"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -39,7 +39,7 @@ func NewUploadCmd() *cobra.Command {
 
 func runUpload(yes, dryRun bool) error {
 	settings := recording.LoadRecordingSettings()
-	sessions := LoadSessions(settings)
+	sessions := recording.IterSessionRecords(settings)
 
 	ui.CommandStart("UPLOAD RECORDING")
 

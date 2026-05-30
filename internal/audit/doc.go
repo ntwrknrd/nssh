@@ -1,4 +1,4 @@
-// Package logging provides audit logging for security events.
+// Package audit provides audit logging for security events.
 //
 // This package implements dual-output logging: stderr for immediate feedback
 // and a persistent audit file for security compliance and debugging.
@@ -7,7 +7,6 @@
 //
 // The audit log records security-relevant events:
 //   - SSH connection attempts and results
-//   - Vault unlock/lock operations
 //   - Credential access
 //   - Agent lifecycle events
 //
@@ -31,11 +30,11 @@
 //
 // # Usage
 //
-//	logger, err := logging.NewAuditLogger(slog.LevelInfo, &cfg.Logging.Audit, stateDir)
+//	logger, err := audit.NewLogger(slog.LevelInfo, &cfg.Logging.Audit, stateDir)
 //	if err != nil {
 //	    return err
 //	}
 //	defer logger.Close()
 //
 //	logger.Info("ssh_connect", "host", hostname, "user", username)
-package logging
+package audit
