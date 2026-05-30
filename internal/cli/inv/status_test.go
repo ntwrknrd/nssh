@@ -24,17 +24,16 @@ func TestRenderStatusTreeShowsLocalProviderAndProviderRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{Inventory: config.InventoryConfig{
-		DefaultGroup: "lab",
 		Group: map[string]config.GroupConfig{
-			"lab":     {},
-			"custcbb": {},
+			"lab":      {},
+			"customer": {},
 		},
 		Provider: map[string]config.InventoryProviderConfig{
 			"netbox-prod": {
 				Type: config.ProviderNetBox,
 				Route: []config.InventoryRouteConfig{{
-					Group: "custcbb",
-					Match: config.InventoryRouteMatch{"provider": []string{"custcbb"}},
+					Group: "customer",
+					Match: config.InventoryRouteMatch{"provider": []string{"customer"}},
 				}},
 			},
 		},
@@ -48,8 +47,8 @@ func TestRenderStatusTreeShowsLocalProviderAndProviderRoutes(t *testing.T) {
 		IncludeFile: inventory.ProviderIncludeFile("netbox-prod"),
 		LastError:   "api down",
 		Objects: map[string]*inventory.ProviderHost{
-			"device:1": {ObjectID: "device:1", Host: "edge01", HostName: "edge01.example.com", Group: "custcbb"},
-			"device:2": {ObjectID: "device:2", Host: "edge02", HostName: "edge02.example.com", Group: "custcbb"},
+			"device:1": {ObjectID: "device:1", Host: "edge01", HostName: "edge01.example.com", Group: "customer"},
+			"device:2": {ObjectID: "device:2", Host: "edge02", HostName: "edge02.example.com", Group: "customer"},
 		},
 	}
 	if err := inventory.SaveProviderState(state); err != nil {
@@ -72,8 +71,8 @@ func TestRenderStatusTreeShowsLocalProviderAndProviderRoutes(t *testing.T) {
 		"  output: " + filepath.Join(paths.SSHConfigDir, "nssh.d", "provider_netbox-prod.conf"),
 		"  last error: api down",
 		"  routes",
-		"    [0] group custcbb -> " + filepath.Join(paths.SSHConfigDir, "nssh.d", "provider_netbox-prod.conf"),
-		"        match provider = custcbb",
+		"    [0] group customer -> " + filepath.Join(paths.SSHConfigDir, "nssh.d", "provider_netbox-prod.conf"),
+		"        match provider = customer",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status tree missing %q:\n%s", want, got)
@@ -87,15 +86,14 @@ func TestRenderStatusTreeOmitsMissingLocalProvider(t *testing.T) {
 
 	paths := &config.Paths{SSHConfigDir: filepath.Join(t.TempDir(), ".ssh")}
 	cfg := &config.Config{Inventory: config.InventoryConfig{
-		DefaultGroup: "lab",
 		Group: map[string]config.GroupConfig{
-			"lab":     {},
-			"custcbb": {},
+			"lab":      {},
+			"customer": {},
 		},
 		Provider: map[string]config.InventoryProviderConfig{
 			"netbox-prod": {
 				Type:  config.ProviderNetBox,
-				Route: []config.InventoryRouteConfig{{Group: "custcbb"}},
+				Route: []config.InventoryRouteConfig{{Group: "customer"}},
 			},
 		},
 	}}
@@ -118,7 +116,6 @@ func TestRenderStatusTreeShowsRefreshResultsForExternalProviders(t *testing.T) {
 
 	paths := &config.Paths{SSHConfigDir: filepath.Join(t.TempDir(), ".ssh")}
 	cfg := &config.Config{Inventory: config.InventoryConfig{
-		DefaultGroup: "lab",
 		Group: map[string]config.GroupConfig{
 			"lab": {},
 		},

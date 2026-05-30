@@ -23,7 +23,7 @@ func TestRefreshProviderWritesStateWithoutCredentials(t *testing.T) {
 	cfg := config.InventoryProviderConfig{
 		Type: config.ProviderNetBox,
 		Route: []config.InventoryRouteConfig{{
-			Group: "custcbb",
+			Group: "customer",
 		}},
 	}
 	now := time.Date(2026, 5, 28, 13, 0, 0, 0, time.UTC)
@@ -31,12 +31,12 @@ func TestRefreshProviderWritesStateWithoutCredentials(t *testing.T) {
 	result := RefreshProvider(context.Background(), "netbox-prod", cfg, fakeProvider{objects: []Object{{
 		ObjectID: "device:1",
 		Name:     "edge01",
-		HostName: "edge01.custcbb.local",
+		HostName: "edge01.customer.local",
 	}}}, nil, RefreshOptions{
 		Now:            now,
 		WriteSSHConfig: false,
 		Groups: map[string]config.GroupConfig{
-			"custcbb": {DefaultUser: "chris.jones"},
+			"customer": {DefaultUser: "netops"},
 		},
 	})
 	if result.Err != nil {
@@ -49,10 +49,10 @@ func TestRefreshProviderWritesStateWithoutCredentials(t *testing.T) {
 	if state == nil || len(state.Objects) != 1 {
 		t.Fatalf("state = %+v", state)
 	}
-	if state.Objects["device:1"].Group != "custcbb" {
+	if state.Objects["device:1"].Group != "customer" {
 		t.Fatalf("group = %q", state.Objects["device:1"].Group)
 	}
-	if state.Objects["device:1"].Username != "chris.jones" {
+	if state.Objects["device:1"].Username != "netops" {
 		t.Fatalf("username = %q", state.Objects["device:1"].Username)
 	}
 	if !state.LastRefresh.Equal(now) {
@@ -68,7 +68,7 @@ func TestRefreshProviderFailurePreservesLastKnownGoodState(t *testing.T) {
 		Type:        config.ProviderNetBox,
 		IncludeFile: ProviderIncludeFile("netbox-prod"),
 		Objects: map[string]*ProviderHost{
-			"device:1": {ObjectID: "device:1", Host: "edge01", Group: "custcbb", HostName: "edge01.custcbb.local"},
+			"device:1": {ObjectID: "device:1", Host: "edge01", Group: "customer", HostName: "edge01.customer.local"},
 		},
 	}
 	if err := SaveProviderState(current); err != nil {

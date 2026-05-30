@@ -2,208 +2,309 @@
 #
 # Location: ~/.config/nssh/config.toml
 #
-# All settings are optional - nssh works without this file using sensible defaults.
+# All settings are optional. nssh merges this file with built-in defaults.
+
+# Import shared or modular config before applying this file's local overrides.
+# Common value: ["conf.d/base.toml"] or ["inventory/*.toml"].
+# include = ["conf.d/base.toml"]
 
 # ============================================================================
-# [agent]
+# Agent runtime
 # ============================================================================
 
 [agent]
 
-# Auto-start runtime agent on first provider-session request
+# Start the nssh runtime agent on first provider-session request.
+# Common value: true.
 # auto_start = true
 
-# Idle timeout - terminate agent after inactivity (1s-24h)
+# How long the nssh runtime agent can sit idle before exiting.
+# Common value: "1h" for default use, "4h" for a longer work session.
 # Env: NSSH_AGENT_IDLE_TIMEOUT
 # idle_timeout = "1h"
 
-# Activity increment - extend idle deadline on activity (1s-idle_timeout)
-# Each activity adds this much to the current deadline, capped at idle_timeout from now
+# How much activity extends the idle deadline, capped by idle_timeout.
+# Common value: "15m" or "30m".
 # Env: NSSH_AGENT_ACTIVITY_INCREMENT
 # activity_increment = "15m"
 
-# Max lifetime - hard cap regardless of activity (1m-168h)
+# Hard maximum runtime for the agent even if it remains active.
+# Common value: "8h" for a workday, "24h" for default behavior.
 # Env: NSSH_AGENT_MAX_LIFETIME
 # max_lifetime = "24h"
 
 # ============================================================================
-# [credential]
+# Credential providers
 # ============================================================================
 
 [credential]
 
-# Default provider used by inventory auth mappings that omit provider.
-default_provider = "pass-local"
+# Import credential provider definitions under [credential].
+# Common value: ["credentials/*.toml"].
+# include = ["credentials/*.toml"]
 
 [credential.provider.pass-local]
+
+# Credential backend type.
+# Acceptable values: "pass", "1password", "bitwarden".
 type = "pass"
 
-  [credential.provider.pass-local.config]
-  command = "pass"
-  prefix = "nssh"
+[credential.provider.pass-local.config]
+
+# Credential CLI command for pass-compatible providers.
+# Common value: "pass".
+command = "pass"
+
+# Password-store path prefix for nssh-managed entries.
+# Common value: "nssh".
+prefix = "nssh"
+
+# Provider session handling mode.
+# Acceptable values: "external", "agent", "none".
+session = "external"
 
 # 1Password provider example.
 # [credential.provider.op-network]
+# # Credential backend type.
+# # Acceptable values: "pass", "1password", "bitwarden".
 # type = "1password"
 #
-#   [credential.provider.op-network.config]
+# [credential.provider.op-network.config]
+# # 1Password account shorthand passed to op when needed.
+# # Common value: "" or your 1Password account name.
 # account = ""
-# vault = "Network"
-# session = "agent"
 #
+# # 1Password vault containing SSH credential items.
+# # Common value: "Network" or "TeamVault".
+# vault = "Network"
+#
+# # Provider session handling mode.
+# # Common value: "agent" to let nssh broker provider requests.
+# session = "agent"
+
 # Bitwarden provider example.
 # [credential.provider.bw-lab]
+# # Credential backend type.
+# # Acceptable values: "pass", "1password", "bitwarden".
 # type = "bitwarden"
 #
-#   [credential.provider.bw-lab.config]
+# [credential.provider.bw-lab.config]
+# # Provider session handling mode.
+# # Common value: "external" so bw owns authentication state.
 # session = "external"
-#
+
 # ============================================================================
-# [inventory]
+# Inventory
 # ============================================================================
 
 [inventory]
 
-# Default local inventory group for new hosts.
-# default_group = "default"
+# Import inventory groups or providers under [inventory].
+# Common value: ["inventory/groups/*.toml", "inventory/providers.toml"].
+# include = ["inventory/groups/*.toml", "inventory/providers.toml"]
 
-# Local groups label hosts in the implicit provider_local.conf inventory.
 [inventory.group.default]
+
+# Domain suffixes associated with this inventory group.
+# Common value: [".example.com"].
+# domain_suffix = [".example.com"]
+
+# Default SSH username for hosts in this group.
+# Common value: your network admin username.
 # default_user = "netops"
 
-  [inventory.group.default.auth]
-  provider = "pass-local"
-  ref = "nssh/groups/default"
+# Credential item used for password auth in this group.
+# Common provider: "pass-local"; ref may be a provider URI or stable item name.
+auth = { provider = "pass-local", ref = "nssh/groups/default" }
 
 # Host auth override example.
-# [inventory.host.edge01.auth]
-# provider = "pass-local"
-# ref = "nssh/hosts/edge01"
-# username = "netops"
+# [inventory.host.edge01]
+# # Credential item override used for this exact host.
+# # Common value: provider plus a stable provider item reference.
+# auth = { provider = "pass-local", ref = "nssh/hosts/edge01", username = "netops" }
 
-# External inventory providers are configured here, not through CLI CRUD.
+# NetBox provider example.
 # [inventory.provider.netbox-prod]
+# # Inventory provider type.
+# # Acceptable values: "netbox", "containerlab".
 # type = "netbox"
 #
-#   [inventory.provider.netbox-prod.config]
-#   base_url = "https://netbox.example.com"
-#   token_env = "NETBOX_TOKEN"
+# # Inventory provider connection settings.
+# # Common value: environment-backed URL/token so secrets are not stored in config.
+# config = { url_env = "NETBOX_URL", token_env = "NETBOX_TOKEN" }
 #
-#   [[inventory.provider.netbox-prod.route]]
-#   group = "default"
-#   # Optional: "password" or "key". Defaults to password when the group has auth.
-#   auth_mode = "password"
+# [[inventory.provider.netbox-prod.route]]
+# # Human-readable route name used in status/debug output.
+# # Common value: a short inventory purpose name.
+# name = "network-devices"
+#
+# # Inventory group assigned to matching provider objects.
+# # Common value: an existing inventory group name.
+# group = "default"
+#
+# # SSH auth directives to render for matched hosts.
+# # Acceptable values: "password" or "key".
+# auth_mode = "password"
+#
+# [inventory.provider.netbox-prod.route.match]
+# # Route only objects with matching normalized attributes.
+# # Common values: domain_suffix, manufacturer, tenant.
+# domain_suffix = [".example.com"]
+# manufacturer = ["Juniper", "Arista"]
+
+# Containerlab provider example.
+# [inventory.provider.containerlab-lab]
+# # Inventory provider type.
+# # Acceptable values: "netbox", "containerlab".
+# type = "containerlab"
+#
+# # Inventory provider connection settings.
+# # Common value: jump_host names the Linux host running containerlab.
+# config = { jump_host = "nre-netlab01", sudo = true, strict_host_key_checking = false }
+#
+# [[inventory.provider.containerlab-lab.route]]
+# # Inventory group assigned to matching provider objects.
+# # Common value: an existing inventory group name.
+# group = "lab"
+#
+# [inventory.provider.containerlab-lab.route.match]
+# # Route only objects with matching normalized attributes.
+# # Common values: kind, state.
+# kind = ["ceos", "vjunos"]
+# state = ["running"]
 
 # ============================================================================
-# [logging.audit]
+# Audit logging
 # ============================================================================
 
 [logging.audit]
 
-# Enable security event logging to ~/.local/state/nssh/audit.log
+# Enable security event logging.
+# Common value: true.
 # enabled = true
 
-# Maximum backup files to retain for SSH config and credentials (1-100, 0=unlimited)
+# Maximum rotated audit/config backup files to retain.
+# Common value: 10.
 # max_backup_files = 10
 
-# Max audit log size before rotation (supports KB, MB, GB suffixes)
+# Maximum audit log size before rotation.
+# Common value: "10MB".
 # max_size = "10MB"
 
 # ============================================================================
-# [logging.session]
+# Session recording
 # ============================================================================
 
 [logging.session]
 
-# Enable automatic session recording
+# Record SSH sessions automatically.
+# Common value: true for audit-heavy workflows, false to disable.
 # enabled = false
 
-# Append to daily session file vs creating separate files per session
+# Append sessions to a daily cast file instead of separate files.
+# Common value: true.
 # append_mode = true
 
-# Recording storage directory (~ expansion supported)
+# Directory for session recording files.
+# Common value: "~/.local/state/nssh/casts".
 # dir = "~/.local/state/nssh/casts"
 
-# Custom asciinema server URL (used by `nssh log upload` and `nssh log auth`)
+# Custom asciinema upload server URL.
+# Common value: "https://asciinema.org".
 # asciinema_server_url = "https://asciinema.org"
 
-# Exclude patterns: never record matching hosts (glob or regex:... prefix)
-# Only used if include_hosts is empty
-# exclude_hosts = ["prod-*", "*.production.com", "regex:.*-mgmt$"]
+# Host patterns that should never be recorded.
+# Common value: ["lab-*", "regex:.*-mgmt$"].
+# exclude_hosts = ["lab-*"]
 
-# Include patterns: only record matching hosts (glob or regex:... prefix)
-# Takes precedence over exclude_hosts
-# include_hosts = ["lab-*", "dev-*", "regex:^staging-.*"]
+# Host patterns that should be recorded, taking precedence over excludes.
+# Common value: ["prod-*"].
+# include_hosts = ["prod-*"]
 
-# Cap long pauses in recordings, in seconds (0=disabled)
+# Cap long pauses in recordings, in seconds.
+# Common value: 0 to disable.
 # idle_time_limit = 0
 
-# When to apply idle time limit: "play", "record", or "both"
+# When to apply idle time limiting.
+# Acceptable values: "play", "record", "both".
 # idle_time_limit_mode = "play"
 
-# Title format template: {host}, {user}, {date}, {time}
+# Recording title template.
+# Common value: "nssh:{host}".
 # title_format = "nssh:{host}"
 
-# Fixed terminal dimensions for recordings (cols x rows)
+# Fixed terminal size used for recordings.
+# Common value: "145x30" or "100x30".
 # window_size = "100x30"
 
-# Automatically export recordings to plain text (.txt) when session ends
+# Export a plain-text copy of each recording after the session ends.
+# Common value: true if recordings are searched often.
 # auto_export_txt = false
 
 # ============================================================================
-# [logging.session.archive]
+# Session archive maintenance
 # ============================================================================
 
 [logging.session.archive]
 
-# Enable automatic archival of old session recordings
+# Enable automatic archival of old session recordings.
+# Common value: false.
 # enabled = false
 
-# Archive storage directory for monthly bundles (~ expansion supported)
+# Directory for monthly recording archives.
+# Common value: "~/.local/state/nssh/archives".
 # dir = "~/.local/state/nssh/archives"
 
-# Jitter for daily archive schedule to prevent thundering herd
+# Randomize archive schedule timing.
+# Common value: "30m".
 # jitter = "30m"
 
-# Maximum monthly archive bundles to retain
+# Maximum monthly archive bundles to retain.
+# Common value: 12.
 # max_bundles = 12
 
-# Maximum bytes to process per maintenance run (0=unlimited)
+# Maximum bytes to process per archive maintenance run.
+# Common value: 0 for unlimited.
 # max_run_bytes = 0
 
-# Minimum age before a recording is eligible for archival
-# min_age = "30d"
+# Minimum recording age before archival.
+# Common value: "720h" for about 30 days.
+# min_age = "720h"
 
 # ============================================================================
-# [ssh.connection]
+# SSH connection
 # ============================================================================
 
 [ssh.connection]
 
-# Connection idle timeout (0=disabled)
-# idle_timeout = "0"
+# Disconnect SSH after inactivity.
+# Common value: "0s" to disable.
+# idle_timeout = "0s"
 
-# Password prompt timeout
+# How long to wait for an SSH password prompt.
+# Common value: "10s".
 # password_timeout = "10s"
 
-# SSH connection timeout
+# Overall SSH connection timeout.
+# Common value: "30s".
 # timeout = "30s"
 
 # ============================================================================
-# [ssh.security]
+# SSH security
 # ============================================================================
 
 [ssh.security]
 
-# Accept-once behavior: "pin" or "accept-new" (overrides host_key_policy)
+# Accept-once host key behavior.
+# Acceptable values: "pin", "accept-new".
 # Env: NSSH_ACCEPT_ONCE_MODE
 # accept_once_mode = "pin"
 
-# Allow compatibility probes to write to real known_hosts
+# Allow compatibility probes to write to real known_hosts.
+# Common value: false unless using TOFU mode.
 # compat_persist_probes = false
 
-# Host key policy preset: "pin" or "tofu"
-#   pin: Accept-once pins fingerprint, probes use temp known_hosts
-#   tofu: Accept-once uses accept-new, probes persist to real known_hosts
+# Host key behavior preset. "pin" is stricter; "tofu" accepts first use.
+# Common value: "pin" for strict mode, "tofu" for lab/internal gear.
 # Env: NSSH_HOST_KEY_POLICY
 # host_key_policy = "pin"

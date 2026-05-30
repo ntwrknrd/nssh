@@ -188,15 +188,8 @@ func buildInitPlan(req initPlanRequest) (*initPlan, error) {
 			return nil, err
 		}
 	}
-	if cfg.Credential.DefaultProvider == "" {
-		cfg.Credential.DefaultProvider = req.CredentialProviders[0].Name
-	}
-	if _, ok := cfg.Credential.Provider[cfg.Credential.DefaultProvider]; !ok {
-		cfg.Credential.DefaultProvider = req.CredentialProviders[0].Name
-	}
-
 	if len(req.GroupCredentialProviders) == 0 {
-		req.GroupCredentialProviders = map[string]string{"default": cfg.Credential.DefaultProvider}
+		req.GroupCredentialProviders = map[string]string{"default": req.CredentialProviders[0].Name}
 	}
 	for group, provider := range req.GroupCredentialProviders {
 		ref := credentialRefForGroup(provider, group)
@@ -378,10 +371,6 @@ func ensureInventoryGroups(cfg *config.Config, sources []initInventorySourceRequ
 	if cfg.Inventory.Group == nil {
 		cfg.Inventory.Group = make(map[string]config.GroupConfig)
 	}
-	if cfg.Inventory.DefaultGroup == "" {
-		cfg.Inventory.DefaultGroup = "default"
-	}
-	cfg.Inventory.Group[cfg.Inventory.DefaultGroup] = config.GroupConfig{}
 	for i := range sources {
 		source := &sources[i]
 		for _, group := range source.Groups {
@@ -481,9 +470,6 @@ func initCredentialAssignmentSummary(cfg *config.Config) []string {
 	out := make([]string, 0, len(groups))
 	for _, group := range groups {
 		provider := cfg.Inventory.Group[group].Auth.Provider
-		if provider == "" {
-			provider = cfg.Credential.DefaultProvider
-		}
 		out = append(out, group+" -> "+provider)
 	}
 	return out

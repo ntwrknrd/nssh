@@ -36,8 +36,7 @@ var supportedProviders = map[string]bool{
 
 // CredentialConfig defines named credential provider instances.
 type CredentialConfig struct {
-	DefaultProvider string                              `toml:"default_provider"`
-	Provider        map[string]CredentialProviderConfig `toml:"provider"`
+	Provider map[string]CredentialProviderConfig `toml:"provider"`
 
 	// Host and Group are legacy credential binding tables. Auth mappings now
 	// live under inventory.host and inventory.group.
@@ -77,10 +76,9 @@ type CredentialRefConfig struct {
 
 // InventoryConfig holds group metadata and external inventory provider config.
 type InventoryConfig struct {
-	DefaultGroup string                             `toml:"default_group"`
-	Group        map[string]GroupConfig             `toml:"group"`
-	Host         map[string]InventoryHostConfig     `toml:"host"`
-	Provider     map[string]InventoryProviderConfig `toml:"provider"`
+	Group    map[string]GroupConfig             `toml:"group"`
+	Host     map[string]InventoryHostConfig     `toml:"host"`
+	Provider map[string]InventoryProviderConfig `toml:"provider"`
 }
 
 // GroupConfig describes a logical inventory group.
@@ -147,11 +145,7 @@ func (c *CredentialConfig) Validate() error {
 		return fmt.Errorf("credential.group is no longer supported; configure inventory.group.<group>.auth instead")
 	}
 
-	c.DefaultProvider = strings.TrimSpace(c.DefaultProvider)
-	zeroConfig := c.DefaultProvider == "" && len(c.Provider) == 0
-	if zeroConfig {
-		c.DefaultProvider = "pass-local"
-	}
+	zeroConfig := len(c.Provider) == 0
 	if c.Provider == nil {
 		c.Provider = make(map[string]CredentialProviderConfig)
 	}
@@ -173,11 +167,6 @@ func (c *CredentialConfig) Validate() error {
 			return err
 		}
 		c.Provider[name] = provider
-	}
-	if c.DefaultProvider != "" {
-		if _, ok := c.Provider[c.DefaultProvider]; !ok {
-			return fmt.Errorf("credential.default_provider references unknown provider %q", c.DefaultProvider)
-		}
 	}
 	return nil
 }
@@ -217,7 +206,7 @@ func (c *CredentialProviderConfig) Validate(name string) error {
 }
 
 // Validate checks a credential reference mapping.
-func (c *CredentialRefConfig) Validate(scope, defaultProvider string, providers map[string]CredentialProviderConfig) error {
+func (c *CredentialRefConfig) Validate(scope string, providers map[string]CredentialProviderConfig) error {
 	c.Provider = strings.TrimSpace(c.Provider)
 	if strings.TrimSpace(c.Ref) == "" {
 		return fmt.Errorf("%s.ref is required", scope)
@@ -226,10 +215,7 @@ func (c *CredentialRefConfig) Validate(scope, defaultProvider string, providers 
 		return fmt.Errorf("%s.username and username_ref are mutually exclusive", scope)
 	}
 	if c.Provider == "" {
-		if defaultProvider == "" {
-			return fmt.Errorf("%s.provider requires credential.default_provider when omitted", scope)
-		}
-		return nil
+		return fmt.Errorf("%s.provider is required", scope)
 	}
 	if _, ok := providers[c.Provider]; !ok {
 		return fmt.Errorf("%s.provider references unknown provider %q", scope, c.Provider)
@@ -248,18 +234,8 @@ func validateProviderSessionPolicy(scope, policy string) error {
 
 // Validate checks inventory group and provider configuration.
 func (c *InventoryConfig) Validate() error {
-	if strings.TrimSpace(c.DefaultGroup) == "" {
-		c.DefaultGroup = "default"
-	}
-	if err := validateBareKeySafe("inventory.default_group", c.DefaultGroup); err != nil {
-		return err
-	}
-
 	if c.Group == nil {
 		c.Group = make(map[string]GroupConfig)
-	}
-	if _, ok := c.Group[c.DefaultGroup]; !ok {
-		c.Group[c.DefaultGroup] = GroupConfig{}
 	}
 	for name := range c.Group {
 		if err := validateBareKeySafe("inventory.group", name); err != nil {
@@ -307,6 +283,9 @@ func (c *InventoryAuthConfig) Validate(scope string) error {
 	}
 	if c.Ref == "" {
 		return fmt.Errorf("%s.ref is required", scope)
+	}
+	if c.Provider == "" {
+		return fmt.Errorf("%s.provider is required", scope)
 	}
 	if c.Username != "" && c.UsernameRef != "" {
 		return fmt.Errorf("%s.username and username_ref are mutually exclusive", scope)

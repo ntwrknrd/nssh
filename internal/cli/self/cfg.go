@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/BurntSushi/toml"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
@@ -82,11 +81,12 @@ func printEffectiveConfig(paths *config.Paths) error {
 		return err
 	}
 
-	encoder := toml.NewEncoder(os.Stdout)
-	if err := encoder.Encode(cfg); err != nil {
+	text, err := config.MarshalSparse(cfg)
+	if err != nil {
 		ui.CommandEnd(ui.StatusError)
 		return err
 	}
+	fmt.Print(text)
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }

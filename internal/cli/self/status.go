@@ -91,7 +91,6 @@ func runStatus() error {
 	ui.SubSection("Configuration")
 	printFileStatus(paths.ConfigFile, "Config file")
 	if cfg, err := config.LoadDefault(); err == nil {
-		ui.StatusLineNeutral("Default provider", cfg.Credential.DefaultProvider)
 		ui.StatusLineNeutral("Provider instances", fmt.Sprintf("%d", len(cfg.Credential.Provider)))
 		ui.StatusLineNeutral("Host auth overrides", fmt.Sprintf("%d", len(cfg.Inventory.Host)))
 		ui.StatusLineNeutral("Group auth mappings", fmt.Sprintf("%d", inventoryGroupAuthCount(cfg)))

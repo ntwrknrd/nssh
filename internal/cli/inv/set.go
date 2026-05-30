@@ -77,15 +77,16 @@ func runSetGroup(group string) error {
 		ui.CommandEnd(ui.StatusError)
 		return err
 	}
-	if err := config.Save(config.DefaultPaths().ConfigFile, cfg); err != nil {
+	if !created {
+		ui.Noop("Group %q already exists", group)
+		ui.CommandEnd(ui.StatusNoop)
+		return nil
+	}
+	if err := config.SaveInventoryGroup(config.DefaultPaths().ConfigFile, cfg, group); err != nil {
 		ui.CommandEnd(ui.StatusError)
 		return err
 	}
-	if created {
-		ui.Success("Group %q created", group)
-	} else {
-		ui.Noop("Group %q already exists", group)
-	}
+	ui.Success("Group %q created", group)
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
@@ -149,7 +150,7 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 			ui.CommandEnd(ui.StatusError)
 			return err
 		}
-		if err := config.Save(config.DefaultPaths().ConfigFile, cfg); err != nil {
+		if err := config.SaveInventoryHostAuth(config.DefaultPaths().ConfigFile, cfg, host); err != nil {
 			ui.CommandEnd(ui.StatusError)
 			return err
 		}

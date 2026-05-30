@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/BurntSushi/toml"
 )
 
 // Config is the root configuration structure loaded from config.toml.
@@ -18,6 +16,8 @@ type Config struct {
 	Inventory  InventoryConfig  `toml:"inventory"`
 	Logging    LoggingConfig    `toml:"logging"`
 	SSH        SSHConfig        `toml:"ssh"`
+
+	document *configDocument
 }
 
 // ============================================================================
@@ -197,7 +197,6 @@ func DefaultConfig() *Config {
 			},
 		},
 		Credential: CredentialConfig{
-			DefaultProvider: "pass-local",
 			Provider: map[string]CredentialProviderConfig{
 				"pass-local": {
 					Type: CredentialProviderPass,
@@ -210,7 +209,6 @@ func DefaultConfig() *Config {
 			},
 		},
 		Inventory: InventoryConfig{
-			DefaultGroup: "default",
 			Group: map[string]GroupConfig{
 				"default": {
 					Auth: InventoryAuthConfig{
@@ -267,44 +265,61 @@ func DefaultConfig() *Config {
 func Load(path string) (*Config, error) {
 	cfg := DefaultConfig()
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			applyEnvOverrides(cfg)
-			if err := cfg.Validate(); err != nil {
-				return nil, fmt.Errorf("validate config: %w", err)
-			}
-			return cfg, nil
+	if _, err := os.Stat(path); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("read config %s: %w", path, err)
 		}
-		return nil, fmt.Errorf("read config %s: %w", path, err)
+		applyEnvOverrides(cfg)
+		if err := cfg.Validate(); err != nil {
+			return nil, fmt.Errorf("validate config: %w", err)
+		}
+		return cfg, nil
 	}
 
-	md, err := toml.Decode(string(data), cfg)
+	doc, err := loadConfigDocument(path)
 	if err != nil {
-		return nil, fmt.Errorf("parse config %s: %w", path, err)
+		return nil, err
 	}
-	if md.IsDefined("sync", "sources") {
-		return nil, fmt.Errorf("validate config %s: %w", path, legacySyncSourcesError())
+	if err := decodeConfigDocument(path, doc, cfg); err != nil {
+		return nil, err
 	}
-	pruneImplicitInventoryDefaults(md, cfg)
+	pruneImplicitCredentialDefaults(doc.effective, cfg)
+	pruneImplicitInventoryDefaults(doc.effective, cfg)
 
 	applyEnvOverrides(cfg)
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate config %s: %w", path, err)
 	}
+	cfg.document = doc
 
 	return cfg, nil
 }
 
-func pruneImplicitInventoryDefaults(md toml.MetaData, cfg *Config) {
+func pruneImplicitCredentialDefaults(table map[string]any, cfg *Config) {
+	if cfg == nil || cfg.Credential.Provider == nil {
+		return
+	}
+	configDefinesProviders := tablePathDefined(table, "credential", "provider")
+	passLocalExplicit := tablePathDefined(table, "credential", "provider", "pass-local")
+	if configDefinesProviders && !passLocalExplicit {
+		delete(cfg.Credential.Provider, "pass-local")
+		if defaultGroup, ok := cfg.Inventory.Group["default"]; ok &&
+			!tablePathDefined(table, "inventory", "group", "default", "auth") &&
+			defaultGroup.Auth.Provider == "pass-local" {
+			defaultGroup.Auth = InventoryAuthConfig{}
+			cfg.Inventory.Group["default"] = defaultGroup
+		}
+	}
+}
+
+func pruneImplicitInventoryDefaults(table map[string]any, cfg *Config) {
 	if cfg == nil || cfg.Inventory.Group == nil {
 		return
 	}
-	defaultGroupExplicit := md.IsDefined("inventory", "group", "default")
-	configDefinesGroups := md.IsDefined("inventory", "group")
-	configChangesDefaultGroup := md.IsDefined("inventory", "default_group") && cfg.Inventory.DefaultGroup != "default"
-	if !defaultGroupExplicit && (configDefinesGroups || configChangesDefaultGroup) {
+	defaultGroupExplicit := tablePathDefined(table, "inventory", "group", "default")
+	configDefinesGroups := tablePathDefined(table, "inventory", "group")
+	if !defaultGroupExplicit && configDefinesGroups {
 		delete(cfg.Inventory.Group, "default")
 	}
 }
@@ -341,15 +356,7 @@ func LoadDefault() (*Config, error) {
 
 // Save writes the config to the specified path.
 func Save(path string, cfg *Config) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		return fmt.Errorf("create config: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-	return toml.NewEncoder(f).Encode(cfg)
+	return SaveSparse(path, cfg)
 }
 
 // ============================================================================
@@ -402,10 +409,7 @@ func validateInventoryAuthProvider(scope string, auth InventoryAuthConfig, crede
 	}
 	provider := strings.TrimSpace(auth.Provider)
 	if provider == "" {
-		if credential.DefaultProvider == "" {
-			return fmt.Errorf("%s.provider requires credential.default_provider when omitted", scope)
-		}
-		return nil
+		return fmt.Errorf("%s.provider is required", scope)
 	}
 	if _, ok := credential.Provider[provider]; !ok {
 		return fmt.Errorf("%s.provider references unknown provider %q", scope, provider)

@@ -54,10 +54,7 @@ func (p hostAuthPatch) Validate(cfg *config.Config) error {
 	}
 	provider := p.Auth.Provider
 	if provider == "" {
-		provider = cfg.Credential.DefaultProvider
-	}
-	if provider == "" {
-		return fmt.Errorf("--credential-provider is required when credential.default_provider is unset")
+		return fmt.Errorf("--credential-provider is required")
 	}
 	if _, ok := cfg.Credential.Provider[provider]; !ok {
 		return fmt.Errorf("credential provider %q is not configured", provider)
@@ -115,22 +112,18 @@ func effectiveInventoryAuth(cfg *config.Config, host, group string) inventoryAut
 		cfg = config.DefaultConfig()
 	}
 	if hostCfg, ok := cfg.Inventory.Host[host]; ok && hostCfg.Auth.IsSet() {
-		return inventoryAuthViewFromAuth("host override", hostCfg.Auth, cfg.Credential.DefaultProvider)
+		return inventoryAuthViewFromAuth("host override", hostCfg.Auth)
 	}
 	if groupCfg, ok := cfg.Inventory.Group[group]; ok && groupCfg.Auth.IsSet() {
-		return inventoryAuthViewFromAuth("group "+group, groupCfg.Auth, cfg.Credential.DefaultProvider)
+		return inventoryAuthViewFromAuth("group "+group, groupCfg.Auth)
 	}
 	return inventoryAuthView{Source: "-", Provider: "-", Ref: "-", Username: "-", UsernameRef: "-"}
 }
 
-func inventoryAuthViewFromAuth(source string, auth config.InventoryAuthConfig, defaultProvider string) inventoryAuthView {
-	provider := auth.Provider
-	if provider == "" {
-		provider = defaultProvider
-	}
+func inventoryAuthViewFromAuth(source string, auth config.InventoryAuthConfig) inventoryAuthView {
 	return inventoryAuthView{
 		Source:      source,
-		Provider:    valueOrDash(provider),
+		Provider:    valueOrDash(auth.Provider),
 		Ref:         valueOrDash(auth.Ref),
 		Username:    valueOrDash(auth.Username),
 		UsernameRef: valueOrDash(auth.UsernameRef),

@@ -46,7 +46,7 @@ func TestValidateGroupNameRejectsWhitespace(t *testing.T) {
 }
 
 func TestValidateGroupNameAllowsBareKeySafeNames(t *testing.T) {
-	for _, name := range []string{"homelab", "custcbb", "lab-1", "lab_1"} {
+	for _, name := range []string{"homelab", "customer", "lab-1", "lab_1"} {
 		if err := validateGroupName(name); err != nil {
 			t.Fatalf("validateGroupName(%q): %v", name, err)
 		}

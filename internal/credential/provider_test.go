@@ -9,7 +9,6 @@ import (
 func TestNewRegistryBuildsNamedProviders(t *testing.T) {
 	registry, err := NewRegistry(&config.Config{
 		Credential: config.CredentialConfig{
-			DefaultProvider: "pass-local",
 			Provider: map[string]config.CredentialProviderConfig{
 				"pass-local": {Type: config.CredentialProviderPass},
 				"op-network": {Type: config.CredentialProvider1Password, Config: config.CredentialProviderDetailConfig{Vault: "Network"}},
@@ -34,8 +33,5 @@ func TestNewRegistryBuildsNamedProviders(t *testing.T) {
 	}
 	if op.groupRefs["prod"].Ref != "Network Shared Admin" {
 		t.Fatalf("op-network prod ref = %+v", op.groupRefs["prod"])
-	}
-	if registry.DefaultProviderName() != "pass-local" {
-		t.Fatalf("default provider = %q", registry.DefaultProviderName())
 	}
 }

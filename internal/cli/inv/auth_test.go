@@ -3,6 +3,7 @@ package inv
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
@@ -119,10 +120,20 @@ func TestHostAuthPatchRejectsConflicts(t *testing.T) {
 	}
 
 	err = (hostAuthPatch{
-		Auth: config.InventoryAuthConfig{Ref: "nssh/hosts/edge01", Username: "admin", UsernameRef: "op://vault/item/username"},
+		Auth: config.InventoryAuthConfig{Provider: "pass-local", Ref: "nssh/hosts/edge01", Username: "admin", UsernameRef: "op://vault/item/username"},
 	}).Validate(cfg)
 	if err == nil {
 		t.Fatal("expected username conflict")
+	}
+
+	err = (hostAuthPatch{
+		Auth: config.InventoryAuthConfig{Ref: "nssh/hosts/edge01"},
+	}).Validate(cfg)
+	if err == nil {
+		t.Fatal("expected missing provider error")
+	}
+	if want := "provider is required"; !strings.Contains(err.Error(), want) {
+		t.Fatalf("error %q does not contain %q", err, want)
 	}
 }
 
@@ -141,10 +152,10 @@ func TestEffectiveInventoryAuthHostOverridesGroup(t *testing.T) {
 	}
 }
 
-func TestEffectiveInventoryAuthFallsBackToGroupAndDefaultProvider(t *testing.T) {
+func TestEffectiveInventoryAuthFallsBackToGroupProvider(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Inventory.Group["lab"] = config.GroupConfig{
-		Auth: config.InventoryAuthConfig{Ref: "nssh/groups/lab"},
+		Auth: config.InventoryAuthConfig{Provider: "pass-local", Ref: "nssh/groups/lab"},
 	}
 
 	view := effectiveInventoryAuth(cfg, "edge01", "lab")
@@ -166,9 +177,9 @@ func TestEffectiveInventoryAuthMissing(t *testing.T) {
 
 func TestInventoryAuthDisplayRowsNamePasswordRefExplicitly(t *testing.T) {
 	rows := inventoryAuthDisplayRows(inventoryAuthView{
-		Source:      "group custcbb",
-		Provider:    "op-expedient",
-		Ref:         "op://Expedient/item/password",
+		Source:      "group customer",
+		Provider:    "op-network",
+		Ref:         "op://ExampleCorp/item/password",
 		Username:    "-",
 		UsernameRef: "-",
 	})

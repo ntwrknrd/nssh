@@ -41,7 +41,7 @@ Auth mappings live in inventory config:
 - `inventory.group.<group>.auth` for group defaults
 
 Each mapping may specify `provider`, `ref`, `username`, and `username_ref`.
-When `provider` is omitted, `credential.default_provider` is used.
+Every auth mapping must specify `provider`; nssh does not infer one.
 Group-level `default_user` is SSH inventory policy; provider refresh renders it
 as `User` in generated SSH config. Auth `username` is only for provider items
 that must override the inventory login user.

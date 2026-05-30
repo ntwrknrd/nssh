@@ -79,12 +79,12 @@ func TestOnePasswordGetGroupReadsConfiguredItemRef(t *testing.T) {
 	provider := &onePasswordProvider{
 		vault: "Network",
 		groupRefs: map[string]config.CredentialRefConfig{
-			"custcbb": {Ref: "Network Shared Admin"},
+			"customer": {Ref: "Network Shared Admin"},
 		},
 		runner: runner,
 	}
 
-	got, err := provider.GetGroup("custcbb")
+	got, err := provider.GetGroup("customer")
 	if err != nil {
 		t.Fatalf("GetGroup: %v", err)
 	}

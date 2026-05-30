@@ -29,8 +29,8 @@ func TestProviderStateRoundTripUsesInventoryPath(t *testing.T) {
 				ObjectID: "device:1",
 				Host:     "edge01",
 				Patterns: []string{"edge01"},
-				Group:    "custcbb",
-				HostName: "edge01.custcbb.local",
+				Group:    "customer",
+				HostName: "edge01.customer.local",
 			},
 		},
 	}
@@ -50,7 +50,7 @@ func TestProviderStateRoundTripUsesInventoryPath(t *testing.T) {
 	if loaded.Provider != "netbox-prod" {
 		t.Fatalf("provider = %q", loaded.Provider)
 	}
-	if loaded.Objects["device:1"].Group != "custcbb" {
+	if loaded.Objects["device:1"].Group != "customer" {
 		t.Fatalf("group = %q", loaded.Objects["device:1"].Group)
 	}
 }

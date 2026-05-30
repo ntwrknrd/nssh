@@ -51,13 +51,6 @@ func upsertLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config
 	if err := cfg.Inventory.Validate(); err != nil {
 		return err
 	}
-	groupName := patch.Group
-	if groupName == "" {
-		groupName = cfg.Inventory.DefaultGroup
-	}
-	if _, ok := cfg.Inventory.Group[groupName]; !ok {
-		return fmt.Errorf("group %q not found", groupName)
-	}
 	targetFile := localFilePath(paths, inventory.LocalProviderIncludeFile())
 
 	existing, existingCfg, err := findInventoryHostWithLocation(parser, cfg, paths, patch.Host)
@@ -66,6 +59,17 @@ func upsertLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config
 	}
 	if existing != nil && metadataForHost(existing, cfg, paths, nil).Owner != "local" {
 		return fmt.Errorf("host %q is provider-owned; change provider route config instead", patch.Host)
+	}
+
+	groupName := patch.Group
+	if groupName == "" && existing != nil {
+		groupName = inventory.LocalHostGroup(existing, "")
+	}
+	if groupName == "" {
+		return fmt.Errorf("group is required")
+	}
+	if _, ok := cfg.Inventory.Group[groupName]; !ok {
+		return fmt.Errorf("group %q not found", groupName)
 	}
 
 	var host *sshconfig.HostEntry
@@ -318,14 +322,10 @@ func metadataForHost(host *sshconfig.HostEntry, cfg *config.Config, paths *confi
 			return hostMetadata{Owner: name, Group: "-"}
 		}
 	}
-	group := cfg.Inventory.DefaultGroup
-	if group == "" {
-		group = "default"
-	}
 	if samePath(host.SourceFile, localFilePath(paths, inventory.LocalProviderIncludeFile())) {
-		return hostMetadata{Owner: inventory.LocalProviderName, Group: inventory.LocalHostGroup(host, group)}
+		return hostMetadata{Owner: inventory.LocalProviderName, Group: inventory.LocalHostGroup(host, "-")}
 	}
-	return hostMetadata{Owner: "local", Group: group}
+	return hostMetadata{Owner: "local", Group: "-"}
 }
 
 func samePath(a, b string) bool {

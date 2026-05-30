@@ -124,7 +124,7 @@ func writeLocalStatus(b *strings.Builder, cfg *config.Config, paths *config.Path
 
 	groupSet := make(map[string]bool)
 	for _, host := range parsed.Hosts {
-		groupSet[inventory.LocalHostGroup(host, cfg.Inventory.DefaultGroup)] = true
+		groupSet[inventory.LocalHostGroup(host, "")] = true
 	}
 	names := make([]string, 0, len(groupSet))
 	for name := range groupSet {

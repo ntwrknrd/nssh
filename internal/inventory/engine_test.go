@@ -8,7 +8,7 @@ import (
 
 func TestReconcileRoutesObjectsToGroups(t *testing.T) {
 	routes := []config.InventoryRouteConfig{{
-		Group: "custcbb",
+		Group: "customer",
 		Match: config.InventoryRouteMatch{
 			"manufacturer": {"Juniper"},
 			"status":       {"active"},
@@ -17,7 +17,7 @@ func TestReconcileRoutesObjectsToGroups(t *testing.T) {
 	objects := []Object{{
 		ObjectID: "device:1",
 		Name:     "edge01",
-		HostName: "edge01.custcbb.local",
+		HostName: "edge01.customer.local",
 		Attributes: map[string][]string{
 			"manufacturer": {"Juniper"},
 			"status":       {"active"},
@@ -28,7 +28,7 @@ func TestReconcileRoutesObjectsToGroups(t *testing.T) {
 	if len(plan.Adds) != 1 {
 		t.Fatalf("adds = %d, want 1", len(plan.Adds))
 	}
-	if plan.Adds[0].Group != "custcbb" {
+	if plan.Adds[0].Group != "customer" {
 		t.Fatalf("group = %q", plan.Adds[0].Group)
 	}
 }

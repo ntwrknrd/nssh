@@ -11,9 +11,9 @@ func TestGenerateProviderSSHConfigUsesInventoryHeader(t *testing.T) {
 	content := generateProviderSSHConfig([]*ProviderHost{{
 		Host:     "edge01",
 		Patterns: []string{"edge01"},
-		Group:    "custcbb",
-		HostName: "edge01.custcbb.local",
-		Username: "chris.jones",
+		Group:    "customer",
+		HostName: "edge01.customer.local",
+		Username: "netops",
 	}}, "netbox-prod", "netbox", true)
 
 	if !strings.HasPrefix(content, providerSSHConfigHeader) {
@@ -22,10 +22,10 @@ func TestGenerateProviderSSHConfigUsesInventoryHeader(t *testing.T) {
 	if !strings.Contains(content, "# Provider: netbox-prod (netbox)") {
 		t.Fatalf("missing provider comment: %q", content)
 	}
-	if !strings.Contains(content, "# Group: custcbb") {
+	if !strings.Contains(content, "# Group: customer") {
 		t.Fatalf("missing group comment: %q", content)
 	}
-	if !strings.Contains(content, "  User chris.jones\n") {
+	if !strings.Contains(content, "  User netops\n") {
 		t.Fatalf("missing user directive: %q", content)
 	}
 }

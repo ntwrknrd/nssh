@@ -8,7 +8,7 @@ import (
 func TestBuildSSHArgsUsesTargetAlias(t *testing.T) {
 	info := &HostInfo{
 		Target:   "nre-netlab01",
-		Hostname: "nre-netlab01.custcbb.local",
+		Hostname: "nre-netlab01.customer.local",
 		Username: "nre",
 	}
 	cmd := RemoteCommand{Argv: []string{"containerlab", "inspect", "--all", "--format", "json"}}
@@ -22,7 +22,7 @@ func TestBuildSSHArgsUsesTargetAlias(t *testing.T) {
 	if !strings.Contains(joined, "-l nre") {
 		t.Fatalf("missing username: %v", args)
 	}
-	if strings.Contains(joined, "nre-netlab01.custcbb.local 'containerlab'") {
+	if strings.Contains(joined, "nre-netlab01.customer.local 'containerlab'") {
 		t.Fatalf("should use host alias instead of hostname when target is set: %v", args)
 	}
 	if !strings.Contains(joined, "nre-netlab01 'containerlab'") {
@@ -32,7 +32,7 @@ func TestBuildSSHArgsUsesTargetAlias(t *testing.T) {
 
 func TestBuildSSHArgsFallsBackToHostname(t *testing.T) {
 	info := &HostInfo{
-		Hostname: "nre-netlab01.custcbb.local",
+		Hostname: "nre-netlab01.customer.local",
 		Username: "nre",
 	}
 	cmd := RemoteCommand{Argv: []string{"true"}}
@@ -40,7 +40,7 @@ func TestBuildSSHArgsFallsBackToHostname(t *testing.T) {
 	args := buildSSHArgs(info, cmd)
 	joined := strings.Join(args, " ")
 
-	if !strings.Contains(joined, "nre-netlab01.custcbb.local 'true'") {
+	if !strings.Contains(joined, "nre-netlab01.customer.local 'true'") {
 		t.Fatalf("expected hostname fallback in ssh args: %v", args)
 	}
 }

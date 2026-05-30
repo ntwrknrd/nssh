@@ -115,7 +115,6 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 
 type providerRegistry interface {
 	Provider(name string) credential.Provider
-	DefaultProviderName() string
 }
 
 func resolveBoundCredential(cfg *config.Config, registry providerRegistry, hostname, group, username string) (*ResolvedCredential, error) {
@@ -123,16 +122,14 @@ func resolveBoundCredential(cfg *config.Config, registry providerRegistry, hostn
 		return nil, nil
 	}
 	if ref, ok := cfg.Inventory.Host[hostname]; ok && ref.Auth.IsSet() {
-		providerName := bindingProvider(ref.Auth.CredentialRef(), registry.DefaultProviderName())
-		provider := registry.Provider(providerName)
+		provider := registry.Provider(ref.Auth.Provider)
 		return resolveScopedCredential(provider, scopeHost, hostname, username)
 	}
 	if group == "" {
 		return nil, nil
 	}
 	if ref, ok := cfg.Inventory.Group[group]; ok && ref.Auth.IsSet() {
-		providerName := bindingProvider(ref.Auth.CredentialRef(), registry.DefaultProviderName())
-		provider := registry.Provider(providerName)
+		provider := registry.Provider(ref.Auth.Provider)
 		return resolveScopedCredential(provider, scopeGroup, group, username)
 	}
 	return nil, nil
@@ -144,13 +141,6 @@ const (
 	scopeHost  credentialScope = "host"
 	scopeGroup credentialScope = "group"
 )
-
-func bindingProvider(ref config.CredentialRefConfig, defaultProvider string) string {
-	if strings.TrimSpace(ref.Provider) != "" {
-		return ref.Provider
-	}
-	return defaultProvider
-}
 
 func resolveScopedCredential(provider credential.Provider, scope credentialScope, name, username string) (*ResolvedCredential, error) {
 	if provider == nil {
@@ -207,5 +197,5 @@ func resolveGroup(hostEntry *sshconfig.HostEntry, cfg *config.Config) string {
 			}
 		}
 	}
-	return inventory.LocalHostGroup(hostEntry, cfg.Inventory.DefaultGroup)
+	return inventory.LocalHostGroup(hostEntry, "")
 }

@@ -19,7 +19,7 @@ func TestNormalizeNetBoxDevices(t *testing.T) {
 	devices := []netboxDevice{
 		{
 			ID:   42,
-			Name: "acm-core1.custcbb.local",
+			Name: "acm-core1.customer.local",
 			Status: netboxChoice{
 				Value: "active",
 				Label: "Active",
@@ -31,7 +31,7 @@ func TestNormalizeNetBoxDevices(t *testing.T) {
 				Manufacturer: &netboxNamedRef{Name: "Juniper", Slug: "juniper"},
 			},
 			Site:   &netboxNamedRef{Name: "ACM", Slug: "acm"},
-			Tenant: &netboxNamedRef{Name: "CustCBB", Slug: "custcbb"},
+			Tenant: &netboxNamedRef{Name: "Customer", Slug: "customer"},
 			Tags: []netboxNamedRef{
 				{Name: "Core Routing", Slug: "core-routing"},
 				{Name: "datapulse-metrics", Slug: "datapulse-metrics"},
@@ -66,13 +66,13 @@ func TestNormalizeNetBoxDevices(t *testing.T) {
 	if obj.ObjectType != "device" {
 		t.Fatalf("object_type = %q", obj.ObjectType)
 	}
-	if obj.Name != "acm-core1.custcbb.local" {
+	if obj.Name != "acm-core1.customer.local" {
 		t.Fatalf("name = %q", obj.Name)
 	}
-	if obj.FQDN != "acm-core1.custcbb.local" {
+	if obj.FQDN != "acm-core1.customer.local" {
 		t.Fatalf("fqdn = %q", obj.FQDN)
 	}
-	if obj.HostName != "acm-core1.custcbb.local" {
+	if obj.HostName != "acm-core1.customer.local" {
 		t.Fatalf("hostname = %q", obj.HostName)
 	}
 	if !slices.Contains(obj.Attributes["manufacturer"], "Juniper") {
@@ -84,7 +84,7 @@ func TestNormalizeNetBoxDevices(t *testing.T) {
 	if !slices.Contains(obj.Attributes["device_type_slug"], "mx480") {
 		t.Fatalf("device_type_slug attrs = %v", obj.Attributes["device_type_slug"])
 	}
-	if !slices.Contains(obj.Attributes["domain_suffix"], ".custcbb.local") {
+	if !slices.Contains(obj.Attributes["domain_suffix"], ".customer.local") {
 		t.Fatalf("domain_suffix attrs = %v", obj.Attributes["domain_suffix"])
 	}
 	if !slices.Contains(obj.Attributes["tag"], "Core Routing") || !slices.Contains(obj.Attributes["tag"], "core-routing") {
@@ -117,8 +117,8 @@ func TestNetBoxProviderDiscover(t *testing.T) {
 	})
 	handler.HandleFunc("/api/tenancy/tenants/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Query().Get("name") == "Expedient" || r.URL.Query().Get("slug") == "Expedient" || r.URL.Query().Get("slug") == "expedient-48":
-			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{Results: []netboxNamedRef{{Name: "Expedient", Slug: "expedient-48"}}})
+		case r.URL.Query().Get("name") == "ExampleCorp" || r.URL.Query().Get("slug") == "ExampleCorp" || r.URL.Query().Get("slug") == "example-48":
+			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{Results: []netboxNamedRef{{Name: "ExampleCorp", Slug: "example-48"}}})
 		default:
 			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{})
 		}
@@ -133,15 +133,15 @@ func TestNetBoxProviderDiscover(t *testing.T) {
 		if got := r.URL.Query()["manufacturer"]; !slices.Equal(got, []string{"arista", "juniper"}) {
 			t.Fatalf("manufacturer query = %v", got)
 		}
-		if got := r.URL.Query()["tenant"]; !slices.Equal(got, []string{"expedient-48"}) {
+		if got := r.URL.Query()["tenant"]; !slices.Equal(got, []string{"example-48"}) {
 			t.Fatalf("tenant query = %v", got)
 		}
-		if got := r.URL.Query().Get("name__iregex"); got != "^[A-Za-z0-9._-]+(?:\\.custcbb\\.local|\\.expedient\\.com)$" {
+		if got := r.URL.Query().Get("name__iregex"); got != "^[A-Za-z0-9._-]+(?:\\.customer\\.local|\\.example\\.com)$" {
 			t.Fatalf("name__iregex query = %q", got)
 		}
 		resp := netboxListResponse{
 			Results: []netboxDevice{
-				{ID: 1, Name: "edge01.expedient.com", Status: netboxChoice{Value: "active"}},
+				{ID: 1, Name: "edge01.example.com", Status: netboxChoice{Value: "active"}},
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
@@ -160,19 +160,19 @@ func TestNetBoxProviderDiscover(t *testing.T) {
 		},
 		Route: []config.InventoryRouteConfig{
 			{
-				Group: "custcbb",
+				Group: "customer",
 				Match: config.InventoryRouteMatch{
 					"manufacturer":  {"Juniper", "Arista"},
-					"tenant":        {"Expedient"},
-					"domain_suffix": {".custcbb.local"},
+					"tenant":        {"ExampleCorp"},
+					"domain_suffix": {".customer.local"},
 				},
 			},
 			{
-				Group: "cbb",
+				Group: "corp",
 				Match: config.InventoryRouteMatch{
 					"manufacturer":  {"Juniper", "Arista"},
-					"tenant":        {"Expedient"},
-					"domain_suffix": {".expedient.com"},
+					"tenant":        {"ExampleCorp"},
+					"domain_suffix": {".example.com"},
 				},
 			},
 		},
@@ -185,7 +185,7 @@ func TestNetBoxProviderDiscover(t *testing.T) {
 	if len(objects) != 1 {
 		t.Fatalf("objects = %d", len(objects))
 	}
-	if objects[0].HostName != "edge01.expedient.com" {
+	if objects[0].HostName != "edge01.example.com" {
 		t.Fatalf("hostname = %q", objects[0].HostName)
 	}
 }
@@ -216,7 +216,7 @@ func TestNetBoxProviderDiscoverLoadsTokenFromEnvFile(t *testing.T) {
 		}
 		resp := netboxListResponse{
 			Results: []netboxDevice{
-				{ID: 1, Name: "edge01.expedient.com", Status: netboxChoice{Value: "active"}},
+				{ID: 1, Name: "edge01.example.com", Status: netboxChoice{Value: "active"}},
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
@@ -257,7 +257,7 @@ func TestNetBoxProviderDiscoverUsesDefaultEnvFileAndTokenName(t *testing.T) {
 		}
 		resp := netboxListResponse{
 			Results: []netboxDevice{
-				{ID: 1, Name: "edge01.expedient.com", Status: netboxChoice{Value: "active"}},
+				{ID: 1, Name: "edge01.example.com", Status: netboxChoice{Value: "active"}},
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
@@ -293,7 +293,7 @@ func TestNetBoxProviderDetectsPaginationLoop(t *testing.T) {
 		resp := netboxListResponse{
 			Next: serverURLWithPath(r.Host, r.URL.Path, r.URL.RawQuery),
 			Results: []netboxDevice{
-				{ID: 1, Name: "edge01.expedient.com", Status: netboxChoice{Value: "active"}},
+				{ID: 1, Name: "edge01.example.com", Status: netboxChoice{Value: "active"}},
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
@@ -324,8 +324,8 @@ func TestBuildNetBoxDeviceQuery(t *testing.T) {
 	})
 	handler.HandleFunc("/api/tenancy/tenants/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Query().Get("name") == "Expedient" || r.URL.Query().Get("slug") == "Expedient" || r.URL.Query().Get("slug") == "expedient-48":
-			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{Results: []netboxNamedRef{{Name: "Expedient", Slug: "expedient-48"}}})
+		case r.URL.Query().Get("name") == "ExampleCorp" || r.URL.Query().Get("slug") == "ExampleCorp" || r.URL.Query().Get("slug") == "example-48":
+			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{Results: []netboxNamedRef{{Name: "ExampleCorp", Slug: "example-48"}}})
 		default:
 			_ = json.NewEncoder(w).Encode(netboxNamedListResponse{})
 		}
@@ -335,19 +335,19 @@ func TestBuildNetBoxDeviceQuery(t *testing.T) {
 
 	query := buildNetBoxDeviceQuery(context.Background(), server.Client(), server.URL, "test-token", []config.InventoryRouteConfig{
 		{
-			Group: "custcbb",
+			Group: "customer",
 			Match: config.InventoryRouteMatch{
 				"manufacturer":  {"Juniper", "Arista"},
-				"tenant":        {"Expedient"},
-				"domain_suffix": {".custcbb.local"},
+				"tenant":        {"ExampleCorp"},
+				"domain_suffix": {".customer.local"},
 			},
 		},
 		{
-			Group: "cbb",
+			Group: "corp",
 			Match: config.InventoryRouteMatch{
 				"manufacturer":  {"Arista", "Juniper"},
-				"tenant":        {"Expedient"},
-				"domain_suffix": {".expedient.com"},
+				"tenant":        {"ExampleCorp"},
+				"domain_suffix": {".example.com"},
 			},
 		},
 	})
@@ -355,10 +355,10 @@ func TestBuildNetBoxDeviceQuery(t *testing.T) {
 	if got := query["manufacturer"]; !slices.Equal(got, []string{"arista", "juniper"}) {
 		t.Fatalf("manufacturer query = %v", got)
 	}
-	if got := query["tenant"]; !slices.Equal(got, []string{"expedient-48"}) {
+	if got := query["tenant"]; !slices.Equal(got, []string{"example-48"}) {
 		t.Fatalf("tenant query = %v", got)
 	}
-	if got := query.Get("name__iregex"); got != "^[A-Za-z0-9._-]+(?:\\.custcbb\\.local|\\.expedient\\.com)$" {
+	if got := query.Get("name__iregex"); got != "^[A-Za-z0-9._-]+(?:\\.customer\\.local|\\.example\\.com)$" {
 		t.Fatalf("name__iregex query = %q", got)
 	}
 }
@@ -366,13 +366,13 @@ func TestBuildNetBoxDeviceQuery(t *testing.T) {
 func TestBuildNetBoxDeviceQuerySkipsPartialRouteFilters(t *testing.T) {
 	query := buildNetBoxDeviceQuery(context.Background(), nil, "https://netbox.example.com", "test-token", []config.InventoryRouteConfig{
 		{
-			Group: "custcbb",
+			Group: "customer",
 			Match: config.InventoryRouteMatch{
 				"manufacturer": {"Juniper"},
 			},
 		},
 		{
-			Group: "cbb",
+			Group: "corp",
 			Match: config.InventoryRouteMatch{},
 		},
 	})
@@ -396,7 +396,7 @@ func TestFetchDevicesIncludesQueryParameters(t *testing.T) {
 		}
 		resp := netboxListResponse{
 			Results: []netboxDevice{
-				{ID: 1, Name: "edge01.expedient.com", Status: netboxChoice{Value: "active"}},
+				{ID: 1, Name: "edge01.example.com", Status: netboxChoice{Value: "active"}},
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)

@@ -24,8 +24,7 @@ type Provider interface {
 
 // Registry holds configured credential provider instances by name.
 type Registry struct {
-	defaultProvider string
-	providers       map[string]Provider
+	providers map[string]Provider
 }
 
 // NewRegistry constructs all named credential provider instances.
@@ -39,8 +38,7 @@ func NewRegistry(cfg *config.Config) (*Registry, error) {
 	}
 
 	registry := &Registry{
-		defaultProvider: credCfg.DefaultProvider,
-		providers:       make(map[string]Provider, len(credCfg.Provider)),
+		providers: make(map[string]Provider, len(credCfg.Provider)),
 	}
 	for name, providerCfg := range credCfg.Provider {
 		provider, err := buildNamedProvider(name, providerCfg, cfg)
@@ -60,26 +58,9 @@ func (r *Registry) Provider(name string) Provider {
 	return r.providers[name]
 }
 
-// DefaultProviderName returns the configured default provider instance name.
-func (r *Registry) DefaultProviderName() string {
-	if r == nil {
-		return ""
-	}
-	return r.defaultProvider
-}
-
-// DefaultProvider returns the configured default provider instance.
-func (r *Registry) DefaultProvider() Provider {
-	if r == nil {
-		return nil
-	}
-	return r.providers[r.defaultProvider]
-}
-
 func buildNamedProvider(name string, providerCfg config.CredentialProviderConfig, cfg *config.Config) (Provider, error) {
-	credCfg := cfg.Credential
-	hostRefs := hostRefsForProvider(cfg.Inventory.Host, name, credCfg.DefaultProvider)
-	groupRefs := groupRefsForProvider(cfg.Inventory.Group, name, credCfg.DefaultProvider)
+	hostRefs := hostRefsForProvider(cfg.Inventory.Host, name)
+	groupRefs := groupRefsForProvider(cfg.Inventory.Group, name)
 	switch providerCfg.Type {
 	case config.CredentialProviderPass:
 		provider := newPassProvider(providerCfg).(*passProvider)
@@ -104,7 +85,7 @@ func buildNamedProvider(name string, providerCfg config.CredentialProviderConfig
 	}
 }
 
-func hostRefsForProvider(refs map[string]config.InventoryHostConfig, providerName, defaultProvider string) map[string]config.CredentialRefConfig {
+func hostRefsForProvider(refs map[string]config.InventoryHostConfig, providerName string) map[string]config.CredentialRefConfig {
 	if len(refs) == 0 {
 		return nil
 	}
@@ -114,11 +95,7 @@ func hostRefsForProvider(refs map[string]config.InventoryHostConfig, providerNam
 		if !auth.IsSet() {
 			continue
 		}
-		refProvider := auth.Provider
-		if refProvider == "" {
-			refProvider = defaultProvider
-		}
-		if refProvider == providerName {
+		if auth.Provider == providerName {
 			filtered[name] = auth.CredentialRef()
 		}
 	}
@@ -128,7 +105,7 @@ func hostRefsForProvider(refs map[string]config.InventoryHostConfig, providerNam
 	return filtered
 }
 
-func groupRefsForProvider(refs map[string]config.GroupConfig, providerName, defaultProvider string) map[string]config.CredentialRefConfig {
+func groupRefsForProvider(refs map[string]config.GroupConfig, providerName string) map[string]config.CredentialRefConfig {
 	if len(refs) == 0 {
 		return nil
 	}
@@ -138,11 +115,7 @@ func groupRefsForProvider(refs map[string]config.GroupConfig, providerName, defa
 		if !auth.IsSet() {
 			continue
 		}
-		refProvider := auth.Provider
-		if refProvider == "" {
-			refProvider = defaultProvider
-		}
-		if refProvider == providerName {
+		if auth.Provider == providerName {
 			filtered[name] = auth.CredentialRef()
 		}
 	}

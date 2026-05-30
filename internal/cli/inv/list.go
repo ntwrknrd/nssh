@@ -28,9 +28,9 @@ field:value matches a specific field exactly.
 Fields: host, hostname, id, user, port, provider, group.
 
 Examples:
-  nssh inv list -s cbb
-  nssh inv list -s group:cbb
-  nssh inv list -s 'group:cbb user:admin'
+  nssh inv list -s corp
+  nssh inv list -s group:corp
+  nssh inv list -s 'group:corp user:admin'
   nssh inv list -g`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if groups {

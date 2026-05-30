@@ -212,9 +212,8 @@ Resolution order:
 2. Group binding for the resolved inventory group.
 3. No password credential.
 
-A binding may omit `Provider` only when `[credential].default_provider` is set.
-That default is a convenience for compact config and new `inv set --credential-ref` operations;
-it is not a single active credential backend.
+A binding must include `Provider`. nssh does not infer a credential provider
+from global config.
 
 Provider callers must not know the provider's storage format.
 
@@ -257,8 +256,6 @@ Default config:
 
 ```toml
 [credential]
-default_provider = "pass-local"
-
 [credential.provider.pass-local]
 type = "pass"
 
@@ -337,7 +334,7 @@ Config rules:
 
 - Provider instance names must be TOML bare-key safe.
 - Provider binding names must reference configured provider instances.
-- `default_provider`, when set, must reference a configured provider instance.
+- Every host/group credential binding must specify a configured provider.
 - `age` must not validate as a provider type.
 - Invalid provider-session policy must fail validation.
 - Host credential bindings override group credential bindings.
@@ -640,13 +637,13 @@ Wizard flow:
 `--dry-run` should show selected inventory sources, credential provider
 instances, credential assignments, dependency checks, and planned file changes
 without writing. `--yes` may accept safe defaults for missing config (`local`
-inventory, `pass-local` credential provider, and the default group bound to
-`pass-local`), but it must not create GPG keys, create provider accounts, store
+inventory, `pass-local` credential provider, and an explicit `default` group
+bound to `pass-local`), but it must not create GPG keys, create provider accounts, store
 tokens, or make provider-auth decisions.
 
 Local inventory setup:
 
-- Ensure the default group exists.
+- Ensure an explicit `default` group exists.
 - Ensure `~/.ssh/nssh.d/provider_local.conf` can be used.
 - Do not require a first host during init.
 
@@ -759,7 +756,7 @@ Add tests that verify:
 - `age` no longer validates as a provider instance type
 - provider instance names must be TOML bare-key safe
 - host/group credential bindings must reference configured provider instances
-- host/group credential bindings may inherit `default_provider`
+- host/group credential bindings must specify a provider explicitly
 - invalid provider-session policy fails
 - Pass command defaults to `pass`
 
@@ -776,9 +773,9 @@ binding validation are not implemented.
 
 Add provider constants for `pass`, `1password`, and `bitwarden`. Remove `age`
 from active validation. Replace global `credential.type` with
-`credential.default_provider`, `credential.provider.<name>`, and host/group
-binding provider fields. Add provider config fields for command, prefix,
-account, vault, and provider-session policy.
+`credential.provider.<name>` and host/group binding provider fields. Add
+provider config fields for command, prefix, account, vault, and
+provider-session policy.
 
 - [x] **Step 3: Update example config**
 
@@ -809,8 +806,8 @@ Expected: pass.
 Cover:
 
 - interactive init shows inventory sources and credential provider assignments
-- local inventory plus Pass writes `pass-local` and binds the default group to
-  it
+- local inventory plus Pass writes `pass-local` and binds an explicit `default`
+  group to it
 - multiple inventory sources write multiple `[inventory.provider.<name>]`
   blocks
 - NetBox setup writes provider config without storing a token value
@@ -846,7 +843,7 @@ The UI should use short labels:
 ```text
 Inventory sources: Local SSH config, NetBox, Containerlab
 Credential providers: Pass, 1Password, Bitwarden
-Credential assignment: Default group -> pass-local
+Credential assignment: default -> pass-local
 ```
 
 Collect only settings nssh needs. Do not ask for or store provider secrets.

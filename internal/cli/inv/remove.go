@@ -64,10 +64,6 @@ func runRemoveGroup(group string) error {
 		ui.CommandEnd(ui.StatusError)
 		return err
 	}
-	if group == cfg.Inventory.DefaultGroup {
-		ui.CommandEnd(ui.StatusError)
-		return fmt.Errorf("cannot remove default group %q", group)
-	}
 	if _, ok := cfg.Inventory.Group[group]; !ok {
 		ui.Noop("Group %q not found", group)
 		ui.CommandEnd(ui.StatusNoop)
@@ -94,7 +90,7 @@ func runRemoveGroup(group string) error {
 		}
 	}
 	delete(cfg.Inventory.Group, group)
-	if err := config.Save(config.DefaultPaths().ConfigFile, cfg); err != nil {
+	if err := config.DeleteInventoryGroup(config.DefaultPaths().ConfigFile, cfg, group); err != nil {
 		ui.CommandEnd(ui.StatusError)
 		return err
 	}

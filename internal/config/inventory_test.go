@@ -12,8 +12,6 @@ import (
 func TestInventoryCredentialConfigDecode(t *testing.T) {
 	const input = `
 [credential]
-default_provider = "pass-local"
-
   [credential.provider.pass-local]
   type = "pass"
 
@@ -35,16 +33,13 @@ default_provider = "pass-local"
     [credential.provider.bw-lab.config]
     session = "external"
 
-[inventory]
-default_group = "lab"
+[inventory.group.lab]
 
-  [inventory.group.lab]
+  [inventory.group.customer]
+  domain_suffix = [".customer.local"]
+  default_user = "netops"
 
-  [inventory.group.custcbb]
-  domain_suffix = [".custcbb.local"]
-  default_user = "chris.jones"
-
-    [inventory.group.custcbb.auth]
+    [inventory.group.customer.auth]
     provider = "op-network"
     ref = "Network Shared Admin"
 
@@ -61,7 +56,7 @@ default_group = "lab"
     token_env = "NETBOX_TOKEN"
 
     [[inventory.provider.netbox-prod.route]]
-    group = "custcbb"
+    group = "customer"
     auth_mode = "password"
 
       [inventory.provider.netbox-prod.route.match]
@@ -92,9 +87,6 @@ default_group = "lab"
 		t.Fatalf("validate: %v", err)
 	}
 
-	if cfg.Credential.DefaultProvider != "pass-local" {
-		t.Fatalf("credential.default_provider = %q", cfg.Credential.DefaultProvider)
-	}
 	if cfg.Credential.Provider["pass-local"].Type != CredentialProviderPass {
 		t.Fatalf("pass-local type = %q", cfg.Credential.Provider["pass-local"].Type)
 	}
@@ -104,11 +96,11 @@ default_group = "lab"
 	if cfg.Credential.Provider["bw-lab"].Type != CredentialProviderBitwarden {
 		t.Fatalf("bw-lab type = %q", cfg.Credential.Provider["bw-lab"].Type)
 	}
-	if cfg.Inventory.Group["custcbb"].Auth.Provider != "op-network" {
-		t.Fatalf("inventory.group.custcbb.auth.provider = %q", cfg.Inventory.Group["custcbb"].Auth.Provider)
+	if cfg.Inventory.Group["customer"].Auth.Provider != "op-network" {
+		t.Fatalf("inventory.group.customer.auth.provider = %q", cfg.Inventory.Group["customer"].Auth.Provider)
 	}
-	if cfg.Inventory.Group["custcbb"].Auth.Ref != "Network Shared Admin" {
-		t.Fatalf("inventory.group.custcbb.auth.ref = %q", cfg.Inventory.Group["custcbb"].Auth.Ref)
+	if cfg.Inventory.Group["customer"].Auth.Ref != "Network Shared Admin" {
+		t.Fatalf("inventory.group.customer.auth.ref = %q", cfg.Inventory.Group["customer"].Auth.Ref)
 	}
 	if cfg.Inventory.Host["edge01"].Auth.Provider != "bw-lab" {
 		t.Fatalf("inventory.host.edge01.auth.provider = %q", cfg.Inventory.Host["edge01"].Auth.Provider)
@@ -116,14 +108,11 @@ default_group = "lab"
 	if cfg.Inventory.Host["edge01"].Auth.UsernameRef != "op://Network/Edge 01/username" {
 		t.Fatalf("inventory.host.edge01.auth.username_ref = %q", cfg.Inventory.Host["edge01"].Auth.UsernameRef)
 	}
-	if cfg.Inventory.DefaultGroup != "lab" {
-		t.Fatalf("inventory.default_group = %q", cfg.Inventory.DefaultGroup)
+	if got := cfg.Inventory.Group["customer"].DomainSuffix; len(got) != 1 || got[0] != ".customer.local" {
+		t.Fatalf("customer.domain_suffix = %v", got)
 	}
-	if got := cfg.Inventory.Group["custcbb"].DomainSuffix; len(got) != 1 || got[0] != ".custcbb.local" {
-		t.Fatalf("custcbb.domain_suffix = %v", got)
-	}
-	if cfg.Inventory.Group["custcbb"].DefaultUser != "chris.jones" {
-		t.Fatalf("custcbb.default_user = %q", cfg.Inventory.Group["custcbb"].DefaultUser)
+	if cfg.Inventory.Group["customer"].DefaultUser != "netops" {
+		t.Fatalf("customer.default_user = %q", cfg.Inventory.Group["customer"].DefaultUser)
 	}
 
 	nb := cfg.Inventory.Provider["netbox-prod"]
@@ -133,7 +122,7 @@ default_group = "lab"
 	if nb.Config.BaseURL != "https://netbox.example.com" {
 		t.Fatalf("base_url = %q", nb.Config.BaseURL)
 	}
-	if len(nb.Route) != 1 || nb.Route[0].Group != "custcbb" {
+	if len(nb.Route) != 1 || nb.Route[0].Group != "customer" {
 		t.Fatalf("netbox routes = %+v", nb.Route)
 	}
 	if nb.Route[0].AuthMode != AuthModePassword {
@@ -141,15 +130,12 @@ default_group = "lab"
 	}
 }
 
-func TestDefaultCredentialConfigCreatesPassLocal(t *testing.T) {
+func TestDefaultCredentialConfigCreatesPassLocalProvider(t *testing.T) {
 	cfg := CredentialConfig{}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 
-	if cfg.DefaultProvider != "pass-local" {
-		t.Fatalf("default_provider = %q", cfg.DefaultProvider)
-	}
 	provider := cfg.Provider["pass-local"]
 	if provider.Type != CredentialProviderPass {
 		t.Fatalf("pass-local type = %q", provider.Type)
@@ -171,7 +157,6 @@ func TestCredentialConfigValidation(t *testing.T) {
 		{
 			name: "pass provider",
 			cfg: CredentialConfig{
-				DefaultProvider: "pass-local",
 				Provider: map[string]CredentialProviderConfig{
 					"pass-local": {Type: CredentialProviderPass},
 				},
@@ -180,7 +165,6 @@ func TestCredentialConfigValidation(t *testing.T) {
 		{
 			name: "1password provider",
 			cfg: CredentialConfig{
-				DefaultProvider: "op-network",
 				Provider: map[string]CredentialProviderConfig{
 					"op-network": {Type: CredentialProvider1Password, Config: CredentialProviderDetailConfig{Vault: "Network"}},
 				},
@@ -189,7 +173,6 @@ func TestCredentialConfigValidation(t *testing.T) {
 		{
 			name: "bitwarden provider",
 			cfg: CredentialConfig{
-				DefaultProvider: "bw-lab",
 				Provider: map[string]CredentialProviderConfig{
 					"bw-lab": {Type: CredentialProviderBitwarden},
 				},
@@ -198,7 +181,6 @@ func TestCredentialConfigValidation(t *testing.T) {
 		{
 			name: "provider name must be bare-key safe",
 			cfg: CredentialConfig{
-				DefaultProvider: "bad.name",
 				Provider: map[string]CredentialProviderConfig{
 					"bad.name": {Type: CredentialProviderPass},
 				},
@@ -206,19 +188,8 @@ func TestCredentialConfigValidation(t *testing.T) {
 			wantErr: "bare-key safe",
 		},
 		{
-			name: "default provider must exist",
-			cfg: CredentialConfig{
-				DefaultProvider: "missing",
-				Provider: map[string]CredentialProviderConfig{
-					"pass-local": {Type: CredentialProviderPass},
-				},
-			},
-			wantErr: "default_provider references unknown provider",
-		},
-		{
 			name: "invalid provider-session policy",
 			cfg: CredentialConfig{
-				DefaultProvider: "op-network",
 				Provider: map[string]CredentialProviderConfig{
 					"op-network": {Type: CredentialProvider1Password, Config: CredentialProviderDetailConfig{Vault: "Network", Session: "forever"}},
 				},
@@ -255,7 +226,6 @@ func TestInventoryConfigValidation(t *testing.T) {
 		{
 			name: "default local group is valid",
 			cfg: InventoryConfig{
-				DefaultGroup: "default",
 				Group: map[string]GroupConfig{
 					"default": {},
 				},
@@ -264,7 +234,6 @@ func TestInventoryConfigValidation(t *testing.T) {
 		{
 			name: "invalid group name",
 			cfg: InventoryConfig{
-				DefaultGroup: "bad.name",
 				Group: map[string]GroupConfig{
 					"bad.name": {},
 				},
@@ -274,7 +243,6 @@ func TestInventoryConfigValidation(t *testing.T) {
 		{
 			name: "provider route group must exist",
 			cfg: InventoryConfig{
-				DefaultGroup: "default",
 				Group: map[string]GroupConfig{
 					"default": {},
 				},
@@ -291,7 +259,6 @@ func TestInventoryConfigValidation(t *testing.T) {
 		{
 			name: "provider route auth mode must be valid",
 			cfg: InventoryConfig{
-				DefaultGroup: "default",
 				Group: map[string]GroupConfig{
 					"default": {},
 				},
@@ -308,7 +275,6 @@ func TestInventoryConfigValidation(t *testing.T) {
 		{
 			name: "group auth requires ref",
 			cfg: InventoryConfig{
-				DefaultGroup: "default",
 				Group: map[string]GroupConfig{
 					"default": {Auth: InventoryAuthConfig{Provider: "pass-local"}},
 				},
@@ -316,9 +282,17 @@ func TestInventoryConfigValidation(t *testing.T) {
 			wantErr: "ref is required",
 		},
 		{
+			name: "group auth requires provider",
+			cfg: InventoryConfig{
+				Group: map[string]GroupConfig{
+					"default": {Auth: InventoryAuthConfig{Ref: "nssh/groups/default"}},
+				},
+			},
+			wantErr: "provider is required",
+		},
+		{
 			name: "host auth username options conflict",
 			cfg: InventoryConfig{
-				DefaultGroup: "default",
 				Group: map[string]GroupConfig{
 					"default": {},
 				},
@@ -331,7 +305,6 @@ func TestInventoryConfigValidation(t *testing.T) {
 		{
 			name: "containerlab requires jump host",
 			cfg: InventoryConfig{
-				DefaultGroup: "lab",
 				Group: map[string]GroupConfig{
 					"lab": {},
 				},
@@ -380,14 +353,11 @@ func TestConfigValidationRejectsUnknownInventoryAuthProvider(t *testing.T) {
 	}
 }
 
-func TestLoadInventoryGroupsDoNotRetainDefaultGroupWhenConfigDefinesGroups(t *testing.T) {
+func TestLoadInventoryGroupsDoNotRetainImplicitDefaultGroupWhenConfigDefinesGroups(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.toml")
 	input := `
-[inventory]
-default_group = "cbb"
-
-  [inventory.group.cbb]
+[inventory.group.corp]
 `
 	if err := os.WriteFile(path, []byte(input), 0600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -396,9 +366,6 @@ default_group = "cbb"
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
-	}
-	if cfg.Inventory.DefaultGroup != "cbb" {
-		t.Fatalf("default_group = %q", cfg.Inventory.DefaultGroup)
 	}
 	if _, ok := cfg.Inventory.Group["default"]; ok {
 		t.Fatalf("unexpected default group retained: %+v", cfg.Inventory.Group["default"])

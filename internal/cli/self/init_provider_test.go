@@ -29,9 +29,6 @@ func TestInitYesDefaultsToLocalInventoryAndPassCredentialProvider(t *testing.T) 
 	}
 
 	cfg := plan.Config
-	if cfg.Credential.DefaultProvider != "pass-local" {
-		t.Fatalf("default_provider = %q", cfg.Credential.DefaultProvider)
-	}
 	if cfg.Credential.Provider["pass-local"].Type != config.CredentialProviderPass {
 		t.Fatalf("pass-local provider = %+v", cfg.Credential.Provider["pass-local"])
 	}

@@ -26,7 +26,6 @@ func TestVisitDoctorFindingsEmitsBeforeCheckingLaterHosts(t *testing.T) {
 		},
 	}
 	cfg := &config.Config{Inventory: config.InventoryConfig{
-		DefaultGroup: "lab",
 		Group: map[string]config.GroupConfig{
 			"lab": {},
 		},
@@ -272,7 +271,6 @@ func newDoctorFixture(t *testing.T, localContent string) (*sshconfig.Parser, *co
 	}
 	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := &config.Config{Inventory: config.InventoryConfig{
-		DefaultGroup: "lab",
 		Group: map[string]config.GroupConfig{
 			"lab": {},
 		},

@@ -3,17 +3,17 @@ package selection
 import "testing"
 
 func TestSelectorMatchesPlainAndFieldTerms(t *testing.T) {
-	selector, err := Compile("group:cbb user:chris core", []string{"host", "hostname", "user", "provider", "group", "port"})
+	selector, err := Compile("group:corp user:chris core", []string{"host", "hostname", "user", "provider", "group", "port"})
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
 
 	matches := selector.Match(Row{
 		"host":     "151-core1",
-		"hostname": "151-core1.expedient.com",
+		"hostname": "151-core1.example.com",
 		"user":     "chris",
 		"provider": "local",
-		"group":    "cbb",
+		"group":    "corp",
 		"port":     "22",
 	})
 	if !matches {
@@ -22,14 +22,14 @@ func TestSelectorMatchesPlainAndFieldTerms(t *testing.T) {
 
 	wrongGroup := selector.Match(Row{
 		"host":     "151-core1",
-		"hostname": "151-core1.expedient.com",
+		"hostname": "151-core1.example.com",
 		"user":     "chris",
 		"provider": "local",
-		"group":    "custcbb",
+		"group":    "customer",
 		"port":     "22",
 	})
 	if wrongGroup {
-		t.Fatal("expected exact group selector not to match custcbb")
+		t.Fatal("expected exact group selector not to match customer")
 	}
 }
 

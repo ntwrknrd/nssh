@@ -25,6 +25,18 @@ New installs use:
 Include ~/.ssh/nssh.d/*
 ```
 
+Configuration stays in TOML and can be split with `include = [...]` at the
+root or under any table. Included files are merged first, then the importing
+file overrides them. Paths are relative to the file declaring the include.
+
+```toml
+[credential]
+include = ["credentials/*.toml"]
+
+[inventory]
+include = ["inventory/groups/*.toml", "inventory/netbox.toml"]
+```
+
 ## Inventory
 
 Inventory is managed with `nssh inv`. SSH config remains the canonical backing
@@ -57,7 +69,7 @@ Set the SSH login user on the inventory group when every host in that group
 uses the same account. Provider refresh writes this into generated SSH config.
 
 ```toml
-[inventory.group.custcbb]
+[inventory.group.customer]
 default_user = "netops"
 ```
 
@@ -89,12 +101,9 @@ if the destination group has an auth mapping, otherwise key auth.
 `nssh inv get <host>` shows the effective auth mapping for that host. It never
 prints the target password.
 
-Pass is the default provider:
+New installs include a `pass-local` provider and explicit group auth mapping:
 
 ```toml
-[credential]
-default_provider = "pass-local"
-
 [credential.provider.pass-local]
 type = "pass"
 
@@ -108,7 +117,8 @@ ref = "nssh/groups/default"
 ```
 
 The auth mapping points at the password record. The SSH username belongs to
-inventory group config unless the provider item must override it.
+inventory group config unless the provider item must override it. Every auth
+mapping must specify `provider`; nssh does not infer one.
 
 1Password and Bitwarden can be added as named providers:
 

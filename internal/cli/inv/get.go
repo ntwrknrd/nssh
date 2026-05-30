@@ -81,7 +81,7 @@ func runGetGroup(name string) error {
 		ui.CommandEnd(ui.StatusError)
 		return fmt.Errorf("group %q not found", name)
 	}
-	auth := inventoryAuthViewFromAuth("group "+name, group.Auth, cfg.Credential.DefaultProvider)
+	auth := inventoryAuthViewFromAuth("group "+name, group.Auth)
 	if !group.Auth.IsSet() {
 		auth = inventoryAuthView{Source: "-", Provider: "-", Ref: "-", Username: "-", UsernameRef: "-"}
 	}
