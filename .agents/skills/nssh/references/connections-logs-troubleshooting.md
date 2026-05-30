@@ -1,0 +1,139 @@
+# Connections, Logs, And Troubleshooting
+
+Audience: agents answering nssh connection, agent, recording, and operational
+questions.
+
+## Connection Behavior
+
+Source paths:
+
+- `internal/app/command.go`
+- `internal/app/app.go`
+- `internal/connect/lookup.go`
+- `internal/connect/resolve.go`
+- `internal/connect/connect.go`
+- `internal/ssh/connector/`
+- `internal/ssh/compat/`
+
+`nssh HOST` is rewritten by `internal/app.PreprocessArgs` to hidden
+`smart-connect`. Direct `nssh connect HOST` bypasses smart host-add fallback and
+treats the host as the SSH destination.
+
+Smart lookup behavior:
+
+1. Check SSH config for an exact host.
+2. If one partial match exists, use it.
+3. If multiple partial matches exist, open `fzf` selection.
+4. If lookup misses and external inventory providers exist, refresh providers
+   once and retry.
+5. If lookup still misses, offer local inventory creation with `nssh inv set`.
+
+Username precedence in `internal/connect.ResolveHostForConnect`:
+
+1. Explicit `user@host` or `-l user`.
+2. SSH config `User`.
+3. Inventory group `default_user`.
+4. `host.defaults.default_user`.
+
+OpenSSH owns transport. nssh starts OpenSSH inside a PTY and injects a resolved
+password only after prompt detection.
+
+## Agent Runtime
+
+Commands:
+
+```bash
+nssh agent status
+nssh agent stop
+nssh agent restart
+nssh agent doctor
+```
+
+The agent is a Unix socket daemon used for provider-session requests and
+background archive maintenance. It is not a password cache and does not lock or
+unlock external password managers.
+
+Relevant config:
+
+```toml
+[agent]
+auto_start = true
+idle_timeout = "1h"
+activity_increment = "15m"
+max_lifetime = "24h"
+```
+
+If a `session = "agent"` provider cannot connect to the agent and
+`agent.auto_start` is true, nssh starts the runtime automatically.
+
+## Host Keys And Legacy SSH
+
+Host-key behavior is configured under `[ssh.security]`:
+
+```toml
+accept_once_mode = "pin"
+host_key_policy = "pin"
+compat_persist_probes = false
+```
+
+`accept_once_mode = "pin"` uses a stricter accept-once flow. `accept-new` uses
+OpenSSH trust-on-first-use behavior.
+
+On legacy SSH algorithm failures, `internal/connect.handleCompatibilityFix`
+probes the target, maps stderr through `internal/ssh/compat`, asks before
+persisting fixes, writes them to the owning SSH include file, and retries.
+
+## Recordings And Logs
+
+Commands:
+
+```bash
+nssh log list
+nssh log search <pattern>
+nssh log play <id>
+nssh log export <id>
+nssh log upload <id>
+nssh log delete <id>
+nssh log auth
+```
+
+Recording config lives under `[logging.session]`. Recording is disabled by
+default. When enabled, nssh wraps the outer command with asciinema and guards the
+inner connection with `NSSH_RECORDING_INNER=1`.
+
+Recording files default to `~/.local/state/nssh/casts`. Archive maintenance is
+configured under `[logging.session.archive]` and executed by the agent runtime.
+
+Audit logging is separate from session recording and lives under
+`[logging.audit]`.
+
+## Diagnostics
+
+Use these first:
+
+```bash
+nssh self status
+nssh inv status
+nssh inv doctor
+nssh agent status
+nssh agent doctor
+nssh -v <command>
+NSSH_DEBUG=1 nssh <host>
+```
+
+For performance questions, benchmark the actual host:
+
+```bash
+nssh self bench ssh <host>
+nssh self bench scp <host>
+```
+
+Benchmark artifacts are written under `~/.local/share/nssh/benchmarks/`.
+
+For provider credential failures, separate these causes:
+
+- Auth mapping missing or points at the wrong provider/ref.
+- Provider CLI not logged in or locked.
+- Provider item exists but username does not match selected SSH username.
+- Inventory host is in a group without auth and route defaults to key mode.
+- External inventory cache is stale; run `nssh inv status` or trigger refresh.
