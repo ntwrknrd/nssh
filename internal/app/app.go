@@ -60,6 +60,10 @@ func Run(opts Options) int {
 }
 
 func execute(opts Options, args []string) error {
+	if len(args) > 0 && completionEntrypoints[args[0]] {
+		return fmt.Errorf("shell completion is not supported")
+	}
+
 	rootCmd := NewRootCmd(opts)
 	rootCmd.SetArgs(PreprocessArgs(args))
 	return rootCmd.Execute()

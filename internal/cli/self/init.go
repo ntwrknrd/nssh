@@ -14,17 +14,15 @@ import (
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/shell"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
 
 // InitOptions configures the behavior of runInit.
 type InitOptions struct {
-	SkipShell bool // skip shell integration entirely
-	DryRun    bool // preview mode, no changes made
-	Yes       bool // auto-confirm all prompts
-	Quiet     bool // minimal output (for reinstall)
+	DryRun bool // preview mode, no changes made
+	Yes    bool // auto-confirm all prompts
+	Quiet  bool // minimal output
 }
 
 // NewInitCmd creates the init subcommand.
@@ -34,17 +32,11 @@ func NewInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize configuration",
-		Long: `Initialize nssh with configuration and shell integration.
-
-Automatically detects your shell and offers to install:
-- Shell helper functions (bash/zsh/fish)
-- Shell completions
-- Profile sourcing snippet
+		Long: `Initialize nssh configuration.
 
 Credentials are protected with a passphrase using scrypt encryption.
 Session caching keeps credentials unlocked for 4 hours (configurable).
 
-Use --skip-shell to opt out of shell integration entirely.
 Use -y to skip all confirmation prompts.
 
 To start fresh, use 'nssh self reset'.`,
@@ -53,7 +45,6 @@ To start fresh, use 'nssh self reset'.`,
 		},
 	}
 
-	cmd.Flags().BoolVar(&opts.SkipShell, "skip-shell", false, "skip shell integration")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "preview changes without applying")
 	cmd.Flags().BoolVarP(&opts.Yes, "yes", "y", false, "skip confirmation prompts")
 
@@ -185,23 +176,6 @@ func runInit(opts InitOptions) error {
 		}
 	}
 
-	// Shell integration
-	if !opts.Quiet {
-		ui.SubSection("Shell Integration")
-	}
-	if opts.SkipShell {
-		if !opts.Quiet {
-			ui.Info("Shell integration: skipped (--skip-shell)")
-		}
-	} else {
-		if err := installShellIntegration(paths, opts.DryRun, opts.Yes); err != nil {
-			ui.Warning("Shell integration failed: %v", err)
-		} else {
-			shellInfo := DetectShell()
-			ui.Warning("Restart your shell or run: source %s", AbbreviatePath(shellInfo.RCFile))
-		}
-	}
-
 	// Determine final status
 	missingRequired := false
 	for _, dep := range deps {
@@ -242,174 +216,6 @@ func runInit(opts InitOptions) error {
 	}
 
 	return nil
-}
-
-func installShellIntegration(paths *config.Paths, dryRun, yes bool) error {
-	shellInfo := DetectShell()
-
-	if shellInfo.Name == "unknown" {
-		ui.Warning("Unknown shell - skipping shell integration")
-		return nil
-	}
-
-	// Confirm installation
-	if !yes && !dryRun {
-		result, _ := ui.Confirm(fmt.Sprintf("Install shell integration for %s?", shellInfo.Name), true)
-		if !result {
-			ui.Info("Shell integration: skipped (user declined)")
-			return nil
-		}
-	}
-
-	// Write shell integration script
-	shareDir := paths.DataDir
-	var scriptPath string
-	var scriptContent string
-
-	switch shellInfo.Name {
-	case "fish":
-		scriptPath = filepath.Join(shareDir, "nssh-shell-integration.fish")
-		scriptContent = shell.FishIntegration
-	default: // bash, zsh
-		scriptPath = filepath.Join(shareDir, "nssh-shell-integration.sh")
-		scriptContent = shell.BashZshIntegration
-	}
-
-	if !dryRun {
-		if err := os.MkdirAll(shareDir, 0755); err != nil {
-			return fmt.Errorf("create share dir: %w", err)
-		}
-		if err := os.WriteFile(scriptPath, []byte(scriptContent), 0644); err != nil {
-			return fmt.Errorf("write script: %w", err)
-		}
-	}
-	ui.Success("Shell script: %s", AbbreviatePath(scriptPath))
-
-	// Install completions
-	if err := installCompletions(shellInfo.Name, dryRun); err != nil {
-		ui.Warning("Completions: %v", err)
-	} else {
-		ui.Success("Completions installed")
-	}
-
-	// Append source snippet to rc file
-	if err := appendSourceSnippet(shellInfo, scriptPath, dryRun); err != nil {
-		ui.Warning("RC file update: %v", err)
-	} else {
-		ui.Success("RC file updated: %s", AbbreviatePath(shellInfo.RCFile))
-	}
-
-	return nil
-}
-
-func installCompletions(shellName string, dryRun bool) error {
-	if rootCmd == nil {
-		return fmt.Errorf("root command not set")
-	}
-
-	home := homeDir()
-	var completionPath string
-
-	switch shellName {
-	case "fish":
-		completionPath = filepath.Join(home, ".config", "fish", "completions", "nssh.fish")
-	case "zsh":
-		// Use ~/.zsh/completions if it exists, otherwise create it
-		completionDir := filepath.Join(home, ".zsh", "completions")
-		completionPath = filepath.Join(completionDir, "_nssh")
-	case "bash":
-		completionDir := filepath.Join(home, ".bash_completion.d")
-		completionPath = filepath.Join(completionDir, "nssh")
-	default:
-		return fmt.Errorf("unsupported shell: %s", shellName)
-	}
-
-	if dryRun {
-		return nil
-	}
-
-	// Ensure completion directory exists
-	completionDir := filepath.Dir(completionPath)
-	if err := os.MkdirAll(completionDir, 0755); err != nil {
-		return fmt.Errorf("create completion dir: %w", err)
-	}
-
-	// Generate completions directly using Cobra API
-	f, err := os.Create(completionPath)
-	if err != nil {
-		return fmt.Errorf("create completion file: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	switch shellName {
-	case "bash":
-		err = rootCmd.GenBashCompletion(f)
-	case "zsh":
-		err = rootCmd.GenZshCompletion(f)
-	case "fish":
-		err = rootCmd.GenFishCompletion(f, true)
-	}
-	if err != nil {
-		return fmt.Errorf("generate completions: %w", err)
-	}
-
-	return nil
-}
-
-func appendSourceSnippet(shellInfo ShellInfo, scriptPath string, dryRun bool) error {
-	// Check if already installed
-	if checkShellIntegration(shellInfo.RCFile) {
-		return nil // Already installed
-	}
-
-	var snippet string
-	switch shellInfo.Name {
-	case "fish":
-		snippet = fmt.Sprintf(`
-%s
-source %s
-`, ShellIntegrationMarker, scriptPath)
-	default: // bash, zsh
-		snippet = fmt.Sprintf(`
-%s
-if [ -f "%s" ]; then
-    source "%s"
-fi
-`, ShellIntegrationMarker, scriptPath, scriptPath)
-	}
-
-	if dryRun {
-		return nil
-	}
-
-	// Ensure rc file directory exists
-	rcDir := filepath.Dir(shellInfo.RCFile)
-	if err := os.MkdirAll(rcDir, 0755); err != nil {
-		return fmt.Errorf("create rc dir: %w", err)
-	}
-
-	// Append to rc file
-	f, err := os.OpenFile(shellInfo.RCFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("open rc file: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	if _, err := f.WriteString(snippet); err != nil {
-		return fmt.Errorf("write snippet: %w", err)
-	}
-
-	return nil
-}
-
-// RunInitQuiet runs init with minimal output (used by reinstall).
-// Only refreshes shell integration, does not touch credential protection.
-func RunInitQuiet(dryRun bool) error {
-	return runInit(InitOptions{
-		DryRun: dryRun,
-		Yes:    true,
-		Quiet:  true,
-	})
 }
 
 // ensureSSHConfigInclude ensures ~/.ssh/config has an Include directive for nssh.d.

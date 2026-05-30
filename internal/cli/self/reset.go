@@ -49,7 +49,6 @@ This command permanently deletes:
 - Session recordings
 - nssh configuration
 
-Shell integration in your rc file will remain but become a harmless no-op.
 SSH config (~/.ssh/) will not be modified.
 
 Use --dry-run to preview what would be deleted.
@@ -90,8 +89,6 @@ func runReset(dryRun, force bool) error {
 	fmt.Println()
 
 	// Show what's preserved
-	shellInfo := DetectShell()
-	ui.Info("Shell integration in %s will remain (harmless no-op)", AbbreviatePath(shellInfo.RCFile))
 	ui.Info("SSH config (~/.ssh/) will not be modified")
 	fmt.Println()
 

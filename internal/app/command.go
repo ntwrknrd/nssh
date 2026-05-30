@@ -28,8 +28,12 @@ var (
 		"smart-connect":      true,
 		"__list-subcommands": true,
 		"__agent":            true,
-		"__complete":         true,
-		"__completeNoDesc":   true,
+	}
+
+	completionEntrypoints = map[string]bool{
+		"completion":       true,
+		"__complete":       true,
+		"__completeNoDesc": true,
 	}
 
 	sshFlagsWithValue = map[string]bool{
@@ -91,7 +95,6 @@ and record sessions.`,
 	rootCmd.PersistentFlags().BoolP("help", "h", false, "Print command help")
 
 	self.SetVersion(opts.Version, opts.Commit, opts.Date, strings.Join(agent.CompiledFeatures, ", "))
-	self.SetRootCmd(rootCmd)
 
 	rootCmd.AddCommand(newConnectCmd())
 	rootCmd.AddCommand(newSmartConnectCmd())
@@ -279,7 +282,7 @@ func newSelfCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "self",
 		Short: "Manage nssh",
-		Long:  "Manage nssh installation, shell integration, and updates.",
+		Long:  "Manage nssh installation and updates.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()

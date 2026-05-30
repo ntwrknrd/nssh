@@ -6,59 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
-
-	"github.com/spf13/cobra"
 )
-
-// rootCmd holds a reference to the root command for completion generation.
-var rootCmd *cobra.Command
-
-// SetRootCmd sets the root command (called from main for completion generation).
-func SetRootCmd(cmd *cobra.Command) {
-	rootCmd = cmd
-}
-
-// ShellInfo contains detected shell information.
-type ShellInfo struct {
-	Name   string // "bash", "zsh", "fish", or "unknown"
-	RCFile string // Path to the shell's rc file
-}
-
-// DetectShell detects the user's shell and returns appropriate rc file path.
-func DetectShell() ShellInfo {
-	shell := os.Getenv("SHELL")
-	home := homeDir()
-
-	switch {
-	case strings.Contains(shell, "fish"):
-		return ShellInfo{
-			Name:   "fish",
-			RCFile: filepath.Join(home, ".config", "fish", "config.fish"),
-		}
-	case strings.Contains(shell, "zsh"):
-		return ShellInfo{
-			Name:   "zsh",
-			RCFile: filepath.Join(home, ".zshrc"),
-		}
-	case strings.Contains(shell, "bash"):
-		// Prefer .bashrc on Linux, .bash_profile on macOS
-		rcFile := filepath.Join(home, ".bashrc")
-		if runtime.GOOS == "darwin" {
-			rcFile = filepath.Join(home, ".bash_profile")
-		}
-		return ShellInfo{
-			Name:   "bash",
-			RCFile: rcFile,
-		}
-	default:
-		return ShellInfo{
-			Name:   "unknown",
-			RCFile: filepath.Join(home, ".bashrc"),
-		}
-	}
-}
 
 // FindBinary returns the full path to the nssh binary, or empty string if not found.
 func FindBinary() string {
@@ -144,9 +93,6 @@ func AbbreviatePath(path string) string {
 	}
 	return path
 }
-
-// ShellIntegrationMarker is the comment marker used to identify nssh shell integration.
-const ShellIntegrationMarker = "# nssh shell integration"
 
 // Dependency represents an external binary dependency.
 type Dependency struct {

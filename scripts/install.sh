@@ -187,7 +187,7 @@ main() {
             ;;
     esac
 
-    info "Run 'nssh self init' to set up shell integration"
+    info "Run 'nssh self init' to set up nssh"
 }
 
 main "$@"

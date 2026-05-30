@@ -1,7 +1,6 @@
 package self
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,7 +40,6 @@ func NewStatusCmd() *cobra.Command {
 - Binary location
 - Configuration files
 - Credentials and encryption setup
-- Shell integration status
 
 This helps diagnose setup issues and shows next steps for configuration.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -92,26 +90,6 @@ func runStatus() error {
 		printStatus(true, "CLI binary", AbbreviatePath(binaryPath))
 	} else {
 		printStatus(false, "CLI binary", "not found on PATH")
-	}
-
-	// Shell Integration (after dependencies)
-	ui.SubSection("Shell Integration")
-
-	shellInfo := DetectShell()
-	printStatus(true, "Detected shell", shellInfo.Name)
-
-	shellIntegrated := checkShellIntegration(shellInfo.RCFile)
-	if shellIntegrated {
-		printStatus(true, "Shell integration", "installed in "+AbbreviatePath(shellInfo.RCFile))
-	} else {
-		printStatus(false, "Shell integration", "not installed")
-	}
-
-	completionInstalled := checkCompletions(shellInfo.Name)
-	if completionInstalled {
-		printStatus(true, "Completions", "installed")
-	} else {
-		printStatus(false, "Completions", "not installed")
 	}
 
 	// Configuration
@@ -270,58 +248,5 @@ func formatDuration(seconds int64) string {
 		return fmt.Sprintf("%dm %ds", minutes, secs)
 	default:
 		return fmt.Sprintf("%ds", secs)
-	}
-}
-
-func checkShellIntegration(rcFile string) bool {
-	f, err := os.Open(rcFile)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = f.Close() }()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		if strings.Contains(scanner.Text(), ShellIntegrationMarker) {
-			return true
-		}
-	}
-	return false
-}
-
-func checkCompletions(shell string) bool {
-	home := homeDir()
-
-	switch shell {
-	case "fish":
-		return FileExists(filepath.Join(home, ".config", "fish", "completions", "nssh.fish"))
-	case "zsh":
-		// Check common zsh completion locations
-		locations := []string{
-			filepath.Join(home, ".oh-my-zsh", "completions", "_nssh"),
-			filepath.Join(home, ".zsh", "completions", "_nssh"),
-			"/usr/local/share/zsh/site-functions/_nssh",
-		}
-		for _, loc := range locations {
-			if FileExists(loc) {
-				return true
-			}
-		}
-		return false
-	case "bash":
-		// Check common bash completion locations
-		locations := []string{
-			filepath.Join(home, ".bash_completion.d", "nssh"),
-			"/etc/bash_completion.d/nssh",
-			"/usr/local/etc/bash_completion.d/nssh",
-		}
-		for _, loc := range locations {
-			if FileExists(loc) {
-				return true
-			}
-		}
-		return false
-	default:
-		return false
 	}
 }

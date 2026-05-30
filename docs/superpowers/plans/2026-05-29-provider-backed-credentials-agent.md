@@ -635,8 +635,7 @@ Wizard flow:
 10. Write or merge `config.toml` only after validation succeeds.
 11. Back up existing `config.toml` before overwriting it.
 12. Ensure the SSH config include is installed.
-13. Offer shell integration.
-14. Print concise status and next steps.
+13. Print concise status and next steps.
 
 `--dry-run` should show selected inventory sources, credential provider
 instances, credential assignments, dependency checks, and planned file changes
@@ -836,10 +835,9 @@ Expected: fail before the init wizard is refactored.
 
 - [x] **Step 2: Refactor init into a testable plan/apply flow**
 
-Separate provider selection, dependency checks, config merge, file writes, SSH
-include setup, and shell integration. Use injected prompt and command-runner
-interfaces so provider setup can be tested without real Pass, GPG, `op`, or
-`bw` commands.
+Separate provider selection, dependency checks, config merge, file writes, and
+SSH include setup. Use injected prompt and command-runner interfaces so provider
+setup can be tested without real Pass, GPG, `op`, or `bw` commands.
 
 - [x] **Step 3: Implement the provider-selection wizard**
 

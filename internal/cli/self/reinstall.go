@@ -28,7 +28,6 @@ func NewReinstallCmd() *cobra.Command {
 This command:
 1. Downloads the install script from GitHub
 2. Installs the latest release binary to ~/.local/bin
-3. Refreshes shell integration
 
 Use --release to install a specific GitHub release tag.
 Use --dev to build from source instead.
@@ -54,9 +53,6 @@ To reinitialize credentials, use 'nssh self rekey' or 'nssh self reset'.`,
 func runReinstallRelease(release string) error {
 	ui.CommandStart("REINSTALL NSSH")
 
-	// Track warnings for final status
-	hasWarnings := false
-
 	// Run install script from GitHub
 	ui.SubSection("Download and Install")
 	ui.Info("Fetching latest release from GitHub...")
@@ -77,30 +73,16 @@ func runReinstallRelease(release string) error {
 		return &exit.ExitError{Code: 1}
 	}
 
-	// Refresh shell integration
-	ui.SubSection("Shell Integration")
-	if err := RunInitQuiet(false); err != nil {
-		ui.Warning("Shell integration refresh failed: %v", err)
-		hasWarnings = true
-	} else {
-		ui.Success("Shell integration refreshed")
-	}
-
 	// Check if ~/.local/bin is on PATH
 	installDir := filepath.Join(homeDir(), ".local", "bin")
 	if FindBinary() == "" {
 		fmt.Println()
 		ui.Warning("Add to PATH: export PATH=\"%s:$PATH\"", AbbreviatePath(installDir))
-		hasWarnings = true
-	}
-
-	// Footer with appropriate status
-	if hasWarnings {
 		ui.CommandEnd(ui.StatusWarning)
-	} else {
-		ui.CommandEnd(ui.StatusSuccess)
+		return nil
 	}
 
+	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 
@@ -133,9 +115,6 @@ func normalizeRelease(release string) (string, error) {
 
 func runReinstallDev() error {
 	ui.CommandStart("REINSTALL NSSH (DEV)")
-
-	// Track warnings for final status
-	hasWarnings := false
 
 	// Find project root
 	projectRoot := FindProjectRoot()
@@ -173,25 +152,14 @@ func runReinstallDev() error {
 	}
 	ui.Success("Installed: %s", AbbreviatePath(binPath))
 
-	// Refresh shell integration
-	if err := RunInitQuiet(false); err != nil {
-		ui.Warning("Shell integration refresh failed: %v", err)
-		hasWarnings = true
-	}
-
 	// Check if ~/.local/bin is on PATH
 	if FindBinary() == "" {
 		fmt.Println()
 		ui.Warning("Add to PATH: export PATH=\"%s:$PATH\"", AbbreviatePath(installDir))
-		hasWarnings = true
-	}
-
-	// Footer with appropriate status
-	if hasWarnings {
 		ui.CommandEnd(ui.StatusWarning)
-	} else {
-		ui.CommandEnd(ui.StatusSuccess)
+		return nil
 	}
 
+	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }

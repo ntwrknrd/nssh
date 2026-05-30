@@ -5,7 +5,7 @@ injection, session recording, and installation tools.
 
 ## First Setup
 
-Initialize local state and shell integration:
+Initialize local state:
 
 ```bash
 nssh self init

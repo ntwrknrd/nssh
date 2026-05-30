@@ -30,7 +30,6 @@ SSH wrapper for power users: manage hosts and credentials, inject passwords auto
 - **Agent runtime** - Background daemon brokers provider sessions and metadata cache with configurable idle/lifetime timeouts
 - **SSH config management** - Create, remove, sort, and update host entries in SSH config files with automatic alphabetical sorting, timestamped backups, and indexed lookups across SSH 'Include' config files
 - **Legacy device compatibility** - Auto-detects SSH algorithm mismatches and applies KEX/cipher/MAC fixes for older network equipment (see [ARCHITECTURE.md](docs/ARCHITECTURE.md#ssh-compatibility-detection-and-remediation))
-- **Shell integration** - History tracking (Bash/Zsh/Fish) and tab completion for hostnames, contexts, and commands
 - **Session recording & playback** - Automatic asciinema integration with host-based filtering, idle time limiting, automatic archival, and comprehensive session management via `nssh log` CLI (list/play/upload/export/delete with pattern matching and interactive selection)
 - **File transfers** - Standard SCP CLI with shared credential resolution (see [USER_GUIDE.md](docs/USER_GUIDE.md#connecting))
 - **Host key pinning** - Pin-on-first-use security model with configurable trust-on-first-use fallback
@@ -57,7 +56,7 @@ Initialize nssh (interactive setup)
 nssh self init
 ```
 
-The `init` command guides you through: credential provider selection, SSH config setup, shell integration, and include file creation. **TIP:** After installation, run `nssh self status`
+The `init` command guides you through credential provider selection, SSH config setup, and include file creation. **TIP:** After installation, run `nssh self status`
 
 For detailed instructions & manual setup options see [Getting Started](docs/USER_GUIDE.md#getting-started).
 
@@ -68,7 +67,7 @@ nssh self uninstall
 # add --dry-run to preview what would be removed
 ```
 
-This removes shell integration, the binary, config, and recordings. Use `--keep-config` or `--keep-recordings` to preserve specific data.
+This removes the binary, config, and recordings. Use `--keep-config` or `--keep-recordings` to preserve specific data.
 
 ## Learn More
 
