@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/inventory"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
@@ -132,11 +133,43 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 		return err
 	}
 	parser := sshconfig.NewParser()
+	paths := config.DefaultPaths()
 	if group != "" || hostname != "" || user != "" || portSet || !authPatch.HasChange() {
-		if err := upsertLocalHost(parser, cfg, config.DefaultPaths(), hostPatch{
+		existing, _, err := findInventoryHostWithLocation(parser, cfg, paths, host)
+		if err != nil {
+			ui.CommandEnd(ui.StatusError)
+			return err
+		}
+		if existing != nil && metadataForHost(existing, cfg, paths, nil).Owner != "local" {
+			ui.CommandEnd(ui.StatusError)
+			return fmt.Errorf("host %q is provider-owned; change provider route config instead", host)
+		}
+		ui.Info("Owner: local inventory provider")
+		ui.Info("Output: %s", localFilePath(paths, inventory.LocalProviderIncludeFile()))
+		groupPrompt := promptInventoryGroup
+		if summaries, err := loadInventoryGroupSummaries(cfg, parser, paths); err == nil {
+			options := inventoryGroupSelectOptions(summaries)
+			groupPrompt = func(groups []string) (string, error) {
+				return promptInventoryGroupOptions(inventoryGroupSelectOptionsForNames(groups, options))
+			}
+		}
+		resolvedGroup, err := resolveLocalHostGroup(cfg, hostPatch{
 			Host:     host,
 			Group:    group,
 			HostName: hostname,
+		}, existing, groupPrompt)
+		if err != nil {
+			ui.CommandEnd(ui.StatusError)
+			return err
+		}
+		resolvedHostName := hostname
+		if existing == nil && strings.TrimSpace(resolvedHostName) == "" {
+			resolvedHostName = defaultHostNameForGroup(cfg, host, resolvedGroup)
+		}
+		if err := upsertLocalHost(parser, cfg, paths, hostPatch{
+			Host:     host,
+			Group:    resolvedGroup,
+			HostName: resolvedHostName,
 			User:     user,
 			Port:     port,
 			PortSet:  portSet,

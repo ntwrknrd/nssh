@@ -79,6 +79,63 @@ func TestUpsertLocalHostRequiresGroupForNewHost(t *testing.T) {
 	}
 }
 
+func TestResolveLocalHostGroupInfersFromHostnameDomainSuffix(t *testing.T) {
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Group: map[string]config.GroupConfig{
+			"cbb":     {DomainSuffix: []string{".expedient.com"}},
+			"custcbb": {DomainSuffix: []string{".custcbb.local"}},
+		},
+	}}
+
+	group, err := resolveLocalHostGroup(cfg, hostPatch{
+		Host:     "nre-netlab01",
+		HostName: "nre-netlab01.custcbb.local",
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("resolveLocalHostGroup: %v", err)
+	}
+	if group != "custcbb" {
+		t.Fatalf("group = %q, want custcbb", group)
+	}
+}
+
+func TestResolveLocalHostGroupPromptsWhenDomainDoesNotMatch(t *testing.T) {
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Group: map[string]config.GroupConfig{
+			"cbb": {},
+			"lab": {},
+		},
+	}}
+	var options []string
+
+	group, err := resolveLocalHostGroup(cfg, hostPatch{Host: "lab-router"}, nil, func(g []string) (string, error) {
+		options = g
+		return "lab", nil
+	})
+	if err != nil {
+		t.Fatalf("resolveLocalHostGroup: %v", err)
+	}
+	if group != "lab" {
+		t.Fatalf("group = %q, want lab", group)
+	}
+	if strings.Join(options, ",") != "cbb,lab" {
+		t.Fatalf("prompt options = %v, want sorted cbb, lab", options)
+	}
+}
+
+func TestDefaultHostNameForGroupUsesSingleDomainSuffixForShortHost(t *testing.T) {
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Group: map[string]config.GroupConfig{
+			"custcbb": {DomainSuffix: []string{".custcbb.local"}},
+		},
+	}}
+
+	got := defaultHostNameForGroup(cfg, "nre-netlab01", "custcbb")
+	if got != "nre-netlab01.custcbb.local" {
+		t.Fatalf("hostname = %q, want nre-netlab01.custcbb.local", got)
+	}
+}
+
 func TestUpsertLocalHostPreservesExistingGroupWhenGroupOmitted(t *testing.T) {
 	tmp := t.TempDir()
 	sshDir := filepath.Join(tmp, ".ssh")

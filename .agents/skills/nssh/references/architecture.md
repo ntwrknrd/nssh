@@ -188,9 +188,9 @@ Interactive connection starts in `internal/connect.ConnectHost`.
 
 1. `internal/app.PreprocessArgs` maps `nssh HOST` to hidden `smart-connect`.
 2. `connect.ResolveHostname` checks SSH config, exact matches, suggestions, and
-   fuzzy selection. On misses, it refreshes eligible inventory providers once.
-3. If lookup still misses, `internal/app.Run` spawns `nssh inv set <host>` for
-   local inventory creation.
+   fuzzy selection. On misses, it returns host-not-found immediately.
+3. On host-not-found, `internal/app.Run` spawns `nssh inv set <host>` for local
+   inventory creation.
 4. `connect.ResolveHostForConnect` loads config, finds the SSH host entry,
    resolves inventory group metadata, selects a username, and resolves any
    provider-backed credential.

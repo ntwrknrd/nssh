@@ -266,6 +266,84 @@ func (t *Table) Render() int {
 	return margin
 }
 
+// RenderTablesSideBySide prints two tables next to each other and returns the
+// left margin used to center the combined output.
+func RenderTablesSideBySide(left, right *Table, gap int) int {
+	rendered, margin := renderTablesSideBySideString(left, right, gap)
+	if rendered != "" {
+		fmt.Println(rendered)
+	}
+	return margin
+}
+
+// RenderTitledTablesSideBySide prints two labeled tables next to each other and
+// returns the left margin used to center the combined output.
+func RenderTitledTablesSideBySide(leftTitle string, left *Table, rightTitle string, right *Table, gap int) int {
+	rendered, margin := renderTitledTablesSideBySideString(leftTitle, left, rightTitle, right, gap)
+	if rendered != "" {
+		fmt.Println(rendered)
+	}
+	return margin
+}
+
+func renderTablesSideBySideString(left, right *Table, gap int) (string, int) {
+	if left == nil || len(left.headers) == 0 {
+		if right == nil {
+			return "", 0
+		}
+		return right.renderString()
+	}
+	if right == nil || len(right.headers) == 0 {
+		return left.renderString()
+	}
+	if gap < 1 {
+		gap = 1
+	}
+	rendered := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		left.renderRawString(),
+		strings.Repeat(" ", gap),
+		right.renderRawString(),
+	)
+	termW := termWidth()
+	leftMargin := (termW - lipgloss.Width(rendered)) / 2
+	if leftMargin < 0 {
+		leftMargin = 0
+	}
+	return lipgloss.PlaceHorizontal(termW, lipgloss.Center, rendered), leftMargin
+}
+
+func renderTitledTablesSideBySideString(leftTitle string, left *Table, rightTitle string, right *Table, gap int) (string, int) {
+	if left == nil || len(left.headers) == 0 {
+		return renderTablesSideBySideString(left, right, gap)
+	}
+	if right == nil || len(right.headers) == 0 {
+		return renderTablesSideBySideString(left, right, gap)
+	}
+	leftRaw := withTableTitle(leftTitle, left.renderRawString())
+	rightRaw := withTableTitle(rightTitle, right.renderRawString())
+	if gap < 1 {
+		gap = 1
+	}
+	rendered := lipgloss.JoinHorizontal(lipgloss.Top, leftRaw, strings.Repeat(" ", gap), rightRaw)
+	termW := termWidth()
+	leftMargin := (termW - lipgloss.Width(rendered)) / 2
+	if leftMargin < 0 {
+		leftMargin = 0
+	}
+	return lipgloss.PlaceHorizontal(termW, lipgloss.Center, rendered), leftMargin
+}
+
+func withTableTitle(title, rendered string) string {
+	title = strings.TrimSpace(title)
+	if title == "" || rendered == "" {
+		return rendered
+	}
+	width := lipgloss.Width(rendered)
+	label := lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render(title)
+	return lipgloss.PlaceHorizontal(width, lipgloss.Center, label) + "\n" + rendered
+}
+
 // LeftMargin returns the left margin that would be used for centering without printing.
 func (t *Table) LeftMargin() int {
 	_, margin := t.renderString()
@@ -274,8 +352,23 @@ func (t *Table) LeftMargin() int {
 
 // renderString renders the table and returns the centered string and left margin.
 func (t *Table) renderString() (string, int) {
-	if len(t.headers) == 0 {
+	rendered := t.renderRawString()
+	if rendered == "" {
 		return "", 0
+	}
+	termW := termWidth()
+	tableWidth := lipgloss.Width(rendered)
+	leftMargin := (termW - tableWidth) / 2
+	if leftMargin < 0 {
+		leftMargin = 0
+	}
+	centered := lipgloss.PlaceHorizontal(termW, lipgloss.Center, rendered)
+	return centered, leftMargin
+}
+
+func (t *Table) renderRawString() string {
+	if len(t.headers) == 0 {
+		return ""
 	}
 
 	termW := termWidth()
@@ -494,17 +587,7 @@ func (t *Table) renderString() (string, int) {
 		rendered = t.insertFooterRows(rendered, footerRows, borderStyle)
 	}
 
-	// Calculate centering
-	tableWidth := lipgloss.Width(rendered)
-	leftMargin := (termW - tableWidth) / 2
-	if leftMargin < 0 {
-		leftMargin = 0
-	}
-
-	// Center the table
-	centered := lipgloss.PlaceHorizontal(termW, lipgloss.Center, rendered)
-
-	return centered, leftMargin
+	return rendered
 }
 
 // insertFooterRows manipulates the rendered table string to add a separator and footer rows.

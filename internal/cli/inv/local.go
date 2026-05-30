@@ -15,6 +15,8 @@ import (
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/inventory"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
+	"github.com/ntwrknrd/nssh/internal/ui"
+	"golang.org/x/term"
 )
 
 type hostPatch struct {
@@ -30,6 +32,8 @@ type hostMetadata struct {
 	Owner string
 	Group string
 }
+
+type groupPromptFunc func([]string) (string, error)
 
 type importResult struct {
 	Added   int
@@ -103,6 +107,113 @@ func upsertLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config
 	targetCfg.Hosts = append(targetCfg.Hosts[:idx], append([]*sshconfig.HostEntry{host}, targetCfg.Hosts[idx:]...)...)
 	sshconfig.SortHosts(targetCfg.Hosts)
 	return writeParsedConfig(parser, targetCfg, paths)
+}
+
+func resolveLocalHostGroup(cfg *config.Config, patch hostPatch, existing *sshconfig.HostEntry, prompt groupPromptFunc) (string, error) {
+	if strings.TrimSpace(patch.Group) != "" {
+		return strings.TrimSpace(patch.Group), nil
+	}
+	if existing != nil {
+		if group := inventory.LocalHostGroup(existing, ""); group != "" {
+			return group, nil
+		}
+	}
+	if group := inferGroupFromDomainSuffix(cfg, patch); group != "" {
+		return group, nil
+	}
+	if prompt == nil {
+		return "", fmt.Errorf("group is required")
+	}
+	groups := sortedInventoryGroupNames(cfg)
+	if len(groups) == 0 {
+		return "", fmt.Errorf("group is required")
+	}
+	selected, err := prompt(groups)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(selected) == "" {
+		return "", fmt.Errorf("selection canceled")
+	}
+	return strings.TrimSpace(selected), nil
+}
+
+func inferGroupFromDomainSuffix(cfg *config.Config, patch hostPatch) string {
+	if cfg == nil {
+		return ""
+	}
+	target := strings.ToLower(strings.TrimSpace(patch.HostName))
+	if target == "" {
+		target = strings.ToLower(strings.TrimSpace(patch.Host))
+	}
+	type match struct {
+		group  string
+		suffix string
+	}
+	var matches []match
+	for group, groupCfg := range cfg.Inventory.Group {
+		for _, suffix := range groupCfg.DomainSuffix {
+			suffix = strings.ToLower(strings.TrimSpace(suffix))
+			if suffix != "" && strings.HasSuffix(target, suffix) {
+				matches = append(matches, match{group: group, suffix: suffix})
+			}
+		}
+	}
+	if len(matches) == 0 {
+		return ""
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		if len(matches[i].suffix) != len(matches[j].suffix) {
+			return len(matches[i].suffix) > len(matches[j].suffix)
+		}
+		return matches[i].group < matches[j].group
+	})
+	return matches[0].group
+}
+
+func sortedInventoryGroupNames(cfg *config.Config) []string {
+	if cfg == nil || len(cfg.Inventory.Group) == 0 {
+		return nil
+	}
+	groups := make([]string, 0, len(cfg.Inventory.Group))
+	for group := range cfg.Inventory.Group {
+		groups = append(groups, group)
+	}
+	sort.Strings(groups)
+	return groups
+}
+
+func defaultHostNameForGroup(cfg *config.Config, host, group string) string {
+	if cfg == nil || strings.Contains(host, ".") {
+		return host
+	}
+	groupCfg, ok := cfg.Inventory.Group[group]
+	if !ok || len(groupCfg.DomainSuffix) != 1 {
+		return host
+	}
+	suffix := strings.TrimSpace(groupCfg.DomainSuffix[0])
+	if suffix == "" {
+		return host
+	}
+	if strings.HasPrefix(suffix, ".") {
+		return host + suffix
+	}
+	return host + "." + suffix
+}
+
+func promptInventoryGroup(groups []string) (string, error) {
+	options := make([]ui.SelectOption, 0, len(groups))
+	for _, group := range groups {
+		options = append(options, ui.SelectOption{Label: group, Value: group})
+	}
+	return promptInventoryGroupOptions(options)
+}
+
+func promptInventoryGroupOptions(options []ui.SelectOption) (string, error) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return "", fmt.Errorf("group is required")
+	}
+	return ui.Select("Group", options)
 }
 
 func removeLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, hostName string) (bool, error) {

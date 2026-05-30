@@ -24,9 +24,10 @@ Smart lookup behavior:
 1. Check SSH config for an exact host.
 2. If one partial match exists, use it.
 3. If multiple partial matches exist, open `fzf` selection.
-4. If lookup misses and external inventory providers exist, refresh providers
-   once and retry.
-5. If lookup still misses, offer local inventory creation with `nssh inv set`.
+4. If lookup misses, offer local inventory creation with `nssh inv set`.
+
+Smart lookup does not refresh external inventory providers automatically on a
+miss; use `nssh inv status --refresh` when provider caches need to be updated.
 
 Username precedence in `internal/connect.ResolveHostForConnect`:
 
@@ -136,4 +137,4 @@ For provider credential failures, separate these causes:
 - Provider CLI not logged in or locked.
 - Provider item exists but username does not match selected SSH username.
 - Inventory host is in a group without auth and route defaults to key mode.
-- External inventory cache is stale; run `nssh inv status` or trigger refresh.
+- External inventory cache is stale; run `nssh inv status --refresh`.

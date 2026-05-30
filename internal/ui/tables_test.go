@@ -28,3 +28,35 @@ func TestStreamTableWritesRowsBeforeClose(t *testing.T) {
 		t.Fatalf("stream table did not close:\n%s", afterClose)
 	}
 }
+
+func TestRenderTablesSideBySideStringJoinsTablesHorizontally(t *testing.T) {
+	left := NewTable("Group", "Total")
+	left.AddRow("custcbb", "1,090")
+	right := NewTable("Provider", "Hosts")
+	right.AddRow("netbox-prod", "1,089")
+
+	rendered, _ := renderTablesSideBySideString(left, right, 4)
+
+	if !strings.Contains(rendered, "custcbb") || !strings.Contains(rendered, "netbox-prod") {
+		t.Fatalf("side-by-side render missing table content:\n%s", rendered)
+	}
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.Contains(line, "custcbb") && strings.Contains(line, "netbox-prod") {
+			return
+		}
+	}
+	t.Fatalf("expected table rows to render on the same line:\n%s", rendered)
+}
+
+func TestRenderTitledTablesSideBySideStringLabelsEachTable(t *testing.T) {
+	left := NewTable("Group")
+	left.AddRow("custcbb")
+	right := NewTable("local", "netbox-prod")
+	right.AddRow("1", "1,089")
+
+	rendered, _ := renderTitledTablesSideBySideString("Groups", left, "Provider counts", right, 4)
+
+	if !strings.Contains(rendered, "Groups") || !strings.Contains(rendered, "Provider counts") {
+		t.Fatalf("side-by-side render missing titles:\n%s", rendered)
+	}
+}
