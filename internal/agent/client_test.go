@@ -80,46 +80,6 @@ func TestClient_Hello(t *testing.T) {
 	}
 }
 
-func TestClient_CachePutGet(t *testing.T) {
-	socketPath := testSocketPath(t)
-	restore := SetSocketPathForTest(socketPath)
-	defer restore()
-	cancel, done := startTestAgent(t)
-	defer func() {
-		cancel()
-		<-done
-	}()
-
-	if !waitForSocket(t, 5*time.Second) {
-		t.Fatal("agent did not start in time")
-	}
-
-	client, err := Connect()
-	if err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
-	defer func() { _ = client.Close() }()
-
-	found, got, err := client.CacheGet("missing")
-	if err != nil {
-		t.Fatalf("CacheGet missing: %v", err)
-	}
-	if found || got != nil {
-		t.Fatalf("missing cache found=%v got=%q", found, got)
-	}
-
-	if err := client.CachePut("credential:edge01", []byte(`{"username":"netops","password":"secret"}`)); err != nil {
-		t.Fatalf("CachePut: %v", err)
-	}
-	found, got, err = client.CacheGet("credential:edge01")
-	if err != nil {
-		t.Fatalf("CacheGet: %v", err)
-	}
-	if !found || string(got) != `{"username":"netops","password":"secret"}` {
-		t.Fatalf("cache found=%v got=%q", found, got)
-	}
-}
-
 func TestClient_Status(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)

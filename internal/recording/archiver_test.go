@@ -1,6 +1,6 @@
 //go:build linux || darwin
 
-package agent
+package recording
 
 import (
 	"archive/tar"
@@ -11,9 +11,117 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
+
+type fakeClock struct {
+	mu     sync.Mutex
+	now    time.Time
+	timers map[*fakeTimer]struct{}
+}
+
+func newFakeClock(start time.Time) *fakeClock {
+	return &fakeClock{
+		now:    stripMonotonic(start),
+		timers: make(map[*fakeTimer]struct{}),
+	}
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) NewTimer(d time.Duration) ClockTimer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	t := &fakeTimer{
+		clock:    c,
+		ch:       make(chan time.Time, 1),
+		deadline: c.now.Add(d),
+	}
+	c.timers[t] = struct{}{}
+	return t
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	c.now = c.now.Add(d)
+	timers := make([]*fakeTimer, 0, len(c.timers))
+	for t := range c.timers {
+		timers = append(timers, t)
+	}
+	c.mu.Unlock()
+	for _, t := range timers {
+		t.fireIfDue()
+	}
+}
+
+type fakeTimer struct {
+	clock    *fakeClock
+	ch       chan time.Time
+	deadline time.Time
+	fired    bool
+	stopped  bool
+	mu       sync.Mutex
+}
+
+func (t *fakeTimer) C() <-chan time.Time { return t.ch }
+
+func (t *fakeTimer) Stop() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.stopped {
+		return false
+	}
+	active := !t.fired
+	t.stopped = true
+	return active
+}
+
+func (t *fakeTimer) Reset(d time.Duration) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	active := !t.stopped && !t.fired
+	select {
+	case <-t.ch:
+	default:
+	}
+	fc := t.clock
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	t.deadline = fc.now.Add(d)
+	t.fired = false
+	t.stopped = false
+	return active
+}
+
+func (t *fakeTimer) fireIfDue() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.stopped || t.fired {
+		return
+	}
+	fc := t.clock
+	fc.mu.Lock()
+	now := fc.now
+	fc.mu.Unlock()
+	if t.deadline.After(now) {
+		return
+	}
+	select {
+	case t.ch <- now:
+	default:
+	}
+	t.fired = true
+}
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
 func TestRecordingArchiverArchivesAndDeletes(t *testing.T) {
 	now := stripMonotonic(time.Now())
@@ -28,14 +136,14 @@ func TestRecordingArchiverArchivesAndDeletes(t *testing.T) {
 	oldPath2 := createCast(t, recordingDir, "host-b/2025-01-02/session-001.cast", 256, oldTime)
 	_ = createCast(t, recordingDir, "host-a/2025-02-01/session-002.cast", 64, newTime)
 
-	arch := newRecordingArchiver(archiveConfig{
-		enabled:     true,
-		sourceDir:   recordingDir,
-		archiveDir:  archiveDir,
-		minAge:      30 * 24 * time.Hour,
-		maxBundles:  12,
-		maxRunBytes: 0,
-		jitter:      0,
+	arch := NewArchiveRunner(ArchiveConfig{
+		Enabled:     true,
+		SourceDir:   recordingDir,
+		ArchiveDir:  archiveDir,
+		MinAge:      30 * 24 * time.Hour,
+		MaxBundles:  12,
+		MaxRunBytes: 0,
+		Jitter:      0,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)), clk)
 
 	summary, err := arch.RunOnce(context.Background())
@@ -90,14 +198,14 @@ func TestRecordingArchiverRetentionPrunesOldBundles(t *testing.T) {
 		}
 	}
 
-	arch := newRecordingArchiver(archiveConfig{
-		enabled:     true,
-		sourceDir:   recordingDir,
-		archiveDir:  archiveDir,
-		minAge:      24 * time.Hour,
-		maxBundles:  2,
-		maxRunBytes: 0,
-		jitter:      0,
+	arch := NewArchiveRunner(ArchiveConfig{
+		Enabled:     true,
+		SourceDir:   recordingDir,
+		ArchiveDir:  archiveDir,
+		MinAge:      24 * time.Hour,
+		MaxBundles:  2,
+		MaxRunBytes: 0,
+		Jitter:      0,
 	}, testLogger(), realClock{})
 
 	summary, err := arch.RunOnce(context.Background())
@@ -130,14 +238,14 @@ func TestRecordingArchiverFailureDoesNotDeleteSources(t *testing.T) {
 		t.Fatalf("chmod archive dir: %v", err)
 	}
 
-	arch := newRecordingArchiver(archiveConfig{
-		enabled:     true,
-		sourceDir:   recordingDir,
-		archiveDir:  archiveDir,
-		minAge:      30 * 24 * time.Hour,
-		maxBundles:  12,
-		maxRunBytes: 0,
-		jitter:      0,
+	arch := NewArchiveRunner(ArchiveConfig{
+		Enabled:     true,
+		SourceDir:   recordingDir,
+		ArchiveDir:  archiveDir,
+		MinAge:      30 * 24 * time.Hour,
+		MaxBundles:  12,
+		MaxRunBytes: 0,
+		Jitter:      0,
 	}, testLogger(), realClock{})
 
 	_, err := arch.RunOnce(context.Background())
@@ -164,14 +272,14 @@ func TestRecordingArchiverMaxRunBytes(t *testing.T) {
 	second := createCast(t, recordingDir, "host-a/2024-01-01/session-001.cast", 200, old.Add(time.Minute))
 	_ = createCast(t, recordingDir, "host-a/2024-01-01/session-002.cast", 300, old.Add(2*time.Minute))
 
-	arch := newRecordingArchiver(archiveConfig{
-		enabled:     true,
-		sourceDir:   recordingDir,
-		archiveDir:  archiveDir,
-		minAge:      24 * time.Hour,
-		maxBundles:  12,
-		maxRunBytes: 250,
-		jitter:      0,
+	arch := NewArchiveRunner(ArchiveConfig{
+		Enabled:     true,
+		SourceDir:   recordingDir,
+		ArchiveDir:  archiveDir,
+		MinAge:      24 * time.Hour,
+		MaxBundles:  12,
+		MaxRunBytes: 250,
+		Jitter:      0,
 	}, testLogger(), clk)
 
 	summary, err := arch.RunOnce(context.Background())

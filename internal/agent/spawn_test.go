@@ -190,13 +190,8 @@ func TestSpawn_FullCycle(t *testing.T) {
 // Note: The following tests would require actual process spawning which is
 // difficult to test in unit tests. They are documented here for completeness.
 
-// TestSpawn_IdentityPipeTransfer would verify:
-// - Identity is written to pipe (fd 3)
-// - Agent reads identity from pipe
-// - Identity is stored in memguard-protected memory
-
 // TestSpawn_ReadinessSignaling would verify:
-// - Agent signals readiness via pipe (fd 4)
+// - Agent signals readiness via pipe (fd 3)
 // - Parent waits for readiness before returning
 // - Timeout occurs if agent doesn't signal
 

@@ -16,9 +16,9 @@ Primary packages:
 - `internal/cli/resolve`: shared SSH/SCP host and credential resolution
 - `internal/credential`: provider abstraction and provider implementations
 - `internal/agent`: background runtime, provider-session broker, metadata cache,
-  socket lifecycle, peer checks, and recording archival
+  socket lifecycle, and peer checks
 - `internal/ssh/connector`: PTY connector and password prompt handling
-- `internal/ssh/recording`: recording plan and wrapper logic
+- `internal/recording`: recording plan, wrapper metadata, and archival policy
 
 ## Credential Model
 
@@ -77,7 +77,7 @@ responsibilities are:
 - socket path management and stale socket cleanup
 - peer credential verification
 - idle timeout, max lifetime, signal handling, and stop/restart behavior
-- background recording archival
+- hosting the background recording archive runner
 
 Protocol operations include `hello`, `status`, `lock`, metadata cache
 operations, and `provider_request`. `lock` is the internal stop operation used
@@ -99,8 +99,9 @@ by `nssh agent stop`; there is no public vault lock command.
 
 Recording is planned outside the connector. The recording package selects cast
 paths, lock directories, append behavior, title templates, idle limits, and
-archive eligibility. The agent owns background archival so normal SSH sessions
-do not pay archive maintenance cost.
+archive eligibility, and owns archive bundle policy. The agent hosts the
+background archive runner so normal SSH sessions do not pay archive maintenance
+cost.
 
 ## Troubleshooting Surfaces
 

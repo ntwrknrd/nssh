@@ -135,7 +135,6 @@ func runDoctor() error {
 		ui.PrintKeyValue("Socket", "inactive")
 	}
 	ui.PrintKeyValue("Peer verification", "enabled")
-	ui.PrintKeyValue("Secret cache", "disabled")
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }

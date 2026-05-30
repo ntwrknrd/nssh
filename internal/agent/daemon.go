@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/recording"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -221,6 +222,28 @@ func (s *sessionState) getIdleDeadline() time.Time {
 	return s.idleDeadline
 }
 
+type archiveClock struct {
+	clock clock
+}
+
+func (c archiveClock) Now() time.Time {
+	return c.clock.Now()
+}
+
+func (c archiveClock) NewTimer(d time.Duration) recording.ClockTimer {
+	return archiveTimer{timer: c.clock.NewTimer(d)}
+}
+
+type archiveTimer struct {
+	timer clockTimer
+}
+
+func (t archiveTimer) C() <-chan time.Time { return t.timer.C() }
+
+func (t archiveTimer) Stop() bool { return t.timer.Stop() }
+
+func (t archiveTimer) Reset(d time.Duration) bool { return t.timer.Reset(d) }
+
 // Run starts the agent daemon with the given provider and configuration.
 // The agent listens on a Unix socket and handles decrypt requests until:
 // - Idle timeout expires (no activity for IdleTimeout duration)
@@ -329,16 +352,6 @@ func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger
 			}
 			statusData, _ := json.Marshal(state.status(provider.Mode(), cache.count(), sessionCount))
 			resp = Response{ID: req.ID, OK: true, Data: statusData}
-
-		case OpCacheGet:
-			signalActivity()
-			data, found := cache.get(req.Key)
-			resp = Response{ID: req.ID, OK: true, Found: found, Data: data}
-
-		case OpCachePut:
-			signalActivity()
-			cache.put(req.Key, req.Data)
-			resp = Response{ID: req.ID, OK: true}
 
 		case OpMetadataGet:
 			signalActivity()
@@ -512,23 +525,23 @@ func runAgent(ctx context.Context, provider Provider, cfg RuntimeConfig, extendS
 		}
 	}
 
-	archiver := newRecordingArchiver(archiveConfig{
-		enabled:     archive.Enabled,
-		sourceDir:   archiveSource,
-		archiveDir:  archive.Dir,
-		minAge:      archive.MinAge.Duration(),
-		maxBundles:  archive.MaxBundles,
-		maxRunBytes: archive.MaxRunBytes,
-		jitter:      archive.Jitter.Duration(),
-	}, cfg.Logger, clk)
+	archiver := recording.NewArchiveRunner(recording.ArchiveConfig{
+		Enabled:     archive.Enabled,
+		SourceDir:   archiveSource,
+		ArchiveDir:  archive.Dir,
+		MinAge:      archive.MinAge.Duration(),
+		MaxBundles:  archive.MaxBundles,
+		MaxRunBytes: archive.MaxRunBytes,
+		Jitter:      archive.Jitter.Duration(),
+	}, cfg.Logger, archiveClock{clock: clk})
 
 	archCtx, archCancel := context.WithCancel(ctx)
 	var archWG sync.WaitGroup
-	if archiver.enabled() {
+	if archiver.Enabled() {
 		archWG.Add(1)
 		go func() {
 			defer archWG.Done()
-			archiver.runLoop(archCtx)
+			archiver.RunLoop(archCtx)
 		}()
 	}
 	defer func() {

@@ -15,26 +15,6 @@ import (
 	"github.com/ntwrknrd/nssh/internal/config"
 )
 
-// CacheOnlyProvider supports agent metadata cache operations without vault decryption.
-type CacheOnlyProvider struct {
-	*RuntimeProvider
-}
-
-// NewCacheOnlyProvider creates an agent provider for external credential caches.
-func NewCacheOnlyProvider() *CacheOnlyProvider {
-	return &CacheOnlyProvider{RuntimeProvider: NewRuntimeProvider()}
-}
-
-func (p *CacheOnlyProvider) Mode() string {
-	return ModeCache
-}
-
-func (p *CacheOnlyProvider) Close() error {
-	return nil
-}
-
-var _ Provider = (*CacheOnlyProvider)(nil)
-
 type RuntimeProvider struct {
 	mu          sync.RWMutex
 	onePassword map[string]OnePasswordSessionConfig

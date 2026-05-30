@@ -190,9 +190,7 @@ func runStatus() error {
 	ui.SubSection("Session")
 	if client, err := agent.Connect(); err == nil {
 		if status, err := client.Status(); err == nil {
-			if status.Mode == agent.ModeCache {
-				ui.StatusLineNeutral("Status", "credential cache active")
-			} else if status.Mode == agent.ModeRuntime {
+			if status.Mode == agent.ModeRuntime {
 				printStatus(true, "Status", "provider runtime active")
 			} else {
 				printStatus(true, "Status", status.Mode)

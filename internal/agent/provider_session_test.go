@@ -62,7 +62,6 @@ type fakeSessionProvider struct {
 	mode       string
 	requests   []ProviderRequest
 	responses  []ProviderResponse
-	cacheKeys  []string
 	closeCount int
 }
 

@@ -25,6 +25,5 @@ type SessionProvider interface {
 
 // ProviderMode constants for Provider.Mode() return values.
 const (
-	ModeCache   = "cache"
 	ModeRuntime = "runtime"
 )

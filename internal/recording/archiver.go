@@ -1,6 +1,6 @@
-//go:build linux || darwin
+//go:build unix
 
-package agent
+package recording
 
 import (
 	"archive/tar"
@@ -21,15 +21,52 @@ import (
 	"time"
 )
 
-// archiveConfig is the internal configuration used by the recording archiver.
-type archiveConfig struct {
-	enabled     bool
-	sourceDir   string
-	archiveDir  string
-	minAge      time.Duration
-	maxBundles  int
-	maxRunBytes int64
-	jitter      time.Duration
+// Clock provides wall-clock time and timers to the archive runner.
+type Clock interface {
+	Now() time.Time
+	NewTimer(d time.Duration) ClockTimer
+}
+
+// ClockTimer is the timer interface used by Clock.
+type ClockTimer interface {
+	C() <-chan time.Time
+	Stop() bool
+	Reset(d time.Duration) bool
+}
+
+type realClock struct{}
+
+func (realClock) Now() time.Time {
+	return stripMonotonic(time.Now())
+}
+
+func (realClock) NewTimer(d time.Duration) ClockTimer {
+	return &realTimer{t: time.NewTimer(d)}
+}
+
+type realTimer struct {
+	t *time.Timer
+}
+
+func (rt *realTimer) C() <-chan time.Time { return rt.t.C }
+
+func (rt *realTimer) Stop() bool { return rt.t.Stop() }
+
+func (rt *realTimer) Reset(d time.Duration) bool { return rt.t.Reset(d) }
+
+func stripMonotonic(t time.Time) time.Time {
+	return time.Unix(t.Unix(), int64(t.Nanosecond()))
+}
+
+// ArchiveConfig is the internal configuration used by the recording archiver.
+type ArchiveConfig struct {
+	Enabled     bool
+	SourceDir   string
+	ArchiveDir  string
+	MinAge      time.Duration
+	MaxBundles  int
+	MaxRunBytes int64
+	Jitter      time.Duration
 }
 
 type archiveCandidate struct {
@@ -39,8 +76,8 @@ type archiveCandidate struct {
 	modTime time.Time
 }
 
-// archiveSummary captures per-run results for logging and tests.
-type archiveSummary struct {
+// ArchiveSummary captures per-run results for logging and tests.
+type ArchiveSummary struct {
 	FilesArchived  int
 	BytesArchived  int64
 	FilesDeleted   int
@@ -50,16 +87,17 @@ type archiveSummary struct {
 	Capped         bool
 }
 
-// recordingArchiver handles periodic recording archival.
-type recordingArchiver struct {
-	cfg    archiveConfig
+// ArchiveRunner handles periodic recording archival.
+type ArchiveRunner struct {
+	cfg    ArchiveConfig
 	logger *slog.Logger
-	clock  clock
+	clock  Clock
 	rand   *rand.Rand
 	mu     sync.Mutex
 }
 
-func newRecordingArchiver(cfg archiveConfig, logger *slog.Logger, clk clock) *recordingArchiver {
+// NewArchiveRunner creates a periodic recording archive runner.
+func NewArchiveRunner(cfg ArchiveConfig, logger *slog.Logger, clk Clock) *ArchiveRunner {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -67,7 +105,7 @@ func newRecordingArchiver(cfg archiveConfig, logger *slog.Logger, clk clock) *re
 		clk = realClock{}
 	}
 	seed := clk.Now().UnixNano()
-	return &recordingArchiver{
+	return &ArchiveRunner{
 		cfg:    cfg,
 		logger: logger,
 		clock:  clk,
@@ -75,13 +113,13 @@ func newRecordingArchiver(cfg archiveConfig, logger *slog.Logger, clk clock) *re
 	}
 }
 
-func (r *recordingArchiver) enabled() bool {
-	return r != nil && r.cfg.enabled && r.cfg.sourceDir != "" && r.cfg.archiveDir != ""
+func (r *ArchiveRunner) Enabled() bool {
+	return r != nil && r.cfg.Enabled && r.cfg.SourceDir != "" && r.cfg.ArchiveDir != ""
 }
 
 // runLoop executes RunOnce on a daily cadence with jitter until the context is canceled.
-func (r *recordingArchiver) runLoop(ctx context.Context) {
-	if !r.enabled() {
+func (r *ArchiveRunner) RunLoop(ctx context.Context) {
+	if !r.Enabled() {
 		return
 	}
 
@@ -118,10 +156,10 @@ func (r *recordingArchiver) runLoop(ctx context.Context) {
 }
 
 // RunOnce performs a single archival maintenance pass.
-func (r *recordingArchiver) RunOnce(ctx context.Context) (archiveSummary, error) {
-	var summary archiveSummary
+func (r *ArchiveRunner) RunOnce(ctx context.Context) (ArchiveSummary, error) {
+	var summary ArchiveSummary
 
-	if !r.enabled() {
+	if !r.Enabled() {
 		return summary, nil
 	}
 
@@ -133,7 +171,7 @@ func (r *recordingArchiver) RunOnce(ctx context.Context) (archiveSummary, error)
 	}
 
 	// Ensure archive directory exists early.
-	if err := os.MkdirAll(r.cfg.archiveDir, 0o700); err != nil {
+	if err := os.MkdirAll(r.cfg.ArchiveDir, 0o700); err != nil {
 		return summary, fmt.Errorf("create archive dir: %w", err)
 	}
 
@@ -170,14 +208,14 @@ func (r *recordingArchiver) RunOnce(ctx context.Context) (archiveSummary, error)
 	return summary, runErr
 }
 
-func (r *recordingArchiver) processMonth(ctx context.Context, month string, files []archiveCandidate) (archiveSummary, error) {
-	var summary archiveSummary
+func (r *ArchiveRunner) processMonth(ctx context.Context, month string, files []archiveCandidate) (ArchiveSummary, error) {
+	var summary ArchiveSummary
 	if len(files) == 0 {
 		return summary, nil
 	}
 
 	bundleName := fmt.Sprintf("recordings-%s.tar.gz", month)
-	bundlePath := filepath.Join(r.cfg.archiveDir, bundleName)
+	bundlePath := filepath.Join(r.cfg.ArchiveDir, bundleName)
 
 	existing, err := r.readArchiveIndex(bundlePath)
 	if err != nil {
@@ -229,7 +267,7 @@ func (r *recordingArchiver) processMonth(ctx context.Context, month string, file
 	return summary, nil
 }
 
-func (r *recordingArchiver) deleteSources(files []archiveCandidate) (result struct {
+func (r *ArchiveRunner) deleteSources(files []archiveCandidate) (result struct {
 	Files int
 	Bytes int64
 }) {
@@ -244,8 +282,8 @@ func (r *recordingArchiver) deleteSources(files []archiveCandidate) (result stru
 	return result
 }
 
-func (r *recordingArchiver) rewriteArchive(ctx context.Context, bundlePath string, toAdd []archiveCandidate) (int64, error) {
-	temp, err := os.CreateTemp(r.cfg.archiveDir, "recordings-*.tar.gz")
+func (r *ArchiveRunner) rewriteArchive(ctx context.Context, bundlePath string, toAdd []archiveCandidate) (int64, error) {
+	temp, err := os.CreateTemp(r.cfg.ArchiveDir, "recordings-*.tar.gz")
 	if err != nil {
 		return 0, fmt.Errorf("create temp archive: %w", err)
 	}
@@ -354,7 +392,7 @@ func (r *recordingArchiver) rewriteArchive(ctx context.Context, bundlePath strin
 	return bytesWritten, nil
 }
 
-func (r *recordingArchiver) copyExistingArchive(ctx context.Context, bundlePath string, tw *tar.Writer) error {
+func (r *ArchiveRunner) copyExistingArchive(ctx context.Context, bundlePath string, tw *tar.Writer) error {
 	current, err := os.Open(bundlePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -396,7 +434,7 @@ func (r *recordingArchiver) copyExistingArchive(ctx context.Context, bundlePath 
 	}
 }
 
-func (r *recordingArchiver) readArchiveIndex(path string) (map[string]int64, error) {
+func (r *ArchiveRunner) readArchiveIndex(path string) (map[string]int64, error) {
 	entries := make(map[string]int64)
 
 	f, err := os.Open(path)
@@ -427,24 +465,24 @@ func (r *recordingArchiver) readArchiveIndex(path string) (map[string]int64, err
 	}
 }
 
-func (r *recordingArchiver) discoverCandidates(ctx context.Context, now time.Time) ([]archiveCandidate, bool, error) {
-	if r.cfg.sourceDir == "" {
+func (r *ArchiveRunner) discoverCandidates(ctx context.Context, now time.Time) ([]archiveCandidate, bool, error) {
+	if r.cfg.SourceDir == "" {
 		return nil, false, fmt.Errorf("recording source directory is empty")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if _, err := os.Stat(r.cfg.sourceDir); err != nil {
+	if _, err := os.Stat(r.cfg.SourceDir); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, false, nil
 		}
 		return nil, false, fmt.Errorf("stat source dir: %w", err)
 	}
 
-	threshold := now.Add(-r.cfg.minAge)
+	threshold := now.Add(-r.cfg.MinAge)
 	var files []archiveCandidate
 
-	walkErr := filepath.WalkDir(r.cfg.sourceDir, func(path string, d fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(r.cfg.SourceDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -469,7 +507,7 @@ func (r *recordingArchiver) discoverCandidates(ctx context.Context, now time.Tim
 			return nil
 		}
 
-		rel, err := filepath.Rel(r.cfg.sourceDir, path)
+		rel, err := filepath.Rel(r.cfg.SourceDir, path)
 		if err != nil {
 			return nil
 		}
@@ -497,14 +535,14 @@ func (r *recordingArchiver) discoverCandidates(ctx context.Context, now time.Tim
 		return files[i].modTime.Before(files[j].modTime)
 	})
 
-	if r.cfg.maxRunBytes <= 0 {
+	if r.cfg.MaxRunBytes <= 0 {
 		return files, false, nil
 	}
 
 	var selected []archiveCandidate
 	var total int64
 	for _, f := range files {
-		if total+f.size > r.cfg.maxRunBytes {
+		if total+f.size > r.cfg.MaxRunBytes {
 			return selected, true, nil
 		}
 		selected = append(selected, f)
@@ -514,7 +552,7 @@ func (r *recordingArchiver) discoverCandidates(ctx context.Context, now time.Tim
 	return selected, false, nil
 }
 
-func (r *recordingArchiver) groupByMonth(files []archiveCandidate) map[string][]archiveCandidate {
+func (r *ArchiveRunner) groupByMonth(files []archiveCandidate) map[string][]archiveCandidate {
 	groups := make(map[string][]archiveCandidate)
 	for _, f := range files {
 		key := monthKey(f.modTime)
@@ -549,8 +587,8 @@ func parseBundleMonth(name string) (time.Time, bool) {
 	return time.Date(year, time.Month(monthInt), 1, 0, 0, 0, 0, time.UTC), true
 }
 
-func (r *recordingArchiver) pruneBundles() (int, error) {
-	entries, err := os.ReadDir(r.cfg.archiveDir)
+func (r *ArchiveRunner) pruneBundles() (int, error) {
+	entries, err := os.ReadDir(r.cfg.ArchiveDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return 0, nil
@@ -572,7 +610,7 @@ func (r *recordingArchiver) pruneBundles() (int, error) {
 			continue
 		}
 		bundles = append(bundles, bundleInfo{
-			name:  filepath.Join(r.cfg.archiveDir, e.Name()),
+			name:  filepath.Join(r.cfg.ArchiveDir, e.Name()),
 			month: month,
 		})
 	}
@@ -581,11 +619,11 @@ func (r *recordingArchiver) pruneBundles() (int, error) {
 		return bundles[i].month.After(bundles[j].month)
 	})
 
-	if len(bundles) <= r.cfg.maxBundles {
+	if len(bundles) <= r.cfg.MaxBundles {
 		return 0, nil
 	}
 
-	prune := bundles[r.cfg.maxBundles:]
+	prune := bundles[r.cfg.MaxBundles:]
 	deleted := 0
 	for _, b := range prune {
 		if err := os.Remove(b.name); err != nil {
@@ -598,17 +636,17 @@ func (r *recordingArchiver) pruneBundles() (int, error) {
 }
 
 // initialDelay returns a random delay between 0 and jitter before the first run.
-func (r *recordingArchiver) initialDelay() time.Duration {
-	if r.cfg.jitter <= 0 {
+func (r *ArchiveRunner) initialDelay() time.Duration {
+	if r.cfg.Jitter <= 0 {
 		return 0
 	}
-	return time.Duration(r.rand.Int63n(int64(r.cfg.jitter) + 1))
+	return time.Duration(r.rand.Int63n(int64(r.cfg.Jitter) + 1))
 }
 
 // nextInterval returns 24h +/- jitter for the next run.
-func (r *recordingArchiver) nextInterval() time.Duration {
+func (r *ArchiveRunner) nextInterval() time.Duration {
 	base := 24 * time.Hour
-	j := r.cfg.jitter
+	j := r.cfg.Jitter
 	if j <= 0 {
 		return base
 	}
@@ -617,7 +655,7 @@ func (r *recordingArchiver) nextInterval() time.Duration {
 	return base + time.Duration(shift)
 }
 
-func (s archiveSummary) merge(other archiveSummary) archiveSummary {
+func (s ArchiveSummary) merge(other ArchiveSummary) ArchiveSummary {
 	s.FilesArchived += other.FilesArchived
 	s.BytesArchived += other.BytesArchived
 	s.FilesDeleted += other.FilesDeleted

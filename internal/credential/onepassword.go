@@ -3,8 +3,6 @@ package credential
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,7 +22,6 @@ type onePasswordProvider struct {
 	hostRefs       map[string]config.CredentialRefConfig
 	groupRefs      map[string]config.CredentialRefConfig
 	runner         opRunner
-	cache          bool
 	autoStartAgent bool
 }
 
@@ -58,17 +55,6 @@ type onePasswordField struct {
 	Value   string `json:"value"`
 }
 
-type cachedOnePasswordRecord struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Ref      string `json:"ref"`
-}
-
-type cachedOnePasswordItem struct {
-	Found bool            `json:"found"`
-	Item  onePasswordItem `json:"item,omitempty"`
-}
-
 func newOnePasswordProvider(cfg config.CredentialConfig) Provider {
 	return newOnePasswordProviderNamed("", cfg)
 }
@@ -86,7 +72,6 @@ func newOnePasswordProviderNamed(name string, cfg config.CredentialConfig) Provi
 		hostRefs:       cfg.Host,
 		groupRefs:      cfg.Group,
 		runner:         opCLIRunner{},
-		cache:          false,
 		autoStartAgent: true,
 	}
 }
@@ -164,10 +149,6 @@ func (p *onePasswordProvider) agentGet(scope credentialScope, name string, ref c
 }
 
 func (p *onePasswordProvider) getRef(ref config.CredentialRefConfig) (*Record, error) {
-	if record, ok := p.getCachedRef(ref); ok {
-		return record, nil
-	}
-
 	if isOnePasswordSecretRef(ref.Ref) {
 		username, err := p.resolveUsername(ref)
 		if err != nil {
@@ -180,9 +161,7 @@ func (p *onePasswordProvider) getRef(ref config.CredentialRefConfig) (*Record, e
 		if username == "" && password == "" {
 			return nil, nil
 		}
-		record := &Record{Username: username, Secret: secret.NewFromString(password), Ref: ref.Ref}
-		p.putCachedRef(ref, record)
-		return record, nil
+		return &Record{Username: username, Secret: secret.NewFromString(password), Ref: ref.Ref}, nil
 	}
 
 	item, err := p.getItemByRef(ref.Ref)
@@ -206,128 +185,15 @@ func (p *onePasswordProvider) getRef(ref config.CredentialRefConfig) (*Record, e
 	if username == "" && password == "" {
 		return nil, nil
 	}
-	record := &Record{Username: username, Secret: secret.NewFromString(password), Ref: ref.Ref}
-	p.putCachedRef(ref, record)
-	return record, nil
-}
-
-func (p *onePasswordProvider) getCachedRef(ref config.CredentialRefConfig) (*Record, bool) {
-	client, ok := p.cacheClient()
-	if !ok {
-		return nil, false
-	}
-	defer func() { _ = client.Close() }()
-
-	found, data, err := client.CacheGet(p.cacheKey(ref))
-	if err != nil || !found {
-		return nil, false
-	}
-
-	var cached cachedOnePasswordRecord
-	if err := json.Unmarshal(data, &cached); err != nil {
-		return nil, false
-	}
-	if cached.Username == "" && cached.Password == "" {
-		return nil, false
-	}
-	return &Record{
-		Username: cached.Username,
-		Secret:   secret.NewFromString(cached.Password),
-		Ref:      cached.Ref,
-	}, true
-}
-
-func (p *onePasswordProvider) putCachedRef(ref config.CredentialRefConfig, record *Record) {
-	if record == nil || record.Secret == nil {
-		return
-	}
-	client, ok := p.cacheClient()
-	if !ok {
-		return
-	}
-	defer func() { _ = client.Close() }()
-
-	cached := cachedOnePasswordRecord{
-		Username: record.Username,
-		Ref:      record.Ref,
-	}
-	if err := record.Secret.UseString(func(s string) error {
-		cached.Password = s
-		return nil
-	}); err != nil {
-		return
-	}
-	data, err := json.Marshal(cached)
-	if err != nil {
-		return
-	}
-	_ = client.CachePut(p.cacheKey(ref), data)
-}
-
-func (p *onePasswordProvider) cacheClient() (*agent.Client, bool) {
-	if !p.cache {
-		return nil, false
-	}
-	client, err := agent.Connect()
-	if err == nil {
-		return client, true
-	}
-	if !errors.Is(err, agent.ErrAgentNotRunning) {
-		return nil, false
-	}
-	if err := agent.SpawnCache(); err != nil {
-		return nil, false
-	}
-	client, err = agent.Connect()
-	if err != nil {
-		return nil, false
-	}
-	return client, true
-}
-
-func (p *onePasswordProvider) cacheKey(ref config.CredentialRefConfig) string {
-	data, _ := json.Marshal(struct {
-		Account     string                     `json:"account"`
-		Vault       string                     `json:"vault"`
-		Credential  config.CredentialRefConfig `json:"credential"`
-		ProviderKey string                     `json:"provider_key"`
-	}{
-		Account:     p.account,
-		Vault:       p.vault,
-		Credential:  ref,
-		ProviderKey: "1password",
-	})
-	sum := sha256.Sum256(data)
-	return "credential:1password:" + hex.EncodeToString(sum[:])
-}
-
-func (p *onePasswordProvider) itemCacheKey(ref string) string {
-	data, _ := json.Marshal(struct {
-		Account     string `json:"account"`
-		Vault       string `json:"vault"`
-		Ref         string `json:"ref"`
-		ProviderKey string `json:"provider_key"`
-	}{
-		Account:     p.account,
-		Vault:       p.vault,
-		Ref:         ref,
-		ProviderKey: "1password:item",
-	})
-	sum := sha256.Sum256(data)
-	return "credential:1password:item:" + hex.EncodeToString(sum[:])
+	return &Record{Username: username, Secret: secret.NewFromString(password), Ref: ref.Ref}, nil
 }
 
 func (p *onePasswordProvider) getItemByRef(ref string) (*onePasswordItem, error) {
-	if item, ok := p.getCachedItem(ref); ok {
-		return item, nil
-	}
-
 	args := append([]string{"item", "get", ref}, p.scopeArgs()...)
 	args = append(args, "--format", "json", "--reveal")
 	out, err := p.run(context.Background(), nil, args...)
 	if err != nil {
 		if isItemNotFound(out, err) {
-			p.putCachedItem(ref, nil)
 			return nil, nil
 		}
 		return nil, err
@@ -336,48 +202,7 @@ func (p *onePasswordProvider) getItemByRef(ref string) (*onePasswordItem, error)
 	if err := json.Unmarshal(out, &item); err != nil {
 		return nil, fmt.Errorf("parse 1Password item %q: %w", ref, err)
 	}
-	p.putCachedItem(ref, &item)
 	return &item, nil
-}
-
-func (p *onePasswordProvider) getCachedItem(ref string) (*onePasswordItem, bool) {
-	client, ok := p.cacheClient()
-	if !ok {
-		return nil, false
-	}
-	defer func() { _ = client.Close() }()
-
-	found, data, err := client.CacheGet(p.itemCacheKey(ref))
-	if err != nil || !found {
-		return nil, false
-	}
-
-	var cached cachedOnePasswordItem
-	if err := json.Unmarshal(data, &cached); err != nil {
-		return nil, false
-	}
-	if !cached.Found {
-		return nil, true
-	}
-	return &cached.Item, true
-}
-
-func (p *onePasswordProvider) putCachedItem(ref string, item *onePasswordItem) {
-	client, ok := p.cacheClient()
-	if !ok {
-		return
-	}
-	defer func() { _ = client.Close() }()
-
-	cached := cachedOnePasswordItem{Found: item != nil}
-	if item != nil {
-		cached.Item = *item
-	}
-	data, err := json.Marshal(cached)
-	if err != nil {
-		return
-	}
-	_ = client.CachePut(p.itemCacheKey(ref), data)
 }
 
 func (p *onePasswordProvider) readSecretRef(ref string) (string, error) {

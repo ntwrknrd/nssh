@@ -37,4 +37,6 @@
 //
 // The package provides utilities for parsing the recording index file,
 // which tracks metadata (hostname, timestamp, duration) for all recordings.
+// It also owns recording archive bundle policy used by the background agent
+// runtime.
 package recording

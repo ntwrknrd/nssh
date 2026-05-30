@@ -2,8 +2,8 @@
 //
 // The agent communicates with nssh clients over a Unix domain socket using a
 // JSON protocol. It brokers provider-session requests, stores non-secret
-// metadata cache entries, owns socket lifecycle checks, and runs recording
-// archival tasks.
+// metadata cache entries, owns socket lifecycle checks, and hosts background
+// maintenance tasks.
 //
 // # Lifecycle
 //
@@ -27,6 +27,6 @@
 //
 // The agent runs background goroutines for:
 //
-//   - Recording archival: monitors live session recordings and archives them
+//   - Recording archival runner: executes recording package archive policy
 //   - Connection handling: serves client requests with concurrency limits
 package agent

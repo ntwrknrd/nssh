@@ -27,11 +27,9 @@ type Response struct {
 
 // Operation constants for Request.Op field.
 const (
-	OpHello                = "hello"     // Returns agent mode (e.g., "software")
-	OpStatus               = "status"    // Returns session status (JSON StatusInfo)
-	OpLock                 = "lock"      // Terminates the agent
-	OpCacheGet             = "cache_get" // Returns cached data for key, if present
-	OpCachePut             = "cache_put" // Stores cached data for key
+	OpHello                = "hello"  // Returns agent mode (e.g., "runtime")
+	OpStatus               = "status" // Returns session status (JSON StatusInfo)
+	OpLock                 = "lock"   // Terminates the agent
 	OpMetadataGet          = "metadata_get"
 	OpMetadataPut          = "metadata_put"
 	OpMetadataDelete       = "metadata_delete"
