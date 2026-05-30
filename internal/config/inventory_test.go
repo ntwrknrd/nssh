@@ -62,6 +62,7 @@ default_group = "lab"
 
     [[inventory.provider.netbox-prod.route]]
     group = "custcbb"
+    auth_mode = "password"
 
       [inventory.provider.netbox-prod.route.match]
       manufacturer = ["Juniper", "Arista"]
@@ -134,6 +135,9 @@ default_group = "lab"
 	}
 	if len(nb.Route) != 1 || nb.Route[0].Group != "custcbb" {
 		t.Fatalf("netbox routes = %+v", nb.Route)
+	}
+	if nb.Route[0].AuthMode != AuthModePassword {
+		t.Fatalf("netbox route auth_mode = %q", nb.Route[0].AuthMode)
 	}
 }
 
@@ -387,6 +391,23 @@ func TestInventoryConfigValidation(t *testing.T) {
 				},
 			},
 			wantErr: "unknown group",
+		},
+		{
+			name: "provider route auth mode must be valid",
+			cfg: InventoryConfig{
+				DefaultGroup: "default",
+				Group: map[string]GroupConfig{
+					"default": {},
+				},
+				Provider: map[string]InventoryProviderConfig{
+					"netbox-prod": {
+						Type:   ProviderNetBox,
+						Config: InventoryProviderDetailConfig{BaseURL: "https://netbox.example.com"},
+						Route:  []InventoryRouteConfig{{Group: "default", AuthMode: "agent"}},
+					},
+				},
+			},
+			wantErr: "invalid auth_mode",
 		},
 		{
 			name: "unsupported credential backend is separate concern",

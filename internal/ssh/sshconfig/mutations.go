@@ -1,7 +1,6 @@
 package sshconfig
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 
@@ -67,91 +66,6 @@ func ApplyCompatFixes(host *HostEntry, compatTypes []compat.CompatType) error {
 	return nil
 }
 
-// ApplyAuthType changes the authentication type of a host entry.
-// authType should be "password", "keyboard-interactive", or "key".
-func ApplyAuthType(host *HostEntry, authType string) error {
-	// Remove existing auth-related lines
-	authDirectives := map[string]bool{
-		"pubkeyauthentication":     true,
-		"passwordauthentication":   true,
-		"preferredauthentications": true,
-	}
-
-	var newLines []string
-	for _, line := range host.Lines {
-		trimmed := strings.TrimSpace(line)
-		keep := true
-		for directive := range authDirectives {
-			if strings.HasPrefix(strings.ToLower(trimmed), directive+" ") ||
-				strings.HasPrefix(strings.ToLower(trimmed), directive+"\t") {
-				keep = false
-				break
-			}
-		}
-		if keep {
-			newLines = append(newLines, line)
-		}
-	}
-
-	// Find insertion point (after User, or after Host line)
-	insertIdx := findAuthInsertionPoint(newLines)
-
-	// Build auth lines based on type
-	var authLines []string
-	switch authType {
-	case "password":
-		authLines = []string{
-			"  PubkeyAuthentication no\n",
-			"  PreferredAuthentications password\n",
-		}
-		host.Properties["pubkeyauthentication"] = "no"
-		host.Properties["preferredauthentications"] = "password"
-		delete(host.Properties, "passwordauthentication")
-	case "keyboard-interactive":
-		authLines = []string{
-			"  PubkeyAuthentication no\n",
-			"  PreferredAuthentications keyboard-interactive\n",
-		}
-		host.Properties["pubkeyauthentication"] = "no"
-		host.Properties["preferredauthentications"] = "keyboard-interactive"
-		delete(host.Properties, "passwordauthentication")
-	case "key", "publickey":
-		authLines = []string{
-			"  PubkeyAuthentication yes\n",
-			"  PasswordAuthentication no\n",
-		}
-		host.Properties["pubkeyauthentication"] = "yes"
-		host.Properties["passwordauthentication"] = "no"
-		delete(host.Properties, "preferredauthentications")
-	default:
-		return fmt.Errorf("unknown auth type: %s", authType)
-	}
-
-	// Insert auth lines
-	host.Lines = insertAt(newLines, insertIdx, authLines)
-
-	return nil
-}
-
-// HasCompatFix checks if a host entry already has a specific compatibility fix.
-func HasCompatFix(host *HostEntry, compatType compat.CompatType) bool {
-	cfg := compat.CompatConfigs[compatType]
-	directive := strings.ToLower(cfg.Directive)
-	_, exists := host.Properties[directive]
-	return exists
-}
-
-// GetAppliedCompatFixes returns which compat fixes are already applied to a host.
-func GetAppliedCompatFixes(host *HostEntry) []compat.CompatType {
-	var applied []compat.CompatType
-	for _, ct := range compat.AllCompatTypes() {
-		if HasCompatFix(host, ct) {
-			applied = append(applied, ct)
-		}
-	}
-	return applied
-}
-
 // findCompatInsertionPoint finds where to insert compat lines.
 // Prefers after HostName/Port, falls back to after Host line.
 func findCompatInsertionPoint(lines []string) int {
@@ -168,35 +82,6 @@ func findCompatInsertionPoint(lines []string) int {
 			insertIdx = i + 1
 		}
 		// Stop at blank line (end of directives)
-		if strings.TrimSpace(line) == "" {
-			break
-		}
-	}
-
-	return insertIdx
-}
-
-// findAuthInsertionPoint finds where to insert auth lines.
-// Prefers after User, falls back to end of directives.
-func findAuthInsertionPoint(lines []string) int {
-	insertIdx := 1 // Default: after Host line
-
-	userPattern := regexp.MustCompile(`(?i)^\s*user\s+`)
-
-	for i, line := range lines {
-		if i == 0 {
-			continue // Skip Host line
-		}
-		// Track last real directive
-		if strings.TrimSpace(line) != "" {
-			insertIdx = i + 1
-		}
-		// Prefer after User line
-		if userPattern.MatchString(line) {
-			insertIdx = i + 1
-			break
-		}
-		// Stop at blank line
 		if strings.TrimSpace(line) == "" {
 			break
 		}

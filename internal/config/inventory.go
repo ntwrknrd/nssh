@@ -18,6 +18,11 @@ const (
 	ProviderSessionNone       = "none"
 )
 
+const (
+	AuthModePassword = "password"
+	AuthModeKey      = "key"
+)
+
 // Provider name constants.
 const (
 	ProviderContainerlab = "containerlab"
@@ -119,9 +124,10 @@ type InventoryProviderDetailConfig struct {
 
 // InventoryRouteConfig defines a provider route into a group.
 type InventoryRouteConfig struct {
-	Name  string              `toml:"name"`
-	Group string              `toml:"group"`
-	Match InventoryRouteMatch `toml:"match"`
+	Name     string              `toml:"name"`
+	Group    string              `toml:"group"`
+	AuthMode string              `toml:"auth_mode"`
+	Match    InventoryRouteMatch `toml:"match"`
 }
 
 // InventoryRouteMatch is an open map of field names to allowed values.
@@ -350,6 +356,11 @@ func (c *InventoryProviderConfig) Validate(groups map[string]GroupConfig) error 
 		if _, ok := groups[route.Group]; !ok {
 			return fmt.Errorf("route[%d]: unknown group %q", i, route.Group)
 		}
+		route.AuthMode = strings.ToLower(strings.TrimSpace(route.AuthMode))
+		if route.AuthMode != "" && route.AuthMode != AuthModePassword && route.AuthMode != AuthModeKey {
+			return fmt.Errorf("route[%d]: invalid auth_mode %q", i, route.AuthMode)
+		}
+		c.Route[i] = route
 	}
 	return nil
 }

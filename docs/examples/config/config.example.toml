@@ -91,6 +91,8 @@ type = "pass"
 #
 #   [[inventory.provider.netbox-prod.route]]
 #   group = "default"
+#   # Optional: "password" or "key". Defaults to password when the group has auth.
+#   auth_mode = "password"
 
 # ============================================================================
 # [logging.audit]

@@ -30,6 +30,7 @@ func Reconcile(objects []Object, routes []config.InventoryRouteConfig, providerN
 		}
 		host := objectToProviderHost(obj, route.Group)
 		host.Username = groupDefaultUser(route.Group, groups...)
+		host.AuthMode = routeAuthMode(*route, groups...)
 		desired[host.ObjectID] = host
 	}
 
@@ -70,6 +71,16 @@ func groupDefaultUser(group string, groups ...map[string]config.GroupConfig) str
 	return strings.TrimSpace(groups[0][group].DefaultUser)
 }
 
+func routeAuthMode(route config.InventoryRouteConfig, groups ...map[string]config.GroupConfig) string {
+	if route.AuthMode != "" {
+		return route.AuthMode
+	}
+	if len(groups) > 0 && groups[0] != nil && groups[0][route.Group].Auth.IsSet() {
+		return config.AuthModePassword
+	}
+	return config.AuthModeKey
+}
+
 func objectToProviderHost(obj *Object, group string) *ProviderHost {
 	return &ProviderHost{
 		ObjectID:  obj.ObjectID,
@@ -89,6 +100,7 @@ func providerHostChanged(old, new *ProviderHost) bool {
 		old.Username != new.Username ||
 		old.Port != new.Port ||
 		old.ProxyJump != new.ProxyJump ||
+		old.AuthMode != new.AuthMode ||
 		old.ProviderType != new.ProviderType {
 		return true
 	}

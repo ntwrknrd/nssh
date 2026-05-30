@@ -78,10 +78,20 @@ func generateProviderSSHConfig(hosts []*ProviderHost, providerName, providerType
 		if h.ProxyJump != "" {
 			fmt.Fprintf(&b, "  ProxyJump %s\n", h.ProxyJump)
 		}
+		writeAuthMode(&b, h.AuthMode)
+	}
+	return b.String()
+}
+
+func writeAuthMode(b *strings.Builder, mode string) {
+	switch mode {
+	case config.AuthModePassword:
+		b.WriteString("  PubkeyAuthentication no\n")
+		b.WriteString("  PreferredAuthentications keyboard-interactive,password\n")
+	default:
 		b.WriteString("  PubkeyAuthentication yes\n")
 		b.WriteString("  PasswordAuthentication no\n")
 	}
-	return b.String()
 }
 
 func ignoreHostKeysForProvider(providerType string, strictHostKeyChecking bool) bool {

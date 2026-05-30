@@ -37,14 +37,6 @@ var (
 	fingerprintRe = regexp.MustCompile(`(?i)(\w+) key fingerprint is (SHA256:[A-Za-z0-9+/=]+)`)
 )
 
-// Auth failure literals (lowercase, checked with bytes.Contains)
-var authFailureLiterals = [][]byte{
-	[]byte("permission denied"),
-	[]byte("authentication failed"),
-	[]byte("try again"),
-	[]byte("access denied"),
-}
-
 // matchPasswordPrompt checks if the buffer ends with a password prompt.
 // Uses fast bytes operations for simple patterns, falls back to regex for complex ones.
 func matchPasswordPrompt(buf []byte) bool {
@@ -67,17 +59,6 @@ func matchPasswordPrompt(buf []byte) bool {
 	// Slow path: complex patterns need regex
 	for _, re := range passwordComplexPatterns {
 		if re.Match(buf) {
-			return true
-		}
-	}
-	return false
-}
-
-// matchAuthFailure checks if the output indicates an authentication failure.
-func matchAuthFailure(buf []byte) bool {
-	lower := bytes.ToLower(buf)
-	for _, pattern := range authFailureLiterals {
-		if bytes.Contains(lower, pattern) {
 			return true
 		}
 	}

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestCreateSocket_Success(t *testing.T) {
@@ -189,63 +188,6 @@ func TestRemoveSocket_NotExist(t *testing.T) {
 	// Should not error on missing file
 	if err := RemoveSocket(socketPath); err != nil {
 		t.Errorf("RemoveSocket() on missing file error = %v", err)
-	}
-}
-
-func TestIsSocketAlive_Running(t *testing.T) {
-	socketPath := testSocketPath(t)
-	restore := SetSocketPathForTest(socketPath)
-	defer restore()
-
-	// Create a listening socket
-	listener, err := CreateSocket(socketPath)
-	if err != nil {
-		t.Fatalf("CreateSocket() error = %v", err)
-	}
-	defer func() { _ = listener.Close() }()
-
-	// Accept connections in background
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			_ = conn.Close()
-		}
-	}()
-
-	// Give the listener a moment to start
-	time.Sleep(10 * time.Millisecond)
-
-	if !IsSocketAlive(socketPath) {
-		t.Error("IsSocketAlive() = false, want true for listening socket")
-	}
-}
-
-func TestIsSocketAlive_NotRunning(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "not.sock")
-
-	if IsSocketAlive(socketPath) {
-		t.Error("IsSocketAlive() = true, want false for non-existent socket")
-	}
-}
-
-func TestIsSocketAlive_StaleSocket(t *testing.T) {
-	socketPath := testSocketPath(t)
-	restore := SetSocketPathForTest(socketPath)
-	defer restore()
-
-	// Create and immediately close a socket (makes it stale)
-	listener, err := CreateSocket(socketPath)
-	if err != nil {
-		t.Fatalf("CreateSocket() error = %v", err)
-	}
-	_ = listener.Close()
-
-	// Socket file exists but nothing is listening
-	if IsSocketAlive(socketPath) {
-		t.Error("IsSocketAlive() = true, want false for stale socket")
 	}
 }
 

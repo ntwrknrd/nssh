@@ -20,20 +20,7 @@ type Secret struct {
 	buf *memguard.LockedBuffer
 }
 
-// New creates a Secret from plaintext, immediately wiping the source.
-// IMPORTANT: Caller must not retain any references to the plaintext slice.
-func New(plaintext []byte) *Secret {
-	s := &Secret{buf: memguard.NewBufferFromBytes(plaintext)}
-	// Wipe source slice
-	for i := range plaintext {
-		plaintext[i] = 0
-	}
-	return s
-}
-
 // NewFromString creates a Secret from a string.
-// Note: The original string cannot be wiped (Go strings are immutable).
-// Prefer New() with []byte when possible.
 func NewFromString(s string) *Secret {
 	return &Secret{buf: memguard.NewBufferFromBytes([]byte(s))}
 }

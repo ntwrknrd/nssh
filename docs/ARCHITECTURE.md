@@ -46,6 +46,11 @@ Group-level `default_user` is SSH inventory policy; provider refresh renders it
 as `User` in generated SSH config. Auth `username` is only for provider items
 that must override the inventory login user.
 
+Provider routes render SSH authentication policy through `auth_mode`. Password
+routes emit password and keyboard-interactive preferences; key routes disable
+password auth. When `auth_mode` is omitted, routes default to password if the
+target group has an auth mapping, otherwise key.
+
 Resolution order:
 
 1. Host auth override provider and host credential

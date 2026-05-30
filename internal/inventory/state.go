@@ -52,6 +52,7 @@ type ProviderHost struct {
 	Username     string              `json:"username,omitempty"`
 	Port         int                 `json:"port,omitempty"`
 	ProxyJump    string              `json:"proxy_jump,omitempty"`
+	AuthMode     string              `json:"auth_mode,omitempty"`
 	CompatFixes  []compat.CompatType `json:"compat_fixes,omitempty"`
 	ProviderType string              `json:"provider_type,omitempty"`
 }

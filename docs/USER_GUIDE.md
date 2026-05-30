@@ -80,6 +80,12 @@ Credential resolution order during connect:
 2. Inventory group auth mapping
 3. SSH config defaults and key authentication
 
+Provider routes also control the SSH auth directives written to generated SSH
+config. Set `auth_mode = "password"` for routed network gear that should prefer
+password or keyboard-interactive auth. Set `auth_mode = "key"` for routed
+servers that should use SSH keys. When omitted, routes default to password auth
+if the destination group has an auth mapping, otherwise key auth.
+
 `nssh inv get <host>` shows the effective auth mapping for that host. It never
 prints the target password.
 

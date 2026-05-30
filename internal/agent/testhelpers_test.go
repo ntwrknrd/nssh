@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -76,7 +77,7 @@ func waitForSocket(t *testing.T, timeout time.Duration) bool {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if IsSocketAlive(SocketPath()) {
+		if canDialSocket(SocketPath()) {
 			return true
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -89,12 +90,21 @@ func waitForSocketGone(t *testing.T, timeout time.Duration) bool {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if !IsSocketAlive(SocketPath()) {
+		if !canDialSocket(SocketPath()) {
 			return true
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	return false
+}
+
+func canDialSocket(path string) bool {
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func waitDone(t *testing.T, done <-chan struct{}, timeout time.Duration) bool {
