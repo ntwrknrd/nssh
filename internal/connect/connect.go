@@ -21,7 +21,7 @@ import (
 
 // ConnectHost handles an interactive SSH connection.
 func ConnectHost(ctx context.Context, hostname string, sshArgs []string) error {
-	recorded, err := connector.MaybeWrapWithRecording(hostname, sshArgs)
+	recorded, err := maybeWrapWithRecording(hostname, sshArgs)
 	if err != nil {
 		return err
 	}
@@ -107,6 +107,7 @@ func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArg
 	}
 
 	conn := connector.NewConnector(resolved.Hostname, resolved.Username, retryPassword, sshArgs)
+	conn.SetHostKeyPromptFunc(newHostKeyPromptFunc())
 	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 	conn.SetTimeouts(&cfg.SSH.Connection)
 	return conn.Run(ctx)
@@ -119,6 +120,7 @@ func newConnector(resolved *ResolvedHost, sshArgs []string, cfg *config.Config) 
 		slog.Debug("resolved credential", "username", resolved.Username, "source", resolved.Credential.Source)
 	}
 	conn := connector.NewConnector(resolved.Hostname, resolved.Username, password, sshArgs)
+	conn.SetHostKeyPromptFunc(newHostKeyPromptFunc())
 	if resolved.HostEntry != nil {
 		conn.SetResolvedEndpoint(resolved.HostEntry.HostName, resolved.HostEntry.Port())
 	}

@@ -1,6 +1,6 @@
 //go:build unix
 
-package connector
+package connect
 
 import (
 	"fmt"
@@ -13,9 +13,9 @@ import (
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
 
-// MaybeWrapWithRecording checks if recording is enabled and wraps the connection.
+// maybeWrapWithRecording checks if recording is enabled and wraps the connection.
 // Returns true if recording was started (caller should exit), false to continue normally.
-func MaybeWrapWithRecording(hostname string, args []string) (bool, error) {
+func maybeWrapWithRecording(hostname string, args []string) (bool, error) {
 	// Check if we're already inside a recording
 	if os.Getenv("NSSH_RECORDING_INNER") == "1" {
 		return false, nil

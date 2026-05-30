@@ -1,12 +1,11 @@
 package connector
 
 import (
-	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
 
-	"github.com/ntwrknrd/nssh/internal/ui"
 	"golang.org/x/term"
 )
 
@@ -30,22 +29,45 @@ const (
 	HostKeyResultRestart                       // Need to restart with temp known_hosts
 )
 
+// HostKeyPrompt describes a host-key verification prompt.
+type HostKeyPrompt struct {
+	Host        string
+	KeyType     string
+	Fingerprint string
+	Changed     bool
+	Stdin       io.Reader
+}
+
+// HostKeyPromptFunc resolves an interactive host-key verification prompt.
+type HostKeyPromptFunc func(HostKeyPrompt) HostKeyAction
+
 // handleHostKeyPrompt detects host key prompts and shows interactive menu.
 // Returns (handled, result) where handled indicates if a prompt was detected,
 // and result indicates how the caller should proceed.
 func (c *Connector) handleHostKeyPrompt(output []byte) (bool, HostKeyResult) {
 	if matchHostKeyChanged(output) {
 		// SECURITY: Changed host key is a potential MITM attack
-		c.showHostKeyChangedWarning(output)
-		action := c.promptHostKeyAction(true)
+		keyType, fingerprint := extractFingerprint(output)
+		action := c.promptHostKeyAction(HostKeyPrompt{
+			Host:        c.hostname,
+			KeyType:     keyType,
+			Fingerprint: fingerprint,
+			Changed:     true,
+			Stdin:       c.GetStdinReader(),
+		})
 		return true, c.respondToHostKey(action)
 	}
 
 	if matchUnknownHost(output) {
 		// First connection - show fingerprint and prompt
 		keyType, fingerprint := extractFingerprint(output)
-		c.showNewHostInfo(keyType, fingerprint)
-		action := c.promptHostKeyAction(false)
+		action := c.promptHostKeyAction(HostKeyPrompt{
+			Host:        c.hostname,
+			KeyType:     keyType,
+			Fingerprint: fingerprint,
+			Changed:     false,
+			Stdin:       c.GetStdinReader(),
+		})
 		if action == HostKeyAcceptOnce && keyType != "" && fingerprint != "" {
 			c.pinnedHostKey = &pinnedKey{typeName: keyType, fingerprint: fingerprint}
 		}
@@ -55,8 +77,8 @@ func (c *Connector) handleHostKeyPrompt(output []byte) (bool, HostKeyResult) {
 	return false, HostKeyResultContinue
 }
 
-// promptHostKeyAction shows interactive menu using huh.
-func (c *Connector) promptHostKeyAction(dangerMode bool) HostKeyAction {
+// promptHostKeyAction resolves an interactive host-key action.
+func (c *Connector) promptHostKeyAction(prompt HostKeyPrompt) HostKeyAction {
 	// Check if we have an interactive terminal
 	if !isTerminal(os.Stdin.Fd()) {
 		// Non-interactive: check if user explicitly allowed auto-acceptance
@@ -68,101 +90,13 @@ func (c *Connector) promptHostKeyAction(dangerMode bool) HostKeyAction {
 		return HostKeyReject
 	}
 
-	var options []string
-	if dangerMode {
-		// For changed keys, make rejection the obvious choice
-		options = []string{
-			"Reject - possible attack! (recommended)",
-			"Accept anyway (dangerous)",
-		}
-	} else {
-		options = []string{
-			"Reject (disconnect)",
-			"Accept once (this session only)",
-			"Accept always (add to known_hosts)",
-		}
-	}
-
-	defer c.setRawMode()
-
-	idx, err := ui.SelectIndex("Host key verification", options, c.GetStdinReader())
-	if err != nil || idx < 0 {
-		// On error or cancel, default to reject
+	if c.hostKeyPrompt == nil {
 		return HostKeyReject
 	}
 
-	if dangerMode {
-		if idx == 0 {
-			return HostKeyReject
-		}
-		return HostKeyAcceptAlways
-	}
-
-	switch idx {
-	case 0:
-		return HostKeyReject
-	case 1:
-		return HostKeyAcceptOnce
-	default:
-		return HostKeyAcceptAlways
-	}
-}
-
-// showNewHostInfo displays information about a new host's key.
-func (c *Connector) showNewHostInfo(keyType, fingerprint string) {
 	c.restoreTerminal()
 	defer c.setRawMode()
-
-	fp := fingerprint
-	if keyType != "" && fingerprint != "" {
-		fp = fmt.Sprintf("%s %s", keyType, fingerprint)
-	}
-	if fp == "" {
-		fp = "(fingerprint not available)"
-	}
-
-	fmt.Println()
-	panel := ui.NewPanel("New Host").
-		Row("Host:", c.hostname).
-		Row("Fingerprint:", fp).
-		WithFooter("")
-	panel.Print()
-	fmt.Println()
-	fmt.Println(ui.Gray("This is the first time connecting to this host."))
-	fmt.Println()
-}
-
-// showHostKeyChangedWarning displays a prominent warning about changed host keys.
-func (c *Connector) showHostKeyChangedWarning(output []byte) {
-	c.restoreTerminal()
-	defer c.setRawMode()
-
-	keyType, fingerprint := extractFingerprint(output)
-	fp := ""
-	if keyType != "" && fingerprint != "" {
-		fp = fmt.Sprintf("%s %s", keyType, fingerprint)
-	}
-
-	fmt.Println()
-	fmt.Println(ui.Red("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"))
-	fmt.Println(ui.Red("@    WARNING: REMOTE HOST IDENTIFICATION HAS    @"))
-	fmt.Println(ui.Red("@              CHANGED!                         @"))
-	fmt.Println(ui.Red("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"))
-	fmt.Println()
-	fmt.Println(ui.Yellow("IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!"))
-	fmt.Println(ui.Yellow("Someone could be eavesdropping on you right now (man-in-the-middle attack)!"))
-	fmt.Println()
-
-	panel := ui.NewPanel("").
-		Row("Host:", c.hostname).
-		Row("New fingerprint:", fp).
-		WithWarning()
-	panel.Print()
-
-	fmt.Println()
-	fmt.Println("The host key has changed. If this is expected (server reinstall,")
-	fmt.Println("key rotation), you may proceed. Otherwise, DO NOT CONTINUE.")
-	fmt.Println()
+	return c.hostKeyPrompt(prompt)
 }
 
 // respondToHostKey writes the appropriate response to the PTY.
