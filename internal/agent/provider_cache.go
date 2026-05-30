@@ -84,10 +84,6 @@ func (opCLIRunner) Run(ctx context.Context, stdin []byte, args ...string) ([]byt
 	return out, nil
 }
 
-func (p *RuntimeProvider) Mode() string {
-	return ModeRuntime
-}
-
 func (p *RuntimeProvider) Register1Password(name string, cfg OnePasswordSessionConfig) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -14,20 +14,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// version, commit, date, and features are set via ldflags at build time
+// version, commit, and date are set via ldflags at build time
 var (
-	version  = "dev"
-	commit   = ""
-	date     = ""
-	features = ""
+	version = "dev"
+	commit  = ""
+	date    = ""
 )
 
 // SetVersion sets the version info (called from main).
-func SetVersion(v, c, d, f string) {
+func SetVersion(v, c, d string) {
 	version = v
 	commit = c
 	date = d
-	features = f
 }
 
 // NewStatusCmd creates the status subcommand.
@@ -60,9 +58,6 @@ func runStatus() error {
 		versionStr = fmt.Sprintf("%s (%s, %s, %s/%s)", version, commit, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 	} else {
 		versionStr = fmt.Sprintf("%s (%s, %s/%s)", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
-	}
-	if features != "" {
-		versionStr += fmt.Sprintf(" [%s]", features)
 	}
 	ui.StatusLineNeutralText(versionStr)
 
@@ -168,11 +163,7 @@ func runStatus() error {
 	ui.SubSection("Session")
 	if client, err := agent.Connect(); err == nil {
 		if status, err := client.Status(); err == nil {
-			if status.Mode == agent.ModeRuntime {
-				printStatus(true, "Status", "provider runtime active")
-			} else {
-				printStatus(true, "Status", status.Mode)
-			}
+			printStatus(true, "Status", "provider runtime active")
 			ui.StatusLineNeutral("Idle in", formatDuration(status.RemainingIdle))
 			ui.StatusLineNeutral("Ends in", formatDuration(status.RemainingLife))
 		} else {

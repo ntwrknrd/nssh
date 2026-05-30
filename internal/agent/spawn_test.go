@@ -174,12 +174,8 @@ func TestSpawn_FullCycle(t *testing.T) {
 	}
 	defer func() { _ = client.Close() }()
 
-	mode, err := client.Hello()
-	if err != nil {
-		t.Fatalf("Hello() error = %v", err)
-	}
-	if mode != ModeRuntime {
-		t.Errorf("Hello() = %q, want %q", mode, ModeRuntime)
+	if _, err := client.Status(); err != nil {
+		t.Fatalf("Status() error = %v", err)
 	}
 
 	// Cleanup

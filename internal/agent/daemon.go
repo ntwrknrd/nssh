@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -32,8 +31,7 @@ const (
 	// Maximum concurrent connections to prevent resource exhaustion
 	maxConcurrentConnections = 10
 
-	// Maximum request size to prevent memory exhaustion (1MB should be plenty
-	// for age-encrypted credentials which are typically a few KB)
+	// Maximum request size to prevent memory exhaustion.
 	maxRequestSize = 1 << 20 // 1 MiB
 
 	// Timeout for writing responses to clients
@@ -86,61 +84,6 @@ type sessionState struct {
 	mu                sync.RWMutex
 }
 
-type metadataCache struct {
-	mu   sync.RWMutex
-	data map[string][]byte
-}
-
-func newMetadataCache() *metadataCache {
-	return &metadataCache{data: make(map[string][]byte)}
-}
-
-func (c *metadataCache) get(key string) ([]byte, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	value, ok := c.data[key]
-	if !ok {
-		return nil, false
-	}
-	return append([]byte(nil), value...), true
-}
-
-func (c *metadataCache) put(key string, value []byte) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.data[key] = append([]byte(nil), value...)
-}
-
-func (c *metadataCache) delete(key string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.data, key)
-}
-
-func (c *metadataCache) deletePrefix(prefix string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for key := range c.data {
-		if strings.HasPrefix(key, prefix) {
-			delete(c.data, key)
-		}
-	}
-}
-
-func (c *metadataCache) clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.data = make(map[string][]byte)
-}
-
-func (c *metadataCache) count() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.data)
-}
-
 // stripMonotonic removes the monotonic component from a time.Time value.
 // This ensures comparisons use wall clock time so that system sleep or clock
 // adjustments are accounted for.
@@ -175,7 +118,7 @@ func (s *sessionState) extendIdleDeadline() {
 	}
 }
 
-func (s *sessionState) status(mode string, metadataEntries, providerSessions int) StatusInfo {
+func (s *sessionState) status(providerSessions int) StatusInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -191,13 +134,11 @@ func (s *sessionState) status(mode string, metadataEntries, providerSessions int
 	}
 
 	return StatusInfo{
-		Mode:                 mode,
-		IdleTimeout:          int64(s.idleTimeout.Seconds()),
-		MaxLifetime:          int64(s.maxLifetime.Seconds()),
-		RemainingLife:        int64(remainingLife.Seconds()),
-		RemainingIdle:        int64(remainingIdle.Seconds()),
-		MetadataCacheEntries: metadataEntries,
-		ProviderSessions:     providerSessions,
+		IdleTimeout:      int64(s.idleTimeout.Seconds()),
+		MaxLifetime:      int64(s.maxLifetime.Seconds()),
+		RemainingLife:    int64(remainingLife.Seconds()),
+		RemainingIdle:    int64(remainingIdle.Seconds()),
+		ProviderSessions: providerSessions,
 	}
 }
 
@@ -245,7 +186,7 @@ func (t archiveTimer) Stop() bool { return t.timer.Stop() }
 func (t archiveTimer) Reset(d time.Duration) bool { return t.timer.Reset(d) }
 
 // Run starts the agent daemon with the given provider and configuration.
-// The agent listens on a Unix socket and handles decrypt requests until:
+// The agent listens on a Unix socket and handles provider requests until:
 // - Idle timeout expires (no activity for IdleTimeout duration)
 // - Max lifetime expires (regardless of activity)
 // - Lock command received from client
@@ -273,7 +214,7 @@ func Run(provider Provider, cfg RuntimeConfig) error {
 // Handles multiple requests per connection until client disconnects or lock.
 // The activityCh is used to signal the main loop that activity occurred,
 // allowing it to reset the idle timer for long-lived connections.
-func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger, shutdown chan<- string, state *sessionState, activityCh chan<- struct{}, cache *metadataCache) {
+func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger, shutdown chan<- string, state *sessionState, activityCh chan<- struct{}) {
 	defer func() { _ = conn.Close() }()
 
 	// Verify peer credentials
@@ -341,42 +282,14 @@ func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger
 		resp.ID = req.ID
 
 		switch req.Op {
-		case OpHello:
-			resp = Response{ID: req.ID, OK: true, Data: []byte(provider.Mode())}
-
 		case OpStatus:
 			// Status checks don't count as activity - they're just observing state
 			sessionCount := 0
 			if p, ok := provider.(interface{ SessionCount() int }); ok {
 				sessionCount = p.SessionCount()
 			}
-			statusData, _ := json.Marshal(state.status(provider.Mode(), cache.count(), sessionCount))
+			statusData, _ := json.Marshal(state.status(sessionCount))
 			resp = Response{ID: req.ID, OK: true, Data: statusData}
-
-		case OpMetadataGet:
-			signalActivity()
-			data, found := cache.get(req.Key)
-			resp = Response{ID: req.ID, OK: true, Found: found, Data: data}
-
-		case OpMetadataPut:
-			signalActivity()
-			cache.put(req.Key, req.Data)
-			resp = Response{ID: req.ID, OK: true}
-
-		case OpMetadataDelete:
-			signalActivity()
-			cache.delete(req.Key)
-			resp = Response{ID: req.ID, OK: true}
-
-		case OpMetadataDeletePrefix:
-			signalActivity()
-			cache.deletePrefix(req.Key)
-			resp = Response{ID: req.ID, OK: true}
-
-		case OpMetadataClear:
-			signalActivity()
-			cache.clear()
-			resp = Response{ID: req.ID, OK: true}
 
 		case OpProviderRequest:
 			signalActivity()
@@ -552,7 +465,6 @@ func runAgent(ctx context.Context, provider Provider, cfg RuntimeConfig, extendS
 	connSem := semaphore.NewWeighted(maxConcurrentConnections)
 	defer func() { _ = provider.Close() }()
 
-	cache := newMetadataCache()
 	activityCh := make(chan struct{}, 1)
 	shutdown := make(chan string, 1)
 
@@ -586,7 +498,6 @@ func runAgent(ctx context.Context, provider Provider, cfg RuntimeConfig, extendS
 	}()
 
 	cfg.Logger.Info("agent started",
-		"mode", provider.Mode(),
 		"idle_timeout", cfg.Agent.IdleTimeout.Duration(),
 		"max_lifetime", cfg.Agent.MaxLifetime.Duration(),
 		"socket", sockPath)
@@ -658,7 +569,7 @@ func runAgent(ctx context.Context, provider Provider, cfg RuntimeConfig, extendS
 
 			go func(c *net.UnixConn) {
 				defer connSem.Release(1)
-				handleConnection(c, provider, cfg.Logger, shutdown, state, activityCh, cache)
+				handleConnection(c, provider, cfg.Logger, shutdown, state, activityCh)
 			}(result.conn)
 		}
 	}

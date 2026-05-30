@@ -27,7 +27,7 @@ SSH wrapper for power users: manage hosts and credentials, inject passwords auto
 - **Interactive PTY connector** - In-process password injection without external tools (see [ARCHITECTURE.md](docs/ARCHITECTURE.md#pty-connector-architecture))
 - **Fuzzy host selection** - Exact matches connect instantly; partial matches use `fzf` for interactive filtering
 - **Provider-backed credentials** - Pass is the default local provider; 1Password and Bitwarden are supported through provider-owned authentication
-- **Agent runtime** - Background daemon brokers provider sessions and metadata cache with configurable idle/lifetime timeouts
+- **Agent runtime** - Background daemon brokers provider sessions with configurable idle/lifetime timeouts
 - **SSH config management** - Create, remove, sort, and update host entries in SSH config files with automatic alphabetical sorting, timestamped backups, and indexed lookups across SSH 'Include' config files
 - **Legacy device compatibility** - Auto-detects SSH algorithm mismatches and applies KEX/cipher/MAC fixes for older network equipment (see [ARCHITECTURE.md](docs/ARCHITECTURE.md#ssh-compatibility-detection-and-remediation))
 - **Session recording & playback** - Automatic asciinema integration with host-based filtering, idle time limiting, automatic archival, and comprehensive session management via `nssh log` CLI (list/play/upload/export/delete with pattern matching and interactive selection)

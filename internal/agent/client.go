@@ -35,47 +35,6 @@ func Connect() (*Client, error) {
 	}, nil
 }
 
-// Hello sends a hello request to verify the agent is responsive.
-// Returns the agent's security mode (e.g., "software").
-func (c *Client) Hello() (string, error) {
-	resp, err := c.request(Request{Version: ProtocolVersion, Op: OpHello})
-	if err != nil {
-		return "", err
-	}
-	return string(resp.Data), nil
-}
-
-func (c *Client) MetadataGet(key string) (bool, []byte, error) {
-	resp, err := c.request(Request{Version: ProtocolVersion, Op: OpMetadataGet, Key: key})
-	if err != nil {
-		return false, nil, err
-	}
-	if !resp.Found {
-		return false, nil, nil
-	}
-	return true, resp.Data, nil
-}
-
-func (c *Client) MetadataPut(key string, data []byte) error {
-	_, err := c.request(Request{Version: ProtocolVersion, Op: OpMetadataPut, Key: key, Data: data})
-	return err
-}
-
-func (c *Client) MetadataDelete(key string) error {
-	_, err := c.request(Request{Version: ProtocolVersion, Op: OpMetadataDelete, Key: key})
-	return err
-}
-
-func (c *Client) MetadataDeletePrefix(prefix string) error {
-	_, err := c.request(Request{Version: ProtocolVersion, Op: OpMetadataDeletePrefix, Key: prefix})
-	return err
-}
-
-func (c *Client) MetadataClear() error {
-	_, err := c.request(Request{Version: ProtocolVersion, Op: OpMetadataClear})
-	return err
-}
-
 func (c *Client) ProviderRequest(req ProviderRequest) (*ProviderResponse, error) {
 	resp, err := c.request(Request{Version: ProtocolVersion, Op: OpProviderRequest, Provider: &req})
 	if err != nil {

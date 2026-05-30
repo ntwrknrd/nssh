@@ -4,8 +4,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -59,7 +57,6 @@ func TestNewConfiguredRuntimeProviderTreatsBlank1PasswordSessionAsAgentOwned(t *
 }
 
 type fakeSessionProvider struct {
-	mode       string
 	requests   []ProviderRequest
 	responses  []ProviderResponse
 	closeCount int
@@ -78,13 +75,6 @@ func (f *fakeOnePasswordRunner) Run(_ context.Context, _ []byte, args ...string)
 	out := f.outs[0]
 	f.outs = f.outs[1:]
 	return out, nil
-}
-
-func (p *fakeSessionProvider) Mode() string {
-	if p.mode == "" {
-		return ModeRuntime
-	}
-	return p.mode
 }
 
 func (p *fakeSessionProvider) HandleProviderRequest(_ context.Context, req ProviderRequest) (ProviderResponse, error) {
@@ -169,126 +159,5 @@ func TestAgentServesProviderRequests(t *testing.T) {
 	}
 	if len(provider.requests) != 1 || provider.requests[0].Provider != "op-network" {
 		t.Fatalf("provider requests = %+v", provider.requests)
-	}
-}
-
-func TestMetadataCacheOperationsDoNotExposeRawKeysInStatus(t *testing.T) {
-	socketPath := testSocketPath(t)
-	restore := SetSocketPathForTest(socketPath)
-	defer restore()
-
-	cancel, done := RunInBackground(context.Background(), NewRuntimeProvider(), DefaultRuntimeConfig())
-	defer func() {
-		cancel()
-		<-done
-	}()
-	if !waitForSocket(t, 5*time.Second) {
-		t.Fatal("agent did not start in time")
-	}
-
-	client, err := Connect()
-	if err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-	defer func() { _ = client.Close() }()
-
-	if err := client.MetadataPut("provider:op-network:item:edge01", []byte(`{"item_id":"abc"}`)); err != nil {
-		t.Fatalf("MetadataPut: %v", err)
-	}
-	found, got, err := client.MetadataGet("provider:op-network:item:edge01")
-	if err != nil {
-		t.Fatalf("MetadataGet: %v", err)
-	}
-	if !found || string(got) != `{"item_id":"abc"}` {
-		t.Fatalf("metadata found=%v got=%q", found, got)
-	}
-	if err := client.MetadataDelete("provider:op-network:item:edge01"); err != nil {
-		t.Fatalf("MetadataDelete: %v", err)
-	}
-	found, _, err = client.MetadataGet("provider:op-network:item:edge01")
-	if err != nil {
-		t.Fatalf("MetadataGet after delete: %v", err)
-	}
-	if found {
-		t.Fatal("metadata key still found after delete")
-	}
-
-	_ = client.MetadataPut("provider:op-network:item:edge01", []byte("one"))
-	_ = client.MetadataPut("provider:op-network:item:edge02", []byte("two"))
-	if err := client.MetadataDeletePrefix("provider:op-network:"); err != nil {
-		t.Fatalf("MetadataDeletePrefix: %v", err)
-	}
-	found, _, _ = client.MetadataGet("provider:op-network:item:edge01")
-	if found {
-		t.Fatal("metadata prefix delete missed edge01")
-	}
-
-	_ = client.MetadataPut("provider:op-network:item:edge03", []byte("three"))
-	status, err := client.Status()
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	if status.MetadataCacheEntries != 1 {
-		t.Fatalf("metadata count = %d", status.MetadataCacheEntries)
-	}
-	data, _ := json.Marshal(status)
-	if strings.Contains(string(data), "edge03") || strings.Contains(string(data), "provider:op-network") {
-		t.Fatalf("status leaks raw cache key: %s", data)
-	}
-	if err := client.MetadataClear(); err != nil {
-		t.Fatalf("MetadataClear: %v", err)
-	}
-	status, err = client.Status()
-	if err != nil {
-		t.Fatalf("Status after clear: %v", err)
-	}
-	if status.MetadataCacheEntries != 0 {
-		t.Fatalf("metadata count after clear = %d", status.MetadataCacheEntries)
-	}
-}
-
-func TestAgentStopClearsMetadataBecauseProcessExits(t *testing.T) {
-	socketPath := testSocketPath(t)
-	restore := SetSocketPathForTest(socketPath)
-	defer restore()
-
-	cancel, done := RunInBackground(context.Background(), NewRuntimeProvider(), DefaultRuntimeConfig())
-	if !waitForSocket(t, 5*time.Second) {
-		t.Fatal("agent did not start in time")
-	}
-	client, err := Connect()
-	if err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-	if err := client.MetadataPut("provider:op-network:item:edge01", []byte("one")); err != nil {
-		t.Fatalf("MetadataPut: %v", err)
-	}
-	if err := client.Lock(); err != nil {
-		t.Fatalf("Lock: %v", err)
-	}
-	_ = client.Close()
-	cancel()
-	<-done
-	_ = os.Remove(socketPath)
-
-	cancel, done = RunInBackground(context.Background(), NewRuntimeProvider(), DefaultRuntimeConfig())
-	defer func() {
-		cancel()
-		<-done
-	}()
-	if !waitForSocket(t, 5*time.Second) {
-		t.Fatal("agent did not restart in time")
-	}
-	client, err = Connect()
-	if err != nil {
-		t.Fatalf("Connect restarted: %v", err)
-	}
-	defer func() { _ = client.Close() }()
-	found, _, err := client.MetadataGet("provider:op-network:item:edge01")
-	if err != nil {
-		t.Fatalf("MetadataGet restarted: %v", err)
-	}
-	if found {
-		t.Fatal("metadata survived agent process restart")
 	}
 }

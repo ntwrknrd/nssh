@@ -1,9 +1,8 @@
 // Package agent implements the nssh background runtime daemon.
 //
 // The agent communicates with nssh clients over a Unix domain socket using a
-// JSON protocol. It brokers provider-session requests, stores non-secret
-// metadata cache entries, owns socket lifecycle checks, and hosts background
-// maintenance tasks.
+// JSON protocol. It brokers provider-session requests, owns socket lifecycle
+// checks, and hosts background maintenance tasks.
 //
 // # Lifecycle
 //
@@ -21,7 +20,6 @@
 //   - OpStatus: query runtime status and remaining lifetime
 //   - OpLock: terminate the agent session
 //   - OpProviderRequest: broker a provider-scoped request
-//   - Metadata cache operations for non-secret state
 //
 // # Background Tasks
 //

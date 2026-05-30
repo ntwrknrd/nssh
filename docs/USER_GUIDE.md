@@ -157,8 +157,7 @@ nssh cp ./file switch1:/tmp/file
 
 ## Agent
 
-`nssh agent` manages the background runtime used for provider sessions and
-metadata cache.
+`nssh agent` manages the background runtime used for provider sessions.
 
 ```bash
 nssh agent status

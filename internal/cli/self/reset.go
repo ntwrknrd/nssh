@@ -155,7 +155,7 @@ func runReset(dryRun, force bool) error {
 	// 2. Delete directories in order: state, data, config
 	hasErrors := false
 
-	// State directory (socket, recordings, lockout)
+	// State directory (socket, recordings)
 	if DirExists(summary.StateDir) {
 		if err := os.RemoveAll(summary.StateDir); err != nil {
 			ui.Warning("Failed to remove %s: %v", AbbreviatePath(summary.StateDir), err)

@@ -75,6 +75,6 @@ func IsRunning() bool {
 	}
 	defer func() { _ = client.Close() }()
 
-	_, err = client.Hello()
+	_, err = client.Status()
 	return err == nil
 }

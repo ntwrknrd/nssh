@@ -90,8 +90,6 @@ func runStatus() error {
 		return err
 	}
 	ui.PrintKeyValue("Agent", "active")
-	ui.PrintKeyValue("Mode", status.Mode)
-	ui.PrintKeyValue("Metadata cache entries", fmt.Sprintf("%d", status.MetadataCacheEntries))
 	ui.PrintKeyValue("Provider sessions", fmt.Sprintf("%d", status.ProviderSessions))
 	ui.PrintKeyValue("Idle in", formatAgentSeconds(status.RemainingIdle))
 	ui.PrintKeyValue("Ends in", formatAgentSeconds(status.RemainingLife))

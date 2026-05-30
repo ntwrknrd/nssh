@@ -97,7 +97,7 @@ func TestDaemon_MaxLifetime(t *testing.T) {
 				if err != nil {
 					return
 				}
-				_, _ = client.Hello()
+				_, _ = client.ProviderRequest(ProviderRequest{Provider: "missing", Action: "get"})
 				_ = client.Close()
 			}
 		}
@@ -137,11 +137,8 @@ func TestDaemon_ActivityResetsIdleTimeout(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Connect() error = %v", err)
 		}
-		_, _, err = client.MetadataGet("activity")
+		_, err = client.ProviderRequest(ProviderRequest{Provider: "missing", Action: "get"})
 		_ = client.Close()
-		if err != nil {
-			t.Fatalf("MetadataGet() error = %v", err)
-		}
 
 		fc.Advance(200 * time.Millisecond) // less than idle timeout, should keep alive
 	}
@@ -220,8 +217,8 @@ func TestDaemon_ConcurrentConnections(t *testing.T) {
 			}
 			defer func() { _ = client.Close() }()
 
-			mode, err := client.Hello()
-			if err == nil && mode == ModeRuntime {
+			_, err = client.Status()
+			if err == nil {
 				mu.Lock()
 				successes++
 				mu.Unlock()
@@ -337,7 +334,7 @@ func TestDaemon_ProtocolVersionMismatch(t *testing.T) {
 	}
 	defer func() { _ = conn.Close() }()
 
-	req := Request{Version: 999, Op: OpHello}
+	req := Request{Version: 999, Op: OpStatus}
 	encoder := json.NewEncoder(conn)
 	decoder := json.NewDecoder(conn)
 
@@ -477,12 +474,8 @@ func TestDaemon_StaleSocketCleanup(t *testing.T) {
 	}
 	defer func() { _ = client.Close() }()
 
-	mode, err := client.Hello()
-	if err != nil {
-		t.Fatalf("Hello() error = %v", err)
-	}
-	if mode != ModeRuntime {
-		t.Errorf("Hello() = %q, want %q", mode, ModeRuntime)
+	if _, err := client.Status(); err != nil {
+		t.Fatalf("Status() error = %v", err)
 	}
 }
 
@@ -531,7 +524,7 @@ func TestDaemon_StatusDoesNotResetIdleTimer(t *testing.T) {
 	}
 }
 
-func TestDaemon_MetadataGetResetsIdleTimer(t *testing.T) {
+func TestDaemon_ProviderRequestResetsIdleTimer(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()
@@ -558,11 +551,8 @@ func TestDaemon_MetadataGetResetsIdleTimer(t *testing.T) {
 			t.Fatalf("Connect() #%d error = %v", i, err)
 		}
 
-		_, _, err = client.MetadataGet("activity")
+		_, err = client.ProviderRequest(ProviderRequest{Provider: "missing", Action: "get"})
 		_ = client.Close()
-		if err != nil {
-			t.Fatalf("MetadataGet() #%d error = %v", i, err)
-		}
 	}
 
 	// Agent should still be running

@@ -11,7 +11,6 @@ type Request struct {
 	ID       string           `json:"id,omitempty"`               // Request ID for log correlation (optional)
 	Op       string           `json:"op"`                         // Operation name
 	Data     []byte           `json:"data,omitempty"`             // Operation payload
-	Key      string           `json:"key,omitempty"`              // Metadata cache key
 	Provider *ProviderRequest `json:"provider_request,omitempty"` // Provider-session request
 }
 
@@ -20,33 +19,24 @@ type Response struct {
 	ID       string            `json:"id,omitempty"`                // Echoes request ID for correlation
 	OK       bool              `json:"ok"`                          // true if operation succeeded
 	Data     []byte            `json:"data,omitempty"`              // Result data
-	Found    bool              `json:"found,omitempty"`             // Result found flag
 	Provider *ProviderResponse `json:"provider_response,omitempty"` // Provider-session response
 	Err      string            `json:"err,omitempty"`               // Error message if OK is false
 }
 
 // Operation constants for Request.Op field.
 const (
-	OpHello                = "hello"  // Returns agent mode (e.g., "runtime")
-	OpStatus               = "status" // Returns session status (JSON StatusInfo)
-	OpLock                 = "lock"   // Terminates the agent
-	OpMetadataGet          = "metadata_get"
-	OpMetadataPut          = "metadata_put"
-	OpMetadataDelete       = "metadata_delete"
-	OpMetadataDeletePrefix = "metadata_delete_prefix"
-	OpMetadataClear        = "metadata_clear"
-	OpProviderRequest      = "provider_request"
+	OpStatus          = "status" // Returns session status (JSON StatusInfo)
+	OpLock            = "lock"   // Terminates the agent
+	OpProviderRequest = "provider_request"
 )
 
 // StatusInfo is returned by the status operation.
 type StatusInfo struct {
-	Mode                 string `json:"mode"`                   // Security mode (e.g., "software")
-	IdleTimeout          int64  `json:"idle_timeout"`           // Configured idle timeout in seconds
-	MaxLifetime          int64  `json:"max_lifetime"`           // Configured max lifetime in seconds
-	RemainingLife        int64  `json:"remaining_life"`         // Seconds until max lifetime expires
-	RemainingIdle        int64  `json:"remaining_idle"`         // Seconds until idle timeout (approximate)
-	MetadataCacheEntries int    `json:"metadata_cache_entries"` // Non-secret metadata cache count
-	ProviderSessions     int    `json:"provider_sessions"`      // Active provider-session count
+	IdleTimeout      int64 `json:"idle_timeout"`      // Configured idle timeout in seconds
+	MaxLifetime      int64 `json:"max_lifetime"`      // Configured max lifetime in seconds
+	RemainingLife    int64 `json:"remaining_life"`    // Seconds until max lifetime expires
+	RemainingIdle    int64 `json:"remaining_idle"`    // Seconds until idle timeout (approximate)
+	ProviderSessions int   `json:"provider_sessions"` // Active provider-session count
 }
 
 // ProviderRequest describes a provider-scoped operation brokered by the agent.

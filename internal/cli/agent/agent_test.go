@@ -38,7 +38,7 @@ func TestAgentCommandShowsHelp(t *testing.T) {
 	}
 }
 
-func TestAgentStatusDoesNotRevealMetadataKeysOrSecrets(t *testing.T) {
+func TestAgentStatusShowsRuntimeState(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := runtimeagent.SetSocketPathForTest(socketPath)
 	defer restore()
@@ -53,22 +53,16 @@ func TestAgentStatusDoesNotRevealMetadataKeysOrSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	if err := client.MetadataPut("provider:op-network:item:edge01", []byte(`{"password":"secret"}`)); err != nil {
-		t.Fatalf("metadata put: %v", err)
-	}
 	_ = client.Close()
 
 	output, err := executeAgentCommand("agent", "status")
 	if err != nil {
 		t.Fatalf("agent status: %v", err)
 	}
-	for _, reject := range []string{"provider:op-network", "edge01", "secret"} {
-		if strings.Contains(output, reject) {
-			t.Fatalf("status leaked %q:\n%s", reject, output)
+	for _, want := range []string{"Agent", "active", "Provider sessions", "Idle in", "Ends in"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("status missing %q:\n%s", want, output)
 		}
-	}
-	if !strings.Contains(output, "Metadata cache entries") {
-		t.Fatalf("status missing metadata count:\n%s", output)
 	}
 }
 
@@ -122,8 +116,8 @@ func TestAgentRestartStartsCleanRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status after restart: %v", err)
 	}
-	if status.Mode != runtimeagent.ModeRuntime {
-		t.Fatalf("mode after restart = %q", status.Mode)
+	if status.ProviderSessions != 0 {
+		t.Fatalf("provider sessions after restart = %d", status.ProviderSessions)
 	}
 }
 

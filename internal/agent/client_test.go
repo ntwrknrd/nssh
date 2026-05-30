@@ -51,35 +51,6 @@ func TestClient_Connect_Success(t *testing.T) {
 	<-done
 }
 
-func TestClient_Hello(t *testing.T) {
-	socketPath := testSocketPath(t)
-	restore := SetSocketPathForTest(socketPath)
-	defer restore()
-	cancel, done := startTestAgent(t)
-	defer func() {
-		cancel()
-		<-done
-	}()
-
-	if !waitForSocket(t, 5*time.Second) {
-		t.Fatal("agent did not start in time")
-	}
-
-	client, err := Connect()
-	if err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
-	defer func() { _ = client.Close() }()
-
-	mode, err := client.Hello()
-	if err != nil {
-		t.Fatalf("Hello() error = %v", err)
-	}
-	if mode != ModeRuntime {
-		t.Errorf("Hello() = %q, want %q", mode, ModeRuntime)
-	}
-}
-
 func TestClient_Status(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
@@ -112,9 +83,6 @@ func TestClient_Status(t *testing.T) {
 		t.Fatalf("Status() error = %v", err)
 	}
 
-	if status.Mode != ModeRuntime {
-		t.Errorf("Status.Mode = %q, want %q", status.Mode, ModeRuntime)
-	}
 	if status.IdleTimeout != 30 {
 		t.Errorf("Status.IdleTimeout = %d, want 30", status.IdleTimeout)
 	}
@@ -190,8 +158,8 @@ func TestClient_Close(t *testing.T) {
 	}
 
 	// Further operations should fail
-	_, err = client.Hello()
+	_, err = client.Status()
 	if err == nil {
-		t.Error("Hello() after Close() should error")
+		t.Error("Status() after Close() should error")
 	}
 }

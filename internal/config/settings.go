@@ -34,28 +34,6 @@ type AgentConfig struct {
 	ActivityIncrement Duration `toml:"activity_increment"`
 	// MaxLifetime is the maximum lifetime of the agent regardless of activity (default 24h)
 	MaxLifetime Duration `toml:"max_lifetime"`
-	// Security holds credential protection settings
-	Security AgentSecurityConfig `toml:"security"`
-}
-
-// AgentSecurityConfig holds local agent lifecycle security settings.
-type AgentSecurityConfig struct {
-	// Software holds settings specific to software mode
-	Software SoftwareSecurityConfig `toml:"software"`
-}
-
-// SoftwareSecurityConfig holds settings for software-based credential protection.
-type SoftwareSecurityConfig struct {
-	// LockoutDuration is the initial lockout duration (default: 5m)
-	LockoutDuration Duration `toml:"lockout_duration"`
-	// LockoutThreshold is the number of failed attempts before lockout (default: 10)
-	LockoutThreshold int `toml:"lockout_threshold"`
-	// MaxLockoutDuration is the maximum lockout duration with exponential backoff (default: 1h)
-	MaxLockoutDuration Duration `toml:"max_lockout_duration"`
-	// PassphraseMinLength enforces minimum length for credential passphrases (default: 12)
-	PassphraseMinLength int `toml:"passphrase_min_length"`
-	// ScryptWorkFactor is the scrypt work factor (2^N iterations, default 18)
-	ScryptWorkFactor int `toml:"scrypt_work_factor"`
 }
 
 // ============================================================================
@@ -211,15 +189,6 @@ func DefaultConfig() *Config {
 			IdleTimeout:       Duration(1 * time.Hour),
 			ActivityIncrement: Duration(15 * time.Minute),
 			MaxLifetime:       Duration(24 * time.Hour),
-			Security: AgentSecurityConfig{
-				Software: SoftwareSecurityConfig{
-					LockoutDuration:     Duration(5 * time.Minute),
-					LockoutThreshold:    10,
-					MaxLockoutDuration:  Duration(1 * time.Hour),
-					PassphraseMinLength: 12,
-					ScryptWorkFactor:    18,
-				},
-			},
 		},
 		Host: HostConfig{
 			Defaults: HostDefaultsConfig{
@@ -481,68 +450,6 @@ func (c *AgentConfig) Validate() error {
 	// Logical constraint: idle timeout should be <= max lifetime
 	if idleTimeout > maxLifetime {
 		return fmt.Errorf("agent.idle_timeout (%v) must be <= agent.max_lifetime (%v)", idleTimeout, maxLifetime)
-	}
-
-	return c.Security.Validate()
-}
-
-// Validate checks AgentSecurityConfig values are within acceptable bounds.
-func (c *AgentSecurityConfig) Validate() error {
-	return c.Software.Validate()
-}
-
-// Validate checks SoftwareSecurityConfig values are within acceptable bounds.
-func (c *SoftwareSecurityConfig) Validate() error {
-	// Default passphrase min length if unset
-	if c.PassphraseMinLength == 0 {
-		c.PassphraseMinLength = 12
-	}
-
-	// Validate scrypt work factor (min 14, max 22)
-	if c.ScryptWorkFactor < 14 {
-		return fmt.Errorf("agent.security.software.scrypt_work_factor must be >= 14 (got %d)", c.ScryptWorkFactor)
-	}
-	if c.ScryptWorkFactor > 22 {
-		return fmt.Errorf("agent.security.software.scrypt_work_factor must be <= 22 (got %d)", c.ScryptWorkFactor)
-	}
-
-	// Validate passphrase minimum length
-	if c.PassphraseMinLength < 8 {
-		return fmt.Errorf("agent.security.software.passphrase_min_length must be >= 8 (got %d)", c.PassphraseMinLength)
-	}
-	if c.PassphraseMinLength > 128 {
-		return fmt.Errorf("agent.security.software.passphrase_min_length must be <= 128 (got %d)", c.PassphraseMinLength)
-	}
-
-	// Validate lockout threshold (min 3, max 100)
-	if c.LockoutThreshold < 3 {
-		return fmt.Errorf("agent.security.software.lockout_threshold must be >= 3 (got %d)", c.LockoutThreshold)
-	}
-	if c.LockoutThreshold > 100 {
-		return fmt.Errorf("agent.security.software.lockout_threshold must be <= 100 (got %d)", c.LockoutThreshold)
-	}
-
-	// Validate lockout duration (min 1m, max 1h)
-	lockoutDuration := c.LockoutDuration.Duration()
-	if lockoutDuration < time.Minute {
-		return fmt.Errorf("agent.security.software.lockout_duration must be >= 1m (got %v)", lockoutDuration)
-	}
-	if lockoutDuration > time.Hour {
-		return fmt.Errorf("agent.security.software.lockout_duration must be <= 1h (got %v)", lockoutDuration)
-	}
-
-	// Validate max lockout duration (min 5m, max 24h)
-	maxLockoutDuration := c.MaxLockoutDuration.Duration()
-	if maxLockoutDuration < 5*time.Minute {
-		return fmt.Errorf("agent.security.software.max_lockout_duration must be >= 5m (got %v)", maxLockoutDuration)
-	}
-	if maxLockoutDuration > 24*time.Hour {
-		return fmt.Errorf("agent.security.software.max_lockout_duration must be <= 24h (got %v)", maxLockoutDuration)
-	}
-
-	// Logical constraint: max_lockout_duration >= lockout_duration
-	if maxLockoutDuration < lockoutDuration {
-		return fmt.Errorf("agent.security.software.max_lockout_duration (%v) must be >= lockout_duration (%v)", maxLockoutDuration, lockoutDuration)
 	}
 
 	return nil

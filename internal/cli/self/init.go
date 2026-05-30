@@ -34,8 +34,8 @@ func NewInitCmd() *cobra.Command {
 		Short: "Initialize configuration",
 		Long: `Initialize nssh configuration.
 
-Credentials are protected with a passphrase using scrypt encryption.
-Session caching keeps credentials unlocked for 4 hours (configurable).
+Credentials are resolved through configured providers such as Pass, 1Password,
+or Bitwarden. The runtime agent can broker provider sessions when configured.
 
 Use -y to skip all confirmation prompts.
 

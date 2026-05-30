@@ -15,8 +15,8 @@ Primary packages:
 - `internal/cli/inv`: inventory commands
 - `internal/cli/resolve`: shared SSH/SCP host and credential resolution
 - `internal/credential`: provider abstraction and provider implementations
-- `internal/agent`: background runtime, provider-session broker, metadata cache,
-  socket lifecycle, and peer checks
+- `internal/agent`: background runtime, provider-session broker, socket
+  lifecycle, and peer checks
 - `internal/ssh/connector`: PTY connector and password prompt handling
 - `internal/recording`: recording plan, wrapper metadata, and archival policy
 
@@ -78,15 +78,14 @@ The agent is a Unix-domain-socket daemon. It is not the credential store. Its
 responsibilities are:
 
 - provider-session requests for agent-owned providers
-- non-secret metadata cache operations
 - socket path management and stale socket cleanup
 - peer credential verification
 - idle timeout, max lifetime, signal handling, and stop/restart behavior
 - hosting the background recording archive runner
 
-Protocol operations include `hello`, `status`, `lock`, metadata cache
-operations, and `provider_request`. `lock` is the internal stop operation used
-by `nssh agent stop`; there is no public vault lock command.
+Protocol operations include `status`, `lock`, and `provider_request`. `lock` is
+the internal stop operation used by `nssh agent stop`; there is no public vault
+lock command.
 
 ## Connection Flow
 
@@ -112,7 +111,6 @@ cost.
 
 - `nssh self status`: installed binary, config, providers, SSH include state,
   recording state, and agent status
-- `nssh agent status`: runtime mode, lifetime, metadata cache count, and provider
-  session count
+- `nssh agent status`: runtime lifetime and provider session count
 - `nssh agent doctor`: socket and runtime diagnostics
 - `nssh inv status`: inventory provider cache and output status

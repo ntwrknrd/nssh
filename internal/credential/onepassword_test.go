@@ -171,18 +171,6 @@ func TestOnePasswordAgentSessionRoutesGetThroughAgent(t *testing.T) {
 		t.Fatalf("op calls = %d, want 1", len(runner.calls))
 	}
 
-	client, err := agent.Connect()
-	if err != nil {
-		t.Fatalf("agent connect: %v", err)
-	}
-	defer func() { _ = client.Close() }()
-	status, err := client.Status()
-	if err != nil {
-		t.Fatalf("agent status: %v", err)
-	}
-	if status.MetadataCacheEntries != 0 {
-		t.Fatalf("1Password agent request stored metadata entries = %d", status.MetadataCacheEntries)
-	}
 }
 
 func TestOnePasswordAgentSessionRepeatedRequestsUseAgentProcess(t *testing.T) {

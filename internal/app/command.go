@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ntwrknrd/nssh/internal/agent"
 	agentcmd "github.com/ntwrknrd/nssh/internal/cli/agent"
 	"github.com/ntwrknrd/nssh/internal/cli/cp"
 	"github.com/ntwrknrd/nssh/internal/cli/inv"
@@ -94,7 +93,7 @@ and record sessions.`,
 	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
 	rootCmd.PersistentFlags().BoolP("help", "h", false, "Print command help")
 
-	self.SetVersion(opts.Version, opts.Commit, opts.Date, strings.Join(agent.CompiledFeatures, ", "))
+	self.SetVersion(opts.Version, opts.Commit, opts.Date)
 
 	rootCmd.AddCommand(newConnectCmd())
 	rootCmd.AddCommand(newSmartConnectCmd())
