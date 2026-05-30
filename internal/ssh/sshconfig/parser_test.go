@@ -29,7 +29,7 @@ Host router
   PubkeyAuthentication no
   PreferredAuthentications keyboard-interactive
 
-Host switch legacy-switch
+Host switch alt-switch
   HostName switch.example.com
   User netadmin
 `
@@ -87,7 +87,7 @@ Host switch legacy-switch
 	if len(switchHost.Patterns) != 2 {
 		t.Errorf("expected 2 patterns, got %d", len(switchHost.Patterns))
 	}
-	if switchHost.Patterns[0] != "switch" || switchHost.Patterns[1] != "legacy-switch" {
+	if switchHost.Patterns[0] != "switch" || switchHost.Patterns[1] != "alt-switch" {
 		t.Errorf("unexpected patterns: %v", switchHost.Patterns)
 	}
 }
@@ -151,11 +151,12 @@ func TestSortHosts(t *testing.T) {
 		{Host: "Alpha"},
 		{Host: "BRAVO"},
 		{Host: "delta"},
+		{Host: "*"},
 	}
 
 	SortHosts(hosts)
 
-	expected := []string{"Alpha", "BRAVO", "charlie", "delta"}
+	expected := []string{"Alpha", "BRAVO", "charlie", "delta", "*"}
 	for i, h := range hosts {
 		if h.Host != expected[i] {
 			t.Errorf("position %d: got %q, want %q", i, h.Host, expected[i])

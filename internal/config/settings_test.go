@@ -79,7 +79,6 @@ timeout = "60s"
 password_timeout = "20s"
 
 [host.defaults]
-default_context = "work"
 default_user = "admin"
 
 [logging.audit]
@@ -102,9 +101,6 @@ auto_start = false
 	}
 	if cfg.SSH.Connection.PasswordTimeout.Duration() != 20*time.Second {
 		t.Errorf("password_timeout = %v, want 20s", cfg.SSH.Connection.PasswordTimeout.Duration())
-	}
-	if cfg.Host.Defaults.DefaultContext != "work" {
-		t.Errorf("host.defaults.default_context = %q, want %q", cfg.Host.Defaults.DefaultContext, "work")
 	}
 	if cfg.Host.Defaults.DefaultUser != "admin" {
 		t.Errorf("host.defaults.default_user = %q, want %q", cfg.Host.Defaults.DefaultUser, "admin")

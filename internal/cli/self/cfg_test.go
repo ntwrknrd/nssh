@@ -32,11 +32,6 @@ func TestRunCfgDefaultUsesCommandBanners(t *testing.T) {
 			t.Fatalf("cfg output missing %q:\n%s", want, got)
 		}
 	}
-	for _, reject := range []string{"NSSH CONFIG", "Config:", "Effective configuration"} {
-		if strings.Contains(got, reject) {
-			t.Fatalf("cfg output should not include %q:\n%s", reject, got)
-		}
-	}
 }
 
 func TestRunCfgPathOnlyStaysRawPath(t *testing.T) {

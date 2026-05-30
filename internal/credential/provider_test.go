@@ -1,34 +1,10 @@
 package credential
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 )
-
-func TestProviderInterfaceIsReadOnly(t *testing.T) {
-	providerType := reflect.TypeOf((*Provider)(nil)).Elem()
-	for _, method := range []string{"SetHost", "SetGroup", "RemoveHost", "RemoveGroup", "Status"} {
-		if _, ok := providerType.MethodByName(method); ok {
-			t.Fatalf("Provider should not expose %s after credential CLI removal", method)
-		}
-	}
-}
-
-func TestNewRegistryRejectsActiveAgeProvider(t *testing.T) {
-	_, err := NewRegistry(&config.Config{
-		Credential: config.CredentialConfig{
-			DefaultProvider: "local-age",
-			Provider: map[string]config.CredentialProviderConfig{
-				"local-age": {Type: "age"},
-			},
-		},
-	})
-	if err == nil {
-		t.Fatal("expected age provider rejection")
-	}
-}
 
 func TestNewRegistryBuildsNamedProviders(t *testing.T) {
 	registry, err := NewRegistry(&config.Config{

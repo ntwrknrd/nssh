@@ -135,7 +135,7 @@ func TestRuntimeProviderResolvesOnePasswordSecretRefs(t *testing.T) {
 	}
 }
 
-func TestAgentServesProviderRequestsWithoutAgeProviderMethods(t *testing.T) {
+func TestAgentServesProviderRequests(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)
 	defer restore()

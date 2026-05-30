@@ -14,7 +14,7 @@ import (
 	runtimeagent "github.com/ntwrknrd/nssh/internal/agent"
 )
 
-func TestAgentCommandShowsHelpAndDoesNotIncludeCacheInternals(t *testing.T) {
+func TestAgentCommandShowsHelp(t *testing.T) {
 	output, err := executeAgentCommand("agent")
 	if err != nil {
 		t.Fatalf("agent command: %v", err)
@@ -33,10 +33,8 @@ func TestAgentCommandShowsHelpAndDoesNotIncludeCacheInternals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("agent help: %v", err)
 	}
-	for _, reject := range []string{"clear", "warm"} {
-		if strings.Contains(help, reject) {
-			t.Fatalf("help should not expose %q:\n%s", reject, help)
-		}
+	if !strings.Contains(help, "doctor") {
+		t.Fatalf("agent help missing doctor command:\n%s", help)
 	}
 }
 

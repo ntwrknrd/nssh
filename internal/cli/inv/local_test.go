@@ -153,7 +153,7 @@ func TestInventoryHostsIgnoresNonNsshIncludes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sshDir, "nssh.d", "provider_local.conf"), []byte("Host managed\n  HostName managed.example.com\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(sshDir, "conf.d", "legacy_hosts"), []byte("Host legacy\n  HostName legacy.example.com\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(sshDir, "conf.d", "external_hosts"), []byte("Host unmanaged\n  HostName unmanaged.example.com\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -259,8 +259,8 @@ func TestRemoveLocalHostIgnoresNonInventoryIncludes(t *testing.T) {
 	if err := os.WriteFile(mainConfig, []byte("Include conf.d/*\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	legacyFile := filepath.Join(sshDir, "conf.d", "legacy_hosts")
-	if err := os.WriteFile(legacyFile, []byte("Host legacy\n  HostName legacy.example.com\n"), 0600); err != nil {
+	externalFile := filepath.Join(sshDir, "conf.d", "external_hosts")
+	if err := os.WriteFile(externalFile, []byte("Host unmanaged\n  HostName unmanaged.example.com\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -273,19 +273,19 @@ func TestRemoveLocalHostIgnoresNonInventoryIncludes(t *testing.T) {
 	}}
 	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
 
-	removed, err := removeLocalHost(parser, cfg, paths, "legacy")
+	removed, err := removeLocalHost(parser, cfg, paths, "unmanaged")
 	if err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	if removed {
 		t.Fatal("expected non-inventory host to be ignored")
 	}
-	content, err := os.ReadFile(legacyFile)
+	content, err := os.ReadFile(externalFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(content), "Host legacy") {
-		t.Fatalf("legacy include was modified:\n%s", content)
+	if !strings.Contains(string(content), "Host unmanaged") {
+		t.Fatalf("external include was modified:\n%s", content)
 	}
 }
 

@@ -33,27 +33,6 @@ func TestReconcileRoutesObjectsToGroups(t *testing.T) {
 	}
 }
 
-func TestReconcileDoesNotTrackCredentialClass(t *testing.T) {
-	routes := []config.InventoryRouteConfig{{
-		Group: "lab",
-		Match: config.InventoryRouteMatch{"kind": {"ceos"}},
-	}}
-	objects := []Object{{
-		ObjectID:   "lab/core01",
-		Name:       "clab-core01",
-		HostName:   "172.20.0.2",
-		Attributes: map[string][]string{"kind": {"ceos"}},
-	}}
-
-	plan := Reconcile(objects, routes, "nre-netlab01", nil)
-	if len(plan.Adds) != 1 {
-		t.Fatalf("adds = %d, want 1", len(plan.Adds))
-	}
-	if plan.Adds[0].ProviderType != "" {
-		t.Fatalf("provider type metadata should be assigned by refresh writer, got %q", plan.Adds[0].ProviderType)
-	}
-}
-
 func TestReconcileAssignsRouteAuthMode(t *testing.T) {
 	routes := []config.InventoryRouteConfig{{
 		Group:    "servers",

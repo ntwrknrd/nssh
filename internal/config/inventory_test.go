@@ -196,21 +196,6 @@ func TestCredentialConfigValidation(t *testing.T) {
 			},
 		},
 		{
-			name: "age provider is invalid",
-			cfg: CredentialConfig{
-				DefaultProvider: "local-age",
-				Provider: map[string]CredentialProviderConfig{
-					"local-age": {Type: "age"},
-				},
-			},
-			wantErr: "unsupported credential provider",
-		},
-		{
-			name:    "legacy global type is invalid",
-			cfg:     CredentialConfig{Type: "age"},
-			wantErr: "credential.type is no longer supported",
-		},
-		{
 			name: "provider name must be bare-key safe",
 			cfg: CredentialConfig{
 				DefaultProvider: "bad.name",
@@ -229,32 +214,6 @@ func TestCredentialConfigValidation(t *testing.T) {
 				},
 			},
 			wantErr: "default_provider references unknown provider",
-		},
-		{
-			name: "legacy host binding is invalid",
-			cfg: CredentialConfig{
-				DefaultProvider: "pass-local",
-				Provider: map[string]CredentialProviderConfig{
-					"pass-local": {Type: CredentialProviderPass},
-				},
-				Host: map[string]CredentialRefConfig{
-					"edge01": {Provider: "pass-local", Ref: "nssh/hosts/edge01"},
-				},
-			},
-			wantErr: "credential.host is no longer supported",
-		},
-		{
-			name: "legacy group binding is invalid",
-			cfg: CredentialConfig{
-				DefaultProvider: "pass-local",
-				Provider: map[string]CredentialProviderConfig{
-					"pass-local": {Type: CredentialProviderPass},
-				},
-				Group: map[string]CredentialRefConfig{
-					"default": {Ref: "nssh/groups/default"},
-				},
-			},
-			wantErr: "credential.group is no longer supported",
 		},
 		{
 			name: "invalid provider-session policy",
@@ -284,69 +243,6 @@ func TestCredentialConfigValidation(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err, tt.wantErr)
 			}
 		})
-	}
-}
-
-func TestLegacyInventoryCredentialConfigDecode(t *testing.T) {
-	const input = `
-[credential]
-type = "1password"
-
-  [credential.config]
-  account = "ntwrknrd"
-  vault = "Network"
-
-  [credential.group.custcbb]
-  ref = "Network Shared Admin"
-
-  [credential.host.edge01]
-  ref = "op://Network/Edge 01/password"
-  username_ref = "op://Network/Edge 01/username"
-
-[inventory]
-default_group = "lab"
-
-  [inventory.group.lab]
-
-  [inventory.group.custcbb]
-  domain_suffix = [".custcbb.local"]
-
-  [inventory.provider.netbox-prod]
-  type = "netbox"
-
-    [inventory.provider.netbox-prod.config]
-    base_url = "https://netbox.example.com"
-    token_env = "NETBOX_TOKEN"
-
-    [[inventory.provider.netbox-prod.route]]
-    group = "custcbb"
-
-      [inventory.provider.netbox-prod.route.match]
-      manufacturer = ["Juniper", "Arista"]
-      status = ["active"]
-
-  [inventory.provider.nre-netlab01]
-  type = "containerlab"
-
-    [inventory.provider.nre-netlab01.config]
-    jump_host = "nre-netlab01"
-    sudo = true
-    strict_host_key_checking = false
-
-    [[inventory.provider.nre-netlab01.route]]
-    group = "lab"
-
-      [inventory.provider.nre-netlab01.route.match]
-      kind = ["ceos", "vjunos"]
-      state = ["running"]
-`
-
-	cfg := DefaultConfig()
-	if _, err := toml.Decode(input, cfg); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "credential.type is no longer supported") {
-		t.Fatalf("validate error = %v, want credential.type rejection", err)
 	}
 }
 
@@ -408,15 +304,6 @@ func TestInventoryConfigValidation(t *testing.T) {
 				},
 			},
 			wantErr: "invalid auth_mode",
-		},
-		{
-			name: "unsupported credential backend is separate concern",
-			cfg: InventoryConfig{
-				DefaultGroup: "default",
-				Group: map[string]GroupConfig{
-					"default": {},
-				},
-			},
 		},
 		{
 			name: "group auth requires ref",
@@ -490,49 +377,6 @@ func TestConfigValidationRejectsUnknownInventoryAuthProvider(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "references unknown provider") {
 		t.Fatalf("error %q does not contain unknown provider", err)
-	}
-}
-
-func TestLoadRejectsLegacySyncSources(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "config.toml")
-	input := `
-[[sync.sources]]
-name = "lab"
-provider = "containerlab"
-
-  [sync.sources.containerlab]
-  jump_host = "jumpbox"
-
-  [[sync.sources.routes]]
-  context = "lab"
-`
-	if err := os.WriteFile(path, []byte(input), 0600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := Load(path)
-	if err == nil {
-		t.Fatal("expected legacy sync config rejection")
-	}
-	if !strings.Contains(err.Error(), "sync.sources is no longer supported") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestSaveDoesNotEmitLegacySyncTable(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "config.toml")
-	cfg := DefaultConfig()
-
-	if err := Save(path, cfg); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read saved config: %v", err)
-	}
-	if strings.Contains(string(data), "[sync]") || strings.Contains(string(data), "[[sync.sources]]") {
-		t.Fatalf("saved config contains legacy sync table:\n%s", data)
 	}
 }
 

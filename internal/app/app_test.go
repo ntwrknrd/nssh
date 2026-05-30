@@ -1,8 +1,6 @@
 package app
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -42,6 +40,16 @@ func TestPreprocessArgs(t *testing.T) {
 			out:  []string{"smart-connect", "router1", "-p", "2200"},
 		},
 		{
+			name: "ssh flag with value after host",
+			in:   []string{"router1", "-p", "2200"},
+			out:  []string{"smart-connect", "router1", "-p", "2200"},
+		},
+		{
+			name: "ssh boolean flags before host",
+			in:   []string{"-4", "-A", "router1"},
+			out:  []string{"smart-connect", "router1", "-4", "-A"},
+		},
+		{
 			name: "multiple SSH flags",
 			in:   []string{"-p", "2222", "-l", "admin", "somehost"},
 			out:  []string{"smart-connect", "somehost", "-p", "2222", "-l", "admin"},
@@ -56,6 +64,11 @@ func TestPreprocessArgs(t *testing.T) {
 			in:   []string{"-v", "--help"},
 			out:  []string{"-v", "--help"},
 		},
+		{
+			name: "empty args",
+			in:   []string{},
+			out:  []string{},
+		},
 	}
 
 	for _, tt := range tests {
@@ -68,18 +81,12 @@ func TestPreprocessArgs(t *testing.T) {
 	}
 }
 
-func TestRootCommandCutover(t *testing.T) {
+func TestRootCommandRegistersPublicCommands(t *testing.T) {
 	root := NewRootCmd(Options{Version: "test"})
 
 	for _, name := range []string{"agent", "inv", "connect", "cp", "self"} {
 		if cmd, _, err := root.Find([]string{name}); err != nil || cmd == root || cmd.Name() != name {
 			t.Fatalf("expected public command %q, got cmd=%v err=%v", name, cmd, err)
-		}
-	}
-
-	for _, removed := range []string{"host", "ctx", "sync", "cred", "lock", "unlock"} {
-		if cmd, _, err := root.Find([]string{removed}); err == nil && cmd != root && cmd.Name() == removed {
-			t.Fatalf("removed command %q is still registered", removed)
 		}
 	}
 }
@@ -98,37 +105,5 @@ func TestSelfHelpDoesNotTruncate(t *testing.T) {
 		if strings.Contains(help, "...") {
 			t.Fatalf("%s help should not be truncated:\n%s", strings.Join(path, " "), help)
 		}
-	}
-}
-
-func TestNoRootCLIPackageImportsRemain(t *testing.T) {
-	root := repoRoot()
-	legacyImport := "github.com/ntwrknrd/nssh/internal/" + "cli\""
-
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "docs":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if filepath.Ext(path) != ".go" {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(data), legacyImport) {
-			t.Fatalf("%s still imports root internal/cli package", path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }

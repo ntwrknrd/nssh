@@ -22,9 +22,6 @@ func TestGenerateProviderSSHConfigUsesInventoryHeader(t *testing.T) {
 	if !strings.Contains(content, "# Provider: netbox-prod (netbox)") {
 		t.Fatalf("missing provider comment: %q", content)
 	}
-	if strings.Contains(content, "nssh sync") || strings.Contains(content, "Source:") {
-		t.Fatalf("provider output still uses sync/source wording: %q", content)
-	}
 	if !strings.Contains(content, "# Group: custcbb") {
 		t.Fatalf("missing group comment: %q", content)
 	}

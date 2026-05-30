@@ -28,7 +28,7 @@ func snapshotDir() string {
 }
 
 // discoverCommands recursively discovers all commands and returns a map of
-// snapshot path -> command path (e.g., "host/add.txt" -> ["host", "add"])
+// snapshot path -> command path (e.g., "inv/list.txt" -> ["inv", "list"])
 func discoverCommands(cmd *cobra.Command, prefix []string) map[string][]string {
 	cases := make(map[string][]string)
 
