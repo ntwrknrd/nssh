@@ -27,22 +27,6 @@ func TestSecret_Use(t *testing.T) {
 	}
 }
 
-func TestSecret_UseString(t *testing.T) {
-	s := NewFromString("password123")
-	defer s.Destroy()
-
-	err := s.UseString(func(str string) error {
-		if str != "password123" {
-			t.Errorf("UseString callback got %q, want %q", str, "password123")
-		}
-		return nil
-	})
-
-	if err != nil {
-		t.Errorf("UseString() error: %v", err)
-	}
-}
-
 func TestSecret_UseAfterDestroy(t *testing.T) {
 	s := NewFromString("password123")
 	s.Destroy()
@@ -54,38 +38,6 @@ func TestSecret_UseAfterDestroy(t *testing.T) {
 
 	if err == nil {
 		t.Error("Use() after Destroy should return error")
-	}
-}
-
-func TestSecret_Len(t *testing.T) {
-	s := NewFromString("12345")
-	defer s.Destroy()
-
-	if s.Len() != 5 {
-		t.Errorf("Len() = %d, want 5", s.Len())
-	}
-}
-
-func TestSecret_LenAfterDestroy(t *testing.T) {
-	s := NewFromString("12345")
-	s.Destroy()
-
-	if s.Len() != 0 {
-		t.Errorf("Len() after Destroy = %d, want 0", s.Len())
-	}
-}
-
-func TestSecret_IsDestroyed(t *testing.T) {
-	s := NewFromString("test")
-
-	if s.IsDestroyed() {
-		t.Error("IsDestroyed() = true before Destroy")
-	}
-
-	s.Destroy()
-
-	if !s.IsDestroyed() {
-		t.Error("IsDestroyed() = false after Destroy")
 	}
 }
 

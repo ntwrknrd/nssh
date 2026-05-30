@@ -186,6 +186,9 @@ func runCp(source, dest string, recursive, preserve, quiet, verbose bool) error 
 	if resolved.Credential != nil {
 		password = resolved.Credential.Password
 	}
+	if password != nil {
+		defer password.Destroy()
+	}
 	scpUser := resolved.Username
 
 	// Build remote spec using the Host identifier (hostSearch) so SSH config applies

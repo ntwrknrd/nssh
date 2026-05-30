@@ -1,12 +1,13 @@
-// Package secret provides secure memory handling for sensitive data.
+// Package secret provides transient memory handling for provider-resolved SSH
+// passwords.
 //
-// This package wraps memguard to provide memory-safe storage for passwords,
-// keys, and other sensitive values. Data is stored in locked memory pages
-// that are protected from swapping and core dumps.
+// This package wraps memguard for the short path between credential providers
+// and PTY password injection. It is not credential storage, a vault, or a
+// provider authentication layer.
 //
 // # Security Properties
 //
-// Secrets created with this package benefit from:
+// Passwords created with this package benefit from:
 //   - Memory locking (mlock) to prevent swapping to disk
 //   - Guard pages to detect buffer overflows
 //   - Automatic zeroing on destruction
@@ -16,18 +17,19 @@
 //
 // Access secret data through callbacks to prevent reference retention:
 //
-//	secret := secret.New(sensitiveBytes)
-//	defer secret.Destroy()
+//	password := secret.NewFromString(providerPassword)
+//	defer password.Destroy()
 //
-//	err := secret.UseBytes(func(data []byte) error {
-//	    // Use data here; don't retain references
-//	    return doSomething(data)
+//	err := password.Use(func(data []byte) error {
+//	    // Write data here; don't retain references.
+//	    return writePassword(data)
 //	})
 //
 // # Creating Secrets
 //
-// Use [New] for byte slices (source is wiped), or [NewFromString] for strings
-// (cannot wipe immutable strings).
+// Use [NewFromString] for password strings returned by external provider CLIs.
+// The source string cannot be explicitly wiped because Go strings are immutable;
+// the memguard copy is destroyed by [Secret.Destroy].
 //
 // # Important
 //

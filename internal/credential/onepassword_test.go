@@ -320,8 +320,8 @@ func revealTestSecret(t *testing.T, record *Record) string {
 		return ""
 	}
 	value := ""
-	if err := record.Secret.UseString(func(s string) error {
-		value = s
+	if err := record.Secret.Use(func(pw []byte) error {
+		value = string(pw)
 		return nil
 	}); err != nil {
 		t.Fatalf("secret: %v", err)

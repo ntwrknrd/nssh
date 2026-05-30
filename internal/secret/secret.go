@@ -29,7 +29,7 @@ func NewFromString(s string) *Secret {
 // The byte slice is ONLY valid during the callback execution.
 // Callers MUST NOT:
 //   - Store the slice or any derived references
-//   - Convert to string (use UseString for that)
+//   - Convert to string outside narrow test assertions
 //   - Pass the slice to functions that retain it
 //
 // Example:
@@ -43,40 +43,6 @@ func (s *Secret) Use(fn func([]byte) error) error {
 		return fmt.Errorf("secret: already destroyed")
 	}
 	return fn(s.buf.Bytes())
-}
-
-// UseString provides temporary access to secret as string via callback.
-// Same restrictions as Use() apply - do not retain the string.
-//
-// SECURITY TRADE-OFF: This method creates a Go string copy that cannot be
-// explicitly wiped (Go strings are immutable, no access to backing array).
-// The copy persists until GC collects it - potentially seconds to minutes.
-//
-// When to use UseString vs Use:
-//   - UseString: APIs that require string (e.g., sql.DB.Query placeholders)
-//   - Use: Prefer for I/O operations where []byte works (PTY writes, HTTP bodies)
-//
-// The memguard-protected original remains secure; only the temporary copy
-// is vulnerable to memory inspection during its GC lifetime.
-func (s *Secret) UseString(fn func(string) error) error {
-	if s.buf == nil {
-		return fmt.Errorf("secret: already destroyed")
-	}
-	str := string(s.buf.Bytes())
-	return fn(str)
-}
-
-// Len returns the length of the secret without exposing contents.
-func (s *Secret) Len() int {
-	if s.buf == nil {
-		return 0
-	}
-	return s.buf.Size()
-}
-
-// IsDestroyed returns true if the secret has been destroyed.
-func (s *Secret) IsDestroyed() bool {
-	return s.buf == nil
 }
 
 // Destroy zeros and releases the secret memory.

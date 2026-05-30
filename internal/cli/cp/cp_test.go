@@ -43,6 +43,7 @@ func TestRunCpUsesSharedResolvePath(t *testing.T) {
 	}()
 
 	var gotQuery, gotUser string
+	resolvedPassword := secret.NewFromString("secret")
 	resolveHostForConnect = func(query, explicitUser string, cfg ...*config.Config) (*clireconnect.ResolvedHost, error) {
 		gotQuery = query
 		gotUser = explicitUser
@@ -52,7 +53,7 @@ func TestRunCpUsesSharedResolvePath(t *testing.T) {
 			HostEntry: &sshconfig.HostEntry{Host: query},
 			Credential: &clireconnect.ResolvedCredential{
 				Username: "resolved-user",
-				Password: secret.NewFromString("secret"),
+				Password: resolvedPassword,
 			},
 		}, nil
 	}
@@ -61,8 +62,8 @@ func TestRunCpUsesSharedResolvePath(t *testing.T) {
 	runScp = func(args []string, password *secret.Secret) error {
 		scpArgs = append([]string(nil), args...)
 		if password != nil {
-			_ = password.UseString(func(s string) error {
-				gotPassword = s
+			_ = password.Use(func(pw []byte) error {
+				gotPassword = string(pw)
 				return nil
 			})
 		}
@@ -80,6 +81,9 @@ func TestRunCpUsesSharedResolvePath(t *testing.T) {
 	}
 	if gotPassword != "secret" {
 		t.Fatalf("password = %q", gotPassword)
+	}
+	if err := resolvedPassword.Use(func([]byte) error { return nil }); err == nil {
+		t.Fatal("resolved password was not destroyed after cp")
 	}
 }
 
