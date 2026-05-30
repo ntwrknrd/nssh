@@ -49,6 +49,32 @@ func TestRunCfgPathOnlyStaysRawPath(t *testing.T) {
 	}
 }
 
+func TestRenderConfigTextLeavesNonTerminalOutputPlain(t *testing.T) {
+	input := "[agent]\nidle_timeout = \"4h\"\n"
+
+	got := renderConfigText(input, false)
+
+	if got != input {
+		t.Fatalf("non-terminal config output should stay plain:\nwant %q\n got %q", input, got)
+	}
+	if strings.Contains(got, "\x1b[") {
+		t.Fatalf("non-terminal config output should not include ANSI escapes:\n%q", got)
+	}
+}
+
+func TestRenderConfigTextHighlightsTerminalOutput(t *testing.T) {
+	input := "[agent]\nidle_timeout = \"4h\"\n"
+
+	got := renderConfigText(input, true)
+
+	if got == input {
+		t.Fatal("terminal config output should be highlighted")
+	}
+	if !strings.Contains(got, "\x1b[") {
+		t.Fatalf("terminal config output should include ANSI escapes:\n%q", got)
+	}
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 

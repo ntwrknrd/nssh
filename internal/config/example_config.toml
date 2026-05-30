@@ -252,7 +252,7 @@ auth = { provider = "pass-local", ref = "nssh/groups/default" }
 # enabled = false
 
 # Directory for monthly recording archives.
-# Common value: "~/.local/state/nssh/archives".
+# Default value: "~/.local/state/nssh/archives".
 # dir = "~/.local/state/nssh/archives"
 
 # Randomize archive schedule timing.

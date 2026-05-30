@@ -347,7 +347,7 @@ func loggingTable(cfg LoggingConfig) map[string]any {
 	if cfg.Session.AutoExportTxt {
 		session["auto_export_txt"] = cfg.Session.AutoExportTxt
 	}
-	archive := sessionArchiveTable(cfg.Session.Archive)
+	archive := sessionArchiveTable(cfg.Session.Archive, DefaultConfig().Logging.Session.Archive)
 	if len(archive) > 0 {
 		session["archive"] = archive
 	}
@@ -357,22 +357,24 @@ func loggingTable(cfg LoggingConfig) map[string]any {
 	return table
 }
 
-func sessionArchiveTable(cfg SessionArchiveConfig) map[string]any {
+func sessionArchiveTable(cfg, defaults SessionArchiveConfig) map[string]any {
 	table := make(map[string]any)
-	addString(table, "dir", cfg.Dir)
-	if cfg.Enabled {
+	if cfg.Enabled != defaults.Enabled {
 		table["enabled"] = cfg.Enabled
 	}
-	if cfg.Jitter.Duration() > 0 {
+	if cfg.Dir != "" && cfg.Dir != defaults.Dir {
+		table["dir"] = cfg.Dir
+	}
+	if cfg.Jitter.Duration() != defaults.Jitter.Duration() {
 		table["jitter"] = cfg.Jitter.Duration().String()
 	}
-	if cfg.MaxBundles > 0 {
+	if cfg.MaxBundles != defaults.MaxBundles {
 		table["max_bundles"] = cfg.MaxBundles
 	}
-	if cfg.MaxRunBytes > 0 {
+	if cfg.MaxRunBytes != defaults.MaxRunBytes {
 		table["max_run_bytes"] = cfg.MaxRunBytes
 	}
-	if cfg.MinAge.Duration() > 0 {
+	if cfg.MinAge.Duration() != defaults.MinAge.Duration() {
 		table["min_age"] = cfg.MinAge.Duration().String()
 	}
 	return table
@@ -650,7 +652,7 @@ func optionComment(path, key string) []string {
 		"logging.session.title_format":          {"Recording title template.", `Common value: "nssh:{host}".`},
 		"logging.session.window_size":           {"Fixed terminal size used for recordings.", `Common value: "145x30" or "100x30".`},
 		"logging.session.auto_export_txt":       {"Export a plain-text copy of each recording after the session ends.", "Common value: true if recordings are searched often."},
-		"logging.session.archive.dir":           {"Directory for monthly recording archives.", `Common value: "~/.local/state/nssh/archives".`},
+		"logging.session.archive.dir":           {"Directory for monthly recording archives.", `Default value: "~/.local/state/nssh/archives".`},
 		"logging.session.archive.enabled":       {"Enable automatic archival of old session recordings.", "Common value: false."},
 		"logging.session.archive.jitter":        {"Randomize archive schedule timing.", `Common value: "30m".`},
 		"logging.session.archive.max_bundles":   {"Maximum monthly archive bundles to retain.", "Common value: 12."},

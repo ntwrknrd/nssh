@@ -8,6 +8,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // NewCfgCmd creates the cfg subcommand.
@@ -86,7 +87,14 @@ func printEffectiveConfig(paths *config.Paths) error {
 		ui.CommandEnd(ui.StatusError)
 		return err
 	}
-	fmt.Print(text)
+	fmt.Print(renderConfigText(text, term.IsTerminal(int(os.Stdout.Fd()))))
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil
+}
+
+func renderConfigText(text string, color bool) string {
+	if !color {
+		return text
+	}
+	return ui.HighlightTOML(text)
 }

@@ -269,6 +269,38 @@ func TestMarshalSparseIncludesCommentsForEmittedOptions(t *testing.T) {
 	}
 }
 
+func TestMarshalSparseOmitsDefaultSessionArchiveSettings(t *testing.T) {
+	cfg := DefaultConfig()
+
+	got, err := MarshalSparse(cfg)
+	if err != nil {
+		t.Fatalf("MarshalSparse: %v", err)
+	}
+	if strings.Contains(got, "[logging.session.archive]") {
+		t.Fatalf("default archive settings should be omitted from sparse config:\n%s", got)
+	}
+}
+
+func TestMarshalSparseIncludesNonDefaultSessionArchiveSettings(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Logging.Session.Archive.Enabled = true
+	cfg.Logging.Session.Archive.Dir = filepath.Join(t.TempDir(), "archive")
+
+	got, err := MarshalSparse(cfg)
+	if err != nil {
+		t.Fatalf("MarshalSparse: %v", err)
+	}
+	for _, want := range []string{
+		"[logging.session.archive]",
+		"enabled = true",
+		`dir = "`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("sparse config missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func boolPtr(v bool) *bool {
 	return &v
 }
