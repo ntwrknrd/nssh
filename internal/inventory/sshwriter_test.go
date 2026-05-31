@@ -25,8 +25,8 @@ func TestGenerateProviderSSHConfigUsesInventoryHeader(t *testing.T) {
 	if !strings.Contains(content, "# Group: customer") {
 		t.Fatalf("missing group comment: %q", content)
 	}
-	if !strings.Contains(content, "  User netops\n") {
-		t.Fatalf("missing user directive: %q", content)
+	if strings.Contains(content, "  User ") {
+		t.Fatalf("managed provider config rendered identity directive: %q", content)
 	}
 }
 

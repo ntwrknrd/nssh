@@ -243,8 +243,16 @@ func decodeConfigDocument(path string, doc *configDocument, cfg *Config) error {
 	return nil
 }
 
-func (c *Config) InventoryGroupSource(name string) string {
-	return c.sourceFor("inventory", "group", name)
+func (c *Config) InventoryGroupSource(provider, group string) string {
+	source := c.sourceFor("inventory", "provider", provider, "group", group)
+	if source == "" && provider == ProviderLocal {
+		source = c.sourceFor("inventory", "group", group)
+	}
+	return source
+}
+
+func (c *Config) InventoryProviderSource(provider string) string {
+	return c.sourceFor("inventory", "provider", provider)
 }
 
 func (c *Config) InventoryHostSource(name string) string {

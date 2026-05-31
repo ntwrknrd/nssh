@@ -2,6 +2,8 @@ package inventory
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
@@ -11,7 +13,6 @@ import (
 type RefreshOptions struct {
 	Now            time.Time
 	WriteSSHConfig bool
-	Groups         map[string]config.GroupConfig
 }
 
 // RefreshResult reports one provider refresh outcome.
@@ -36,9 +37,15 @@ func RefreshProvider(
 	}
 	current, err := LoadProviderState(name)
 	if err != nil {
-		return RefreshResult{Provider: name, Err: err}
+		if !IsUnsupportedStateVersion(err) {
+			return RefreshResult{Provider: name, Err: err}
+		}
+		current = nil
 	}
-	objects, err := provider.Discover(ctx, name, cfg, runner)
+	selectors := config.InventoryConfig{Provider: map[string]config.InventoryProviderConfig{name: cfg}}.ProviderSelectors(name)
+	discoverCfg := cfg
+	discoverCfg.Selectors = selectors
+	objects, err := provider.Discover(ctx, name, discoverCfg, runner)
 	if err != nil {
 		if current != nil {
 			next := cloneProviderState(current)
@@ -48,7 +55,10 @@ func RefreshProvider(
 		return RefreshResult{Provider: name, Err: err}
 	}
 
-	plan := Reconcile(objects, cfg.Route, name, current, opts.Groups)
+	plan := Reconcile(objects, selectors, name, current, cfg.Group)
+	if len(plan.Conflicts) > 0 {
+		return RefreshResult{Provider: name, Plan: plan, Err: selectorConflictError(name, plan.Conflicts)}
+	}
 	allHosts := make(map[string]*ProviderHost)
 	if current != nil {
 		for id, host := range current.Objects {
@@ -95,6 +105,14 @@ func RefreshProvider(
 		}
 	}
 	return RefreshResult{Provider: name, Plan: plan}
+}
+
+func selectorConflictError(provider string, conflicts []GroupConflict) error {
+	if len(conflicts) == 0 {
+		return nil
+	}
+	conflict := conflicts[0]
+	return fmt.Errorf("provider %s object %q matched multiple groups: %s", provider, conflict.Object.ObjectID, strings.Join(conflict.Groups, ", "))
 }
 
 func providerStrictHostKeyChecking(cfg config.InventoryProviderConfig) bool {

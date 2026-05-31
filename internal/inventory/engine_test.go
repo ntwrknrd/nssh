@@ -6,10 +6,11 @@ import (
 	"github.com/ntwrknrd/nssh/internal/config"
 )
 
-func TestReconcileRoutesObjectsToGroups(t *testing.T) {
-	routes := []config.InventoryRouteConfig{{
-		Group: "customer",
-		Match: config.InventoryRouteMatch{
+func TestReconcileSelectorsObjectsToGroups(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{{
+		Group:    "netbox-prod/customer",
+		Provider: "netbox-prod",
+		Match: config.InventoryMatch{
 			"manufacturer": {"Juniper"},
 			"status":       {"active"},
 		},
@@ -24,44 +25,20 @@ func TestReconcileRoutesObjectsToGroups(t *testing.T) {
 		},
 	}}
 
-	plan := Reconcile(objects, routes, "netbox-prod", nil)
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, nil)
 	if len(plan.Adds) != 1 {
 		t.Fatalf("adds = %d, want 1", len(plan.Adds))
 	}
-	if plan.Adds[0].Group != "customer" {
+	if plan.Adds[0].Group != "netbox-prod/customer" {
 		t.Fatalf("group = %q", plan.Adds[0].Group)
 	}
 }
 
-func TestReconcileAssignsRouteAuthMode(t *testing.T) {
-	routes := []config.InventoryRouteConfig{{
-		Group:    "servers",
-		AuthMode: config.AuthModeKey,
-		Match:    config.InventoryRouteMatch{"role": {"server"}},
-	}}
-	objects := []Object{{
-		ObjectID:   "node:1",
-		Name:       "app01",
-		HostName:   "app01.example.com",
-		Attributes: map[string][]string{"role": {"server"}},
-	}}
-	groups := map[string]config.GroupConfig{
-		"servers": {Auth: config.InventoryAuthConfig{Provider: "pass-local", Ref: "nssh/groups/servers"}},
-	}
-
-	plan := Reconcile(objects, routes, "netbox-prod", nil, groups)
-	if len(plan.Adds) != 1 {
-		t.Fatalf("adds = %d, want 1", len(plan.Adds))
-	}
-	if plan.Adds[0].AuthMode != config.AuthModeKey {
-		t.Fatalf("auth mode = %q, want %q", plan.Adds[0].AuthMode, config.AuthModeKey)
-	}
-}
-
 func TestReconcileDefaultsAuthModeFromGroupAuth(t *testing.T) {
-	routes := []config.InventoryRouteConfig{{
-		Group: "network",
-		Match: config.InventoryRouteMatch{"role": {"switch"}},
+	selectors := []config.InventoryGroupSelector{{
+		Group:    "netbox-prod/network",
+		Provider: "netbox-prod",
+		Match:    config.InventoryMatch{"role": {"switch"}},
 	}}
 	objects := []Object{{
 		ObjectID:   "device:1",
@@ -70,10 +47,10 @@ func TestReconcileDefaultsAuthModeFromGroupAuth(t *testing.T) {
 		Attributes: map[string][]string{"role": {"switch"}},
 	}}
 	groups := map[string]config.GroupConfig{
-		"network": {Auth: config.InventoryAuthConfig{Provider: "pass-local", Ref: "nssh/groups/network"}},
+		"network": {Auth: config.InventoryAuthConfig{CredentialProvider: "pass-local", PasswordRef: "nssh/groups/network"}},
 	}
 
-	plan := Reconcile(objects, routes, "netbox-prod", nil, groups)
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, groups)
 	if len(plan.Adds) != 1 {
 		t.Fatalf("adds = %d, want 1", len(plan.Adds))
 	}
@@ -83,9 +60,10 @@ func TestReconcileDefaultsAuthModeFromGroupAuth(t *testing.T) {
 }
 
 func TestReconcileDefaultsAuthModeToKeyWithoutGroupAuth(t *testing.T) {
-	routes := []config.InventoryRouteConfig{{
-		Group: "servers",
-		Match: config.InventoryRouteMatch{"role": {"server"}},
+	selectors := []config.InventoryGroupSelector{{
+		Group:    "netbox-prod/servers",
+		Provider: "netbox-prod",
+		Match:    config.InventoryMatch{"role": {"server"}},
 	}}
 	objects := []Object{{
 		ObjectID:   "node:1",
@@ -95,11 +73,32 @@ func TestReconcileDefaultsAuthModeToKeyWithoutGroupAuth(t *testing.T) {
 	}}
 	groups := map[string]config.GroupConfig{"servers": {}}
 
-	plan := Reconcile(objects, routes, "netbox-prod", nil, groups)
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, groups)
 	if len(plan.Adds) != 1 {
 		t.Fatalf("adds = %d, want 1", len(plan.Adds))
 	}
 	if plan.Adds[0].AuthMode != config.AuthModeKey {
 		t.Fatalf("auth mode = %q, want %q", plan.Adds[0].AuthMode, config.AuthModeKey)
+	}
+}
+
+func TestReconcileReportsConflictingGroupSelectors(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{
+		{Group: "netbox-prod/customer", Provider: "netbox-prod", Match: config.InventoryMatch{"role": {"router"}}},
+		{Group: "netbox-prod/network", Provider: "netbox-prod", Match: config.InventoryMatch{"role": {"router"}}},
+	}
+	objects := []Object{{
+		ObjectID:   "device:1",
+		Name:       "edge01",
+		HostName:   "edge01.example.com",
+		Attributes: map[string][]string{"role": {"router"}},
+	}}
+
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, nil)
+	if len(plan.Conflicts) != 1 {
+		t.Fatalf("conflicts = %+v, want one conflict", plan.Conflicts)
+	}
+	if len(plan.Adds) != 0 {
+		t.Fatalf("adds = %+v, want no additions on conflict", plan.Adds)
 	}
 }

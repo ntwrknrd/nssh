@@ -60,9 +60,6 @@ func generateProviderSSHConfig(hosts []*ProviderHost, providerName, providerType
 			b.WriteString("  UserKnownHostsFile /dev/null\n")
 			b.WriteString("  GlobalKnownHostsFile /dev/null\n")
 		}
-		if h.Username != "" {
-			fmt.Fprintf(&b, "  User %s\n", h.Username)
-		}
 		if h.Port > 0 && h.Port != 22 {
 			fmt.Fprintf(&b, "  Port %d\n", h.Port)
 		}

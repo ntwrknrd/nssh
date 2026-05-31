@@ -129,7 +129,37 @@ func TestOnePasswordGetHostReadsConfiguredSecretRefs(t *testing.T) {
 	}
 }
 
-func TestOnePasswordAgentSessionRoutesGetThroughAgent(t *testing.T) {
+func TestOnePasswordGetHostReadsItemBaseRefFields(t *testing.T) {
+	runner := &fakeOPRunner{outs: []fakeOPOut{
+		{data: "netops"},
+		{data: "secret"},
+	}}
+	provider := &onePasswordProvider{
+		hostRefs: map[string]config.CredentialRefConfig{
+			"edge01": {
+				Ref: "op://Network/Edge 01/",
+			},
+		},
+		runner: runner,
+	}
+
+	got, err := provider.GetHost("edge01")
+	if err != nil {
+		t.Fatalf("GetHost: %v", err)
+	}
+	gotSecret := revealTestSecret(t, got)
+	if got == nil || got.Username != "netops" || gotSecret != "secret" || got.Ref != "op://Network/Edge 01/" {
+		t.Fatalf("record = %+v secret=%q", got, gotSecret)
+	}
+	if strings.Join(runner.calls[0].args, " ") != "read op://Network/Edge 01/username" {
+		t.Fatalf("username ref args = %#v", runner.calls[0].args)
+	}
+	if strings.Join(runner.calls[1].args, " ") != "read op://Network/Edge 01/password" {
+		t.Fatalf("password ref args = %#v", runner.calls[1].args)
+	}
+}
+
+func TestOnePasswordAgentSessionGetsThroughAgent(t *testing.T) {
 	socketPath := fmt.Sprintf("/tmp/nssh-cred-%d-%d.sock", os.Getpid(), time.Now().UnixNano())
 	t.Cleanup(func() { _ = os.Remove(socketPath) })
 	restore := agent.SetSocketPathForTest(socketPath)

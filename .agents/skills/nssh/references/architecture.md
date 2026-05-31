@@ -88,7 +88,7 @@ Inventory is the source of host placement and generated SSH config.
 Primary packages:
 
 - `internal/cli/inv`: command implementation.
-- `internal/inventory`: provider state, route matching, reconciliation, local
+- `internal/inventory`: provider state, group matching, reconciliation, local
   host metadata, and SSH config rendering.
 - `internal/inventory/providers`: provider implementations.
 
@@ -99,30 +99,30 @@ External providers write deterministic include files through
 `nssh.d/provider_<provider>.conf`.
 
 Provider state is non-secret JSON under
-`$XDG_STATE_HOME/nssh/inventory/providers/`. It records provider objects, route
-ownership, last refresh time, include file, auth mode, and persisted compatibility
+`$XDG_STATE_HOME/nssh/inventory/providers/`. It records provider objects, group
+membership, last refresh time, include file, auth mode, and persisted compatibility
 fixes.
 
 Current external providers:
 
 - NetBox: `internal/inventory/providers/netbox.go`; fetches devices from the
   NetBox API, supports environment-backed URL/token config, and normalizes
-  device fields into route-match attributes.
+  device fields into group selector attributes.
 - Containerlab: `internal/inventory/providers/containerlab.go`; runs
   `containerlab inspect --all --format json` on a jump host through
   `internal/ssh/remoteexec`.
 
-Routes are configured with `config.InventoryRouteConfig` and matched by
-`inventory.MatchRoute`. `inventory.Reconcile` owns add/update/remove planning.
-`inventory.WriteProviderSSHConfig` renders provider-owned SSH config. A route
-with `auth_mode = "password"` emits password/keyboard-interactive preferences;
-`auth_mode = "key"` disables password auth. If omitted, `inventory.routeAuthMode`
-defaults to password when the target group has auth, otherwise key.
+Providers own groups and group selectors. The canonical group ID is
+`<provider>/<group>`, for example `local/custcbb` or `netbox-prod/custcbb`.
+Selectors are matched by `inventory.MatchGroupSelectors`.
+`inventory.Reconcile` owns add/update/remove planning.
+`inventory.WriteProviderSSHConfig` renders provider-owned SSH config. Auth mode
+defaults to password when the target group has password auth, otherwise key.
 
 ## Credentials
 
 Credential storage is external. nssh stores only auth mappings that tell it
-which provider and item reference apply to a host or group.
+which provider and item reference apply to a host or provider-owned group.
 
 Primary packages:
 
@@ -141,17 +141,18 @@ Supported credential providers:
 Auth mappings live under:
 
 - `inventory.host.<host>.auth`
-- `inventory.group.<group>.auth`
+- `inventory.provider.<provider>.group.<group>.auth`
 
-Every set auth mapping must include `provider` and `ref`. `username` and
-`username_ref` are optional and mutually exclusive. Do not use legacy
+Every set auth mapping must include `credential_provider` and either
+`password_ref` or `username_ref`. `username` and `username_ref` are optional and
+mutually exclusive. Do not use legacy
 `credential.host`, `credential.group`, or root `credential.type`; validation
 rejects those forms.
 
 Credential selection order in `internal/connect.resolveBoundCredential`:
 
 1. Host auth override.
-2. Inventory group auth mapping.
+2. Inventory provider group auth mapping.
 3. No nssh credential; OpenSSH config and keys handle auth.
 
 `internal/connect.ResolveHostForConnect` is shared by connect and SCP. Keep it

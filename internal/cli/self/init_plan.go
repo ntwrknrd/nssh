@@ -189,13 +189,22 @@ func buildInitPlan(req initPlanRequest) (*initPlan, error) {
 		}
 	}
 	if len(req.GroupCredentialProviders) == 0 {
-		req.GroupCredentialProviders = map[string]string{"default": req.CredentialProviders[0].Name}
+		req.GroupCredentialProviders = make(map[string]string)
+		for _, groupID := range groupsFromInventorySources(req.InventorySources) {
+			req.GroupCredentialProviders[groupID] = req.CredentialProviders[0].Name
+		}
 	}
-	for group, provider := range req.GroupCredentialProviders {
-		ref := credentialRefForGroup(provider, group)
-		groupCfg := cfg.Inventory.Group[group]
-		groupCfg.Auth = config.InventoryAuthConfig{Provider: provider, Ref: ref}
-		cfg.Inventory.Group[group] = groupCfg
+	for groupID, provider := range req.GroupCredentialProviders {
+		inventoryProvider, group, err := config.ParseInventoryGroupID(groupID)
+		if err != nil {
+			return nil, err
+		}
+		ref := credentialRefForGroup(provider, groupID)
+		providerCfg := cfg.Inventory.Provider[inventoryProvider]
+		groupCfg := providerCfg.Group[group]
+		groupCfg.Auth = config.InventoryAuthConfig{CredentialProvider: provider, PasswordRef: ref}
+		providerCfg.Group[group] = groupCfg
+		cfg.Inventory.Provider[inventoryProvider] = providerCfg
 	}
 	if len(req.HostCredentialProviders) > 0 && cfg.Inventory.Host == nil {
 		cfg.Inventory.Host = make(map[string]config.InventoryHostConfig)
@@ -203,8 +212,8 @@ func buildInitPlan(req initPlanRequest) (*initPlan, error) {
 	for host, provider := range req.HostCredentialProviders {
 		cfg.Inventory.Host[host] = config.InventoryHostConfig{
 			Auth: config.InventoryAuthConfig{
-				Provider: provider,
-				Ref:      credentialRefForHost(provider, host),
+				CredentialProvider: provider,
+				PasswordRef:        credentialRefForHost(provider, host),
 			},
 		}
 	}
@@ -228,7 +237,7 @@ func promptNetBoxSource(prompter initPrompter) (initInventorySourceRequest, erro
 	if err != nil {
 		return initInventorySourceRequest{}, err
 	}
-	group, err := prompter.Input("NetBox route group", "default")
+	group, err := prompter.Input("NetBox group", "default")
 	if err != nil {
 		return initInventorySourceRequest{}, err
 	}
@@ -250,7 +259,7 @@ func promptContainerlabSource(prompter initPrompter) (initInventorySourceRequest
 	if err != nil {
 		return initInventorySourceRequest{}, err
 	}
-	group, err := prompter.Input("Containerlab route group", "lab")
+	group, err := prompter.Input("Containerlab group", "lab")
 	if err != nil {
 		return initInventorySourceRequest{}, err
 	}
@@ -307,14 +316,15 @@ func groupsFromInventorySources(sources []initInventorySourceRequest) []string {
 	seen := make(map[string]bool)
 	for i := range sources {
 		source := &sources[i]
+		provider := initInventorySourceProviderName(*source)
 		for _, group := range source.Groups {
 			if group != "" {
-				seen[group] = true
+				seen[config.FormatInventoryGroupID(provider, group)] = true
 			}
 		}
 	}
 	if len(seen) == 0 {
-		seen["default"] = true
+		seen[config.FormatInventoryGroupID(config.ProviderLocal, "default")] = true
 	}
 	groups := make([]string, 0, len(seen))
 	for group := range seen {
@@ -329,6 +339,7 @@ func applyInventorySources(cfg *config.Config, sources []initInventorySourceRequ
 		source := &sources[i]
 		switch source.Type {
 		case "", initInventoryLocal:
+			ensureProviderGroups(cfg, config.ProviderLocal, config.ProviderLocal, source.Groups)
 			continue
 		case config.ProviderNetBox:
 			if source.Name == "" {
@@ -342,8 +353,8 @@ func applyInventorySources(cfg *config.Config, sources []initInventorySourceRequ
 					TokenEnv: source.TokenEnv,
 					EnvFile:  source.EnvFile,
 				},
-				Route: routesForGroups(source.Groups),
 			}
+			ensureProviderGroups(cfg, source.Name, config.ProviderNetBox, source.Groups)
 		case config.ProviderContainerlab:
 			if strings.TrimSpace(source.JumpHost) == "" {
 				return fmt.Errorf("containerlab.config.jump_host is required")
@@ -358,8 +369,8 @@ func applyInventorySources(cfg *config.Config, sources []initInventorySourceRequ
 					Sudo:                  source.Sudo,
 					StrictHostKeyChecking: source.StrictHostKeyChecking,
 				},
-				Route: routesForGroups(source.Groups),
 			}
+			ensureProviderGroups(cfg, source.Name, config.ProviderContainerlab, source.Groups)
 		default:
 			return fmt.Errorf("unsupported inventory source %q", source.Type)
 		}
@@ -368,17 +379,12 @@ func applyInventorySources(cfg *config.Config, sources []initInventorySourceRequ
 }
 
 func ensureInventoryGroups(cfg *config.Config, sources []initInventorySourceRequest) {
-	if cfg.Inventory.Group == nil {
-		cfg.Inventory.Group = make(map[string]config.GroupConfig)
+	if cfg.Inventory.Provider == nil {
+		cfg.Inventory.Provider = make(map[string]config.InventoryProviderConfig)
 	}
 	for i := range sources {
 		source := &sources[i]
-		for _, group := range source.Groups {
-			if group == "" {
-				continue
-			}
-			cfg.Inventory.Group[group] = config.GroupConfig{}
-		}
+		ensureProviderGroups(cfg, initInventorySourceProviderName(*source), source.Type, source.Groups)
 	}
 }
 
@@ -400,15 +406,37 @@ func applyCredentialProvider(cfg *config.Config, provider initCredentialProvider
 	return nil
 }
 
-func routesForGroups(groups []string) []config.InventoryRouteConfig {
-	routes := make([]config.InventoryRouteConfig, 0, len(groups))
+func initInventorySourceProviderName(source initInventorySourceRequest) string {
+	if source.Type == "" || source.Type == initInventoryLocal {
+		return config.ProviderLocal
+	}
+	return source.Name
+}
+
+func ensureProviderGroups(cfg *config.Config, provider, providerType string, groups []string) {
+	if provider == "" {
+		return
+	}
+	if providerType == "" {
+		providerType = config.ProviderLocal
+	}
+	if cfg.Inventory.Provider == nil {
+		cfg.Inventory.Provider = make(map[string]config.InventoryProviderConfig)
+	}
+	providerCfg := cfg.Inventory.Provider[provider]
+	if providerCfg.Type == "" {
+		providerCfg.Type = providerType
+	}
+	if providerCfg.Group == nil {
+		providerCfg.Group = make(map[string]config.GroupConfig)
+	}
 	for _, group := range groups {
 		if group == "" {
 			continue
 		}
-		routes = append(routes, config.InventoryRouteConfig{Group: group})
+		providerCfg.Group[group] = providerCfg.Group[group]
 	}
-	return routes
+	cfg.Inventory.Provider[provider] = providerCfg
 }
 
 func credentialRefForGroup(provider, group string) string {
@@ -460,16 +488,21 @@ func initCredentialProviderSummary(cfg *config.Config) []string {
 }
 
 func initCredentialAssignmentSummary(cfg *config.Config) []string {
-	groups := make([]string, 0, len(cfg.Inventory.Group))
-	for group, groupCfg := range cfg.Inventory.Group {
-		if groupCfg.Auth.IsSet() {
-			groups = append(groups, group)
+	groups := make([]string, 0)
+	groupProviders := make(map[string]string)
+	for provider, providerCfg := range cfg.Inventory.Provider {
+		for group, groupCfg := range providerCfg.Group {
+			if groupCfg.Auth.IsSet() {
+				groupID := config.FormatInventoryGroupID(provider, group)
+				groups = append(groups, groupID)
+				groupProviders[groupID] = groupCfg.Auth.CredentialProvider
+			}
 		}
 	}
 	sort.Strings(groups)
 	out := make([]string, 0, len(groups))
 	for _, group := range groups {
-		provider := cfg.Inventory.Group[group].Auth.Provider
+		provider := groupProviders[group]
 		out = append(out, group+" -> "+provider)
 	}
 	return out

@@ -164,11 +164,16 @@ func handleCompatibilityFix(ctx context.Context, hostname, includeFile string) b
 		if cfg, err := config.LoadDefault(); err == nil && cfg != nil {
 			testCfg.UseSystemKnownHosts = cfg.SSH.Security.CompatPersistProbes
 		}
-		if resolved, err := ResolveHostForConnect(hostEntry.Host, hostEntry.User()); err == nil && resolved.Credential != nil {
+		resolved, err := ResolveHostForConnect(hostEntry.Host, "")
+		if err == nil && resolved.Credential != nil {
 			testCfg.Password = resolved.Credential.Password
 		}
 
-		testResult, err := connector.TestConnection(ctx, hostEntry.Host, hostEntry.User(), testCfg)
+		testUser := ""
+		if resolved != nil {
+			testUser = resolved.Username
+		}
+		testResult, err := connector.TestConnection(ctx, hostEntry.Host, testUser, testCfg)
 		if err != nil {
 			slog.Debug("test connection failed", "err", err)
 			break

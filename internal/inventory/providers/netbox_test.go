@@ -158,18 +158,20 @@ func TestNetBoxProviderDiscover(t *testing.T) {
 			BaseURL:  server.URL,
 			TokenEnv: "NB_TEST_TOKEN",
 		},
-		Route: []config.InventoryRouteConfig{
+		Selectors: []config.InventoryGroupSelector{
 			{
-				Group: "customer",
-				Match: config.InventoryRouteMatch{
+				Group:    "customer",
+				Provider: "netbox-prod",
+				Match: config.InventoryMatch{
 					"manufacturer":  {"Juniper", "Arista"},
 					"tenant":        {"ExampleCorp"},
 					"domain_suffix": {".customer.local"},
 				},
 			},
 			{
-				Group: "corp",
-				Match: config.InventoryRouteMatch{
+				Group:    "corp",
+				Provider: "netbox-prod",
+				Match: config.InventoryMatch{
 					"manufacturer":  {"Juniper", "Arista"},
 					"tenant":        {"ExampleCorp"},
 					"domain_suffix": {".example.com"},
@@ -333,18 +335,20 @@ func TestBuildNetBoxDeviceQuery(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	query := buildNetBoxDeviceQuery(context.Background(), server.Client(), server.URL, "test-token", []config.InventoryRouteConfig{
+	query := buildNetBoxDeviceQuery(context.Background(), server.Client(), server.URL, "test-token", []config.InventoryGroupSelector{
 		{
-			Group: "customer",
-			Match: config.InventoryRouteMatch{
+			Group:    "customer",
+			Provider: "netbox-prod",
+			Match: config.InventoryMatch{
 				"manufacturer":  {"Juniper", "Arista"},
 				"tenant":        {"ExampleCorp"},
 				"domain_suffix": {".customer.local"},
 			},
 		},
 		{
-			Group: "corp",
-			Match: config.InventoryRouteMatch{
+			Group:    "corp",
+			Provider: "netbox-prod",
+			Match: config.InventoryMatch{
 				"manufacturer":  {"Arista", "Juniper"},
 				"tenant":        {"ExampleCorp"},
 				"domain_suffix": {".example.com"},
@@ -361,19 +365,24 @@ func TestBuildNetBoxDeviceQuery(t *testing.T) {
 	if got := query.Get("name__iregex"); got != "^[A-Za-z0-9._-]+(?:\\.customer\\.local|\\.example\\.com)$" {
 		t.Fatalf("name__iregex query = %q", got)
 	}
+	if got := query["status"]; len(got) != 0 {
+		t.Fatalf("status query should not be added by default: %v", got)
+	}
 }
 
-func TestBuildNetBoxDeviceQuerySkipsPartialRouteFilters(t *testing.T) {
-	query := buildNetBoxDeviceQuery(context.Background(), nil, "https://netbox.example.com", "test-token", []config.InventoryRouteConfig{
+func TestBuildNetBoxDeviceQuerySkipsPartialSelectorFilters(t *testing.T) {
+	query := buildNetBoxDeviceQuery(context.Background(), nil, "https://netbox.example.com", "test-token", []config.InventoryGroupSelector{
 		{
-			Group: "customer",
-			Match: config.InventoryRouteMatch{
+			Group:    "customer",
+			Provider: "netbox-prod",
+			Match: config.InventoryMatch{
 				"manufacturer": {"Juniper"},
 			},
 		},
 		{
-			Group: "corp",
-			Match: config.InventoryRouteMatch{},
+			Group:    "corp",
+			Provider: "netbox-prod",
+			Match:    config.InventoryMatch{},
 		},
 	})
 
@@ -381,7 +390,7 @@ func TestBuildNetBoxDeviceQuerySkipsPartialRouteFilters(t *testing.T) {
 		return
 	}
 	if _, ok := query["manufacturer"]; ok {
-		t.Fatalf("manufacturer query should be omitted when not present on every route: %v", query["manufacturer"])
+		t.Fatalf("manufacturer query should be omitted when not present on every selector: %v", query["manufacturer"])
 	}
 }
 

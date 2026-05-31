@@ -13,41 +13,29 @@ import (
 	"github.com/ntwrknrd/nssh/internal/inventory"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
-	"github.com/spf13/cobra"
 )
 
-func newDoctorCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "doctor",
-		Short: "Check inventory health",
-		Long:  "Check local-provider inventory for stale hosts, duplicates, and rename candidates.",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDoctor()
-		},
-	}
-}
-
-type doctorFinding struct {
+type localRefreshFinding struct {
 	Host   string
 	Group  string
 	Issue  string
 	Detail string
 	host   *sshconfig.HostEntry
-	fix    doctorFix
+	fix    localRefreshFix
 }
 
-type doctorFixKind int
+type localRefreshFixKind int
 
 const (
-	doctorFixNone doctorFixKind = iota
-	doctorFixRemoveHost
-	doctorFixRemoveDuplicate
-	doctorFixRenameHost
-	doctorFixMergeHost
+	localRefreshFixNone localRefreshFixKind = iota
+	localRefreshFixRemoveHost
+	localRefreshFixRemoveDuplicate
+	localRefreshFixRenameHost
+	localRefreshFixMergeHost
 )
 
-type doctorFix struct {
-	kind        doctorFixKind
+type localRefreshFix struct {
+	kind        localRefreshFixKind
 	host        *sshconfig.HostEntry
 	target      *sshconfig.HostEntry
 	newID       string
@@ -55,13 +43,13 @@ type doctorFix struct {
 	alias       string
 }
 
-type doctorDNSResult struct {
+type localRefreshDNSResult struct {
 	status string
 	detail string
 }
 
-func runDoctor() error {
-	ui.CommandStart("INVENTORY DOCTOR")
+func runLocalRefresh() error {
+	ui.CommandStart("INVENTORY LOCAL REFRESH")
 	cfg, err := config.LoadDefault()
 	if err != nil {
 		ui.CommandEnd(ui.StatusError)
@@ -78,9 +66,9 @@ func runDoctor() error {
 		return err
 	}
 	table := ui.NewStreamTable("Host", "Group", "Issue", "Detail").
-		WithColumnWidths(doctorTableWidths(hosts, cfg, config.DefaultPaths(), index)...)
-	var findings []doctorFinding
-	count := visitDoctorFindings(hosts, cfg, config.DefaultPaths(), index, doctorResolveTarget, func(finding doctorFinding) {
+		WithColumnWidths(localRefreshTableWidths(hosts, cfg, config.DefaultPaths(), index)...)
+	var findings []localRefreshFinding
+	count := visitLocalRefreshFindings(hosts, cfg, config.DefaultPaths(), index, localRefreshResolveTarget, func(finding localRefreshFinding) {
 		findings = append(findings, finding)
 		table.AddRow(finding.Host, finding.Group, finding.Issue, finding.Detail)
 	})
@@ -90,14 +78,14 @@ func runDoctor() error {
 		return nil
 	}
 	table.Close()
-	fixable := fixableDoctorFindings(findings)
+	fixable := fixableLocalRefreshFindings(findings)
 	if len(fixable) == 0 {
 		ui.Warning("No local fixes are available for these findings")
 		ui.CommandEnd(ui.StatusWarning)
 		return nil
 	}
 
-	selected, err := selectDoctorFixes(fixable)
+	selected, err := selectLocalRefreshFixes(fixable)
 	if err != nil {
 		ui.Abort("Selection failed: %s", err)
 		ui.CommandEnd(ui.StatusAbort)
@@ -110,7 +98,7 @@ func runDoctor() error {
 	}
 
 	ui.SubSection("Applying")
-	applied, err := applyDoctorFixes(sshconfig.NewParser(), config.DefaultPaths(), selected)
+	applied, err := applyLocalRefreshFixes(sshconfig.NewParser(), config.DefaultPaths(), selected)
 	if err != nil {
 		ui.CommandEnd(ui.StatusError)
 		return err
@@ -120,19 +108,19 @@ func runDoctor() error {
 	return nil
 }
 
-func visitDoctorFindings(
+func visitLocalRefreshFindings(
 	hosts []*sshconfig.HostEntry,
 	cfg *config.Config,
 	paths *config.Paths,
 	index map[string]*inventory.HostInfo,
-	dnsCheck func(string) doctorDNSResult,
-	emit func(doctorFinding),
+	dnsCheck func(string) localRefreshDNSResult,
+	emit func(localRefreshFinding),
 ) int {
 	if dnsCheck == nil {
-		dnsCheck = doctorResolveTarget
+		dnsCheck = localRefreshResolveTarget
 	}
 	count := 0
-	emitFinding := func(finding doctorFinding) {
+	emitFinding := func(finding localRefreshFinding) {
 		count++
 		if emit != nil {
 			emit(finding)
@@ -146,7 +134,7 @@ func visitDoctorFindings(
 		for _, pattern := range hostPatterns(host) {
 			if prev := seen[pattern]; prev != nil {
 				duplicate = true
-				finding := doctorFinding{
+				finding := localRefreshFinding{
 					Host:   host.Host,
 					Group:  meta.Group,
 					Issue:  "duplicate",
@@ -154,7 +142,7 @@ func visitDoctorFindings(
 					host:   host,
 				}
 				if meta.Owner == "local" {
-					finding.fix = doctorFix{kind: doctorFixRemoveDuplicate, host: host}
+					finding.fix = localRefreshFix{kind: localRefreshFixRemoveDuplicate, host: host}
 				}
 				emitFinding(finding)
 				continue
@@ -167,34 +155,34 @@ func visitDoctorFindings(
 		if meta.Owner != "local" {
 			continue
 		}
-		target := doctorDNSTarget(host)
+		target := localRefreshDNSTarget(host)
 		result := dnsCheck(target)
 		switch result.status {
 		case "nxdomain":
-			emitFinding(doctorFinding{
+			emitFinding(localRefreshFinding{
 				Host:   host.Host,
 				Group:  meta.Group,
 				Issue:  "stale-dns",
 				Detail: fmt.Sprintf("%s: NXDOMAIN", target),
 				host:   host,
-				fix:    doctorFix{kind: doctorFixRemoveHost, host: host},
+				fix:    localRefreshFix{kind: localRefreshFixRemoveHost, host: host},
 			})
 		case "timeout":
-			emitFinding(doctorFinding{
+			emitFinding(localRefreshFinding{
 				Host:   host.Host,
 				Group:  meta.Group,
 				Issue:  "stale-dns",
 				Detail: fmt.Sprintf("%s: lookup timeout", target),
 				host:   host,
-				fix:    doctorFix{kind: doctorFixRemoveHost, host: host},
+				fix:    localRefreshFix{kind: localRefreshFixRemoveHost, host: host},
 			})
 		case "cname":
 			newID := sshconfig.DeriveHostID(result.detail)
-			fix := doctorFix{kind: doctorFixRenameHost, host: host, newID: newID, cnameTarget: result.detail}
+			fix := localRefreshFix{kind: localRefreshFixRenameHost, host: host, newID: newID, cnameTarget: result.detail}
 			if existing := localHosts[strings.ToLower(newID)]; existing != nil && existing != host {
-				fix = doctorFix{kind: doctorFixMergeHost, host: host, target: existing, alias: host.Host}
+				fix = localRefreshFix{kind: localRefreshFixMergeHost, host: host, target: existing, alias: host.Host}
 			}
-			emitFinding(doctorFinding{
+			emitFinding(localRefreshFinding{
 				Host:   host.Host,
 				Group:  meta.Group,
 				Issue:  "cname-rename",
@@ -203,7 +191,7 @@ func visitDoctorFindings(
 				fix:    fix,
 			})
 		case "error":
-			emitFinding(doctorFinding{
+			emitFinding(localRefreshFinding{
 				Host:   host.Host,
 				Group:  meta.Group,
 				Issue:  "dns-error",
@@ -215,7 +203,7 @@ func visitDoctorFindings(
 	return count
 }
 
-func doctorTableWidths(hosts []*sshconfig.HostEntry, cfg *config.Config, paths *config.Paths, index map[string]*inventory.HostInfo) []int {
+func localRefreshTableWidths(hosts []*sshconfig.HostEntry, cfg *config.Config, paths *config.Paths, index map[string]*inventory.HostInfo) []int {
 	widths := []int{len("Host"), len("Group"), len("stale-dns"), 72}
 	for _, host := range hosts {
 		if w := len(host.Host); w > widths[0] {
@@ -229,18 +217,18 @@ func doctorTableWidths(hosts []*sshconfig.HostEntry, cfg *config.Config, paths *
 	return widths
 }
 
-func fixableDoctorFindings(findings []doctorFinding) []doctorFinding {
-	fixable := make([]doctorFinding, 0, len(findings))
+func fixableLocalRefreshFindings(findings []localRefreshFinding) []localRefreshFinding {
+	fixable := make([]localRefreshFinding, 0, len(findings))
 	for i := range findings {
 		finding := findings[i]
-		if finding.fix.kind != doctorFixNone {
+		if finding.fix.kind != localRefreshFixNone {
 			fixable = append(fixable, finding)
 		}
 	}
 	return fixable
 }
 
-func selectDoctorFixes(findings []doctorFinding) ([]doctorFinding, error) {
+func selectLocalRefreshFixes(findings []localRefreshFinding) ([]localRefreshFinding, error) {
 	options := make([]ui.FuzzySelectOption, len(findings))
 	for i := range findings {
 		finding := findings[i]
@@ -253,7 +241,7 @@ func selectDoctorFixes(findings []doctorFinding) ([]doctorFinding, error) {
 	if err != nil {
 		return nil, err
 	}
-	selected := make([]doctorFinding, 0, len(indices))
+	selected := make([]localRefreshFinding, 0, len(indices))
 	for _, idx := range indices {
 		if idx >= 0 && idx < len(findings) {
 			selected = append(selected, findings[idx])
@@ -262,7 +250,7 @@ func selectDoctorFixes(findings []doctorFinding) ([]doctorFinding, error) {
 	return selected, nil
 }
 
-func applyDoctorFixes(parser *sshconfig.Parser, paths *config.Paths, findings []doctorFinding) (int, error) {
+func applyLocalRefreshFixes(parser *sshconfig.Parser, paths *config.Paths, findings []localRefreshFinding) (int, error) {
 	if parser == nil {
 		parser = sshconfig.NewParser()
 	}
@@ -295,9 +283,9 @@ func applyDoctorFixes(parser *sshconfig.Parser, paths *config.Paths, findings []
 	for i := range findings {
 		finding := findings[i]
 		switch finding.fix.kind {
-		case doctorFixNone:
+		case localRefreshFixNone:
 			continue
-		case doctorFixRemoveHost:
+		case localRefreshFixRemoveHost:
 			parsed, err := getParsed(finding.fix.host.SourceFile)
 			if err != nil {
 				return applied, err
@@ -305,7 +293,7 @@ func applyDoctorFixes(parser *sshconfig.Parser, paths *config.Paths, findings []
 			parsed.Hosts = sshconfig.RemoveHost(parsed.Hosts, finding.fix.host.Host)
 			markDirty(parsed)
 			applied++
-		case doctorFixRemoveDuplicate:
+		case localRefreshFixRemoveDuplicate:
 			parsed, err := getParsed(finding.fix.host.SourceFile)
 			if err != nil {
 				return applied, err
@@ -313,7 +301,7 @@ func applyDoctorFixes(parser *sshconfig.Parser, paths *config.Paths, findings []
 			parsed.Hosts = removeHostEntryByLines(parsed.Hosts, finding.fix.host.Lines)
 			markDirty(parsed)
 			applied++
-		case doctorFixRenameHost:
+		case localRefreshFixRenameHost:
 			parsed, err := getParsed(finding.fix.host.SourceFile)
 			if err != nil {
 				return applied, err
@@ -322,10 +310,10 @@ func applyDoctorFixes(parser *sshconfig.Parser, paths *config.Paths, findings []
 			if host == nil {
 				return applied, fmt.Errorf("host %q not found in %s", finding.fix.host.Host, parsed.Path)
 			}
-			renameDoctorHost(host, finding.fix.newID, finding.fix.cnameTarget)
+			renameLocalRefreshHost(host, finding.fix.newID, finding.fix.cnameTarget)
 			markDirty(parsed)
 			applied++
-		case doctorFixMergeHost:
+		case localRefreshFixMergeHost:
 			oldParsed, err := getParsed(finding.fix.host.SourceFile)
 			if err != nil {
 				return applied, err
@@ -339,7 +327,7 @@ func applyDoctorFixes(parser *sshconfig.Parser, paths *config.Paths, findings []
 			if target == nil {
 				return applied, fmt.Errorf("merge target %q not found in %s", finding.fix.target.Host, targetParsed.Path)
 			}
-			addDoctorHostAlias(target, finding.fix.alias)
+			addLocalRefreshHostAlias(target, finding.fix.alias)
 			markDirty(oldParsed)
 			markDirty(targetParsed)
 			applied++
@@ -361,12 +349,12 @@ func applyDoctorFixes(parser *sshconfig.Parser, paths *config.Paths, findings []
 	return applied, nil
 }
 
-func renameDoctorHost(host *sshconfig.HostEntry, newID, cnameTarget string) {
+func renameLocalRefreshHost(host *sshconfig.HostEntry, newID, cnameTarget string) {
 	if strings.TrimSpace(newID) == "" {
 		newID = host.Host
 	}
 	if !strings.EqualFold(newID, host.Host) {
-		setDoctorHostPatterns(host, append([]string{newID}, hostPatterns(host)...))
+		setLocalRefreshHostPatterns(host, append([]string{newID}, hostPatterns(host)...))
 		host.Host = newID
 	}
 	upsertDirective(host, "HostName", cnameTarget)
@@ -374,14 +362,14 @@ func renameDoctorHost(host *sshconfig.HostEntry, newID, cnameTarget string) {
 	host.Properties["hostname"] = cnameTarget
 }
 
-func addDoctorHostAlias(host *sshconfig.HostEntry, alias string) {
+func addLocalRefreshHostAlias(host *sshconfig.HostEntry, alias string) {
 	if strings.TrimSpace(alias) == "" {
 		return
 	}
-	setDoctorHostPatterns(host, append(hostPatterns(host), alias))
+	setLocalRefreshHostPatterns(host, append(hostPatterns(host), alias))
 }
 
-func setDoctorHostPatterns(host *sshconfig.HostEntry, patterns []string) {
+func setLocalRefreshHostPatterns(host *sshconfig.HostEntry, patterns []string) {
 	patterns = uniqueHostPatterns(patterns)
 	for i, line := range host.Lines {
 		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(line)), "host ") {
@@ -466,7 +454,7 @@ func uniqueHostPatterns(patterns []string) []string {
 	return result
 }
 
-func doctorDNSTarget(host *sshconfig.HostEntry) string {
+func localRefreshDNSTarget(host *sshconfig.HostEntry) string {
 	if host == nil {
 		return ""
 	}
@@ -476,31 +464,33 @@ func doctorDNSTarget(host *sshconfig.HostEntry) string {
 	return host.Host
 }
 
-func doctorResolveTarget(target string) doctorDNSResult {
+func localRefreshResolveTarget(target string) localRefreshDNSResult {
 	if target == "" || strings.ContainsAny(target, "*?") {
-		return doctorDNSResult{status: "skip", detail: "wildcard pattern"}
+		return localRefreshDNSResult{status: "skip", detail: "wildcard pattern"}
 	}
 	if net.ParseIP(target) != nil {
-		return doctorDNSResult{status: "skip", detail: "IP address"}
+		return localRefreshDNSResult{status: "skip", detail: "IP address"}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if _, err := net.DefaultResolver.LookupHost(ctx, target); err != nil {
 		var dnsErr *net.DNSError
 		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
-			return doctorDNSResult{status: "nxdomain"}
+			return localRefreshDNSResult{status: "nxdomain"}
 		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) || strings.Contains(err.Error(), "i/o timeout") {
-			return doctorDNSResult{status: "timeout"}
+			return localRefreshDNSResult{status: "timeout"}
 		}
-		return doctorDNSResult{status: "error", detail: err.Error()}
+		return localRefreshDNSResult{status: "error", detail: err.Error()}
 	}
-	cname, err := net.LookupCNAME(target)
+	cnameCtx, cnameCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cnameCancel()
+	cname, err := net.DefaultResolver.LookupCNAME(cnameCtx, target)
 	if err == nil {
 		cname = strings.TrimSuffix(cname, ".")
 		if !strings.EqualFold(cname, target) {
-			return doctorDNSResult{status: "cname", detail: cname}
+			return localRefreshDNSResult{status: "cname", detail: cname}
 		}
 	}
-	return doctorDNSResult{status: "ok"}
+	return localRefreshDNSResult{status: "ok"}
 }

@@ -15,11 +15,15 @@ type hostAuthPatch struct {
 }
 
 type inventoryAuthView struct {
-	Source      string
-	Provider    string
-	Ref         string
-	Username    string
-	UsernameRef string
+	Source             string
+	CredentialProvider string
+	PasswordRef        string
+	Username           string
+	UsernameRef        string
+	UsernameSource     string
+	PasswordSource     string
+	AuthMode           string
+	AuthModeSource     string
 }
 
 type inventoryDisplayRow struct {
@@ -52,7 +56,9 @@ func (p hostAuthPatch) Validate(cfg *config.Config) error {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	provider := p.Auth.Provider
+	auth := p.Auth
+	auth.Normalize()
+	provider := auth.CredentialProvider
 	if provider == "" {
 		return fmt.Errorf("--credential-provider is required")
 	}
@@ -111,32 +117,85 @@ func effectiveInventoryAuth(cfg *config.Config, host, group string) inventoryAut
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	if hostCfg, ok := cfg.Inventory.Host[host]; ok && hostCfg.Auth.IsSet() {
-		return inventoryAuthViewFromAuth("host override", hostCfg.Auth)
+	provider := ""
+	if parsedProvider, _, err := config.ParseInventoryGroupID(group); err == nil {
+		provider = parsedProvider
 	}
-	if groupCfg, ok := cfg.Inventory.Group[group]; ok && groupCfg.Auth.IsSet() {
-		return inventoryAuthViewFromAuth("group "+group, groupCfg.Auth)
+	resolved := cfg.ResolveInventoryAuth(config.InventoryAuthContext{Host: host, Provider: provider, Group: group})
+	if resolved.Disabled {
+		auth := emptyInventoryAuthView()
+		auth.Source = "disabled"
+		auth.PasswordSource = "disabled"
+		return auth
 	}
-	return inventoryAuthView{Source: "-", Provider: "-", Ref: "-", Username: "-", UsernameRef: "-"}
+	if resolved.Source != "" {
+		return inventoryAuthView{
+			Source:             resolved.Source,
+			CredentialProvider: valueOrDash(resolved.CredentialProvider),
+			PasswordRef:        valueOrDash(resolved.PasswordRef),
+			Username:           valueOrDash(resolved.Username),
+			UsernameRef:        valueOrDash(resolved.UsernameRef),
+			UsernameSource:     valueOrDash(resolved.UsernameSource),
+			PasswordSource:     valueOrDash(resolved.PasswordSource),
+			AuthMode:           valueOrDash(resolved.AuthMode),
+			AuthModeSource:     valueOrDash(resolved.AuthModeSource),
+		}
+	}
+	return emptyInventoryAuthView()
 }
 
 func inventoryAuthViewFromAuth(source string, auth config.InventoryAuthConfig) inventoryAuthView {
+	auth.Normalize()
+	usernameSource := "-"
+	if auth.Username != "" || auth.UsernameRef != "" {
+		usernameSource = source
+	}
+	passwordSource := "-"
+	if auth.CredentialProvider != "" || auth.PasswordRef != "" {
+		passwordSource = source
+	}
+	authModeSource := "-"
+	if auth.AuthMode != "" {
+		authModeSource = source
+	}
 	return inventoryAuthView{
-		Source:      source,
-		Provider:    valueOrDash(auth.Provider),
-		Ref:         valueOrDash(auth.Ref),
-		Username:    valueOrDash(auth.Username),
-		UsernameRef: valueOrDash(auth.UsernameRef),
+		Source:             source,
+		CredentialProvider: valueOrDash(auth.CredentialProvider),
+		PasswordRef:        valueOrDash(auth.PasswordRef),
+		Username:           valueOrDash(auth.Username),
+		UsernameRef:        valueOrDash(auth.UsernameRef),
+		UsernameSource:     usernameSource,
+		PasswordSource:     passwordSource,
+		AuthMode:           valueOrDash(auth.AuthMode),
+		AuthModeSource:     authModeSource,
 	}
 }
 
 func inventoryAuthDisplayRows(auth inventoryAuthView) []inventoryDisplayRow {
 	return []inventoryDisplayRow{
 		{Label: "Auth Source", Value: auth.Source},
-		{Label: "Credential Provider", Value: auth.Provider},
-		{Label: "Credential Password Ref", Value: auth.Ref},
-		{Label: "Credential Username Override", Value: auth.Username},
-		{Label: "Credential Username Ref", Value: auth.UsernameRef},
+		{Label: "Auth Mode", Value: auth.AuthMode},
+		{Label: "Auth Mode Source", Value: auth.AuthModeSource},
+		{Label: "Credential Provider", Value: auth.CredentialProvider},
+		{Label: "Username Source", Value: auth.UsernameSource},
+		{Label: "Username", Value: auth.Username},
+		{Label: "Username Ref", Value: auth.UsernameRef},
+		{Label: "Password Source", Value: auth.PasswordSource},
+		{Label: "Password Ref", Value: auth.PasswordRef},
+	}
+}
+
+func emptyInventoryAuthView() inventoryAuthView {
+	return inventoryAuthView{
+		Source:             "-",
+		CredentialProvider: "-",
+		PasswordRef:        "-",
+		Username:           "-",
+		UsernameRef:        "-",
+		UsernameSource:     "-",
+		PasswordSource:     "-",
+		AuthMode:           "-",
+		AuthModeSource:     "-",
 	}
 }
 
@@ -156,18 +215,17 @@ func inventoryHostSSHDisplayRows(host, hostName, user, port string) []inventoryD
 	}
 }
 
-func inventoryGroupSSHDisplayRows(domainSuffix, defaultUser string) []inventoryDisplayRow {
-	return []inventoryDisplayRow{
-		{Label: "Domain Suffix", Value: domainSuffix},
-		{Label: "Default User", Value: defaultUser},
-	}
-}
-
 func printInventoryDisplaySections(sections []inventoryDisplaySection) {
 	for i, section := range sections {
 		ui.SubSection(section.Title, i == 0)
 		for _, row := range section.Rows {
 			ui.PrintKeyValue(row.Label, row.Value)
 		}
+	}
+}
+
+func printInventoryDisplayRows(rows []inventoryDisplayRow) {
+	for _, row := range rows {
+		ui.PrintKeyValue(row.Label, row.Value)
 	}
 }

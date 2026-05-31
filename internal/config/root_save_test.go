@@ -11,8 +11,11 @@ func TestSaveInventoryHostAuthPreservesIncludesAndAvoidsFlattening(t *testing.T)
 	tmp := t.TempDir()
 	mainPath := filepath.Join(tmp, "config.toml")
 	writeConfigFile(t, filepath.Join(tmp, "inventory", "groups.toml"), `
-[group.imported]
-default_user = "shared"
+[provider.local]
+type = "local"
+
+[provider.local.group.imported]
+auth = { username = "shared" }
 `)
 	writeConfigFile(t, mainPath, `
 [credential]
@@ -31,8 +34,8 @@ include = ["inventory/groups.toml"]
 	cfg.Inventory.Host = map[string]InventoryHostConfig{
 		"edge01": {
 			Auth: InventoryAuthConfig{
-				Provider: "pass-local",
-				Ref:      "nssh/hosts/edge01",
+				CredentialProvider: "pass-local",
+				PasswordRef:        "nssh/hosts/edge01",
 			},
 		},
 	}
@@ -50,8 +53,41 @@ include = ["inventory/groups.toml"]
 			t.Fatalf("root config missing %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "[inventory.group.imported]") || strings.Contains(got, `default_user = "shared"`) {
+	if strings.Contains(got, "[inventory.provider.local.group.imported]") || strings.Contains(got, `username = "shared"`) {
 		t.Fatalf("imported group was flattened into root config:\n%s", got)
+	}
+}
+
+func TestSaveInventoryHostAuthWritesDisabledAuth(t *testing.T) {
+	tmp := t.TempDir()
+	mainPath := filepath.Join(tmp, "config.toml")
+	writeConfigFile(t, mainPath, `
+[credential]
+
+[credential.provider.pass-local]
+type = "pass"
+`)
+
+	cfg, err := Load(mainPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cfg.Inventory.Host = map[string]InventoryHostConfig{
+		"edge01": {AuthDisabled: true},
+	}
+
+	if err := SaveInventoryHostAuth(mainPath, cfg, "edge01"); err != nil {
+		t.Fatalf("SaveInventoryHostAuth: %v", err)
+	}
+	data, err := os.ReadFile(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	for _, want := range []string{"[inventory.host.edge01]", "auth_disabled = true"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("root config missing %q:\n%s", want, got)
+		}
 	}
 }
 
@@ -59,21 +95,27 @@ func TestDeleteInventoryGroupRefusesImportedOnlyGroup(t *testing.T) {
 	tmp := t.TempDir()
 	mainPath := filepath.Join(tmp, "config.toml")
 	writeConfigFile(t, filepath.Join(tmp, "groups.toml"), `
-[group.imported]
-default_user = "shared"
+[provider.local]
+type = "local"
+
+[provider.local.group.imported]
+auth = { username = "shared" }
 `)
 	writeConfigFile(t, mainPath, `
 [inventory]
 include = ["groups.toml"]
 
-[inventory.group.default]
+[inventory.provider.local]
+type = "local"
+
+[inventory.provider.local.group.default]
 `)
 
 	cfg, err := Load(mainPath)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	err = DeleteInventoryGroup(mainPath, cfg, "imported")
+	err = DeleteInventoryGroup(mainPath, cfg, "local/imported")
 	if err == nil {
 		t.Fatal("expected imported group removal refusal")
 	}

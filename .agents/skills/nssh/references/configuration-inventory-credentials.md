@@ -34,19 +34,19 @@ Commands:
 ```bash
 nssh inv list
 nssh inv get <host>
-nssh inv set <host> --hostname <addr> --user <user> -g <group>
+nssh inv set <host> --hostname <addr> --user <user> -g local/<group>
 nssh inv rm <host>
-nssh inv import ./hosts.csv --group <group>
-nssh inv get -g <group>
-nssh inv set -g <group>
-nssh inv rm -g <group>
+nssh inv import ./hosts.csv --group local/<group>
+nssh inv set -g local/<group>
+nssh inv rm -g local/<group>
 nssh inv status
-nssh inv doctor
+nssh inv refresh
+nssh inv refresh local
 ```
 
 Local inventory is the implicit `local` provider and writes
 `~/.ssh/nssh.d/provider_local.conf`. Local host groups are stored in SSH config
-comments.
+comments as canonical IDs such as `local/custcbb`.
 
 External inventory providers write provider-owned include files named
 `~/.ssh/nssh.d/provider_<name>.conf` and non-secret state under
@@ -54,15 +54,17 @@ External inventory providers write provider-owned include files named
 
 Current external providers:
 
-- NetBox: configured with `type = "netbox"`, URL/token settings, and route
-  match rules.
+- NetBox: configured with `type = "netbox"`, URL/token settings, and
+  provider-owned group match rules.
 - Containerlab: configured with `type = "containerlab"` and a required
   `jump_host`.
 
-Routes assign discovered objects to groups. `auth_mode = "password"` renders
-password and keyboard-interactive SSH preferences. `auth_mode = "key"` disables
-password auth. If omitted, nssh defaults to password when the group has auth,
-otherwise key.
+Provider-owned group selectors assign discovered objects to canonical groups.
+nssh defaults to password SSH preferences when the provider group has password
+auth, otherwise key.
+For containerlab, use `state = ["running"]` to select any running node; add
+`kind = ["ceos", "vjunos"]` only when a group should be limited to specific
+node kinds.
 
 ## Credential Providers
 
@@ -84,20 +86,24 @@ Supported providers:
 Auth mappings belong to inventory:
 
 ```toml
-[inventory.group.default]
-auth = { provider = "pass-local", ref = "nssh/groups/default" }
+[inventory.provider.local]
+type = "local"
+
+[inventory.provider.local.group.default]
+auth = { credential_provider = "pass-local", password_ref = "nssh/groups/default" }
 
 [inventory.host.edge01]
-auth = { provider = "op-network", ref = "nssh host edge01", username = "netops" }
+auth = { credential_provider = "op-network", password_ref = "nssh host edge01", username = "netops" }
 ```
 
-Every set auth mapping needs `provider` and `ref`. `username` and
-`username_ref` are optional and mutually exclusive.
+Every set auth mapping needs `credential_provider` and either `password_ref` or
+`username_ref`. `username` and `username_ref` are optional and mutually
+exclusive.
 
 Resolution order:
 
 1. Host auth override.
-2. Inventory group auth mapping.
+2. Inventory provider group auth mapping.
 3. SSH config and key auth without an nssh credential.
 
 If a provider record returns a username that conflicts with the selected SSH

@@ -114,7 +114,7 @@ func (p *NetBoxProvider) Discover(ctx context.Context, providerName string, cfg 
 		"env_file", envFile,
 	)
 
-	query := buildNetBoxDeviceQuery(ctx, p.Client, baseURL, token, cfg.Route)
+	query := buildNetBoxDeviceQuery(ctx, p.Client, baseURL, token, cfg.Selectors)
 	slog.Debug("netbox discovery filters", "provider", providerName, "query", query.Encode())
 
 	devices, err := p.fetchDevices(ctx, baseURL, token, query)
@@ -285,19 +285,19 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
-func buildNetBoxDeviceQuery(ctx context.Context, client *http.Client, baseURL, token string, routes []config.InventoryRouteConfig) url.Values {
-	if len(routes) == 0 {
+func buildNetBoxDeviceQuery(ctx context.Context, client *http.Client, baseURL, token string, selectors []config.InventoryGroupSelector) url.Values {
+	if len(selectors) == 0 {
 		return nil
 	}
 
 	query := make(url.Values)
-	addResolvedReferenceQueryFilter(ctx, client, baseURL, token, query, routes, "manufacturer", "manufacturer", "/api/dcim/manufacturers/")
-	addResolvedReferenceQueryFilter(ctx, client, baseURL, token, query, routes, "tenant", "tenant", "/api/tenancy/tenants/")
-	addResolvedReferenceQueryFilter(ctx, client, baseURL, token, query, routes, "role", "role", "/api/dcim/device-roles/")
-	addUnionQueryFilter(query, routes, "status", "status")
-	addResolvedReferenceQueryFilter(ctx, client, baseURL, token, query, routes, "site", "site", "/api/dcim/sites/")
-	addResolvedReferenceQueryFilter(ctx, client, baseURL, token, query, routes, "platform", "platform", "/api/dcim/platforms/")
-	addDomainSuffixRegexFilter(query, routes)
+	addResolvedReferenceQueryFilter(ctx, client, baseURL, token, query, selectors, "manufacturer", "manufacturer", "/api/dcim/manufacturers/")
+	addResolvedReferenceQueryFilter(ctx, client, baseURL, token, query, selectors, "tenant", "tenant", "/api/tenancy/tenants/")
+	addResolvedReferenceQueryFilter(ctx, client, baseURL, token, query, selectors, "role", "role", "/api/dcim/device-roles/")
+	addUnionQueryFilter(query, selectors, "status", "status")
+	addResolvedReferenceQueryFilter(ctx, client, baseURL, token, query, selectors, "site", "site", "/api/dcim/sites/")
+	addResolvedReferenceQueryFilter(ctx, client, baseURL, token, query, selectors, "platform", "platform", "/api/dcim/platforms/")
+	addDomainSuffixRegexFilter(query, selectors)
 
 	if len(query) == 0 {
 		return nil
@@ -305,8 +305,8 @@ func buildNetBoxDeviceQuery(ctx context.Context, client *http.Client, baseURL, t
 	return query
 }
 
-func addUnionQueryFilter(query url.Values, routes []config.InventoryRouteConfig, routeField, queryField string) {
-	values, ok := unionRouteMatchValues(routes, routeField)
+func addUnionQueryFilter(query url.Values, selectors []config.InventoryGroupSelector, selectorField, queryField string) {
+	values, ok := unionSelectorMatchValues(selectors, selectorField)
 	if !ok {
 		return
 	}
@@ -315,20 +315,20 @@ func addUnionQueryFilter(query url.Values, routes []config.InventoryRouteConfig,
 	}
 }
 
-func addResolvedReferenceQueryFilter(ctx context.Context, client *http.Client, baseURL, token string, query url.Values, routes []config.InventoryRouteConfig, routeField, queryField, endpoint string) {
-	values, ok := unionRouteMatchValues(routes, routeField)
+func addResolvedReferenceQueryFilter(ctx context.Context, client *http.Client, baseURL, token string, query url.Values, selectors []config.InventoryGroupSelector, selectorField, queryField, endpoint string) {
+	values, ok := unionSelectorMatchValues(selectors, selectorField)
 	if !ok {
 		return
 	}
 
-	resolved := resolveNetBoxReferenceValues(ctx, client, baseURL, token, endpoint, routeField, values)
+	resolved := resolveNetBoxReferenceValues(ctx, client, baseURL, token, endpoint, selectorField, values)
 	for _, value := range resolved {
 		query.Add(queryField, value)
 	}
 }
 
-func addDomainSuffixRegexFilter(query url.Values, routes []config.InventoryRouteConfig) {
-	suffixes, ok := unionRouteMatchValues(routes, "domain_suffix")
+func addDomainSuffixRegexFilter(query url.Values, selectors []config.InventoryGroupSelector) {
+	suffixes, ok := unionSelectorMatchValues(selectors, "domain_suffix")
 	if !ok || len(suffixes) == 0 {
 		return
 	}
@@ -348,10 +348,10 @@ func addDomainSuffixRegexFilter(query url.Values, routes []config.InventoryRoute
 	query.Set("name__iregex", "^[A-Za-z0-9._-]+(?:"+strings.Join(patterns, "|")+")$")
 }
 
-func unionRouteMatchValues(routes []config.InventoryRouteConfig, field string) ([]string, bool) {
+func unionSelectorMatchValues(selectors []config.InventoryGroupSelector, field string) ([]string, bool) {
 	values := make(map[string]struct{})
-	for _, route := range routes {
-		matches := route.Match[field]
+	for _, selector := range selectors {
+		matches := selector.Match[field]
 		if len(matches) == 0 {
 			return nil, false
 		}

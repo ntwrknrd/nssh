@@ -10,18 +10,19 @@ var normalizedFields = map[string]func(*Object) string{
 	"hostname":    func(o *Object) string { return o.HostName },
 }
 
-// MatchRoute evaluates routes top-to-bottom and returns the first match.
-func MatchRoute(obj *Object, routes []config.InventoryRouteConfig) *config.InventoryRouteConfig {
-	for i := range routes {
-		if routeMatches(obj, &routes[i]) {
-			return &routes[i]
+// MatchGroupSelectors returns every provider group selector that matches obj.
+func MatchGroupSelectors(obj *Object, selectors []config.InventoryGroupSelector) []config.InventoryGroupSelector {
+	matches := make([]config.InventoryGroupSelector, 0, 1)
+	for i := range selectors {
+		if selectorMatches(obj, &selectors[i]) {
+			matches = append(matches, selectors[i])
 		}
 	}
-	return nil
+	return matches
 }
 
-func routeMatches(obj *Object, route *config.InventoryRouteConfig) bool {
-	for field, values := range route.Match {
+func selectorMatches(obj *Object, selector *config.InventoryGroupSelector) bool {
+	for field, values := range selector.Match {
 		if len(values) == 0 {
 			continue
 		}

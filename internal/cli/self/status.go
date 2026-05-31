@@ -182,9 +182,11 @@ func inventoryGroupAuthCount(cfg *config.Config) int {
 		return 0
 	}
 	count := 0
-	for _, group := range cfg.Inventory.Group {
-		if group.Auth.IsSet() {
-			count++
+	for _, provider := range cfg.Inventory.Provider {
+		for _, group := range provider.Group {
+			if group.Auth.IsSet() {
+				count++
+			}
 		}
 	}
 	return count

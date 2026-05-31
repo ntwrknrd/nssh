@@ -75,9 +75,6 @@ func TestLoad_ValidConfig(t *testing.T) {
 timeout = "60s"
 password_timeout = "20s"
 
-[host.defaults]
-default_user = "admin"
-
 [logging.audit]
 max_backup_files = 20
 
@@ -98,9 +95,6 @@ auto_start = false
 	}
 	if cfg.SSH.Connection.PasswordTimeout.Duration() != 20*time.Second {
 		t.Errorf("password_timeout = %v, want 20s", cfg.SSH.Connection.PasswordTimeout.Duration())
-	}
-	if cfg.Host.Defaults.DefaultUser != "admin" {
-		t.Errorf("host.defaults.default_user = %q, want %q", cfg.Host.Defaults.DefaultUser, "admin")
 	}
 	if cfg.Logging.Audit.MaxBackupFiles != 20 {
 		t.Errorf("logging.audit.max_backup_files = %d, want 20", cfg.Logging.Audit.MaxBackupFiles)

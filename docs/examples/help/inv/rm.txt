@@ -1,10 +1,10 @@
 $ nssh inv rm --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
 │   nssh inv rm HOST                  Remove inventory entries                 │
-│   nssh inv rm -g GROUP                                                       │
+│   nssh inv rm -g local/GROUP                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
-│   -g, --group                       treat argument as a group name           │
+│   -g, --group                       treat argument as a provider-qualif...   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

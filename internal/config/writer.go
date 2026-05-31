@@ -28,16 +28,24 @@ func SaveSparse(path string, cfg *Config) error {
 	return writeConfigText(path, text)
 }
 
-func SaveInventoryGroup(path string, cfg *Config, group string) error {
+func SaveInventoryGroup(path string, cfg *Config, groupID string) error {
 	if cfg == nil {
 		return fmt.Errorf("config is required")
 	}
-	groupCfg, ok := cfg.Inventory.Group[group]
+	providerName, groupName, err := ParseInventoryGroupID(groupID)
+	if err != nil {
+		return err
+	}
+	providerCfg, ok := cfg.Inventory.Provider[providerName]
 	if !ok {
-		return fmt.Errorf("inventory group %q is not configured", group)
+		return fmt.Errorf("inventory provider %q is not configured", providerName)
+	}
+	groupCfg, ok := providerCfg.Group[groupName]
+	if !ok {
+		return fmt.Errorf("inventory group %q is not configured", groupID)
 	}
 	root := rootTableForSave(cfg)
-	setMapPath(root, []string{"inventory", "group", group}, groupTable(groupCfg))
+	setMapPath(root, []string{"inventory", "provider", providerName, "group", groupName}, groupTable(groupCfg))
 	return saveRootTable(path, root)
 }
 
@@ -47,7 +55,7 @@ func SaveInventoryHostAuth(path string, cfg *Config, host string) error {
 	}
 	root := rootTableForSave(cfg)
 	hostCfg, ok := cfg.Inventory.Host[host]
-	if !ok || !hostCfg.Auth.IsSet() {
+	if !ok || (!hostCfg.Auth.IsSet() && !hostCfg.AuthDisabled) {
 		if isImportedOnlySource(path, cfg.InventoryHostSource(host)) {
 			return fmt.Errorf("inventory host %q auth is imported from %s", host, cfg.InventoryHostSource(host))
 		}
@@ -58,19 +66,24 @@ func SaveInventoryHostAuth(path string, cfg *Config, host string) error {
 	return saveRootTable(path, root)
 }
 
-func DeleteInventoryGroup(path string, cfg *Config, group string) error {
+func DeleteInventoryGroup(path string, cfg *Config, groupID string) error {
 	if cfg == nil {
 		return fmt.Errorf("config is required")
 	}
-	if isImportedOnlySource(path, cfg.InventoryGroupSource(group)) {
-		return fmt.Errorf("inventory group %q is imported from %s; imported config is read-only", group, cfg.InventoryGroupSource(group))
+	providerName, groupName, err := ParseInventoryGroupID(groupID)
+	if err != nil {
+		return err
+	}
+	if isImportedOnlySource(path, cfg.InventoryGroupSource(providerName, groupName)) {
+		return fmt.Errorf("inventory group %q is imported from %s; imported config is read-only", groupID, cfg.InventoryGroupSource(providerName, groupName))
 	}
 	root := rootTableForSave(cfg)
-	deleteMapPath(root, []string{"inventory", "group", group})
+	deleteMapPath(root, []string{"inventory", "provider", providerName, "group", groupName})
 	return saveRootTable(path, root)
 }
 
 func saveRootTable(path string, table map[string]any) error {
+	stripLegacyIdentityKeys(table)
 	text, err := marshalConfigTable(table)
 	if err != nil {
 		return err
@@ -83,6 +96,32 @@ func writeConfigText(path, text string) error {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 	return os.WriteFile(path, []byte(text), 0600)
+}
+
+func stripLegacyIdentityKeys(root map[string]any) {
+	if root == nil {
+		return
+	}
+	if host, ok := asMap(root["host"]); ok {
+		if defaults, ok := asMap(host["defaults"]); ok {
+			delete(defaults, "default_user")
+			if len(defaults) == 0 {
+				delete(host, "defaults")
+			}
+		}
+		if len(host) == 0 {
+			delete(root, "host")
+		}
+	}
+	inventory, ok := asMap(root["inventory"])
+	if !ok {
+		return
+	}
+	groups, _ := asMap(inventory["group"])
+	for _, name := range sortedMapKeys(groups) {
+		group, _ := asMap(groups[name])
+		delete(group, "default_user")
+	}
 }
 
 func rootTableForSave(cfg *Config) map[string]any {
@@ -165,12 +204,9 @@ func sparseConfigTable(cfg *Config) map[string]any {
 	}
 
 	inventory := make(map[string]any)
-	if len(cfg.Inventory.Group) > 0 {
-		groups := make(map[string]any)
-		for _, name := range sortedGroups(cfg.Inventory.Group) {
-			groups[name] = groupTable(cfg.Inventory.Group[name])
-		}
-		inventory["group"] = groups
+	auth := authTable(cfg.Inventory.Auth)
+	if len(auth) > 0 {
+		inventory["auth"] = auth
 	}
 	if len(cfg.Inventory.Host) > 0 {
 		hosts := make(map[string]any)
@@ -230,16 +266,21 @@ func groupTable(cfg GroupConfig) map[string]any {
 	if len(cfg.DomainSuffix) > 0 {
 		table["domain_suffix"] = cfg.DomainSuffix
 	}
-	addString(table, "default_user", cfg.DefaultUser)
 	auth := authTable(cfg.Auth)
 	if len(auth) > 0 {
 		table["auth"] = auth
+	}
+	if len(cfg.Match) > 0 {
+		table["match"] = inventoryMatchTable(cfg.Match)
 	}
 	return table
 }
 
 func inventoryHostTable(cfg InventoryHostConfig) map[string]any {
 	table := make(map[string]any)
+	if cfg.AuthDisabled {
+		table["auth_disabled"] = cfg.AuthDisabled
+	}
 	auth := authTable(cfg.Auth)
 	if len(auth) > 0 {
 		table["auth"] = auth
@@ -248,27 +289,33 @@ func inventoryHostTable(cfg InventoryHostConfig) map[string]any {
 }
 
 func authTable(cfg InventoryAuthConfig) map[string]any {
+	cfg.Normalize()
 	table := make(map[string]any)
-	addString(table, "provider", cfg.Provider)
-	addString(table, "ref", cfg.Ref)
+	addString(table, "credential_provider", cfg.CredentialProvider)
+	addString(table, "password_ref", cfg.PasswordRef)
 	addString(table, "username", cfg.Username)
 	addString(table, "username_ref", cfg.UsernameRef)
+	addString(table, "auth_mode", cfg.AuthMode)
 	return table
 }
 
 func inventoryProviderTable(cfg InventoryProviderConfig) map[string]any {
 	table := make(map[string]any)
 	addString(table, "type", cfg.Type)
+	auth := authTable(cfg.Auth)
+	if len(auth) > 0 {
+		table["auth"] = auth
+	}
 	detail := inventoryProviderDetailTable(cfg.Config)
 	if len(detail) > 0 {
 		table["config"] = detail
 	}
-	if len(cfg.Route) > 0 {
-		routes := make([]any, 0, len(cfg.Route))
-		for _, route := range cfg.Route {
-			routes = append(routes, inventoryRouteTable(route))
+	if len(cfg.Group) > 0 {
+		groups := make(map[string]any)
+		for _, name := range sortedGroups(cfg.Group) {
+			groups[name] = groupTable(cfg.Group[name])
 		}
-		table["route"] = routes
+		table["group"] = groups
 	}
 	return table
 }
@@ -289,22 +336,15 @@ func inventoryProviderDetailTable(cfg InventoryProviderDetailConfig) map[string]
 	return table
 }
 
-func inventoryRouteTable(cfg InventoryRouteConfig) map[string]any {
+func inventoryMatchTable(matchConfig InventoryMatch) map[string]any {
 	table := make(map[string]any)
-	addString(table, "name", cfg.Name)
-	addString(table, "group", cfg.Group)
-	addString(table, "auth_mode", cfg.AuthMode)
-	if len(cfg.Match) > 0 {
-		match := make(map[string]any)
-		keys := make([]string, 0, len(cfg.Match))
-		for key := range cfg.Match {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			match[key] = cfg.Match[key]
-		}
-		table["match"] = match
+	keys := make([]string, 0, len(matchConfig))
+	for key := range matchConfig {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		table[key] = matchConfig[key]
 	}
 	return table
 }
@@ -488,21 +528,13 @@ func writeInventory(b *bytes.Buffer, root map[string]any) {
 			writeOption(b, "inventory", key, value)
 		}
 	}
-	groups, _ := asMap(inventory["group"])
-	for _, name := range sortedMapKeys(groups) {
-		path := "inventory.group." + name
-		group, _ := asMap(groups[name])
-		writeTableHeader(b, path)
-		for _, key := range []string{"domain_suffix", "default_user"} {
-			writeOptionIfPresent(b, path, group, key)
-		}
-		writeInlineMapIfPresent(b, path, group, "auth")
-	}
+	writeInlineMapIfPresent(b, "inventory", inventory, "auth")
 	hosts, _ := asMap(inventory["host"])
 	for _, name := range sortedMapKeys(hosts) {
 		path := "inventory.host." + name
 		host, _ := asMap(hosts[name])
 		writeTableHeader(b, path)
+		writeOptionIfPresent(b, path, host, "auth_disabled")
 		writeInlineMapIfPresent(b, path, host, "auth")
 	}
 	providers, _ := asMap(inventory["provider"])
@@ -511,21 +543,20 @@ func writeInventory(b *bytes.Buffer, root map[string]any) {
 		provider, _ := asMap(providers[name])
 		writeTableHeader(b, path)
 		writeOptionIfPresent(b, path, provider, "type")
+		writeInlineMapIfPresent(b, path, provider, "auth")
 		writeInlineMapIfPresent(b, path, provider, "config")
-		if routes, ok := provider["route"].([]any); ok {
-			for _, routeValue := range routes {
-				route, _ := asMap(routeValue)
-				routePath := path + ".route"
-				writeArrayTableHeader(b, routePath)
-				for _, key := range []string{"name", "group", "auth_mode"} {
-					writeOptionIfPresent(b, routePath, route, key)
-				}
-				if match, ok := asMap(route["match"]); ok && len(match) > 0 {
-					matchPath := routePath + ".match"
-					writeTableHeader(b, matchPath)
-					for _, key := range sortedMapKeys(match) {
-						writeOption(b, matchPath, key, match[key])
-					}
+		groups, _ := asMap(provider["group"])
+		for _, groupName := range sortedMapKeys(groups) {
+			groupPath := path + ".group." + groupName
+			group, _ := asMap(groups[groupName])
+			writeTableHeader(b, groupPath)
+			writeOptionIfPresent(b, groupPath, group, "domain_suffix")
+			writeInlineMapIfPresent(b, groupPath, group, "auth")
+			if match, ok := asMap(group["match"]); ok && len(match) > 0 {
+				matchPath := groupPath + ".match"
+				writeTableHeader(b, matchPath)
+				for _, key := range sortedMapKeys(match) {
+					writeOption(b, matchPath, key, match[key])
 				}
 			}
 		}
@@ -615,62 +646,60 @@ func writeOption(b *bytes.Buffer, path, key string, value any) {
 
 func optionComment(path, key string) []string {
 	comments := map[string][]string{
-		"include":                               {"Import shared or modular config before applying this file's local overrides.", `Common value: ["conf.d/base.toml"] or ["inventory/*.toml"].`},
-		"agent.auto_start":                      {"Start the nssh runtime agent on first provider-session request.", "Common value: true."},
-		"agent.idle_timeout":                    {"How long the nssh runtime agent can sit idle before exiting.", `Common value: "1h" for default use, "4h" for a longer work session.`},
-		"agent.activity_increment":              {"How much activity extends the idle deadline, capped by idle_timeout.", `Common value: "15m" or "30m".`},
-		"agent.max_lifetime":                    {"Hard maximum runtime for the agent even if it remains active.", `Common value: "8h" for a workday, "24h" for default behavior.`},
-		"credential.include":                    {"Import credential provider definitions under [credential].", `Common value: ["credentials/*.toml"].`},
-		"credential.provider.type":              {"Credential backend type.", `Acceptable values: "pass", "1password", "bitwarden".`},
-		"credential.provider.config.account":    {"1Password account shorthand passed to op when needed.", `Common value: "" or your 1Password account name.`},
-		"credential.provider.config.vault":      {"1Password vault containing SSH credential items.", `Common value: "Network" or "TeamVault".`},
-		"credential.provider.config.command":    {"Credential CLI command for pass-compatible providers.", `Common value: "pass".`},
-		"credential.provider.config.prefix":     {"Password-store path prefix for nssh-managed entries.", `Common value: "nssh".`},
-		"credential.provider.config.session":    {"Provider session handling mode.", `Acceptable values: "external", "agent", "none".`},
-		"inventory.include":                     {"Import inventory groups or providers under [inventory].", `Common value: ["inventory/groups/*.toml", "inventory/providers.toml"].`},
-		"inventory.group.domain_suffix":         {"Domain suffixes associated with this inventory group.", `Common value: [".example.com"].`},
-		"inventory.group.default_user":          {"Default SSH username for hosts in this group.", "Common value: your network admin username."},
-		"inventory.group.auth":                  {"Credential item used for password auth in this group.", `Common provider: "pass-local"; ref may be a provider URI or stable item name.`},
-		"inventory.host.auth":                   {"Credential item override used for this exact host.", "Common value: provider plus a stable provider item reference."},
-		"inventory.provider.type":               {"Inventory provider type.", `Acceptable values: "netbox", "containerlab".`},
-		"inventory.provider.config":             {"Inventory provider connection settings.", "Common value: environment-backed URL/token so secrets are not stored in config."},
-		"inventory.provider.route.name":         {"Human-readable route name used in status/debug output.", "Common value: a short inventory purpose name."},
-		"inventory.provider.route.group":        {"Inventory group assigned to matching provider objects.", "Common value: an existing inventory group name."},
-		"inventory.provider.route.auth_mode":    {"SSH auth directives to render for matched hosts.", `Acceptable values: "password" or "key".`},
-		"inventory.provider.route.match":        {"Route only objects with matching normalized attributes.", "Common values: domain_suffix, manufacturer, tenant."},
-		"logging.audit.enabled":                 {"Enable security event logging.", "Common value: true."},
-		"logging.audit.max_backup_files":        {"Maximum rotated audit/config backup files to retain.", "Common value: 10."},
-		"logging.audit.max_size":                {"Maximum audit log size before rotation.", `Common value: "10MB".`},
-		"logging.session.enabled":               {"Record SSH sessions automatically.", "Common value: true for audit-heavy workflows, false to disable."},
-		"logging.session.append_mode":           {"Append sessions to a daily cast file instead of separate files.", "Common value: true."},
-		"logging.session.asciinema_server_url":  {"Custom asciinema upload server URL.", `Common value: "https://asciinema.org".`},
-		"logging.session.dir":                   {"Directory for session recording files.", `Common value: "~/.local/state/nssh/casts".`},
-		"logging.session.exclude_hosts":         {"Host patterns that should never be recorded.", `Common value: ["lab-*", "regex:.*-mgmt$"].`},
-		"logging.session.idle_time_limit":       {"Cap long pauses in recordings, in seconds.", "Common value: 0 to disable."},
-		"logging.session.idle_time_limit_mode":  {"When to apply idle time limiting.", `Acceptable values: "play", "record", "both".`},
-		"logging.session.include_hosts":         {"Host patterns that should be recorded, taking precedence over excludes.", `Common value: ["prod-*"].`},
-		"logging.session.title_format":          {"Recording title template.", `Common value: "nssh:{host}".`},
-		"logging.session.window_size":           {"Fixed terminal size used for recordings.", `Common value: "145x30" or "100x30".`},
-		"logging.session.auto_export_txt":       {"Export a plain-text copy of each recording after the session ends.", "Common value: true if recordings are searched often."},
-		"logging.session.archive.dir":           {"Directory for monthly recording archives.", `Default value: "~/.local/state/nssh/archives".`},
-		"logging.session.archive.enabled":       {"Enable automatic archival of old session recordings.", "Common value: false."},
-		"logging.session.archive.jitter":        {"Randomize archive schedule timing.", `Common value: "30m".`},
-		"logging.session.archive.max_bundles":   {"Maximum monthly archive bundles to retain.", "Common value: 12."},
-		"logging.session.archive.max_run_bytes": {"Maximum bytes to process per archive maintenance run.", "Common value: 0 for unlimited."},
-		"logging.session.archive.min_age":       {"Minimum recording age before archival.", `Common value: "720h" for about 30 days.`},
-		"ssh.connection.idle_timeout":           {"Disconnect SSH after inactivity.", `Common value: "0s" to disable.`},
-		"ssh.connection.password_timeout":       {"How long to wait for an SSH password prompt.", `Common value: "10s".`},
-		"ssh.connection.timeout":                {"Overall SSH connection timeout.", `Common value: "30s".`},
-		"ssh.security.accept_once_mode":         {"Accept-once host key behavior.", `Acceptable values: "pin", "accept-new".`},
-		"ssh.security.compat_persist_probes":    {"Allow compatibility probes to write to real known_hosts.", "Common value: false unless using TOFU mode."},
-		"ssh.security.host_key_policy":          {"Host key behavior preset. \"pin\" is stricter; \"tofu\" accepts first use.", `Common value: "pin" for strict mode, "tofu" for lab/internal gear.`},
+		"include":                                {"Import shared or modular config before applying this file's local overrides.", `Common value: ["conf.d/base.toml"] or ["inventory/*.toml"].`},
+		"agent.auto_start":                       {"Start the nssh runtime agent on first provider-session request.", "Common value: true."},
+		"agent.idle_timeout":                     {"How long the nssh runtime agent can sit idle before exiting.", `Common value: "1h" for default use, "4h" for a longer work session.`},
+		"agent.activity_increment":               {"How much activity extends the idle deadline, capped by idle_timeout.", `Common value: "15m" or "30m".`},
+		"agent.max_lifetime":                     {"Hard maximum runtime for the agent even if it remains active.", `Common value: "8h" for a workday, "24h" for default behavior.`},
+		"credential.include":                     {"Import credential provider definitions under [credential].", `Common value: ["credentials/*.toml"].`},
+		"credential.provider.type":               {"Credential backend type.", `Acceptable values: "pass", "1password", "bitwarden".`},
+		"credential.provider.config.account":     {"1Password account shorthand passed to op when needed.", `Common value: "" or your 1Password account name.`},
+		"credential.provider.config.vault":       {"1Password vault containing SSH credential items.", `Common value: "Network" or "TeamVault".`},
+		"credential.provider.config.command":     {"Credential CLI command for pass-compatible providers.", `Common value: "pass".`},
+		"credential.provider.config.prefix":      {"Password-store path prefix for nssh-managed entries.", `Common value: "nssh".`},
+		"credential.provider.config.session":     {"Provider session handling mode.", `Acceptable values: "external", "agent", "none".`},
+		"inventory.include":                      {"Import inventory providers and provider-owned groups under [inventory].", `Common value: ["inventory/*.toml"].`},
+		"inventory.provider.group.domain_suffix": {"Legacy group domain suffix metadata.", `Prefer inventory.provider.<provider>.group.<group>.match.domain_suffix for group selection.`},
+		"inventory.auth":                         {"Default nssh-owned SSH identity and auth routing.", `Common keys: username, username_ref, credential_provider, password_ref, auth_mode.`},
+		"inventory.provider.group.auth":          {"Provider group nssh-owned SSH identity and auth routing.", `Common keys: username, credential_provider, password_ref, auth_mode.`},
+		"inventory.provider.group.match":         {"Select provider objects or local hosts into this inventory group.", "Common values: domain_suffix, manufacturer, tenant."},
+		"inventory.host.auth_disabled":           {"Disable inherited stored credentials for this host.", "Common value: true for public-key-only or manually prompted hosts."},
+		"inventory.host.auth":                    {"Host nssh-owned SSH identity and auth routing override.", "Common value: provider plus a stable provider item reference."},
+		"inventory.provider.type":                {"Inventory provider type.", `Acceptable values: "local", "netbox", "containerlab".`},
+		"inventory.provider.config":              {"Inventory provider connection settings.", "Common value: environment-backed URL/token so secrets are not stored in config."},
+		"logging.audit.enabled":                  {"Enable security event logging.", "Common value: true."},
+		"logging.audit.max_backup_files":         {"Maximum rotated audit/config backup files to retain.", "Common value: 10."},
+		"logging.audit.max_size":                 {"Maximum audit log size before rotation.", `Common value: "10MB".`},
+		"logging.session.enabled":                {"Record SSH sessions automatically.", "Common value: true for audit-heavy workflows, false to disable."},
+		"logging.session.append_mode":            {"Append sessions to a daily cast file instead of separate files.", "Common value: true."},
+		"logging.session.asciinema_server_url":   {"Custom asciinema upload server URL.", `Common value: "https://asciinema.org".`},
+		"logging.session.dir":                    {"Directory for session recording files.", `Common value: "~/.local/state/nssh/casts".`},
+		"logging.session.exclude_hosts":          {"Host patterns that should never be recorded.", `Common value: ["lab-*", "regex:.*-mgmt$"].`},
+		"logging.session.idle_time_limit":        {"Cap long pauses in recordings, in seconds.", "Common value: 0 to disable."},
+		"logging.session.idle_time_limit_mode":   {"When to apply idle time limiting.", `Acceptable values: "play", "record", "both".`},
+		"logging.session.include_hosts":          {"Host patterns that should be recorded, taking precedence over excludes.", `Common value: ["prod-*"].`},
+		"logging.session.title_format":           {"Recording title template.", `Common value: "nssh:{host}".`},
+		"logging.session.window_size":            {"Fixed terminal size used for recordings.", `Common value: "145x30" or "100x30".`},
+		"logging.session.auto_export_txt":        {"Export a plain-text copy of each recording after the session ends.", "Common value: true if recordings are searched often."},
+		"logging.session.archive.dir":            {"Directory for monthly recording archives.", `Default value: "~/.local/state/nssh/archives".`},
+		"logging.session.archive.enabled":        {"Enable automatic archival of old session recordings.", "Common value: false."},
+		"logging.session.archive.jitter":         {"Randomize archive schedule timing.", `Common value: "30m".`},
+		"logging.session.archive.max_bundles":    {"Maximum monthly archive bundles to retain.", "Common value: 12."},
+		"logging.session.archive.max_run_bytes":  {"Maximum bytes to process per archive maintenance run.", "Common value: 0 for unlimited."},
+		"logging.session.archive.min_age":        {"Minimum recording age before archival.", `Common value: "720h" for about 30 days.`},
+		"ssh.connection.idle_timeout":            {"Disconnect SSH after inactivity.", `Common value: "0s" to disable.`},
+		"ssh.connection.password_timeout":        {"How long to wait for an SSH password prompt.", `Common value: "10s".`},
+		"ssh.connection.timeout":                 {"Overall SSH connection timeout.", `Common value: "30s".`},
+		"ssh.security.accept_once_mode":          {"Accept-once host key behavior.", `Acceptable values: "pin", "accept-new".`},
+		"ssh.security.compat_persist_probes":     {"Allow compatibility probes to write to real known_hosts.", "Common value: false unless using TOFU mode."},
+		"ssh.security.host_key_policy":           {"Host key behavior preset. \"pin\" is stricter; \"tofu\" accepts first use.", `Common value: "pin" for strict mode, "tofu" for lab/internal gear.`},
 	}
 	keyPath := commentPath(path, key)
 	if comment, ok := comments[keyPath]; ok {
 		return comment
 	}
-	if strings.HasPrefix(keyPath, "inventory.provider.route.match.") {
-		return comments["inventory.provider.route.match"]
+	if strings.Contains(keyPath, ".provider.") && strings.Contains(keyPath, ".match.") {
+		return comments["inventory.provider.group.match"]
 	}
 	return []string{"nssh configuration option.", "Use the documented type for this field."}
 }
@@ -684,14 +713,15 @@ func commentPath(path, key string) string {
 	if len(parts) >= 4 && parts[0] == "credential" && parts[1] == "provider" {
 		parts = append([]string{"credential", "provider"}, parts[3:]...)
 	}
-	if len(parts) >= 4 && parts[0] == "inventory" && parts[1] == "group" {
-		parts = append([]string{"inventory", "group"}, parts[3:]...)
-	}
 	if len(parts) >= 4 && parts[0] == "inventory" && parts[1] == "host" {
 		parts = append([]string{"inventory", "host"}, parts[3:]...)
 	}
 	if len(parts) >= 4 && parts[0] == "inventory" && parts[1] == "provider" {
-		parts = append([]string{"inventory", "provider"}, parts[3:]...)
+		if len(parts) >= 6 && parts[3] == "group" {
+			parts = append([]string{"inventory", "provider", "group"}, parts[5:]...)
+		} else {
+			parts = append([]string{"inventory", "provider"}, parts[3:]...)
+		}
 	}
 	return strings.Join(parts, ".")
 }

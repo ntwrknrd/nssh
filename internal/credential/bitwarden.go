@@ -60,6 +60,17 @@ func (p *bitwardenProvider) GetGroup(group string) (*Record, error) {
 	return p.get(p.groupName(group))
 }
 
+func (p *bitwardenProvider) GetRef(ref config.CredentialRefConfig) (*Record, error) {
+	record, err := p.get(ref.Ref)
+	if err != nil || record == nil {
+		return record, err
+	}
+	if ref.Username != "" {
+		record.Username = strings.TrimSpace(ref.Username)
+	}
+	return record, nil
+}
+
 func (p *bitwardenProvider) get(name string) (*Record, error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, nil

@@ -125,6 +125,38 @@ func TestRuntimeProviderResolvesOnePasswordSecretRefs(t *testing.T) {
 	}
 }
 
+func TestRuntimeProviderResolvesOnePasswordItemBaseRefs(t *testing.T) {
+	runner := &fakeOnePasswordRunner{outs: [][]byte{
+		[]byte("netops\n"),
+		[]byte("secret\n"),
+	}}
+	provider := NewRuntimeProvider()
+	provider.Register1Password("op-network", OnePasswordSessionConfig{
+		Account: "ntwrknrd",
+		Runner:  runner,
+	})
+
+	resp, err := provider.HandleProviderRequest(context.Background(), ProviderRequest{
+		Provider: "op-network",
+		Action:   "get",
+		Ref:      "op://Network/Edge/",
+	})
+	if err != nil {
+		t.Fatalf("HandleProviderRequest: %v", err)
+	}
+	if !resp.Found || resp.Username != "netops" || string(resp.Secret) != "secret" {
+		t.Fatalf("response = %+v", resp)
+	}
+	got := strings.Join(runner.calls[0], " ")
+	if got != "read op://Network/Edge/username --account ntwrknrd" {
+		t.Fatalf("username ref args = %q", got)
+	}
+	got = strings.Join(runner.calls[1], " ")
+	if got != "read op://Network/Edge/password --account ntwrknrd" {
+		t.Fatalf("password ref args = %q", got)
+	}
+}
+
 func TestAgentServesProviderRequests(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)

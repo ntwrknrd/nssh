@@ -20,6 +20,7 @@ type Record struct {
 type Provider interface {
 	GetHost(host string) (*Record, error)
 	GetGroup(group string) (*Record, error)
+	GetRef(ref config.CredentialRefConfig) (*Record, error)
 }
 
 // Registry holds configured credential provider instances by name.
@@ -60,7 +61,7 @@ func (r *Registry) Provider(name string) Provider {
 
 func buildNamedProvider(name string, providerCfg config.CredentialProviderConfig, cfg *config.Config) (Provider, error) {
 	hostRefs := hostRefsForProvider(cfg.Inventory.Host, name)
-	groupRefs := groupRefsForProvider(cfg.Inventory.Group, name)
+	groupRefs := groupRefsForProvider(cfg.Inventory.Provider, name)
 	switch providerCfg.Type {
 	case config.CredentialProviderPass:
 		provider := newPassProvider(providerCfg).(*passProvider)
@@ -95,7 +96,8 @@ func hostRefsForProvider(refs map[string]config.InventoryHostConfig, providerNam
 		if !auth.IsSet() {
 			continue
 		}
-		if auth.Provider == providerName {
+		auth.Normalize()
+		if auth.CredentialProvider == providerName {
 			filtered[name] = auth.CredentialRef()
 		}
 	}
@@ -105,18 +107,21 @@ func hostRefsForProvider(refs map[string]config.InventoryHostConfig, providerNam
 	return filtered
 }
 
-func groupRefsForProvider(refs map[string]config.GroupConfig, providerName string) map[string]config.CredentialRefConfig {
+func groupRefsForProvider(refs map[string]config.InventoryProviderConfig, providerName string) map[string]config.CredentialRefConfig {
 	if len(refs) == 0 {
 		return nil
 	}
 	filtered := make(map[string]config.CredentialRefConfig)
-	for name, ref := range refs {
-		auth := ref.Auth
-		if !auth.IsSet() {
-			continue
-		}
-		if auth.Provider == providerName {
-			filtered[name] = auth.CredentialRef()
+	for inventoryProvider, providerCfg := range refs {
+		for group, ref := range providerCfg.Group {
+			auth := ref.Auth
+			if !auth.IsSet() {
+				continue
+			}
+			auth.Normalize()
+			if auth.CredentialProvider == providerName {
+				filtered[config.FormatInventoryGroupID(inventoryProvider, group)] = auth.CredentialRef()
+			}
 		}
 	}
 	if len(filtered) == 0 {

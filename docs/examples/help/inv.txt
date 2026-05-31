@@ -3,10 +3,10 @@ $ nssh inv --help
 │   nssh inv [flags]                  Manage inventory                         │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
-│   doctor                            Check inventory health                   │
 │   get                               Show inventory details                   │
 │   import                            Import inventory from CSV                │
 │   list                              List inventory                           │
+│   refresh                           Refresh inventory                        │
 │   rm                                Remove inventory entries                 │
 │   set                               Create or update inventory               │
 │   status                            Show inventory provider status           │

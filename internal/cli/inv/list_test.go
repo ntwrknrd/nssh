@@ -1,6 +1,8 @@
 package inv
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
@@ -9,10 +11,10 @@ import (
 
 func TestInventoryGroupSummariesCountHostsByProvider(t *testing.T) {
 	cfg := &config.Config{Inventory: config.InventoryConfig{
-		Group: map[string]config.GroupConfig{
-			"custcbb":      {DomainSuffix: []string{".custcbb.local"}},
-			"containerlab": {},
-			"empty":        {},
+		Provider: map[string]config.InventoryProviderConfig{
+			"local":        {Type: config.ProviderLocal, Group: map[string]config.GroupConfig{"custcbb": {DomainSuffix: []string{".custcbb.local"}}, "empty": {}}},
+			"netbox-prod":  {Type: config.ProviderNetBox, Group: map[string]config.GroupConfig{"custcbb": {DomainSuffix: []string{".custcbb.local"}}}},
+			"nre-netlab01": {Type: config.ProviderContainerlab, Config: config.InventoryProviderDetailConfig{JumpHost: "nre-netlab01"}, Group: map[string]config.GroupConfig{"containerlab": {}}},
 		},
 	}}
 	hosts := []*sshconfig.HostEntry{
@@ -22,107 +24,94 @@ func TestInventoryGroupSummariesCountHostsByProvider(t *testing.T) {
 		{Host: "ungrouped"},
 	}
 	meta := map[*sshconfig.HostEntry]hostMetadata{
-		hosts[0]: {Owner: "local", Group: "custcbb"},
-		hosts[1]: {Owner: "netbox-prod", Group: "custcbb"},
-		hosts[2]: {Owner: "nre-netlab01", Group: "containerlab"},
+		hosts[0]: {Owner: "local", Group: "local/custcbb"},
+		hosts[1]: {Owner: "netbox-prod", Group: "netbox-prod/custcbb"},
+		hosts[2]: {Owner: "nre-netlab01", Group: "nre-netlab01/containerlab"},
 		hosts[3]: {Owner: "local", Group: "-"},
 	}
 
-	rows := inventoryGroupSummaries(cfg, hosts, func(host *sshconfig.HostEntry) hostMetadata {
+	paths := &config.Paths{SSHConfigDir: filepath.Join(t.TempDir(), ".ssh")}
+	rows := inventoryGroupSummaries(cfg, paths, hosts, func(host *sshconfig.HostEntry) hostMetadata {
 		return meta[host]
 	})
 
-	if len(rows) != 3 {
-		t.Fatalf("rows = %d, want 3", len(rows))
+	if len(rows) != 4 {
+		t.Fatalf("rows = %d, want 4", len(rows))
 	}
-	assertGroupSummary(t, rows[0], "containerlab", "-", 1, []inventoryGroupSource{{Provider: "nre-netlab01", Hosts: 1}})
-	assertGroupSummary(t, rows[1], "custcbb", ".custcbb.local", 2, []inventoryGroupSource{
+	assertGroupSummary(t, rows[0], "local/custcbb", ".custcbb.local", 1, []inventoryGroupSource{
 		{Provider: "local", Hosts: 1},
-		{Provider: "netbox-prod", Hosts: 1},
 	})
-	assertGroupSummary(t, rows[2], "empty", "-", 0, nil)
+	assertGroupSummary(t, rows[1], "local/empty", "-", 0, nil)
+	assertGroupSummary(t, rows[2], "netbox-prod/custcbb", ".custcbb.local", 1, []inventoryGroupSource{{Provider: "netbox-prod", Hosts: 1}})
+	assertGroupSummary(t, rows[3], "nre-netlab01/containerlab", "-", 1, []inventoryGroupSource{{Provider: "nre-netlab01", Hosts: 1}})
 }
 
 func TestInventoryGroupSelectOptionsIncludeHostCountsAndProviders(t *testing.T) {
 	options := inventoryGroupSelectOptions([]inventoryGroupSummary{
-		{Name: "custcbb", DomainSuffix: ".custcbb.local", Total: 1089, Sources: []inventoryGroupSource{
-			{Provider: "netbox-prod", Hosts: 1088},
+		{Name: "local/custcbb", DomainSuffix: ".custcbb.local", Total: 1, Sources: []inventoryGroupSource{
 			{Provider: "local", Hosts: 1},
 		}},
+		{Name: "netbox-prod/custcbb", DomainSuffix: ".custcbb.local", Total: 1088, Sources: []inventoryGroupSource{
+			{Provider: "netbox-prod", Hosts: 1088},
+		}},
 		{Name: "empty", DomainSuffix: "-", Total: 0},
-	})
+	}, "810-neteng01")
 
-	if len(options) != 2 {
-		t.Fatalf("options = %d, want 2", len(options))
+	if len(options) != 3 {
+		t.Fatalf("options = %d, want 3", len(options))
 	}
-	if options[0].Value != "custcbb" {
-		t.Fatalf("first option value = %q, want custcbb", options[0].Value)
+	if options[0].Value != "local/custcbb" {
+		t.Fatalf("first option value = %q, want local/custcbb", options[0].Value)
 	}
-	if options[0].Label != "custcbb  1,089 hosts  2 sources  .custcbb.local" {
+	if options[0].Label != "local/custcbb -> 810-neteng01.custcbb.local" {
 		t.Fatalf("first option label = %q", options[0].Label)
 	}
-	if options[1].Label != "empty  0 hosts" {
+	if options[2].Label != "empty -> 810-neteng01" {
 		t.Fatalf("second option label = %q", options[1].Label)
 	}
 }
 
-func TestInventoryGroupTablesSplitSummaryAndProviderCounts(t *testing.T) {
-	summaryHeaders, summaryRows, providerHeaders, providerRows := inventoryGroupTables([]inventoryGroupSummary{
-		{Name: "custcbb", DomainSuffix: "-", Total: 1090, Sources: []inventoryGroupSource{
-			{Provider: "netbox-prod", Hosts: 1089},
-			{Provider: "local", Hosts: 1},
-		}},
+func TestInventoryGroupSummariesIncludeConfigAndOutputFiles(t *testing.T) {
+	tmp := t.TempDir()
+	inventoryFile := filepath.Join(tmp, "inventory.toml")
+	if err := os.WriteFile(inventoryFile, []byte(`
+[provider.netbox-prod]
+type = "netbox"
+
+[provider.netbox-prod.group.custcbb]
+domain_suffix = [".custcbb.local"]
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	configFile := filepath.Join(tmp, "config.toml")
+	if err := os.WriteFile(configFile, []byte(`
+[inventory]
+include = ["inventory.toml"]
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(configFile)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	paths := &config.Paths{SSHConfigDir: filepath.Join(tmp, ".ssh")}
+
+	rows := inventoryGroupSummaries(cfg, paths, nil, func(*sshconfig.HostEntry) hostMetadata {
+		return hostMetadata{}
 	})
 
-	wantSummaryHeaders := []string{"Group", "Domain Suffix", "Total"}
-	if len(summaryHeaders) != len(wantSummaryHeaders) {
-		t.Fatalf("summary headers = %v, want %v", summaryHeaders, wantSummaryHeaders)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1: %+v", len(rows), rows)
 	}
-	for i := range wantSummaryHeaders {
-		if summaryHeaders[i] != wantSummaryHeaders[i] {
-			t.Fatalf("summary headers = %v, want %v", summaryHeaders, wantSummaryHeaders)
-		}
+	if rows[0].Name != "netbox-prod/custcbb" {
+		t.Fatalf("group = %q", rows[0].Name)
 	}
-	wantSummary := [][]string{{"custcbb", "-", "1,090"}}
-	assertRows(t, summaryRows, wantSummary)
-
-	wantProviderHeaders := []string{"local", "netbox-prod"}
-	if len(providerHeaders) != len(wantProviderHeaders) {
-		t.Fatalf("provider headers = %v, want %v", providerHeaders, wantProviderHeaders)
+	if rows[0].ConfigFile != inventoryFile {
+		t.Fatalf("config file = %q, want %q", rows[0].ConfigFile, inventoryFile)
 	}
-	for i := range wantProviderHeaders {
-		if providerHeaders[i] != wantProviderHeaders[i] {
-			t.Fatalf("provider headers = %v, want %v", providerHeaders, wantProviderHeaders)
-		}
-	}
-	wantProvider := [][]string{{"1", "1,089"}}
-	assertRows(t, providerRows, wantProvider)
-}
-
-func TestInventoryGroupTablesUseDashProviderCellsForZeroCounts(t *testing.T) {
-	_, _, _, providerRows := inventoryGroupTables([]inventoryGroupSummary{
-		{Name: "cbb", Total: 208, Sources: []inventoryGroupSource{{Provider: "netbox-prod", Hosts: 208}}},
-		{Name: "containerlab", Total: 19, Sources: []inventoryGroupSource{{Provider: "nre-netlab01", Hosts: 19}}},
-	})
-
-	want := [][]string{
-		{"208", "-"},
-		{"-", "19"},
-	}
-	assertRows(t, providerRows, want)
-}
-
-func assertRows(t *testing.T, rows, want [][]string) {
-	t.Helper()
-	if len(rows) != len(want) {
-		t.Fatalf("rows = %d, want %d", len(rows), len(want))
-	}
-	for i := range want {
-		for j := range want[i] {
-			if rows[i][j] != want[i][j] {
-				t.Fatalf("rows[%d][%d] = %q, want %q; rows=%v", i, j, rows[i][j], want[i][j], rows)
-			}
-		}
+	wantOutput := filepath.Join(paths.SSHConfigDir, "nssh.d", "provider_netbox-prod.conf")
+	if rows[0].OutputFile != wantOutput {
+		t.Fatalf("output file = %q, want %q", rows[0].OutputFile, wantOutput)
 	}
 }
 

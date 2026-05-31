@@ -64,6 +64,17 @@ func (p *passProvider) GetGroup(group string) (*Record, error) {
 	return p.get(p.groupPath(group))
 }
 
+func (p *passProvider) GetRef(ref config.CredentialRefConfig) (*Record, error) {
+	record, err := p.get(ref.Ref)
+	if err != nil || record == nil {
+		return record, err
+	}
+	if ref.Username != "" {
+		record.Username = strings.TrimSpace(ref.Username)
+	}
+	return record, nil
+}
+
 func (p *passProvider) get(path string) (*Record, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, nil
@@ -97,9 +108,6 @@ func parsePassRecord(ref, text string) (*Record, error) {
 			username = strings.TrimSpace(value)
 			break
 		}
-	}
-	if username == "" {
-		return nil, errors.New("pass entry has empty username")
 	}
 	return &Record{
 		Username: username,

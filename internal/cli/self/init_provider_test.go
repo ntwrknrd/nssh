@@ -24,7 +24,7 @@ func TestInitYesDefaultsToLocalInventoryAndPassCredentialProvider(t *testing.T) 
 	if !strings.Contains(plan.Summary(), "Credential providers: Pass") {
 		t.Fatalf("summary missing Pass provider:\n%s", plan.Summary())
 	}
-	if !strings.Contains(plan.Summary(), "Credential assignment: default -> pass-local") {
+	if !strings.Contains(plan.Summary(), "Credential assignment: local/default -> pass-local") {
 		t.Fatalf("summary missing default assignment:\n%s", plan.Summary())
 	}
 
@@ -32,10 +32,7 @@ func TestInitYesDefaultsToLocalInventoryAndPassCredentialProvider(t *testing.T) 
 	if cfg.Credential.Provider["pass-local"].Type != config.CredentialProviderPass {
 		t.Fatalf("pass-local provider = %+v", cfg.Credential.Provider["pass-local"])
 	}
-	if _, ok := cfg.Inventory.Provider["local"]; ok {
-		t.Fatalf("local inventory should be implicit, got provider block: %+v", cfg.Inventory.Provider["local"])
-	}
-	if got := cfg.Inventory.Group["default"].Auth; got.Provider != "pass-local" || got.Ref != "nssh/groups/default" {
+	if got := cfg.Inventory.Provider["local"].Group["default"].Auth; got.CredentialProvider != "pass-local" || got.PasswordRef != "nssh/groups/local/default" {
 		t.Fatalf("default credential binding = %+v", got)
 	}
 }
@@ -65,9 +62,9 @@ func TestInitPlanWritesMultipleInventorySourcesWithoutSecrets(t *testing.T) {
 			{Name: "pass-local", Type: config.CredentialProviderPass},
 		},
 		GroupCredentialProviders: map[string]string{
-			"default": "pass-local",
-			"prod":    "pass-local",
-			"lab":     "pass-local",
+			"local/default":    "pass-local",
+			"netbox-prod/prod": "pass-local",
+			"lab01/lab":        "pass-local",
 		},
 	})
 	if err != nil {
@@ -75,8 +72,8 @@ func TestInitPlanWritesMultipleInventorySourcesWithoutSecrets(t *testing.T) {
 	}
 
 	cfg := plan.Config
-	if len(cfg.Inventory.Provider) != 2 {
-		t.Fatalf("inventory provider count = %d, want 2: %+v", len(cfg.Inventory.Provider), cfg.Inventory.Provider)
+	if len(cfg.Inventory.Provider) != 3 {
+		t.Fatalf("inventory provider count = %d, want 3: %+v", len(cfg.Inventory.Provider), cfg.Inventory.Provider)
 	}
 	if cfg.Inventory.Provider["netbox-prod"].Config.TokenEnv != "NETBOX_TOKEN" {
 		t.Fatalf("netbox token_env = %q", cfg.Inventory.Provider["netbox-prod"].Config.TokenEnv)
@@ -116,9 +113,9 @@ func TestInitPlanSupportsOnePasswordAndBitwardenWithoutAuthMaterial(t *testing.T
 			{Name: "bw-lab", Type: config.CredentialProviderBitwarden, Session: "external", BWSession: "should-not-be-stored"},
 		},
 		GroupCredentialProviders: map[string]string{
-			"default": "pass-local",
-			"prod":    "op-network",
-			"lab":     "bw-lab",
+			"local/default": "pass-local",
+			"local/prod":    "op-network",
+			"local/lab":     "bw-lab",
 		},
 	})
 	if err != nil {
@@ -132,8 +129,8 @@ func TestInitPlanSupportsOnePasswordAndBitwardenWithoutAuthMaterial(t *testing.T
 	if cfg.Credential.Provider["bw-lab"].Config.Session != config.ProviderSessionExternal {
 		t.Fatalf("Bitwarden session = %q", cfg.Credential.Provider["bw-lab"].Config.Session)
 	}
-	if cfg.Inventory.Group["prod"].Auth.Provider != "op-network" || cfg.Inventory.Group["lab"].Auth.Provider != "bw-lab" {
-		t.Fatalf("group assignments = %+v", cfg.Inventory.Group)
+	if cfg.Inventory.Provider["local"].Group["prod"].Auth.CredentialProvider != "op-network" || cfg.Inventory.Provider["local"].Group["lab"].Auth.CredentialProvider != "bw-lab" {
+		t.Fatalf("group assignments = %+v", cfg.Inventory.Provider["local"].Group)
 	}
 
 	tomlText := encodeInitPlanConfig(t, cfg)
@@ -202,7 +199,7 @@ func TestPromptInitPlanRequestShowsSourcesProvidersAndAssignments(t *testing.T) 
 		"Inventory sources: NetBox",
 		"Inventory sources: Containerlab",
 		"Credential providers",
-		"Credential assignment: default",
+		"Credential assignment: local/default",
 	} {
 		if !prompter.saw(want) {
 			t.Fatalf("prompt flow did not show %q; prompts were %v", want, prompter.prompts)
@@ -211,7 +208,7 @@ func TestPromptInitPlanRequestShowsSourcesProvidersAndAssignments(t *testing.T) 
 	if req.CredentialProviders[0].Type != config.CredentialProvider1Password {
 		t.Fatalf("credential providers = %+v", req.CredentialProviders)
 	}
-	if req.GroupCredentialProviders["default"] != "op-network" {
+	if req.GroupCredentialProviders["local/default"] != "op-network" {
 		t.Fatalf("group assignments = %+v", req.GroupCredentialProviders)
 	}
 }

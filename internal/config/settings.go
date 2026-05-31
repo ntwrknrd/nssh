@@ -49,8 +49,6 @@ type HostConfig struct {
 type HostDefaultsConfig struct {
 	// DefaultContext is deprecated; group placement is configured under inventory.
 	DefaultContext string `toml:"default_context"`
-	// DefaultUser is the default SSH username for new hosts
-	DefaultUser string `toml:"default_user"`
 }
 
 // ============================================================================
@@ -193,7 +191,6 @@ func DefaultConfig() *Config {
 		Host: HostConfig{
 			Defaults: HostDefaultsConfig{
 				DefaultContext: "",
-				DefaultUser:    "",
 			},
 		},
 		Credential: CredentialConfig{
@@ -209,11 +206,17 @@ func DefaultConfig() *Config {
 			},
 		},
 		Inventory: InventoryConfig{
-			Group: map[string]GroupConfig{
-				"default": {
-					Auth: InventoryAuthConfig{
-						Provider: "pass-local",
-						Ref:      "nssh/groups/default",
+			Auth: InventoryAuthConfig{},
+			Provider: map[string]InventoryProviderConfig{
+				ProviderLocal: {
+					Type: ProviderLocal,
+					Group: map[string]GroupConfig{
+						"default": {
+							Auth: InventoryAuthConfig{
+								CredentialProvider: "pass-local",
+								PasswordRef:        "nssh/groups/default",
+							},
+						},
 					},
 				},
 			},
@@ -283,6 +286,7 @@ func Load(path string) (*Config, error) {
 	if err := decodeConfigDocument(path, doc, cfg); err != nil {
 		return nil, err
 	}
+	migrateLegacyIdentityConfig(cfg)
 	pruneImplicitCredentialDefaults(doc.effective, cfg)
 	pruneImplicitInventoryDefaults(doc.effective, cfg)
 
@@ -304,23 +308,30 @@ func pruneImplicitCredentialDefaults(table map[string]any, cfg *Config) {
 	passLocalExplicit := tablePathDefined(table, "credential", "provider", "pass-local")
 	if configDefinesProviders && !passLocalExplicit {
 		delete(cfg.Credential.Provider, "pass-local")
-		if defaultGroup, ok := cfg.Inventory.Group["default"]; ok &&
-			!tablePathDefined(table, "inventory", "group", "default", "auth") &&
-			defaultGroup.Auth.Provider == "pass-local" {
+		if defaultGroup, ok := cfg.Inventory.Provider[ProviderLocal].Group["default"]; ok &&
+			!tablePathDefined(table, "inventory", "provider", ProviderLocal, "group", "default", "auth") &&
+			defaultGroup.Auth.CredentialProvider == "pass-local" {
 			defaultGroup.Auth = InventoryAuthConfig{}
-			cfg.Inventory.Group["default"] = defaultGroup
+			localProvider := cfg.Inventory.Provider[ProviderLocal]
+			localProvider.Group["default"] = defaultGroup
+			cfg.Inventory.Provider[ProviderLocal] = localProvider
 		}
 	}
 }
 
+func migrateLegacyIdentityConfig(cfg *Config) {}
+
 func pruneImplicitInventoryDefaults(table map[string]any, cfg *Config) {
-	if cfg == nil || cfg.Inventory.Group == nil {
+	if cfg == nil || cfg.Inventory.Provider == nil {
 		return
 	}
-	defaultGroupExplicit := tablePathDefined(table, "inventory", "group", "default")
-	configDefinesGroups := tablePathDefined(table, "inventory", "group")
+	defaultGroupExplicit := tablePathDefined(table, "inventory", "provider", ProviderLocal, "group", "default")
+	configDefinesGroups := tablePathDefined(table, "inventory", "provider")
 	if !defaultGroupExplicit && configDefinesGroups {
-		delete(cfg.Inventory.Group, "default")
+		if localProvider, ok := cfg.Inventory.Provider[ProviderLocal]; ok {
+			delete(localProvider.Group, "default")
+			cfg.Inventory.Provider[ProviderLocal] = localProvider
+		}
 	}
 }
 
@@ -390,14 +401,22 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) validateInventoryAuthProviders() error {
-	for group, cfg := range c.Inventory.Group {
-		if err := validateInventoryAuthProvider("inventory.group."+group+".auth", cfg.Auth, c.Credential); err != nil {
-			return err
-		}
+	if err := validateInventoryAuthProvider("inventory.auth", c.Inventory.Auth, c.Credential); err != nil {
+		return err
 	}
 	for host, cfg := range c.Inventory.Host {
 		if err := validateInventoryAuthProvider("inventory.host."+host+".auth", cfg.Auth, c.Credential); err != nil {
 			return err
+		}
+	}
+	for providerName, provider := range c.Inventory.Provider {
+		if err := validateInventoryAuthProvider("inventory.provider."+providerName+".auth", provider.Auth, c.Credential); err != nil {
+			return err
+		}
+		for groupName, group := range provider.Group {
+			if err := validateInventoryAuthProvider("inventory.provider."+providerName+".group."+groupName+".auth", group.Auth, c.Credential); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -407,12 +426,16 @@ func validateInventoryAuthProvider(scope string, auth InventoryAuthConfig, crede
 	if !auth.IsSet() {
 		return nil
 	}
-	provider := strings.TrimSpace(auth.Provider)
+	auth.Normalize()
+	if auth.CredentialProvider == "" && auth.PasswordRef == "" {
+		return nil
+	}
+	provider := strings.TrimSpace(auth.CredentialProvider)
 	if provider == "" {
-		return fmt.Errorf("%s.provider is required", scope)
+		return fmt.Errorf("%s.credential_provider is required", scope)
 	}
 	if _, ok := credential.Provider[provider]; !ok {
-		return fmt.Errorf("%s.provider references unknown provider %q", scope, provider)
+		return fmt.Errorf("%s.credential_provider references unknown provider %q", scope, provider)
 	}
 	return nil
 }

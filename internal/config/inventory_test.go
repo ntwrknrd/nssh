@@ -33,20 +33,23 @@ func TestInventoryCredentialConfigDecode(t *testing.T) {
     [credential.provider.bw-lab.config]
     session = "external"
 
-[inventory.group.lab]
-
-  [inventory.group.customer]
-  domain_suffix = [".customer.local"]
-  default_user = "netops"
-
-    [inventory.group.customer.auth]
-    provider = "op-network"
-    ref = "Network Shared Admin"
-
   [inventory.host.edge01.auth]
-  provider = "bw-lab"
-  ref = "op://Network/Edge 01/password"
+  credential_provider = "bw-lab"
+  password_ref = "op://Network/Edge 01/password"
   username_ref = "op://Network/Edge 01/username"
+
+  [inventory.provider.local]
+  type = "local"
+
+    [inventory.provider.local.group.lab]
+
+    [inventory.provider.local.group.customer]
+    domain_suffix = [".customer.local"]
+
+      [inventory.provider.local.group.customer.auth]
+      credential_provider = "op-network"
+      password_ref = "Network Shared Admin"
+      username = "netops"
 
   [inventory.provider.netbox-prod]
   type = "netbox"
@@ -55,13 +58,9 @@ func TestInventoryCredentialConfigDecode(t *testing.T) {
     base_url = "https://netbox.example.com"
     token_env = "NETBOX_TOKEN"
 
-    [[inventory.provider.netbox-prod.route]]
-    group = "customer"
-    auth_mode = "password"
-
-      [inventory.provider.netbox-prod.route.match]
-      manufacturer = ["Juniper", "Arista"]
-      status = ["active"]
+    [inventory.provider.netbox-prod.group.customer.match]
+  manufacturer = ["Juniper", "Arista"]
+  status = ["active"]
 
   [inventory.provider.nre-netlab01]
   type = "containerlab"
@@ -71,12 +70,9 @@ func TestInventoryCredentialConfigDecode(t *testing.T) {
     sudo = true
     strict_host_key_checking = false
 
-    [[inventory.provider.nre-netlab01.route]]
-    group = "lab"
-
-      [inventory.provider.nre-netlab01.route.match]
-      kind = ["ceos", "vjunos"]
-      state = ["running"]
+    [inventory.provider.nre-netlab01.group.lab.match]
+  kind = ["ceos", "vjunos"]
+  state = ["running"]
 `
 
 	cfg := DefaultConfig()
@@ -96,23 +92,24 @@ func TestInventoryCredentialConfigDecode(t *testing.T) {
 	if cfg.Credential.Provider["bw-lab"].Type != CredentialProviderBitwarden {
 		t.Fatalf("bw-lab type = %q", cfg.Credential.Provider["bw-lab"].Type)
 	}
-	if cfg.Inventory.Group["customer"].Auth.Provider != "op-network" {
-		t.Fatalf("inventory.group.customer.auth.provider = %q", cfg.Inventory.Group["customer"].Auth.Provider)
+	customer := cfg.Inventory.Provider["local"].Group["customer"]
+	if customer.Auth.CredentialProvider != "op-network" {
+		t.Fatalf("inventory.provider.local.group.customer.auth.credential_provider = %q", customer.Auth.CredentialProvider)
 	}
-	if cfg.Inventory.Group["customer"].Auth.Ref != "Network Shared Admin" {
-		t.Fatalf("inventory.group.customer.auth.ref = %q", cfg.Inventory.Group["customer"].Auth.Ref)
+	if customer.Auth.PasswordRef != "Network Shared Admin" {
+		t.Fatalf("inventory.provider.local.group.customer.auth.password_ref = %q", customer.Auth.PasswordRef)
 	}
-	if cfg.Inventory.Host["edge01"].Auth.Provider != "bw-lab" {
-		t.Fatalf("inventory.host.edge01.auth.provider = %q", cfg.Inventory.Host["edge01"].Auth.Provider)
+	if cfg.Inventory.Host["edge01"].Auth.CredentialProvider != "bw-lab" {
+		t.Fatalf("inventory.host.edge01.auth.credential_provider = %q", cfg.Inventory.Host["edge01"].Auth.CredentialProvider)
 	}
 	if cfg.Inventory.Host["edge01"].Auth.UsernameRef != "op://Network/Edge 01/username" {
 		t.Fatalf("inventory.host.edge01.auth.username_ref = %q", cfg.Inventory.Host["edge01"].Auth.UsernameRef)
 	}
-	if got := cfg.Inventory.Group["customer"].DomainSuffix; len(got) != 1 || got[0] != ".customer.local" {
+	if got := customer.DomainSuffix; len(got) != 1 || got[0] != ".customer.local" {
 		t.Fatalf("customer.domain_suffix = %v", got)
 	}
-	if cfg.Inventory.Group["customer"].DefaultUser != "netops" {
-		t.Fatalf("customer.default_user = %q", cfg.Inventory.Group["customer"].DefaultUser)
+	if customer.Auth.Username != "netops" {
+		t.Fatalf("customer auth username = %q", customer.Auth.Username)
 	}
 
 	nb := cfg.Inventory.Provider["netbox-prod"]
@@ -122,11 +119,133 @@ func TestInventoryCredentialConfigDecode(t *testing.T) {
 	if nb.Config.BaseURL != "https://netbox.example.com" {
 		t.Fatalf("base_url = %q", nb.Config.BaseURL)
 	}
-	if len(nb.Route) != 1 || nb.Route[0].Group != "customer" {
-		t.Fatalf("netbox routes = %+v", nb.Route)
+	selectors := cfg.Inventory.ProviderSelectors("netbox-prod")
+	if len(selectors) != 1 || selectors[0].Group != "netbox-prod/customer" {
+		t.Fatalf("netbox selectors = %+v", selectors)
 	}
-	if nb.Route[0].AuthMode != AuthModePassword {
-		t.Fatalf("netbox route auth_mode = %q", nb.Route[0].AuthMode)
+	if got := selectors[0].Match["manufacturer"]; len(got) != 2 || got[0] != "Juniper" || got[1] != "Arista" {
+		t.Fatalf("netbox selector match = %+v", selectors[0].Match)
+	}
+}
+
+func TestLoadRejectsLegacyInventoryProviderRoutes(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.toml")
+	if err := os.WriteFile(path, []byte(`
+[inventory.provider.netbox-prod]
+type = "netbox"
+
+[[inventory.provider.netbox-prod.route]]
+group = "customer"
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected legacy route config to be rejected")
+	}
+	if !strings.Contains(err.Error(), "unknown config key") || !strings.Contains(err.Error(), "inventory.provider.netbox-prod.route") {
+		t.Fatalf("error %q does not identify legacy route config", err)
+	}
+}
+
+func TestInventoryProviderGroupValidatesBareGroupName(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Inventory.Provider = map[string]InventoryProviderConfig{
+		"netbox-prod": {Type: ProviderNetBox, Group: map[string]GroupConfig{
+			"bad.name": {Match: InventoryMatch{"role": {"router"}}},
+		}},
+	}
+
+	err := cfg.Inventory.Validate()
+	if err == nil {
+		t.Fatal("expected invalid group name error")
+	}
+	if !strings.Contains(err.Error(), "bare-key safe") {
+		t.Fatalf("error %q does not identify invalid group name", err)
+	}
+}
+
+func TestLoadRejectsLegacyInventoryAuthProviderRef(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.toml")
+	if err := os.WriteFile(path, []byte(`
+[inventory.provider.local.group.default.auth]
+provider = "pass-local"
+ref = "nssh/groups/default"
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected legacy provider/ref keys to be rejected")
+	}
+	if !strings.Contains(err.Error(), "unknown config key") || !strings.Contains(err.Error(), "inventory.provider.local.group.default.auth.provider") {
+		t.Fatalf("error %q does not identify legacy auth keys", err)
+	}
+}
+
+func TestInventoryAuthResolutionUsesLowestConfiguredField(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Inventory.Auth = InventoryAuthConfig{
+		Username: "global-user",
+		AuthMode: AuthModeKey,
+	}
+	cfg.Inventory.Provider = map[string]InventoryProviderConfig{
+		"netbox-prod": {
+			Type: ProviderNetBox,
+			Auth: InventoryAuthConfig{
+				Username: "provider-user",
+			},
+			Group: map[string]GroupConfig{
+				"custcbb": {Auth: InventoryAuthConfig{
+					CredentialProvider: "op-expedient",
+					PasswordRef:        "op://Expedient/group/password",
+					AuthMode:           AuthModePassword,
+				}},
+			},
+		},
+	}
+	cfg.Inventory.Host = map[string]InventoryHostConfig{
+		"edge01": {Auth: InventoryAuthConfig{UsernameRef: "op://Expedient/edge01/username"}},
+	}
+
+	got := cfg.ResolveInventoryAuth(InventoryAuthContext{
+		Host:     "edge01",
+		Group:    "netbox-prod/custcbb",
+		Provider: "netbox-prod",
+	})
+
+	if got.UsernameRef != "op://Expedient/edge01/username" {
+		t.Fatalf("username_ref = %q", got.UsernameRef)
+	}
+	if got.CredentialProvider != "op-expedient" || got.PasswordRef != "op://Expedient/group/password" {
+		t.Fatalf("password binding = provider %q ref %q", got.CredentialProvider, got.PasswordRef)
+	}
+	if got.AuthMode != AuthModePassword {
+		t.Fatalf("auth_mode = %q, want password", got.AuthMode)
+	}
+}
+
+func TestLoadRejectsLegacyDefaultUser(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.toml")
+	if err := os.WriteFile(path, []byte(`
+[inventory.provider.local.group.custcbb]
+default_user = "group-user"
+domain_suffix = [".custcbb.local"]
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected legacy default_user to be rejected")
+	}
+	if !strings.Contains(err.Error(), "unknown config key") || !strings.Contains(err.Error(), "inventory.provider.local.group.custcbb.default_user") {
+		t.Fatalf("error %q does not identify default_user", err)
 	}
 }
 
@@ -226,92 +345,88 @@ func TestInventoryConfigValidation(t *testing.T) {
 		{
 			name: "default local group is valid",
 			cfg: InventoryConfig{
-				Group: map[string]GroupConfig{
-					"default": {},
+				Provider: map[string]InventoryProviderConfig{
+					"local": {Type: ProviderLocal, Group: map[string]GroupConfig{"default": {}}},
 				},
 			},
 		},
 		{
 			name: "invalid group name",
 			cfg: InventoryConfig{
-				Group: map[string]GroupConfig{
-					"bad.name": {},
+				Provider: map[string]InventoryProviderConfig{
+					"local": {Type: ProviderLocal, Group: map[string]GroupConfig{"bad.name": {}}},
 				},
 			},
 			wantErr: "bare-key safe",
 		},
 		{
-			name: "provider route group must exist",
+			name: "provider group selector is valid",
 			cfg: InventoryConfig{
-				Group: map[string]GroupConfig{
-					"default": {},
-				},
 				Provider: map[string]InventoryProviderConfig{
 					"netbox-prod": {
 						Type:   ProviderNetBox,
 						Config: InventoryProviderDetailConfig{BaseURL: "https://netbox.example.com"},
-						Route:  []InventoryRouteConfig{{Group: "missing"}},
+						Group:  map[string]GroupConfig{"default": {Match: InventoryMatch{"role": {"router"}}}},
 					},
 				},
 			},
-			wantErr: "unknown group",
 		},
 		{
-			name: "provider route auth mode must be valid",
+			name: "group auth requires password_ref",
 			cfg: InventoryConfig{
-				Group: map[string]GroupConfig{
-					"default": {},
-				},
 				Provider: map[string]InventoryProviderConfig{
-					"netbox-prod": {
-						Type:   ProviderNetBox,
-						Config: InventoryProviderDetailConfig{BaseURL: "https://netbox.example.com"},
-						Route:  []InventoryRouteConfig{{Group: "default", AuthMode: "agent"}},
-					},
+					"local": {Type: ProviderLocal, Group: map[string]GroupConfig{
+						"default": {Auth: InventoryAuthConfig{CredentialProvider: "pass-local"}},
+					}},
 				},
 			},
-			wantErr: "invalid auth_mode",
+			wantErr: "password_ref or username_ref is required",
 		},
 		{
-			name: "group auth requires ref",
+			name: "group auth requires credential_provider",
 			cfg: InventoryConfig{
-				Group: map[string]GroupConfig{
-					"default": {Auth: InventoryAuthConfig{Provider: "pass-local"}},
+				Provider: map[string]InventoryProviderConfig{
+					"local": {Type: ProviderLocal, Group: map[string]GroupConfig{
+						"default": {Auth: InventoryAuthConfig{PasswordRef: "nssh/groups/default"}},
+					}},
 				},
 			},
-			wantErr: "ref is required",
-		},
-		{
-			name: "group auth requires provider",
-			cfg: InventoryConfig{
-				Group: map[string]GroupConfig{
-					"default": {Auth: InventoryAuthConfig{Ref: "nssh/groups/default"}},
-				},
-			},
-			wantErr: "provider is required",
+			wantErr: "credential_provider is required",
 		},
 		{
 			name: "host auth username options conflict",
 			cfg: InventoryConfig{
-				Group: map[string]GroupConfig{
-					"default": {},
+				Provider: map[string]InventoryProviderConfig{
+					"local": {Type: ProviderLocal, Group: map[string]GroupConfig{"default": {}}},
 				},
 				Host: map[string]InventoryHostConfig{
-					"edge01": {Auth: InventoryAuthConfig{Provider: "pass-local", Ref: "nssh/hosts/edge01", Username: "admin", UsernameRef: "op://vault/item/username"}},
+					"edge01": {Auth: InventoryAuthConfig{CredentialProvider: "pass-local", PasswordRef: "nssh/hosts/edge01", Username: "admin", UsernameRef: "op://vault/item/username"}},
 				},
 			},
 			wantErr: "username and username_ref are mutually exclusive",
 		},
 		{
+			name: "host auth cannot be disabled and set",
+			cfg: InventoryConfig{
+				Provider: map[string]InventoryProviderConfig{
+					"local": {Type: ProviderLocal, Group: map[string]GroupConfig{"default": {}}},
+				},
+				Host: map[string]InventoryHostConfig{
+					"edge01": {
+						AuthDisabled: true,
+						Auth:         InventoryAuthConfig{CredentialProvider: "pass-local", PasswordRef: "nssh/hosts/edge01"},
+					},
+				},
+			},
+			wantErr: "cannot set auth and auth_disabled",
+		},
+		{
 			name: "containerlab requires jump host",
 			cfg: InventoryConfig{
-				Group: map[string]GroupConfig{
-					"lab": {},
-				},
 				Provider: map[string]InventoryProviderConfig{
 					"nre-netlab01": {
 						Type:  ProviderContainerlab,
-						Route: []InventoryRouteConfig{{Group: "lab"}},
+						Group: map[string]GroupConfig{"lab": {}},
 					},
 				},
 			},
@@ -340,9 +455,9 @@ func TestInventoryConfigValidation(t *testing.T) {
 
 func TestConfigValidationRejectsUnknownInventoryAuthProvider(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Inventory.Group["default"] = GroupConfig{
-		Auth: InventoryAuthConfig{Provider: "missing", Ref: "nssh/groups/default"},
-	}
+	localProvider := cfg.Inventory.Provider["local"]
+	localProvider.Group["default"] = GroupConfig{Auth: InventoryAuthConfig{CredentialProvider: "missing", PasswordRef: "nssh/groups/default"}}
+	cfg.Inventory.Provider["local"] = localProvider
 
 	err := cfg.Validate()
 	if err == nil {
@@ -357,7 +472,10 @@ func TestLoadInventoryGroupsDoNotRetainImplicitDefaultGroupWhenConfigDefinesGrou
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.toml")
 	input := `
-[inventory.group.corp]
+[inventory.provider.local]
+type = "local"
+
+[inventory.provider.local.group.corp]
 `
 	if err := os.WriteFile(path, []byte(input), 0600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -367,7 +485,7 @@ func TestLoadInventoryGroupsDoNotRetainImplicitDefaultGroupWhenConfigDefinesGrou
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if _, ok := cfg.Inventory.Group["default"]; ok {
-		t.Fatalf("unexpected default group retained: %+v", cfg.Inventory.Group["default"])
+	if _, ok := cfg.Inventory.Provider["local"].Group["default"]; ok {
+		t.Fatalf("unexpected default group retained: %+v", cfg.Inventory.Provider["local"].Group["default"])
 	}
 }

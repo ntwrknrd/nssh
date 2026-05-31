@@ -15,9 +15,11 @@ func TestNewRegistryBuildsNamedProviders(t *testing.T) {
 			},
 		},
 		Inventory: config.InventoryConfig{
-			Group: map[string]config.GroupConfig{
-				"default": {Auth: config.InventoryAuthConfig{Provider: "pass-local", Ref: "nssh/groups/default"}},
-				"prod":    {Auth: config.InventoryAuthConfig{Provider: "op-network", Ref: "Network Shared Admin"}},
+			Provider: map[string]config.InventoryProviderConfig{
+				"local": {Type: config.ProviderLocal, Group: map[string]config.GroupConfig{
+					"default": {Auth: config.InventoryAuthConfig{CredentialProvider: "pass-local", PasswordRef: "nssh/groups/default"}},
+					"prod":    {Auth: config.InventoryAuthConfig{CredentialProvider: "op-network", PasswordRef: "Network Shared Admin"}},
+				}},
 			},
 		},
 	})
@@ -31,7 +33,7 @@ func TestNewRegistryBuildsNamedProviders(t *testing.T) {
 	if !ok {
 		t.Fatalf("op-network = %T", registry.Provider("op-network"))
 	}
-	if op.groupRefs["prod"].Ref != "Network Shared Admin" {
-		t.Fatalf("op-network prod ref = %+v", op.groupRefs["prod"])
+	if op.groupRefs["local/prod"].Ref != "Network Shared Admin" {
+		t.Fatalf("op-network prod ref = %+v", op.groupRefs["local/prod"])
 	}
 }

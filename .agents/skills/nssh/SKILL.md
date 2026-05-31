@@ -46,7 +46,6 @@ nssh self status
 nssh inv list
 nssh inv get <host>
 nssh inv set <host> --hostname <addr> --user <user> -g <group>
-nssh inv get -g <group>
 nssh inv status
 nssh inv doctor
 nssh <host>

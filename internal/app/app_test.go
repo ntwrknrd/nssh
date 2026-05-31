@@ -15,7 +15,7 @@ func TestPreprocessArgs(t *testing.T) {
 		out  []string
 	}{
 		{
-			name: "simple host routes through smart-connect",
+			name: "simple host connects through smart-connect",
 			in:   []string{"router1"},
 			out:  []string{"smart-connect", "router1"},
 		},

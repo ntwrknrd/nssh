@@ -29,12 +29,39 @@ func (p fakeCredentialProvider) GetGroup(group string) (*credential.Record, erro
 	return p.groups[group], nil
 }
 
+func (p fakeCredentialProvider) GetRef(ref config.CredentialRefConfig) (*credential.Record, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
+	for _, record := range p.hosts {
+		return record, nil
+	}
+	for _, record := range p.groups {
+		return record, nil
+	}
+	return &credential.Record{Username: ref.Username, Secret: secret.NewFromString("secret"), Ref: ref.Ref}, nil
+}
+
 type fakeProviderRegistry struct {
 	providers map[string]credential.Provider
 }
 
 func (r fakeProviderRegistry) Provider(name string) credential.Provider {
 	return r.providers[name]
+}
+
+func setTestGroupAuth(cfg *config.Config, group string, auth config.InventoryAuthConfig) string {
+	if cfg.Inventory.Provider == nil {
+		cfg.Inventory.Provider = make(map[string]config.InventoryProviderConfig)
+	}
+	localProvider := cfg.Inventory.Provider[config.ProviderLocal]
+	localProvider.Type = config.ProviderLocal
+	if localProvider.Group == nil {
+		localProvider.Group = make(map[string]config.GroupConfig)
+	}
+	localProvider.Group[group] = config.GroupConfig{Auth: auth}
+	cfg.Inventory.Provider[config.ProviderLocal] = localProvider
+	return config.FormatInventoryGroupID(config.ProviderLocal, group)
 }
 
 func TestResolveBoundCredentialHostBindingWinsOverGroupBinding(t *testing.T) {
@@ -44,17 +71,15 @@ func TestResolveBoundCredentialHostBindingWinsOverGroupBinding(t *testing.T) {
 		"group-provider": {Type: config.CredentialProviderPass},
 	}
 	cfg.Inventory.Host = map[string]config.InventoryHostConfig{
-		"edge01": {Auth: config.InventoryAuthConfig{Provider: "host-provider", Ref: "nssh/hosts/edge01"}},
+		"edge01": {Auth: config.InventoryAuthConfig{CredentialProvider: "host-provider", PasswordRef: "nssh/hosts/edge01"}},
 	}
-	cfg.Inventory.Group = map[string]config.GroupConfig{
-		"lab": {Auth: config.InventoryAuthConfig{Provider: "group-provider", Ref: "nssh/groups/lab"}},
-	}
+	labGroup := setTestGroupAuth(cfg, "lab", config.InventoryAuthConfig{CredentialProvider: "group-provider", PasswordRef: "nssh/groups/lab"})
 	registry := fakeProviderRegistry{providers: map[string]credential.Provider{
 		"host-provider":  fakeCredentialProvider{hosts: map[string]*credential.Record{"edge01": {Username: "hostuser", Secret: secret.NewFromString("hostpass")}}},
-		"group-provider": fakeCredentialProvider{groups: map[string]*credential.Record{"lab": {Username: "groupuser", Secret: secret.NewFromString("grouppass")}}},
+		"group-provider": fakeCredentialProvider{groups: map[string]*credential.Record{labGroup: {Username: "groupuser", Secret: secret.NewFromString("grouppass")}}},
 	}}
 
-	cred, err := resolveBoundCredential(cfg, registry, "edge01", "lab", "")
+	cred, err := resolveBoundCredential(cfg, registry, "edge01", labGroup, "")
 	if err != nil {
 		t.Fatalf("resolveBoundCredential: %v", err)
 	}
@@ -69,20 +94,18 @@ func TestResolveBoundCredentialSelectsDifferentGroupProviders(t *testing.T) {
 		"pass-local": {Type: config.CredentialProviderPass},
 		"op-network": {Type: config.CredentialProvider1Password, Config: config.CredentialProviderDetailConfig{Vault: "Network"}},
 	}
-	cfg.Inventory.Group = map[string]config.GroupConfig{
-		"lab":  {Auth: config.InventoryAuthConfig{Provider: "pass-local", Ref: "nssh/groups/lab"}},
-		"prod": {Auth: config.InventoryAuthConfig{Provider: "op-network", Ref: "Network Shared Admin"}},
-	}
+	labGroup := setTestGroupAuth(cfg, "lab", config.InventoryAuthConfig{CredentialProvider: "pass-local", PasswordRef: "nssh/groups/lab"})
+	prodGroup := setTestGroupAuth(cfg, "prod", config.InventoryAuthConfig{CredentialProvider: "op-network", PasswordRef: "Network Shared Admin"})
 	registry := fakeProviderRegistry{providers: map[string]credential.Provider{
-		"pass-local": fakeCredentialProvider{groups: map[string]*credential.Record{"lab": {Username: "labuser", Secret: secret.NewFromString("labpass")}}},
-		"op-network": fakeCredentialProvider{groups: map[string]*credential.Record{"prod": {Username: "produser", Secret: secret.NewFromString("prodpass")}}},
+		"pass-local": fakeCredentialProvider{groups: map[string]*credential.Record{labGroup: {Username: "labuser", Secret: secret.NewFromString("labpass")}}},
+		"op-network": fakeCredentialProvider{groups: map[string]*credential.Record{prodGroup: {Username: "produser", Secret: secret.NewFromString("prodpass")}}},
 	}}
 
-	lab, err := resolveBoundCredential(cfg, registry, "edge01", "lab", "")
+	lab, err := resolveBoundCredential(cfg, registry, "edge01", labGroup, "")
 	if err != nil {
 		t.Fatalf("lab resolve: %v", err)
 	}
-	prod, err := resolveBoundCredential(cfg, registry, "edge02", "prod", "")
+	prod, err := resolveBoundCredential(cfg, registry, "edge02", prodGroup, "")
 	if err != nil {
 		t.Fatalf("prod resolve: %v", err)
 	}
@@ -94,14 +117,12 @@ func TestResolveBoundCredentialSelectsDifferentGroupProviders(t *testing.T) {
 func TestResolveBoundCredentialSkipsProviderWhenNoBinding(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Inventory.Host = nil
-	cfg.Inventory.Group = map[string]config.GroupConfig{
-		"lab": {},
-	}
+	labGroup := setTestGroupAuth(cfg, "lab", config.InventoryAuthConfig{})
 	registry := fakeProviderRegistry{providers: map[string]credential.Provider{
 		"pass-local": fakeCredentialProvider{err: errors.New("provider unavailable")},
 	}}
 
-	cred, err := resolveBoundCredential(cfg, registry, "edge01", "lab", "")
+	cred, err := resolveBoundCredential(cfg, registry, "edge01", labGroup, "")
 	if err != nil {
 		t.Fatalf("provider error should not matter without a binding: %v", err)
 	}
@@ -115,18 +136,78 @@ func TestResolveBoundCredentialUsesRequestedUsernameWhenRecordOmitsUsername(t *t
 	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{
 		"op-network": {Type: config.CredentialProvider1Password, Config: config.CredentialProviderDetailConfig{Vault: "Network"}},
 	}
-	cfg.Inventory.Group = map[string]config.GroupConfig{
-		"customer": {Auth: config.InventoryAuthConfig{Provider: "op-network", Ref: "op://Network/Shared/password"}},
-	}
+	customerGroup := setTestGroupAuth(cfg, "customer", config.InventoryAuthConfig{CredentialProvider: "op-network", PasswordRef: "op://Network/Shared/password"})
 	registry := fakeProviderRegistry{providers: map[string]credential.Provider{
-		"op-network": fakeCredentialProvider{groups: map[string]*credential.Record{"customer": {Secret: secret.NewFromString("secret")}}},
+		"op-network": fakeCredentialProvider{groups: map[string]*credential.Record{customerGroup: {Secret: secret.NewFromString("secret")}}},
 	}}
 
-	cred, err := resolveBoundCredential(cfg, registry, "edge01", "customer", "netops")
+	cred, err := resolveBoundCredential(cfg, registry, "edge01", customerGroup, "netops")
 	if err != nil {
 		t.Fatalf("resolveBoundCredential: %v", err)
 	}
 	if cred == nil || cred.Source != CredSourceGroup || cred.Username != "netops" {
 		t.Fatalf("credential = %+v", cred)
+	}
+}
+
+func TestResolveBoundCredentialSkipsMismatchedExplicitUsername(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{
+		"op-network": {Type: config.CredentialProvider1Password, Config: config.CredentialProviderDetailConfig{Vault: "Network"}},
+	}
+	customerGroup := setTestGroupAuth(cfg, "customer", config.InventoryAuthConfig{CredentialProvider: "op-network", PasswordRef: "Network Shared Admin"})
+	registry := fakeProviderRegistry{providers: map[string]credential.Provider{
+		"op-network": fakeCredentialProvider{groups: map[string]*credential.Record{customerGroup: {Username: "admin", Secret: secret.NewFromString("secret")}}},
+	}}
+
+	cred, err := resolveBoundCredential(cfg, registry, "edge01", customerGroup, "netops")
+	if err != nil {
+		t.Fatalf("resolveBoundCredential: %v", err)
+	}
+	if cred != nil {
+		t.Fatalf("credential = %+v, want nil for explicit username mismatch", cred)
+	}
+}
+
+func TestResolveBoundCredentialSkipsDisabledHostAuth(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{
+		"pass-local": {Type: config.CredentialProviderPass},
+	}
+	cfg.Inventory.Host = map[string]config.InventoryHostConfig{
+		"edge01": {AuthDisabled: true},
+	}
+	labGroup := setTestGroupAuth(cfg, "lab", config.InventoryAuthConfig{CredentialProvider: "pass-local", PasswordRef: "nssh/groups/lab"})
+	registry := fakeProviderRegistry{providers: map[string]credential.Provider{
+		"pass-local": fakeCredentialProvider{groups: map[string]*credential.Record{labGroup: {Username: "admin", Secret: secret.NewFromString("secret")}}},
+	}}
+
+	cred, err := resolveBoundCredential(cfg, registry, "edge01", labGroup, "")
+	if err != nil {
+		t.Fatalf("resolveBoundCredential: %v", err)
+	}
+	if cred != nil {
+		t.Fatalf("credential = %+v, want nil when host auth is disabled", cred)
+	}
+}
+
+func TestSelectConnectionUsernameKeepsGroupUserAheadOfCredentialUsername(t *testing.T) {
+	got := selectConnectionUsername(true, "", "stale-ssh-user", "chris.jones", "chris.jones@custcbb.local", "cj")
+	if got != "chris.jones" {
+		t.Fatalf("username = %q, want group default", got)
+	}
+}
+
+func TestSelectConnectionUsernameUsesCredentialUsernameWhenInventoryUserMissing(t *testing.T) {
+	got := selectConnectionUsername(true, "", "stale-ssh-user", "", "admin", "cj")
+	if got != "admin" {
+		t.Fatalf("username = %q, want credential username", got)
+	}
+}
+
+func TestSelectConnectionUsernameKeepsSSHUserForUnmanagedHosts(t *testing.T) {
+	got := selectConnectionUsername(false, "", "ssh-user", "", "credential-user", "cj")
+	if got != "ssh-user" {
+		t.Fatalf("username = %q, want ssh config user", got)
 	}
 }

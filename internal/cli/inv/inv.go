@@ -23,7 +23,7 @@ func NewCmd() *cobra.Command {
 	cmd.AddCommand(newSetCmd())
 	cmd.AddCommand(newRemoveCmd())
 	cmd.AddCommand(newImportCmd())
-	cmd.AddCommand(newDoctorCmd())
+	cmd.AddCommand(newRefreshCmd())
 	cmd.AddCommand(newStatusCmd())
 	return cmd
 }

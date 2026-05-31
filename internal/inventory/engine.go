@@ -2,7 +2,6 @@ package inventory
 
 import (
 	"slices"
-	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 )
@@ -14,24 +13,36 @@ type Plan struct {
 	Removals  []*ProviderHost
 	Unchanged []*ProviderHost
 	Unmatched []Object
+	Conflicts []GroupConflict
 }
 
-// Reconcile routes discovered objects into groups and diffs desired state
+// GroupConflict is an object that matched more than one group selector.
+type GroupConflict struct {
+	Object Object
+	Groups []string
+}
+
+// Reconcile assigns discovered objects to groups and diffs desired state
 // against current provider state.
-func Reconcile(objects []Object, routes []config.InventoryRouteConfig, providerName string, current *ProviderState, groups ...map[string]config.GroupConfig) *Plan {
+func Reconcile(objects []Object, selectors []config.InventoryGroupSelector, providerName string, current *ProviderState, groups map[string]config.GroupConfig) *Plan {
 	plan := &Plan{}
 	desired := make(map[string]*ProviderHost)
 	for i := range objects {
 		obj := &objects[i]
-		route := MatchRoute(obj, routes)
-		if route == nil {
+		matches := MatchGroupSelectors(obj, selectors)
+		switch len(matches) {
+		case 0:
 			plan.Unmatched = append(plan.Unmatched, *obj)
 			continue
+		case 1:
+			selector := matches[0]
+			host := objectToProviderHost(obj, selector.Group)
+			host.AuthMode = groupAuthMode(selector.Group, groups)
+			desired[host.ObjectID] = host
+		default:
+			plan.Conflicts = append(plan.Conflicts, GroupConflict{Object: *obj, Groups: selectorGroups(matches)})
+			continue
 		}
-		host := objectToProviderHost(obj, route.Group)
-		host.Username = groupDefaultUser(route.Group, groups...)
-		host.AuthMode = routeAuthMode(*route, groups...)
-		desired[host.ObjectID] = host
 	}
 
 	var currentObjects map[string]*ProviderHost
@@ -64,19 +75,28 @@ func Reconcile(objects []Object, routes []config.InventoryRouteConfig, providerN
 	return plan
 }
 
-func groupDefaultUser(group string, groups ...map[string]config.GroupConfig) string {
-	if len(groups) == 0 || groups[0] == nil {
-		return ""
+func selectorGroups(selectors []config.InventoryGroupSelector) []string {
+	groups := make([]string, 0, len(selectors))
+	for _, selector := range selectors {
+		groups = append(groups, selector.Group)
 	}
-	return strings.TrimSpace(groups[0][group].DefaultUser)
+	return groups
 }
 
-func routeAuthMode(route config.InventoryRouteConfig, groups ...map[string]config.GroupConfig) string {
-	if route.AuthMode != "" {
-		return route.AuthMode
-	}
-	if len(groups) > 0 && groups[0] != nil && groups[0][route.Group].Auth.IsSet() {
-		return config.AuthModePassword
+func groupAuthMode(group string, groups map[string]config.GroupConfig) string {
+	if groups != nil {
+		_, shortGroup, err := config.ParseInventoryGroupID(group)
+		if err != nil {
+			shortGroup = group
+		}
+		auth := groups[shortGroup].Auth
+		auth.Normalize()
+		if auth.AuthMode != "" {
+			return auth.AuthMode
+		}
+		if auth.PasswordRef != "" {
+			return config.AuthModePassword
+		}
 	}
 	return config.AuthModeKey
 }
@@ -97,7 +117,6 @@ func providerHostChanged(old, new *ProviderHost) bool {
 	if old.Host != new.Host ||
 		old.Group != new.Group ||
 		old.HostName != new.HostName ||
-		old.Username != new.Username ||
 		old.Port != new.Port ||
 		old.ProxyJump != new.ProxyJump ||
 		old.AuthMode != new.AuthMode ||

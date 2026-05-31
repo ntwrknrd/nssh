@@ -11,27 +11,22 @@ import (
 )
 
 func newGetCmd() *cobra.Command {
-	var group bool
 	cmd := &cobra.Command{
 		Use:   "get NAME",
 		Short: "Show inventory details",
-		Long:  "Show host or group inventory details.",
+		Long:  "Show host inventory details.",
 		Args:  cobra.MaximumNArgs(1),
 		Annotations: map[string]string{
-			ui.UsageLinesAnnotation: "nssh inv get HOST\nnssh inv get -g GROUP",
+			ui.UsageLinesAnnotation: "nssh inv get HOST",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			target, err := inventoryTargetArg(args, group)
+			target, err := inventoryTargetArg(args, false)
 			if err != nil {
 				return err
-			}
-			if group {
-				return runGetGroup(target)
 			}
 			return runGet(target)
 		},
 	}
-	cmd.Flags().BoolVarP(&group, "group", "g", false, "treat argument as a group name")
 	return cmd
 }
 
@@ -63,32 +58,6 @@ func runGet(hostName string) error {
 		append([]inventoryDisplayRow{
 			{Label: "Provider", Value: meta.Owner},
 			{Label: "Group", Value: meta.Group},
-		}, inventoryAuthDisplayRows(auth)...),
-	))
-	ui.CommandEnd(ui.StatusSuccess)
-	return nil
-}
-
-func runGetGroup(name string) error {
-	ui.CommandStart("INVENTORY GROUP")
-	cfg, err := config.LoadDefault()
-	if err != nil {
-		ui.CommandEnd(ui.StatusError)
-		return err
-	}
-	group, ok := cfg.Inventory.Group[name]
-	if !ok {
-		ui.CommandEnd(ui.StatusError)
-		return fmt.Errorf("group %q not found", name)
-	}
-	auth := inventoryAuthViewFromAuth("group "+name, group.Auth)
-	if !group.Auth.IsSet() {
-		auth = inventoryAuthView{Source: "-", Provider: "-", Ref: "-", Username: "-", UsernameRef: "-"}
-	}
-	printInventoryDisplaySections(inventoryDisplaySections(
-		inventoryGroupSSHDisplayRows(fmt.Sprintf("%v", group.DomainSuffix), valueOrDash(group.DefaultUser)),
-		append([]inventoryDisplayRow{
-			{Label: "Group", Value: name},
 		}, inventoryAuthDisplayRows(auth)...),
 	))
 	ui.CommandEnd(ui.StatusSuccess)

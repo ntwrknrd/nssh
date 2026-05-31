@@ -2,9 +2,6 @@ $ nssh inv status --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
 │   nssh inv status [provider] [fl... Show inventory provider status           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────╮
-│   --refresh                         refresh external provider caches be...   │
-╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │

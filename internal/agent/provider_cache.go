@@ -137,6 +137,23 @@ func (p *RuntimeProvider) handleOnePasswordGet(ctx context.Context, cfg OnePassw
 		}
 		username = resolved
 	}
+	if isOnePasswordItemBaseRef(ref) {
+		if username == "" {
+			resolved, err := readOnePasswordSecretRef(ctx, cfg, onePasswordFieldRef(ref, "username"))
+			if err != nil {
+				return ProviderResponse{}, err
+			}
+			username = resolved
+		}
+		password, err := readOnePasswordSecretRef(ctx, cfg, onePasswordFieldRef(ref, "password"))
+		if err != nil {
+			return ProviderResponse{}, err
+		}
+		if username == "" && password == "" {
+			return ProviderResponse{Found: false}, nil
+		}
+		return ProviderResponse{Found: true, Username: username, Secret: []byte(password), Ref: ref}, nil
+	}
 	if isOnePasswordSecretRef(ref) {
 		password, err := readOnePasswordSecretRef(ctx, cfg, ref)
 		if err != nil {
@@ -190,6 +207,26 @@ func readOnePasswordSecretRef(ctx context.Context, cfg OnePasswordSessionConfig,
 
 func isOnePasswordSecretRef(ref string) bool {
 	return strings.HasPrefix(strings.TrimSpace(ref), "op://")
+}
+
+func isOnePasswordItemBaseRef(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	return strings.HasPrefix(ref, "op://") && strings.HasSuffix(ref, "/")
+}
+
+func onePasswordFieldRef(ref, field string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	if strings.HasSuffix(ref, "/") {
+		return ref + field
+	}
+	idx := strings.LastIndex(ref, "/")
+	if idx == -1 || idx == len(ref)-1 {
+		return ""
+	}
+	return ref[:idx+1] + field
 }
 
 func sessionItemField(item onePasswordSessionItem, label string) string {

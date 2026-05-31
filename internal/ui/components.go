@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -12,6 +14,11 @@ import (
 func termWidth() int {
 	if w, _, err := term.GetSize(0); err == nil && w > 0 {
 		return w
+	}
+	if raw := strings.TrimSpace(os.Getenv("COLUMNS")); raw != "" {
+		if w, err := strconv.Atoi(raw); err == nil && w > 0 {
+			return w
+		}
 	}
 	return 80
 }

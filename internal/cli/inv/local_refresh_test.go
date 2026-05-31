@@ -12,7 +12,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 )
 
-func TestVisitDoctorFindingsEmitsBeforeCheckingLaterHosts(t *testing.T) {
+func TestVisitLocalRefreshFindingsEmitsBeforeCheckingLaterHosts(t *testing.T) {
 	hosts := []*sshconfig.HostEntry{
 		{
 			Host:       "edge01",
@@ -33,7 +33,7 @@ func TestVisitDoctorFindingsEmitsBeforeCheckingLaterHosts(t *testing.T) {
 	paths := &config.Paths{SSHConfigDir: t.TempDir()}
 
 	var events []string
-	dnsCheck := func(hostName string) doctorDNSResult {
+	dnsCheck := func(hostName string) localRefreshDNSResult {
 		events = append(events, "dns:"+hostName)
 		if hostName == "edge02.example.com" && !reflect.DeepEqual(events, []string{
 			"dns:edge01.example.com",
@@ -43,12 +43,12 @@ func TestVisitDoctorFindingsEmitsBeforeCheckingLaterHosts(t *testing.T) {
 			t.Fatalf("first finding was not emitted before second DNS check: %v", events)
 		}
 		if hostName == "edge01.example.com" {
-			return doctorDNSResult{status: "nxdomain"}
+			return localRefreshDNSResult{status: "nxdomain"}
 		}
-		return doctorDNSResult{status: "ok"}
+		return localRefreshDNSResult{status: "ok"}
 	}
 
-	count := visitDoctorFindings(hosts, cfg, paths, nil, dnsCheck, func(finding doctorFinding) {
+	count := visitLocalRefreshFindings(hosts, cfg, paths, nil, dnsCheck, func(finding localRefreshFinding) {
 		events = append(events, "emit:"+finding.Host)
 	})
 
@@ -57,8 +57,8 @@ func TestVisitDoctorFindingsEmitsBeforeCheckingLaterHosts(t *testing.T) {
 	}
 }
 
-func TestApplyDoctorFixesRemovesSelectedLocalStaleHost(t *testing.T) {
-	parser, cfg, paths, localFile := newDoctorFixture(t, ""+
+func TestApplyLocalRefreshFixesRemovesSelectedLocalStaleHost(t *testing.T) {
+	parser, cfg, paths, localFile := newLocalRefreshFixture(t, ""+
 		"Host stale01\n"+
 		"  HostName stale01.example.com\n"+
 		"\n"+
@@ -68,18 +68,18 @@ func TestApplyDoctorFixesRemovesSelectedLocalStaleHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inventoryHosts: %v", err)
 	}
-	stale := findTestHost(t, hosts, "stale01")
+	stale := findLocalRefreshTestHost(t, hosts, "stale01")
 
-	applied, err := applyDoctorFixes(parser, paths, []doctorFinding{{
+	applied, err := applyLocalRefreshFixes(parser, paths, []localRefreshFinding{{
 		Host:   stale.Host,
-		Group:  "lab",
+		Group:  "local/lab",
 		Issue:  "stale-dns",
 		Detail: "nxdomain",
 		host:   stale,
-		fix:    doctorFix{kind: doctorFixRemoveHost, host: stale},
+		fix:    localRefreshFix{kind: localRefreshFixRemoveHost, host: stale},
 	}})
 	if err != nil {
-		t.Fatalf("applyDoctorFixes: %v", err)
+		t.Fatalf("applyLocalRefreshFixes: %v", err)
 	}
 	if applied != 1 {
 		t.Fatalf("applied = %d, want 1", applied)
@@ -94,8 +94,8 @@ func TestApplyDoctorFixesRemovesSelectedLocalStaleHost(t *testing.T) {
 	}
 }
 
-func TestApplyDoctorFixesRemovesOnlySelectedDuplicateBlock(t *testing.T) {
-	parser, cfg, paths, localFile := newDoctorFixture(t, ""+
+func TestApplyLocalRefreshFixesRemovesOnlySelectedDuplicateBlock(t *testing.T) {
+	parser, cfg, paths, localFile := newLocalRefreshFixture(t, ""+
 		"Host edge01\n"+
 		"  HostName edge01-primary.example.com\n"+
 		"\n"+
@@ -110,16 +110,16 @@ func TestApplyDoctorFixesRemovesOnlySelectedDuplicateBlock(t *testing.T) {
 	}
 	duplicate := hosts[1]
 
-	applied, err := applyDoctorFixes(parser, paths, []doctorFinding{{
+	applied, err := applyLocalRefreshFixes(parser, paths, []localRefreshFinding{{
 		Host:   duplicate.Host,
-		Group:  "lab",
+		Group:  "local/lab",
 		Issue:  "duplicate",
 		Detail: "duplicate Host edge01",
 		host:   duplicate,
-		fix:    doctorFix{kind: doctorFixRemoveDuplicate, host: duplicate},
+		fix:    localRefreshFix{kind: localRefreshFixRemoveDuplicate, host: duplicate},
 	}})
 	if err != nil {
-		t.Fatalf("applyDoctorFixes: %v", err)
+		t.Fatalf("applyLocalRefreshFixes: %v", err)
 	}
 	if applied != 1 {
 		t.Fatalf("applied = %d, want 1", applied)
@@ -134,8 +134,8 @@ func TestApplyDoctorFixesRemovesOnlySelectedDuplicateBlock(t *testing.T) {
 	}
 }
 
-func TestApplyDoctorFixesRenamesCNAMEAndPreservesAlias(t *testing.T) {
-	parser, cfg, paths, localFile := newDoctorFixture(t, ""+
+func TestApplyLocalRefreshFixesRenamesCNAMEAndPreservesAlias(t *testing.T) {
+	parser, cfg, paths, localFile := newLocalRefreshFixture(t, ""+
 		"Host old01\n"+
 		"  HostName old01.example.com\n"+
 		"  User admin\n")
@@ -143,23 +143,23 @@ func TestApplyDoctorFixesRenamesCNAMEAndPreservesAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inventoryHosts: %v", err)
 	}
-	old := findTestHost(t, hosts, "old01")
+	old := findLocalRefreshTestHost(t, hosts, "old01")
 
-	applied, err := applyDoctorFixes(parser, paths, []doctorFinding{{
+	applied, err := applyLocalRefreshFixes(parser, paths, []localRefreshFinding{{
 		Host:   old.Host,
-		Group:  "lab",
+		Group:  "local/lab",
 		Issue:  "cname-rename",
 		Detail: "old01.example.com -> new01.example.com",
 		host:   old,
-		fix: doctorFix{
-			kind:        doctorFixRenameHost,
+		fix: localRefreshFix{
+			kind:        localRefreshFixRenameHost,
 			host:        old,
 			newID:       "new01",
 			cnameTarget: "new01.example.com",
 		},
 	}})
 	if err != nil {
-		t.Fatalf("applyDoctorFixes: %v", err)
+		t.Fatalf("applyLocalRefreshFixes: %v", err)
 	}
 	if applied != 1 {
 		t.Fatalf("applied = %d, want 1", applied)
@@ -173,8 +173,8 @@ func TestApplyDoctorFixesRenamesCNAMEAndPreservesAlias(t *testing.T) {
 	}
 }
 
-func TestApplyDoctorFixesMergesCNAMEIntoExistingLocalHost(t *testing.T) {
-	parser, cfg, paths, localFile := newDoctorFixture(t, ""+
+func TestApplyLocalRefreshFixesMergesCNAMEIntoExistingLocalHost(t *testing.T) {
+	parser, cfg, paths, localFile := newLocalRefreshFixture(t, ""+
 		"Host old01\n"+
 		"  HostName old01.example.com\n"+
 		"\n"+
@@ -184,24 +184,24 @@ func TestApplyDoctorFixesMergesCNAMEIntoExistingLocalHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inventoryHosts: %v", err)
 	}
-	old := findTestHost(t, hosts, "old01")
-	target := findTestHost(t, hosts, "new01")
+	old := findLocalRefreshTestHost(t, hosts, "old01")
+	target := findLocalRefreshTestHost(t, hosts, "new01")
 
-	applied, err := applyDoctorFixes(parser, paths, []doctorFinding{{
+	applied, err := applyLocalRefreshFixes(parser, paths, []localRefreshFinding{{
 		Host:   old.Host,
-		Group:  "lab",
+		Group:  "local/lab",
 		Issue:  "cname-rename",
 		Detail: "old01.example.com -> new01.example.com",
 		host:   old,
-		fix: doctorFix{
-			kind:   doctorFixMergeHost,
+		fix: localRefreshFix{
+			kind:   localRefreshFixMergeHost,
 			host:   old,
 			target: target,
 			alias:  old.Host,
 		},
 	}})
 	if err != nil {
-		t.Fatalf("applyDoctorFixes: %v", err)
+		t.Fatalf("applyLocalRefreshFixes: %v", err)
 	}
 	if applied != 1 {
 		t.Fatalf("applied = %d, want 1", applied)
@@ -216,8 +216,8 @@ func TestApplyDoctorFixesMergesCNAMEIntoExistingLocalHost(t *testing.T) {
 	}
 }
 
-func TestVisitDoctorFindingsDoesNotEmitStaleFixForDuplicateBlock(t *testing.T) {
-	parser, cfg, paths, _ := newDoctorFixture(t, ""+
+func TestVisitLocalRefreshFindingsDoesNotEmitStaleFixForDuplicateBlock(t *testing.T) {
+	parser, cfg, paths, _ := newLocalRefreshFixture(t, ""+
 		"Host edge01\n"+
 		"  HostName edge01-primary.example.com\n"+
 		"\n"+
@@ -228,10 +228,10 @@ func TestVisitDoctorFindingsDoesNotEmitStaleFixForDuplicateBlock(t *testing.T) {
 		t.Fatalf("inventoryHosts: %v", err)
 	}
 
-	var findings []doctorFinding
-	visitDoctorFindings(hosts, cfg, paths, nil, func(string) doctorDNSResult {
-		return doctorDNSResult{status: "nxdomain"}
-	}, func(finding doctorFinding) {
+	var findings []localRefreshFinding
+	visitLocalRefreshFindings(hosts, cfg, paths, nil, func(string) localRefreshDNSResult {
+		return localRefreshDNSResult{status: "nxdomain"}
+	}, func(finding localRefreshFinding) {
 		findings = append(findings, finding)
 	})
 
@@ -239,9 +239,9 @@ func TestVisitDoctorFindingsDoesNotEmitStaleFixForDuplicateBlock(t *testing.T) {
 	staleFixes := 0
 	for _, finding := range findings {
 		switch finding.fix.kind {
-		case doctorFixRemoveDuplicate:
+		case localRefreshFixRemoveDuplicate:
 			duplicateFixes++
-		case doctorFixRemoveHost:
+		case localRefreshFixRemoveHost:
 			staleFixes++
 		}
 	}
@@ -253,7 +253,7 @@ func TestVisitDoctorFindingsDoesNotEmitStaleFixForDuplicateBlock(t *testing.T) {
 	}
 }
 
-func newDoctorFixture(t *testing.T, localContent string) (*sshconfig.Parser, *config.Config, *config.Paths, string) {
+func newLocalRefreshFixture(t *testing.T, localContent string) (*sshconfig.Parser, *config.Config, *config.Paths, string) {
 	t.Helper()
 	tmp := t.TempDir()
 	sshDir := filepath.Join(tmp, ".ssh")
@@ -279,7 +279,7 @@ func newDoctorFixture(t *testing.T, localContent string) (*sshconfig.Parser, *co
 	return parser, cfg, paths, localFile
 }
 
-func findTestHost(t *testing.T, hosts []*sshconfig.HostEntry, name string) *sshconfig.HostEntry {
+func findLocalRefreshTestHost(t *testing.T, hosts []*sshconfig.HostEntry, name string) *sshconfig.HostEntry {
 	t.Helper()
 	host := sshconfig.FindHostByPattern(hosts, name)
 	if host == nil {

@@ -29,17 +29,17 @@ func TestInventoryTargetArgRequiresModeSpecificName(t *testing.T) {
 
 func TestValidateGroupNameRejectsFlagLikeNames(t *testing.T) {
 	for _, name := range []string{"-h", "--help"} {
-		err := validateGroupName(name)
-		if err == nil || !strings.Contains(err.Error(), "cannot start with '-'") {
+		err := validateLocalGroupID(name)
+		if err == nil || (!strings.Contains(err.Error(), "provider-qualified") && !strings.Contains(err.Error(), "bare-key safe")) {
 			t.Fatalf("validateGroupName(%q) = %v, want leading dash rejection", name, err)
 		}
 	}
 }
 
 func TestValidateGroupNameRejectsWhitespace(t *testing.T) {
-	for _, name := range []string{" lab", "lab ", "lab prod"} {
-		err := validateGroupName(name)
-		if err == nil || !strings.Contains(err.Error(), "letters, numbers, underscores, and dashes") {
+	for _, name := range []string{"local/ lab", "local/lab ", "local/lab prod"} {
+		err := validateLocalGroupID(name)
+		if err == nil || (!strings.Contains(err.Error(), "provider-qualified") && !strings.Contains(err.Error(), "bare-key safe")) {
 			t.Fatalf("validateGroupName(%q) = %v, want character set rejection", name, err)
 		}
 	}
@@ -47,7 +47,7 @@ func TestValidateGroupNameRejectsWhitespace(t *testing.T) {
 
 func TestValidateGroupNameAllowsBareKeySafeNames(t *testing.T) {
 	for _, name := range []string{"homelab", "customer", "lab-1", "lab_1"} {
-		if err := validateGroupName(name); err != nil {
+		if err := validateLocalGroupID("local/" + name); err != nil {
 			t.Fatalf("validateGroupName(%q): %v", name, err)
 		}
 	}

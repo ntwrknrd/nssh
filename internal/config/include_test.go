@@ -22,28 +22,25 @@ type = "1password"
 config = { vault = "ExampleCorp", session = "agent" }
 `)
 	writeConfigFile(t, filepath.Join(tmp, "inventory", "groups", "corp.toml"), `
-[group.corp]
-domain_suffix = [".example.com"]
-default_user = "shared-user"
+[provider.local]
+type = "local"
 
-[group.customer]
+[provider.local.group.corp]
+domain_suffix = [".example.com"]
+auth = { username = "shared-user" }
+
+[provider.local.group.customer]
 domain_suffix = [".customer.local"]
-default_user = "netops"
-auth = { provider = "op-network", ref = "op://ExampleCorp/item/password" }
+auth = { credential_provider = "op-network", password_ref = "op://ExampleCorp/item/password", username = "netops" }
+
+[provider.netbox-prod.group.corp.match]
+domain_suffix = [".example.com"]
+manufacturer = ["Juniper", "Arista"]
 `)
 	writeConfigFile(t, filepath.Join(tmp, "inventory", "netbox.toml"), `
 [provider.netbox-prod]
 type = "netbox"
 config = { url_env = "NETBOX_URL", token_env = "NETBOX_TOKEN" }
-
-[[provider.netbox-prod.route]]
-name = "corp-network"
-group = "corp"
-auth_mode = "password"
-
-[provider.netbox-prod.route.match]
-domain_suffix = [".example.com"]
-manufacturer = ["Juniper", "Arista"]
 `)
 	mainPath := filepath.Join(tmp, "config.toml")
 	writeConfigFile(t, mainPath, `
@@ -58,8 +55,8 @@ include = ["credentials/*.toml"]
 [inventory]
 include = ["inventory/groups/*.toml", "inventory/netbox.toml"]
 
-[inventory.group.corp]
-default_user = "local-user"
+[inventory.provider.local.group.corp]
+auth = { username = "local-user" }
 `)
 
 	cfg, err := Load(mainPath)
@@ -79,19 +76,19 @@ default_user = "local-user"
 	if _, ok := cfg.Credential.Provider["pass-local"]; ok {
 		t.Fatalf("implicit pass-local provider should not be retained when config defines providers: %+v", cfg.Credential.Provider)
 	}
-	if cfg.Inventory.Group["corp"].DefaultUser != "local-user" {
-		t.Fatalf("corp default_user = %q", cfg.Inventory.Group["corp"].DefaultUser)
+	if cfg.Inventory.Provider["local"].Group["corp"].Auth.Username != "local-user" {
+		t.Fatalf("corp auth username = %q", cfg.Inventory.Provider["local"].Group["corp"].Auth.Username)
 	}
-	if cfg.Inventory.Group["customer"].Auth.Provider != "op-network" {
-		t.Fatalf("customer auth = %+v", cfg.Inventory.Group["customer"].Auth)
+	if cfg.Inventory.Provider["local"].Group["customer"].Auth.CredentialProvider != "op-network" {
+		t.Fatalf("customer auth = %+v", cfg.Inventory.Provider["local"].Group["customer"].Auth)
 	}
-	if got := cfg.Inventory.Provider["netbox-prod"].Route; len(got) != 1 || got[0].Group != "corp" {
-		t.Fatalf("netbox routes = %+v", got)
+	if got := cfg.Inventory.ProviderSelectors("netbox-prod"); len(got) != 1 || got[0].Group != "netbox-prod/corp" {
+		t.Fatalf("netbox selectors = %+v", got)
 	}
-	if source := cfg.InventoryGroupSource("customer"); !strings.HasSuffix(source, filepath.Join("inventory", "groups", "corp.toml")) {
+	if source := cfg.InventoryGroupSource("local", "customer"); !strings.HasSuffix(source, filepath.Join("inventory", "groups", "corp.toml")) {
 		t.Fatalf("customer source = %q", source)
 	}
-	if source := cfg.InventoryGroupSource("corp"); source != mainPath {
+	if source := cfg.InventoryGroupSource("local", "corp"); source != mainPath {
 		t.Fatalf("corp source = %q, want root file", source)
 	}
 }
@@ -112,7 +109,7 @@ config = { vault = "Network", session = "agent" }
 	if _, ok := cfg.Credential.Provider["pass-local"]; ok {
 		t.Fatalf("implicit pass-local provider should not be retained: %+v", cfg.Credential.Provider)
 	}
-	if auth := cfg.Inventory.Group["default"].Auth; auth.IsSet() {
+	if auth := cfg.Inventory.Provider["local"].Group["default"].Auth; auth.IsSet() {
 		t.Fatalf("implicit default group auth should not be retained: %+v", auth)
 	}
 }
@@ -120,24 +117,15 @@ config = { vault = "Network", session = "agent" }
 func TestLoadIncludeGlobOrderAndArrayReplacement(t *testing.T) {
 	tmp := t.TempDir()
 	writeConfigFile(t, filepath.Join(tmp, "conf.d", "01-base.toml"), `
-[inventory.group.default]
-
-[inventory.group.lab]
-
 [inventory.provider.netbox-prod]
 type = "netbox"
 
-[[inventory.provider.netbox-prod.route]]
-name = "old-route"
-group = "default"
+[inventory.provider.netbox-prod.group.default.match]
+role = ["router"]
 `)
 	writeConfigFile(t, filepath.Join(tmp, "conf.d", "02-override.toml"), `
-[inventory.provider.netbox-prod]
-type = "netbox"
-
-[[inventory.provider.netbox-prod.route]]
-name = "new-route"
-group = "lab"
+[inventory.provider.netbox-prod.group.default.match]
+role = ["switch"]
 `)
 	mainPath := filepath.Join(tmp, "config.toml")
 	writeConfigFile(t, mainPath, `include = ["conf.d/*.toml"]`)
@@ -146,12 +134,12 @@ group = "lab"
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	routes := cfg.Inventory.Provider["netbox-prod"].Route
-	if len(routes) != 1 {
-		t.Fatalf("route count = %d, want replacement with one route: %+v", len(routes), routes)
+	selectors := cfg.Inventory.ProviderSelectors("netbox-prod")
+	if len(selectors) != 1 {
+		t.Fatalf("selector count = %d, want one selector: %+v", len(selectors), selectors)
 	}
-	if routes[0].Name != "new-route" || routes[0].Group != "lab" {
-		t.Fatalf("route = %+v", routes[0])
+	if selectors[0].Group != "netbox-prod/default" || selectors[0].Match["role"][0] != "switch" {
+		t.Fatalf("selector = %+v", selectors[0])
 	}
 }
 
@@ -174,22 +162,19 @@ func TestLoadRejectsUnknownConfigKeys(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.toml")
 	writeConfigFile(t, path, `
-[inventory.group.corp]
+[inventory.provider.local.group.corp]
 local_file = "local_corp.conf"
 
 [inventory.provider.netbox-prod]
 type = "netbox"
 refresh_interval = "15m"
-
-[[inventory.provider.netbox-prod.route]]
-group = "corp"
 `)
 
 	_, err := Load(path)
 	if err == nil {
 		t.Fatal("expected unknown key error")
 	}
-	if !strings.Contains(err.Error(), "inventory.group.corp.local_file") {
+	if !strings.Contains(err.Error(), "inventory.provider.local.group.corp.local_file") {
 		t.Fatalf("error %q does not mention stale group key", err)
 	}
 }
@@ -205,8 +190,8 @@ default_provider = "pass-local"
 type = "pass"
 
 [inventory.group.default.auth]
-provider = "pass-local"
-ref = "nssh/groups/default"
+credential_provider = "pass-local"
+password_ref = "nssh/groups/default"
 `)
 
 	_, err := Load(path)

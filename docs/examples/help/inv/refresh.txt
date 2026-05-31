@@ -1,6 +1,6 @@
-$ nssh inv doctor --help
+$ nssh inv refresh --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh inv doctor [flags]           Check inventory health                   │
+│   nssh inv refresh [provider|loc... Refresh inventory                        │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

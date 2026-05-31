@@ -1,8 +1,11 @@
 package inventory
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -58,5 +61,31 @@ func TestProviderStateRoundTripUsesInventoryPath(t *testing.T) {
 func TestProviderIncludeFileUsesNSSHDirectory(t *testing.T) {
 	if got := ProviderIncludeFile("netbox-prod"); got != filepath.Join("nssh.d", "provider_netbox-prod.conf") {
 		t.Fatalf("include file = %q", got)
+	}
+}
+
+func TestBuildProviderIndexSkipsUnsupportedStateVersionWithoutWarning(t *testing.T) {
+	setupTestStateDir(t)
+	if err := os.MkdirAll(filepath.Dir(providerStatePath("netbox-prod")), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(providerStatePath("netbox-prod"), []byte(`{"version":1,"provider":"netbox-prod","objects":{}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var logs bytes.Buffer
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	index, err := BuildProviderIndex()
+	if err != nil {
+		t.Fatalf("BuildProviderIndex: %v", err)
+	}
+	if len(index) != 0 {
+		t.Fatalf("index = %+v, want empty for stale state", index)
+	}
+	if strings.Contains(logs.String(), "skip corrupt provider state") {
+		t.Fatalf("stale state was logged as corrupt: %s", logs.String())
 	}
 }

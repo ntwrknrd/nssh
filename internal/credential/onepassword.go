@@ -92,6 +92,13 @@ func (p *onePasswordProvider) GetGroup(group string) (*Record, error) {
 	return p.get(scopeGroup, group)
 }
 
+func (p *onePasswordProvider) GetRef(ref config.CredentialRefConfig) (*Record, error) {
+	if p.usesAgentSession() {
+		return p.agentGet(scopeHost, "", ref)
+	}
+	return p.getRef(ref)
+}
+
 type credentialScope string
 
 const (
@@ -145,6 +152,20 @@ func (p *onePasswordProvider) agentGet(scope credentialScope, name string, ref c
 }
 
 func (p *onePasswordProvider) getRef(ref config.CredentialRefConfig) (*Record, error) {
+	if isOnePasswordItemBaseRef(ref.Ref) {
+		username, err := p.resolveUsernameForItemBase(ref)
+		if err != nil {
+			return nil, err
+		}
+		password, err := p.readSecretRef(onePasswordFieldRef(ref.Ref, "password"))
+		if err != nil {
+			return nil, err
+		}
+		if username == "" && password == "" {
+			return nil, nil
+		}
+		return &Record{Username: username, Secret: secret.NewFromString(password), Ref: ref.Ref}, nil
+	}
 	if isOnePasswordSecretRef(ref.Ref) {
 		username, err := p.resolveUsername(ref)
 		if err != nil {
@@ -227,6 +248,20 @@ func (p *onePasswordProvider) resolveUsername(ref config.CredentialRefConfig) (s
 	return p.readSecretRef(usernameRef)
 }
 
+func (p *onePasswordProvider) resolveUsernameForItemBase(ref config.CredentialRefConfig) (string, error) {
+	if ref.Username != "" {
+		return ref.Username, nil
+	}
+	usernameRef := ref.UsernameRef
+	if usernameRef == "" {
+		usernameRef = onePasswordFieldRef(ref.Ref, "username")
+	}
+	if usernameRef == "" {
+		return "", nil
+	}
+	return p.readSecretRef(usernameRef)
+}
+
 func (p *onePasswordProvider) refForScope(scope credentialScope, name string) config.CredentialRefConfig {
 	if scope == scopeHost && p.hostRefs != nil {
 		return p.hostRefs[name]
@@ -274,6 +309,22 @@ func isItemNotFound(out []byte, err error) bool {
 
 func isOnePasswordSecretRef(ref string) bool {
 	return strings.HasPrefix(strings.TrimSpace(ref), "op://")
+}
+
+func isOnePasswordItemBaseRef(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	return strings.HasPrefix(ref, "op://") && strings.HasSuffix(ref, "/")
+}
+
+func onePasswordFieldRef(ref, field string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	if strings.HasSuffix(ref, "/") {
+		return ref + field
+	}
+	return siblingSecretRef(ref, field)
 }
 
 func siblingSecretRef(ref, field string) string {

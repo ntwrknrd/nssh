@@ -18,7 +18,7 @@ func newRemoveCmd() *cobra.Command {
 		Long:    "Remove a local-provider host or group.",
 		Args:    cobra.MaximumNArgs(1),
 		Annotations: map[string]string{
-			ui.UsageLinesAnnotation: "nssh inv rm HOST\nnssh inv rm -g GROUP",
+			ui.UsageLinesAnnotation: "nssh inv rm HOST\nnssh inv rm -g local/GROUP",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := inventoryTargetArg(args, group)
@@ -31,7 +31,7 @@ func newRemoveCmd() *cobra.Command {
 			return runRemoveHost(target)
 		},
 	}
-	cmd.Flags().BoolVarP(&group, "group", "g", false, "treat argument as a group name")
+	cmd.Flags().BoolVarP(&group, "group", "g", false, "treat argument as a provider-qualified group")
 	return cmd
 }
 
@@ -64,19 +64,19 @@ func runRemoveGroup(group string) error {
 		ui.CommandEnd(ui.StatusError)
 		return err
 	}
-	if _, ok := cfg.Inventory.Group[group]; !ok {
+	providerName, groupName, err := config.ParseInventoryGroupID(group)
+	if err != nil {
+		ui.CommandEnd(ui.StatusError)
+		return err
+	}
+	if providerName != config.ProviderLocal {
+		ui.CommandEnd(ui.StatusError)
+		return fmt.Errorf("local inventory group must use local/<group>")
+	}
+	if _, ok := cfg.Inventory.ProviderGroup(providerName, groupName); !ok {
 		ui.Noop("Group %q not found", group)
 		ui.CommandEnd(ui.StatusNoop)
 		return nil
-	}
-	for provider := range cfg.Inventory.Provider {
-		providerCfg := cfg.Inventory.Provider[provider]
-		for _, route := range providerCfg.Route {
-			if route.Group == group {
-				ui.CommandEnd(ui.StatusError)
-				return fmt.Errorf("group %q is referenced by inventory.provider.%s route config", group, provider)
-			}
-		}
 	}
 	hosts, err := inventoryHosts(sshconfig.NewParser(), cfg, config.DefaultPaths())
 	if err != nil {
@@ -89,7 +89,9 @@ func runRemoveGroup(group string) error {
 			return fmt.Errorf("group %q still contains host %q", group, host.Host)
 		}
 	}
-	delete(cfg.Inventory.Group, group)
+	localProvider := cfg.Inventory.Provider[config.ProviderLocal]
+	delete(localProvider.Group, groupName)
+	cfg.Inventory.Provider[config.ProviderLocal] = localProvider
 	if err := config.DeleteInventoryGroup(config.DefaultPaths().ConfigFile, cfg, group); err != nil {
 		ui.CommandEnd(ui.StatusError)
 		return err

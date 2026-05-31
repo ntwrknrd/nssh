@@ -15,13 +15,12 @@ import (
 )
 
 func newListCmd() *cobra.Command {
-	var groups bool
 	var selectPattern string
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List inventory",
-		Long: `List SSH inventory hosts or groups.
+		Long: `List SSH inventory hosts.
 
 Use -s/--select to filter visible rows. Plain text searches all fields;
 field:value matches a specific field exactly.
@@ -31,17 +30,12 @@ Fields: host, hostname, id, user, port, provider, group.
 Examples:
   nssh inv list -s corp
   nssh inv list -s group:corp
-  nssh inv list -s 'group:corp user:admin'
-  nssh inv list -g`,
+  nssh inv list -s 'group:corp user:admin'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if groups {
-				return runListGroups()
-			}
 			return runList(selectPattern)
 		},
 	}
 	cmd.Flags().StringVarP(&selectPattern, "select", "s", "", "filter by text or field:value")
-	cmd.Flags().BoolVarP(&groups, "groups", "g", false, "list groups")
 	return cmd
 }
 
@@ -130,32 +124,6 @@ func filterInventoryHosts(
 	return filtered, nil
 }
 
-func runListGroups() error {
-	ui.CommandStart("INVENTORY GROUPS")
-	cfg, err := config.LoadDefault()
-	if err != nil {
-		ui.CommandEnd(ui.StatusError)
-		return err
-	}
-	rows, err := loadInventoryGroupSummaries(cfg, sshconfig.NewParser(), config.DefaultPaths())
-	if err != nil {
-		ui.CommandEnd(ui.StatusError)
-		return err
-	}
-	summaryHeaders, summaryRows, providerHeaders, providerRows := inventoryGroupTables(rows)
-	summaryTable := ui.NewTable(summaryHeaders...)
-	for _, row := range summaryRows {
-		summaryTable.AddRow(row...)
-	}
-	providerTable := ui.NewTable(providerHeaders...)
-	for _, row := range providerRows {
-		providerTable.AddRow(row...)
-	}
-	ui.RenderTitledTablesSideBySide("Groups", summaryTable, "Provider counts", providerTable, 4)
-	ui.CommandEnd(ui.StatusSuccess)
-	return nil
-}
-
 func loadInventoryGroupSummaries(cfg *config.Config, parser *sshconfig.Parser, paths *config.Paths) ([]inventoryGroupSummary, error) {
 	index, err := inventory.BuildProviderIndex()
 	if err != nil {
@@ -165,13 +133,15 @@ func loadInventoryGroupSummaries(cfg *config.Config, parser *sshconfig.Parser, p
 	if err != nil {
 		return nil, err
 	}
-	return inventoryGroupSummaries(cfg, hosts, func(host *sshconfig.HostEntry) hostMetadata {
+	return inventoryGroupSummaries(cfg, paths, hosts, func(host *sshconfig.HostEntry) hostMetadata {
 		return metadataForHost(host, cfg, paths, index)
 	}), nil
 }
 
 type inventoryGroupSummary struct {
 	Name         string
+	ConfigFile   string
+	OutputFile   string
 	DomainSuffix string
 	Total        int
 	Sources      []inventoryGroupSource
@@ -184,14 +154,38 @@ type inventoryGroupSource struct {
 
 func inventoryGroupSummaries(
 	cfg *config.Config,
+	paths *config.Paths,
 	hosts []*sshconfig.HostEntry,
 	metaForHost func(*sshconfig.HostEntry) hostMetadata,
 ) []inventoryGroupSummary {
-	names := make([]string, 0, len(cfg.Inventory.Group))
-	stats := make(map[string]map[string]int, len(cfg.Inventory.Group))
-	for name := range cfg.Inventory.Group {
-		names = append(names, name)
-		stats[name] = make(map[string]int)
+	if paths == nil {
+		paths = config.DefaultPaths()
+	}
+	names := make([]string, 0)
+	groupConfigs := make(map[string]config.GroupConfig)
+	groupProviders := make(map[string]string)
+	groupSourceFiles := make(map[string]string)
+	stats := make(map[string]map[string]int)
+	for providerName, provider := range cfg.Inventory.Provider {
+		for groupName, groupCfg := range provider.Group {
+			id := config.FormatInventoryGroupID(providerName, groupName)
+			names = append(names, id)
+			groupConfigs[id] = groupCfg
+			groupProviders[id] = providerName
+			groupSourceFiles[id] = inventoryGroupConfigFile(cfg, providerName, groupName)
+			stats[id] = make(map[string]int)
+		}
+	}
+	for groupName, groupCfg := range cfg.Inventory.Group {
+		id := config.FormatInventoryGroupID(config.ProviderLocal, groupName)
+		if _, ok := stats[id]; ok {
+			continue
+		}
+		names = append(names, id)
+		groupConfigs[id] = groupCfg
+		groupProviders[id] = config.ProviderLocal
+		groupSourceFiles[id] = inventoryGroupConfigFile(cfg, config.ProviderLocal, groupName)
+		stats[id] = make(map[string]int)
 	}
 	sort.Strings(names)
 
@@ -210,9 +204,12 @@ func inventoryGroupSummaries(
 	rows := make([]inventoryGroupSummary, 0, len(names))
 	for _, name := range names {
 		providers := stats[name]
+		providerName := groupProviders[name]
 		rows = append(rows, inventoryGroupSummary{
 			Name:         name,
-			DomainSuffix: formatDomainSuffix(cfg.Inventory.Group[name].DomainSuffix),
+			ConfigFile:   valueOrDash(groupSourceFiles[name]),
+			OutputFile:   localFilePath(paths, inventory.ProviderIncludeFile(providerName)),
+			DomainSuffix: formatDomainSuffix(groupConfigs[name].DomainSuffix),
 			Total:        totalProviderHosts(providers),
 			Sources:      inventoryGroupSources(providers),
 		})
@@ -220,19 +217,31 @@ func inventoryGroupSummaries(
 	return rows
 }
 
-func inventoryGroupSelectOptions(rows []inventoryGroupSummary) []ui.SelectOption {
+func inventoryGroupConfigFile(cfg *config.Config, providerName, groupName string) string {
+	source := cfg.InventoryGroupSource(providerName, groupName)
+	if source == "" {
+		source = cfg.InventoryProviderSource(providerName)
+	}
+	return source
+}
+
+func inventoryGroupSelectOptions(rows []inventoryGroupSummary, host string) []ui.SelectOption {
 	options := make([]ui.SelectOption, 0, len(rows))
 	for _, row := range rows {
-		label := fmt.Sprintf("%s  %s %s", row.Name, formatCount(row.Total), pluralize("host", row.Total))
-		if len(row.Sources) > 0 {
-			label += fmt.Sprintf("  %s %s", formatCount(len(row.Sources)), pluralize("source", len(row.Sources)))
-		}
-		if row.DomainSuffix != "-" {
-			label += "  " + row.DomainSuffix
-		}
+		label := fmt.Sprintf("%s -> %s", row.Name, defaultHostNameForGroupSummary(host, row))
 		options = append(options, ui.SelectOption{Label: label, Value: row.Name})
 	}
 	return options
+}
+
+func defaultHostNameForGroupSummary(host string, row inventoryGroupSummary) string {
+	if host == "" || strings.Contains(host, ".") || row.DomainSuffix == "-" || strings.Contains(row.DomainSuffix, ",") {
+		return host
+	}
+	if strings.HasPrefix(row.DomainSuffix, ".") {
+		return host + row.DomainSuffix
+	}
+	return host + "." + row.DomainSuffix
 }
 
 func inventoryGroupSelectOptionsForNames(groups []string, options []ui.SelectOption) []ui.SelectOption {
@@ -268,60 +277,6 @@ func inventoryGroupSources(providers map[string]int) []inventoryGroupSource {
 	return sources
 }
 
-func inventoryGroupTables(summaries []inventoryGroupSummary) ([]string, [][]string, []string, [][]string) {
-	providers := inventoryGroupProviderNames(summaries)
-	summaryHeaders := []string{"Group", "Domain Suffix", "Total"}
-	providerHeaders := providers
-	summaryRows := make([][]string, 0, len(summaries))
-	providerRows := make([][]string, 0, len(summaries))
-	for _, summary := range summaries {
-		counts := make(map[string]int, len(summary.Sources))
-		for _, source := range summary.Sources {
-			counts[source.Provider] = source.Hosts
-		}
-		summaryRows = append(summaryRows, []string{summary.Name, summary.DomainSuffix, formatCount(summary.Total)})
-		providerRow := make([]string, 0, len(providers))
-		for _, provider := range providers {
-			count, ok := counts[provider]
-			if !ok {
-				providerRow = append(providerRow, "-")
-				continue
-			}
-			providerRow = append(providerRow, formatCount(count))
-		}
-		providerRows = append(providerRows, providerRow)
-	}
-	return summaryHeaders, summaryRows, providerHeaders, providerRows
-}
-
-func inventoryGroupProviderNames(summaries []inventoryGroupSummary) []string {
-	seen := make(map[string]bool)
-	for _, summary := range summaries {
-		for _, source := range summary.Sources {
-			seen[source.Provider] = true
-		}
-	}
-	names := make([]string, 0, len(seen))
-	for name := range seen {
-		if name != inventory.LocalProviderName {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	if seen[inventory.LocalProviderName] {
-		return append([]string{inventory.LocalProviderName}, names...)
-	}
-	return names
-}
-
-func totalInventoryGroupHosts(rows []inventoryGroupSummary) int {
-	total := 0
-	for _, row := range rows {
-		total += row.Total
-	}
-	return total
-}
-
 func totalProviderHosts(providers map[string]int) int {
 	total := 0
 	for _, count := range providers {
@@ -335,29 +290,4 @@ func formatDomainSuffix(suffixes []string) string {
 		return "-"
 	}
 	return strings.Join(suffixes, ", ")
-}
-
-func formatCount(count int) string {
-	text := fmt.Sprintf("%d", count)
-	if len(text) <= 3 {
-		return text
-	}
-	var b strings.Builder
-	first := len(text) % 3
-	if first == 0 {
-		first = 3
-	}
-	b.WriteString(text[:first])
-	for i := first; i < len(text); i += 3 {
-		b.WriteByte(',')
-		b.WriteString(text[i : i+3])
-	}
-	return b.String()
-}
-
-func pluralize(word string, count int) string {
-	if count == 1 {
-		return word
-	}
-	return word + "s"
 }

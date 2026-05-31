@@ -3,7 +3,7 @@ $ nssh inv import --help
 │   nssh inv import FILE.csv [flags]  Import inventory from CSV                │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
-│   --group STRING                    target group                             │
+│   --group STRING                    target provider-qualified group          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

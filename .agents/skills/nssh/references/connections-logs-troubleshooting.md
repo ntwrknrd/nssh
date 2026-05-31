@@ -27,14 +27,14 @@ Smart lookup behavior:
 4. If lookup misses, offer local inventory creation with `nssh inv set`.
 
 Smart lookup does not refresh external inventory providers automatically on a
-miss; use `nssh inv status --refresh` when provider caches need to be updated.
+miss; use `nssh inv refresh` when provider caches need to be updated.
 
 Username precedence in `internal/connect.ResolveHostForConnect`:
 
 1. Explicit `user@host` or `-l user`.
 2. SSH config `User`.
-3. Inventory group `default_user`.
-4. `host.defaults.default_user`.
+3. Inventory provider group auth `username`.
+4. Credential item username.
 
 OpenSSH owns transport. nssh starts OpenSSH inside a PTY and injects a resolved
 password only after prompt detection.
@@ -115,7 +115,7 @@ Use these first:
 ```bash
 nssh self status
 nssh inv status
-nssh inv doctor
+nssh inv refresh local
 nssh agent status
 nssh agent doctor
 nssh -v <command>
@@ -136,5 +136,6 @@ For provider credential failures, separate these causes:
 - Auth mapping missing or points at the wrong provider/ref.
 - Provider CLI not logged in or locked.
 - Provider item exists but username does not match selected SSH username.
-- Inventory host is in a group without auth and route defaults to key mode.
-- External inventory cache is stale; run `nssh inv status --refresh`.
+- Inventory host is in a provider-owned group without password auth and
+  defaults to key mode.
+- External inventory cache is stale; run `nssh inv refresh`.

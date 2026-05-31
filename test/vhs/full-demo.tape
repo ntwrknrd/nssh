@@ -66,16 +66,16 @@ Sleep 10s
 Ctrl+L
 
 # ============================================================================
-# Section 2: Group Add & List
+# Section 2: Group Add & Status
 # ============================================================================
 
 # Create an inventory group
-Type "nssh inv set --group test"
+Type "nssh inv set --group local/test"
 Sleep 300ms
 Enter
 
-# Show the created group
-Type "nssh inv list --groups"
+# Show group details in provider status
+Type "nssh inv status"
 Sleep 500ms
 Enter
 
@@ -88,12 +88,12 @@ Ctrl+L
 # ============================================================================
 
 # Create a local inventory host
-Type "nssh inv set ssh-pwd.demo.local --group test --user testuser"
+Type "nssh inv set ssh-pwd.demo.local --group local/test --user testuser"
 Sleep 300ms
 Enter
 
 # Map host auth to an existing provider item
-Type "nssh inv set ssh-pwd.demo.local --credential-provider pass-local --credential-ref nssh/hosts/ssh-pwd.demo.local --credential-username testuser"
+Type "nssh inv set ssh-pwd.demo.local --credential-provider pass-local --password-ref nssh/hosts/ssh-pwd.demo.local --credential-username testuser"
 Sleep 300ms
 Enter
 Sleep 1s

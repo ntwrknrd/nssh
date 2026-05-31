@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,7 +17,7 @@ import (
 )
 
 // StateVersion is the current provider state format.
-const StateVersion = 1
+const StateVersion = 3
 
 const (
 	LocalProviderName = "local"
@@ -40,6 +41,23 @@ type ProviderState struct {
 	LastError             string                   `json:"last_error,omitempty"`
 	IncludeFile           string                   `json:"include_file"`
 	Objects               map[string]*ProviderHost `json:"objects"`
+}
+
+// UnsupportedStateVersionError means a provider cache was written by an older
+// incompatible state schema and should be regenerated.
+type UnsupportedStateVersionError struct {
+	Version  int
+	Expected int
+	Path     string
+}
+
+func (e *UnsupportedStateVersionError) Error() string {
+	return fmt.Sprintf("unsupported provider state version %d in %s (expected %d)", e.Version, e.Path, e.Expected)
+}
+
+func IsUnsupportedStateVersion(err error) bool {
+	var versionErr *UnsupportedStateVersionError
+	return errors.As(err, &versionErr)
 }
 
 // ProviderHost represents one provider-managed SSH target persisted in state.
@@ -139,7 +157,7 @@ func LoadProviderState(provider string) (*ProviderState, error) {
 		return nil, fmt.Errorf("parse state %s: %w", path, err)
 	}
 	if state.Version != StateVersion {
-		return nil, fmt.Errorf("unsupported provider state version %d in %s (expected %d)", state.Version, path, StateVersion)
+		return nil, &UnsupportedStateVersionError{Version: state.Version, Expected: StateVersion, Path: path}
 	}
 	if state.IncludeFile == "" {
 		state.IncludeFile = ProviderIncludeFile(state.Provider)
@@ -250,6 +268,10 @@ func BuildProviderIndex() (map[string]*HostInfo, error) {
 	for _, provider := range providers {
 		state, err := LoadProviderState(provider)
 		if err != nil {
+			if IsUnsupportedStateVersion(err) {
+				slog.Debug("skip stale provider state", "provider", provider, "err", err)
+				continue
+			}
 			slog.Warn("skip corrupt provider state", "provider", provider, "err", err)
 			continue
 		}

@@ -99,79 +99,65 @@ session = "external"
 
 [inventory]
 
-# Import inventory groups or providers under [inventory].
-# Common value: ["inventory/groups/*.toml", "inventory/providers.toml"].
-# include = ["inventory/groups/*.toml", "inventory/providers.toml"]
+# Import inventory providers and provider-owned groups under [inventory].
+# Common value: ["inventory/*.toml"].
+# include = ["inventory/*.toml"]
 
-[inventory.group.default]
+[inventory.provider.local]
 
-# Domain suffixes associated with this inventory group.
-# Common value: [".example.com"].
-# domain_suffix = [".example.com"]
+# Inventory provider type.
+# Acceptable values: "local", "netbox", "containerlab".
+type = "local"
 
-# Default SSH username for hosts in this group.
-# Common value: your network admin username.
-# default_user = "netops"
+[inventory.provider.local.group.default]
 
-# Credential item used for password auth in this group.
-# Common provider: "pass-local"; ref may be a provider URI or stable item name.
-auth = { provider = "pass-local", ref = "nssh/groups/default" }
+# Provider group nssh-owned SSH identity and auth routing.
+# Common keys: username, credential_provider, password_ref, auth_mode.
+auth = { credential_provider = "pass-local", password_ref = "nssh/groups/default", username = "netops", auth_mode = "password" }
+
+# Select local hosts into this inventory group.
+[inventory.provider.local.group.default.match]
+# Common values: domain_suffix, fqdn, hostname.
+domain_suffix = [".example.com"]
 
 # Host auth override example.
 # [inventory.host.edge01]
-# # Credential item override used for this exact host.
-# # Common value: provider plus a stable provider item reference.
-# auth = { provider = "pass-local", ref = "nssh/hosts/edge01", username = "netops" }
+# # Host nssh-owned SSH identity and auth routing override.
+# # Common value: credential_provider plus a stable provider password_ref.
+# auth = { credential_provider = "pass-local", password_ref = "nssh/hosts/edge01", username = "netops" }
 
 # NetBox provider example.
 # [inventory.provider.netbox-prod]
 # # Inventory provider type.
-# # Acceptable values: "netbox", "containerlab".
+# # Acceptable values: "local", "netbox", "containerlab".
 # type = "netbox"
 #
 # # Inventory provider connection settings.
 # # Common value: environment-backed URL/token so secrets are not stored in config.
 # config = { url_env = "NETBOX_URL", token_env = "NETBOX_TOKEN" }
 #
-# [[inventory.provider.netbox-prod.route]]
-# # Human-readable route name used in status/debug output.
-# # Common value: a short inventory purpose name.
-# name = "network-devices"
-#
-# # Inventory group assigned to matching provider objects.
-# # Common value: an existing inventory group name.
-# group = "default"
-#
-# # SSH auth directives to render for matched hosts.
-# # Acceptable values: "password" or "key".
-# auth_mode = "password"
-#
-# [inventory.provider.netbox-prod.route.match]
-# # Route only objects with matching normalized attributes.
-# # Common values: domain_suffix, manufacturer, tenant.
+# [inventory.provider.netbox-prod.group.default.match]
+# # Select provider objects into this inventory group.
+# # Common values: domain_suffix, manufacturer, tenant, status.
 # domain_suffix = [".example.com"]
 # manufacturer = ["Juniper", "Arista"]
+# status = ["active"]
 
 # Containerlab provider example.
 # [inventory.provider.containerlab-lab]
 # # Inventory provider type.
-# # Acceptable values: "netbox", "containerlab".
+# # Acceptable values: "local", "netbox", "containerlab".
 # type = "containerlab"
 #
 # # Inventory provider connection settings.
 # # Common value: jump_host names the Linux host running containerlab.
 # config = { jump_host = "nre-netlab01", sudo = true, strict_host_key_checking = false }
 #
-# [[inventory.provider.containerlab-lab.route]]
-# # Inventory group assigned to matching provider objects.
-# # Common value: an existing inventory group name.
-# group = "lab"
-#
-# [inventory.provider.containerlab-lab.route.match]
-# # Route only objects with matching normalized attributes.
-# # Common values: kind, state.
-# kind = ["ceos", "vjunos"]
+# [inventory.provider.containerlab-lab.group.lab.match]
+# # Select any running containerlab node into this inventory group.
 # state = ["running"]
+# # Optionally narrow by node kind.
+# # kind = ["ceos", "vjunos"]
 
 # ============================================================================
 # Audit logging

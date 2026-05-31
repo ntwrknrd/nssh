@@ -20,7 +20,7 @@ func newImportCmd() *cobra.Command {
 			return runImport(args[0], group)
 		},
 	}
-	cmd.Flags().StringVar(&group, "group", "", "target group")
+	cmd.Flags().StringVar(&group, "group", "", "target provider-qualified group")
 	return cmd
 }
 
