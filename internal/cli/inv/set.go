@@ -2,6 +2,7 @@ package inv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -94,6 +95,10 @@ func runSetGroup(group string) error {
 }
 
 func ensureGroup(cfg *config.Config, group string) bool {
+	return ensureGroupWithConfig(cfg, group, config.GroupConfig{})
+}
+
+func ensureGroupWithConfig(cfg *config.Config, group string, groupCfg config.GroupConfig) bool {
 	_, groupName, _ := config.ParseInventoryGroupID(group)
 	if cfg.Inventory.Provider == nil {
 		cfg.Inventory.Provider = make(map[string]config.InventoryProviderConfig)
@@ -106,9 +111,42 @@ func ensureGroup(cfg *config.Config, group string) bool {
 	if _, ok := localProvider.Group[groupName]; ok {
 		return false
 	}
-	localProvider.Group[groupName] = config.GroupConfig{}
+	localProvider.Group[groupName] = groupCfg
 	cfg.Inventory.Provider[config.ProviderLocal] = localProvider
 	return true
+}
+
+func ensureLocalGroup(cfg *config.Config, group string, patch hostPatch) (bool, error) {
+	if cfg == nil {
+		return false, fmt.Errorf("config is required")
+	}
+	if err := validateLocalGroupID(group); err != nil {
+		return false, err
+	}
+	if _, ok, err := localProviderGroup(cfg, group); err != nil {
+		return false, err
+	} else if ok {
+		return false, nil
+	}
+	created := ensureGroupWithConfig(cfg, group, localGroupConfigFromPatch(patch))
+	if err := cfg.Inventory.Validate(); err != nil {
+		return false, err
+	}
+	return created, nil
+}
+
+func localGroupConfigFromPatch(patch hostPatch) config.GroupConfig {
+	target := strings.TrimSpace(patch.HostName)
+	if target == "" {
+		target = strings.TrimSpace(patch.Host)
+	}
+	suffix := domainSuffixFromFQDN(target)
+	if suffix == "" {
+		return config.GroupConfig{}
+	}
+	return config.GroupConfig{
+		Match: config.InventoryMatch{"domain_suffix": []string{suffix}},
+	}
 }
 
 func validateLocalGroupID(group string) error {
@@ -143,6 +181,7 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 	}
 	parser := sshconfig.NewParser()
 	paths := config.DefaultPaths()
+	pendingCreatedGroup := ""
 	if group != "" || hostname != "" || user != "" || portSet || !authPatch.HasChange() {
 		existing, _, err := findInventoryHostWithLocation(parser, cfg, paths, host)
 		if err != nil {
@@ -167,82 +206,118 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 				return promptInventoryGroupOptions(inventoryGroupSelectOptionsForNames(groups, options))
 			}
 		}
-		resolvedGroup, err := resolveLocalHostGroup(cfg, hostPatch{
-			Host:     host,
-			Group:    group,
-			HostName: hostname,
-		}, existing, groupPrompt)
-		if err != nil {
-			ui.CommandEnd(ui.StatusError)
-			return err
-		}
 		patch := hostPatch{
 			Host:     host,
-			Group:    resolvedGroup,
 			HostName: hostname,
 			User:     user,
 			Port:     port,
 			PortSet:  portSet,
 		}
 		hostAuthChanged := false
-		if interactiveAdd {
-			patch, err = promptLocalHostAddDetails(cfg, patch, nil)
+		var groupCreated bool
+		for {
+			resolvedGroup, err := resolveLocalHostGroup(cfg, hostPatch{
+				Host:     patch.Host,
+				Group:    group,
+				HostName: patch.HostName,
+			}, existing, groupPrompt)
 			if err != nil {
-				ui.CommandEnd(ui.StatusError)
-				return err
-			}
-			host = patch.Host
-			hostAuthChanged = applyInteractiveHostAuthSelection(cfg, patch)
-			credentialRecord, err := resolveLocalHostCredentialRecord(cfg, patch)
-			if err != nil {
-				ui.CommandEnd(ui.StatusError)
-				return err
-			}
-			var credentialSecret *secret.Secret
-			if credentialRecord != nil {
-				credentialSecret = credentialRecord.Secret
-			}
-			if credentialSecret != nil {
-				defer credentialSecret.Destroy()
-			}
-			draft := localHostEntryFromPatch(paths, patch)
-			if user := localHostProbeUser(cfg, patch, credentialRecord); user != "" {
-				upsertDirective(draft, "User", user)
-				draft.Properties["user"] = user
-			}
-			result, err := runLocalHostCompatCheck(context.Background(), cfg, draft, 5, credentialSecret)
-			if err != nil {
-				ui.CommandEnd(ui.StatusError)
-				return err
-			}
-			if len(result.FixesApplied) > 0 {
-				patch.CompatFixes = result.FixesApplied
-				ui.Success("Compatibility fixes validated for %s", patch.Host)
-			} else if result.Success {
-				ui.Success("Connection test passed for %s", patch.Host)
-			} else {
-				ui.Warning("Connection test did not pass: %s", result.StoppedReason)
-				keep, err := ui.Confirm("Add host entry anyway?", false)
-				if err != nil || !keep {
+				if errors.Is(err, errPromptBack) {
 					ui.CommandEnd(ui.StatusAbort)
 					return nil
 				}
+				ui.CommandEnd(ui.StatusError)
+				return err
 			}
-		} else if existing == nil && strings.TrimSpace(patch.HostName) == "" {
-			patch.HostName = defaultHostNameForGroup(cfg, host, resolvedGroup)
+			patch.Group = resolvedGroup
+			if interactiveAdd {
+				patch, err = promptLocalHostAddDetails(cfg, patch, nil)
+				if errors.Is(err, errPromptBack) && group == "" {
+					continue
+				}
+				if err != nil {
+					ui.CommandEnd(ui.StatusError)
+					return err
+				}
+				host = patch.Host
+			}
+			groupCreated, err = ensureLocalGroup(cfg, patch.Group, patch)
+			if err != nil {
+				ui.CommandEnd(ui.StatusError)
+				return err
+			}
+			if groupCreated {
+				pendingCreatedGroup = patch.Group
+			}
+			if interactiveAdd {
+				hostAuthChanged = applyInteractiveHostAuthSelection(cfg, patch)
+				credentialRecord, err := resolveLocalHostCredentialRecord(cfg, patch)
+				if err != nil {
+					ui.CommandEnd(ui.StatusError)
+					return err
+				}
+				var credentialSecret *secret.Secret
+				if credentialRecord != nil {
+					credentialSecret = credentialRecord.Secret
+				}
+				if credentialSecret != nil {
+					defer credentialSecret.Destroy()
+				}
+				draft := localHostEntryFromPatch(paths, patch)
+				if user := localHostProbeUser(cfg, patch, credentialRecord); user != "" {
+					upsertDirective(draft, "User", user)
+					draft.Properties["user"] = user
+				}
+				result, err := runLocalHostCompatCheck(context.Background(), cfg, draft, 5, credentialSecret)
+				if err != nil {
+					ui.CommandEnd(ui.StatusError)
+					return err
+				}
+				if len(result.FixesApplied) > 0 {
+					patch.CompatFixes = result.FixesApplied
+					ui.Success("Compatibility fixes validated for %s", patch.Host)
+				} else if result.Success {
+					ui.Success("Connection test passed for %s", patch.Host)
+				} else {
+					ui.Warning("Connection test did not pass: %s", result.StoppedReason)
+					keep, err := ui.Confirm("Add host entry anyway?", false)
+					if err != nil || !keep {
+						ui.CommandEnd(ui.StatusAbort)
+						return nil
+					}
+				}
+			} else if existing == nil && strings.TrimSpace(patch.HostName) == "" {
+				patch.HostName = defaultHostNameForGroup(cfg, host, patch.Group)
+			}
+			break
 		}
 		if err := upsertLocalHost(parser, cfg, paths, patch); err != nil {
 			ui.CommandEnd(ui.StatusError)
 			return err
 		}
-		if interactiveAdd {
-			if hostAuthChanged {
-				if err := config.SaveInventoryHostAuth(config.DefaultPaths().ConfigFile, cfg, patch.Host); err != nil {
-					ui.CommandEnd(ui.StatusError)
-					return err
-				}
-				stopAgentAfterInventoryAuthMutation()
+		if groupCreated && hostAuthChanged {
+			if err := config.SaveInventoryGroupAndHostAuth(config.DefaultPaths().ConfigFile, cfg, patch.Group, patch.Host); err != nil {
+				ui.CommandEnd(ui.StatusError)
+				return err
 			}
+			ui.Success("Group %q created", patch.Group)
+			stopAgentAfterInventoryAuthMutation()
+			pendingCreatedGroup = ""
+		} else if groupCreated && !authPatch.HasChange() {
+			if err := config.SaveInventoryGroup(config.DefaultPaths().ConfigFile, cfg, patch.Group); err != nil {
+				ui.CommandEnd(ui.StatusError)
+				return err
+			}
+			ui.Success("Group %q created", patch.Group)
+			pendingCreatedGroup = ""
+		} else if hostAuthChanged {
+			if err := config.SaveInventoryHostAuth(config.DefaultPaths().ConfigFile, cfg, patch.Host); err != nil {
+				ui.CommandEnd(ui.StatusError)
+				return err
+			}
+			stopAgentAfterInventoryAuthMutation()
+		}
+		if interactiveAdd {
 			printLocalWrittenHostConfig(parser, cfg, paths, patch.Host)
 		}
 	}
@@ -251,7 +326,13 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 			ui.CommandEnd(ui.StatusError)
 			return err
 		}
-		if err := config.SaveInventoryHostAuth(config.DefaultPaths().ConfigFile, cfg, host); err != nil {
+		if pendingCreatedGroup != "" {
+			if err := config.SaveInventoryGroupAndHostAuth(config.DefaultPaths().ConfigFile, cfg, pendingCreatedGroup, host); err != nil {
+				ui.CommandEnd(ui.StatusError)
+				return err
+			}
+			ui.Success("Group %q created", pendingCreatedGroup)
+		} else if err := config.SaveInventoryHostAuth(config.DefaultPaths().ConfigFile, cfg, host); err != nil {
 			ui.CommandEnd(ui.StatusError)
 			return err
 		}

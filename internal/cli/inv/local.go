@@ -3,6 +3,7 @@ package inv
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -75,7 +76,22 @@ type localHostCompatResult struct {
 	StoppedReason string
 }
 
+const (
+	promptBackValue        = "__back__"
+	promptBackInput        = ":back"
+	promptCreateGroupValue = "__create_group__"
+
+	localBackupTimestampLayout = "20060102_150405"
+	localBackupHourlyKeep      = 10
+	localBackupDailyKeep       = 5
+	localBackupDayHistory      = 7
+)
+
+var errPromptBack = errors.New("prompt back")
 var runLocalHostCompatCheck = testLocalHostCompatibility
+var promptNewInventoryGroupName = func() (string, error) {
+	return ui.InputWithDefault("New local group", "")
+}
 
 var localHostConnectionTest = func(ctx context.Context, host *sshconfig.HostEntry, cfg connector.TestConfig) (*connector.TestResult, error) {
 	return connector.TestConnection(ctx, host.Host, host.User(), cfg)
@@ -183,9 +199,6 @@ func resolveLocalHostGroup(cfg *config.Config, patch hostPatch, existing *sshcon
 		return "", fmt.Errorf("group is required")
 	}
 	groups := sortedInventoryGroupNames(cfg)
-	if len(groups) == 0 {
-		return "", fmt.Errorf("group is required")
-	}
 	selected, err := prompt(groups)
 	if err != nil {
 		return "", err
@@ -285,6 +298,31 @@ func defaultHostNameForGroup(cfg *config.Config, host, group string) string {
 	return host
 }
 
+func promptInputWithBack(prompter localHostAddPrompter, title, defaultValue string, allowBack bool) (string, error) {
+	value, err := prompter.InputWithDefault(title, defaultValue)
+	if err != nil {
+		return "", err
+	}
+	if allowBack && strings.TrimSpace(value) == promptBackInput {
+		return "", errPromptBack
+	}
+	return value, nil
+}
+
+func promptSelectWithBack(prompter localHostAddPrompter, title string, options []ui.SelectOption, allowBack bool) (string, error) {
+	if allowBack {
+		options = append(append([]ui.SelectOption(nil), options...), ui.SelectOption{Label: "Back", Value: promptBackValue})
+	}
+	selected, err := prompter.Select(title, options)
+	if err != nil {
+		return "", err
+	}
+	if allowBack && selected == promptBackValue {
+		return "", errPromptBack
+	}
+	return selected, nil
+}
+
 func promptLocalHostAddDetails(cfg *config.Config, patch hostPatch, prompter localHostAddPrompter) (hostPatch, error) {
 	if prompter == nil {
 		prompter = uiLocalHostAddPrompter{}
@@ -293,87 +331,135 @@ func promptLocalHostAddDetails(cfg *config.Config, patch hostPatch, prompter loc
 	if patch.Host == "" {
 		return patch, fmt.Errorf("host is required")
 	}
-	hostDefault := sshconfig.DeriveHostID(patch.Host)
-	if hostDefault == "" {
-		hostDefault = patch.Host
-	}
-	host, err := prompter.InputWithDefault("Host", hostDefault)
-	if err != nil {
-		return patch, err
-	}
-	host = strings.TrimSpace(host)
-	if host == "" {
-		return patch, fmt.Errorf("host is required")
-	}
-	patch.Host = host
 
-	hostNameDefault := strings.TrimSpace(patch.HostName)
-	if hostNameDefault == "" {
-		hostNameDefault = defaultHostNameForGroup(cfg, hostDefault, patch.Group)
-	}
-	hostName, err := prompter.InputWithDefault("HostName", hostNameDefault)
-	if err != nil {
-		return patch, err
-	}
-	patch.HostName = strings.TrimSpace(hostName)
-
-	portDefault := "22"
-	if patch.PortSet && patch.Port > 0 {
-		portDefault = strconv.Itoa(patch.Port)
-	}
-	portValue, err := prompter.InputWithDefault("Port", portDefault)
-	if err != nil {
-		return patch, err
-	}
-	port, err := strconv.Atoi(strings.TrimSpace(portValue))
-	if err != nil || port < 1 {
-		return patch, fmt.Errorf("invalid port %q", portValue)
-	}
-	patch.Port = port
-	patch.PortSet = true
-
-	authOptions := []ui.SelectOption{
-		{Label: "Public key", Value: config.AuthModeKey},
-		{Label: "Password", Value: config.AuthModePassword},
-	}
-	if patch.AuthMode == config.AuthModePassword {
-		authOptions = []ui.SelectOption{
-			{Label: "Password", Value: config.AuthModePassword},
-			{Label: "Public key", Value: config.AuthModeKey},
-		}
-	}
-	authMode, err := prompter.Select("Authentication", authOptions)
-	if err != nil {
-		return patch, err
-	}
-	authMode = strings.TrimSpace(authMode)
-	if authMode == "" {
-		authMode = config.AuthModeKey
-	}
-	if authMode != config.AuthModeKey && authMode != config.AuthModePassword {
-		return patch, fmt.Errorf("unknown auth mode %q", authMode)
-	}
-	patch.AuthMode = authMode
-	switch authMode {
-	case config.AuthModeKey:
-		if err := promptLocalHostUser(cfg, &patch, prompter); err != nil {
-			return patch, err
-		}
-		patch.Auth = config.InventoryAuthConfig{Username: patch.User, AuthMode: config.AuthModeKey}
-	case config.AuthModePassword:
-		auth, source, err := promptCredentialSource(cfg, patch.Group, patch.Host, prompter)
-		if err != nil {
-			return patch, err
-		}
-		patch.Auth = auth
-		if source == "none" {
-			if err := promptLocalHostUser(cfg, &patch, prompter); err != nil {
+	type promptStep int
+	const (
+		stepHost promptStep = iota
+		stepHostName
+		stepPort
+		stepAuth
+		stepCredentialSource
+		stepUser
+	)
+	step := stepHost
+	for {
+		switch step {
+		case stepHost:
+			hostDefault := strings.TrimSpace(patch.Host)
+			if derived := sshconfig.DeriveHostID(hostDefault); derived != "" {
+				hostDefault = derived
+			}
+			host, err := promptInputWithBack(prompter, "Host", hostDefault, true)
+			if err != nil {
 				return patch, err
 			}
-			patch.Auth = config.InventoryAuthConfig{Username: patch.User, AuthMode: config.AuthModePassword}
+			host = strings.TrimSpace(host)
+			if host == "" {
+				return patch, fmt.Errorf("host is required")
+			}
+			patch.Host = host
+			step = stepHostName
+		case stepHostName:
+			hostNameDefault := strings.TrimSpace(patch.HostName)
+			if hostNameDefault == "" {
+				hostNameDefault = defaultHostNameForGroup(cfg, patch.Host, patch.Group)
+			}
+			hostName, err := promptInputWithBack(prompter, "HostName", hostNameDefault, true)
+			if errors.Is(err, errPromptBack) {
+				step = stepHost
+				continue
+			}
+			if err != nil {
+				return patch, err
+			}
+			patch.HostName = strings.TrimSpace(hostName)
+			step = stepPort
+		case stepPort:
+			portDefault := "22"
+			if patch.PortSet && patch.Port > 0 {
+				portDefault = strconv.Itoa(patch.Port)
+			}
+			portValue, err := promptInputWithBack(prompter, "Port", portDefault, true)
+			if errors.Is(err, errPromptBack) {
+				step = stepHostName
+				continue
+			}
+			if err != nil {
+				return patch, err
+			}
+			port, err := strconv.Atoi(strings.TrimSpace(portValue))
+			if err != nil || port < 1 {
+				return patch, fmt.Errorf("invalid port %q", portValue)
+			}
+			patch.Port = port
+			patch.PortSet = true
+			step = stepAuth
+		case stepAuth:
+			authOptions := []ui.SelectOption{
+				{Label: "Public key", Value: config.AuthModeKey},
+				{Label: "Password", Value: config.AuthModePassword},
+			}
+			if patch.AuthMode == config.AuthModePassword {
+				authOptions = []ui.SelectOption{
+					{Label: "Password", Value: config.AuthModePassword},
+					{Label: "Public key", Value: config.AuthModeKey},
+				}
+			}
+			authMode, err := promptSelectWithBack(prompter, "Authentication", authOptions, true)
+			if errors.Is(err, errPromptBack) {
+				step = stepPort
+				continue
+			}
+			if err != nil {
+				return patch, err
+			}
+			authMode = strings.TrimSpace(authMode)
+			if authMode == "" {
+				authMode = config.AuthModeKey
+			}
+			if authMode != config.AuthModeKey && authMode != config.AuthModePassword {
+				return patch, fmt.Errorf("unknown auth mode %q", authMode)
+			}
+			patch.AuthMode = authMode
+			patch.Auth = config.InventoryAuthConfig{}
+			if authMode == config.AuthModeKey {
+				step = stepUser
+				continue
+			}
+			step = stepCredentialSource
+		case stepCredentialSource:
+			auth, source, err := promptCredentialSource(cfg, patch.Group, patch.Host, prompter)
+			if errors.Is(err, errPromptBack) {
+				step = stepAuth
+				continue
+			}
+			if err != nil {
+				return patch, err
+			}
+			patch.Auth = auth
+			switch source {
+			case "host", "group":
+				return patch, nil
+			case "none":
+				step = stepUser
+			default:
+				return patch, fmt.Errorf("unknown credential source %q", source)
+			}
+		case stepUser:
+			if err := promptLocalHostUser(cfg, &patch, prompter); errors.Is(err, errPromptBack) {
+				if patch.AuthMode == config.AuthModePassword {
+					step = stepCredentialSource
+				} else {
+					step = stepAuth
+				}
+				continue
+			} else if err != nil {
+				return patch, err
+			}
+			patch.Auth = config.InventoryAuthConfig{Username: patch.User, AuthMode: patch.AuthMode}
+			return patch, nil
 		}
 	}
-	return patch, nil
 }
 
 func shouldPromptLocalHostAddDetails(existing *sshconfig.HostEntry, group, hostname, user string, portSet bool, authPatch hostAuthPatch) bool {
@@ -418,7 +504,7 @@ func promptLocalHostUser(cfg *config.Config, patch *hostPatch, prompter localHos
 	if userDefault == "" {
 		userDefault = defaultUserForGroup(cfg, patch.Group)
 	}
-	user, err := prompter.InputWithDefault("User", userDefault)
+	user, err := promptInputWithBack(prompter, "User", userDefault, true)
 	if err != nil {
 		return err
 	}
@@ -442,36 +528,44 @@ func localHostEntryFromPatch(paths *config.Paths, patch hostPatch) *sshconfig.Ho
 }
 
 func promptCredentialSource(cfg *config.Config, group, host string, prompter localHostAddPrompter) (config.InventoryAuthConfig, string, error) {
-	options := make([]ui.SelectOption, 0, 3)
-	if cfg != nil {
-		if groupCfg, ok, err := localProviderGroup(cfg, group); err == nil && ok && groupCfg.Auth.IsSet() {
-			auth := groupCfg.Auth
-			auth.Normalize()
-			options = append(options, ui.SelectOption{
-				Label: fmt.Sprintf("Use group stored credential (%s: %s)", auth.CredentialProvider, displayStoredPasswordRef(auth.PasswordRef)),
-				Value: "group",
-			})
+	for {
+		options := make([]ui.SelectOption, 0, 3)
+		if cfg != nil {
+			if groupCfg, ok, err := localProviderGroup(cfg, group); err == nil && ok && groupCfg.Auth.IsSet() {
+				auth := groupCfg.Auth
+				auth.Normalize()
+				options = append(options, ui.SelectOption{
+					Label: fmt.Sprintf("Use group stored credential (%s: %s)", auth.CredentialProvider, displayStoredPasswordRef(auth.PasswordRef)),
+					Value: "group",
+				})
+			}
 		}
-	}
-	options = append(options,
-		ui.SelectOption{Label: "Set host stored credential", Value: "host"},
-		ui.SelectOption{Label: "No stored credential", Value: "none"},
-	)
-	selected, err := prompter.Select("Credential source", options)
-	if err != nil {
-		return config.InventoryAuthConfig{}, "", err
-	}
-	switch selected {
-	case "group", "none", "":
-		if selected == "" {
-			selected = "none"
+		options = append(options,
+			ui.SelectOption{Label: "Set host stored credential", Value: "host"},
+			ui.SelectOption{Label: "No stored credential", Value: "none"},
+		)
+		selected, err := promptSelectWithBack(prompter, "Credential source", options, true)
+		if err != nil {
+			return config.InventoryAuthConfig{}, "", err
 		}
-		return config.InventoryAuthConfig{}, selected, nil
-	case "host":
-		auth, err := promptHostCredentialAuth(cfg, host, prompter)
-		return auth, selected, err
-	default:
-		return config.InventoryAuthConfig{}, "", fmt.Errorf("unknown credential source %q", selected)
+		switch selected {
+		case "group", "none", "":
+			if selected == "" {
+				selected = "none"
+			}
+			return config.InventoryAuthConfig{}, selected, nil
+		case "host":
+			auth, err := promptHostCredentialAuth(cfg, host, prompter)
+			if errors.Is(err, errPromptBack) {
+				continue
+			}
+			if err != nil {
+				return config.InventoryAuthConfig{}, "", err
+			}
+			return auth, selected, nil
+		default:
+			return config.InventoryAuthConfig{}, "", fmt.Errorf("unknown credential source %q", selected)
+		}
 	}
 }
 
@@ -488,30 +582,35 @@ func promptHostCredentialAuth(cfg *config.Config, host string, prompter localHos
 	if len(providers) == 0 {
 		return config.InventoryAuthConfig{}, fmt.Errorf("no credential providers configured")
 	}
-	provider, err := prompter.Select("Credential provider", providers)
-	if err != nil {
-		return config.InventoryAuthConfig{}, err
-	}
-	provider = strings.TrimSpace(provider)
-	if provider == "" {
-		return config.InventoryAuthConfig{}, fmt.Errorf("credential provider is required")
-	}
+	for {
+		provider, err := promptSelectWithBack(prompter, "Credential provider", providers, true)
+		if err != nil {
+			return config.InventoryAuthConfig{}, err
+		}
+		provider = strings.TrimSpace(provider)
+		if provider == "" {
+			return config.InventoryAuthConfig{}, fmt.Errorf("credential provider is required")
+		}
 
-	ref, err := promptPasswordRef(cfg, provider, host, prompter)
-	if err != nil {
-		return config.InventoryAuthConfig{}, err
+		ref, err := promptPasswordRef(cfg, provider, host, prompter)
+		if errors.Is(err, errPromptBack) {
+			continue
+		}
+		if err != nil {
+			return config.InventoryAuthConfig{}, err
+		}
+		auth := config.InventoryAuthConfig{
+			CredentialProvider: provider,
+			PasswordRef:        strings.TrimSpace(ref),
+		}
+		if auth.PasswordRef == "" {
+			return config.InventoryAuthConfig{}, fmt.Errorf("password_ref is required")
+		}
+		if err := auth.Validate("inventory.host.auth"); err != nil {
+			return config.InventoryAuthConfig{}, err
+		}
+		return auth, nil
 	}
-	auth := config.InventoryAuthConfig{
-		CredentialProvider: provider,
-		PasswordRef:        strings.TrimSpace(ref),
-	}
-	if auth.PasswordRef == "" {
-		return config.InventoryAuthConfig{}, fmt.Errorf("password_ref is required")
-	}
-	if err := auth.Validate("inventory.host.auth"); err != nil {
-		return config.InventoryAuthConfig{}, err
-	}
-	return auth, nil
 }
 
 func credentialProviderOptions(cfg *config.Config) []ui.SelectOption {
@@ -543,7 +642,7 @@ func promptPasswordRef(cfg *config.Config, provider, host string, prompter local
 			options = append(options, ui.SelectOption{Label: item.Label, Value: item.Ref})
 		}
 		options = append(options, ui.SelectOption{Label: "Manual password ref", Value: "__manual__"})
-		selected, err := prompter.Select("Credential item", options)
+		selected, err := promptSelectWithBack(prompter, "Credential item", options, true)
 		if err != nil {
 			return "", err
 		}
@@ -551,7 +650,7 @@ func promptPasswordRef(cfg *config.Config, provider, host string, prompter local
 			return selected, nil
 		}
 	}
-	return prompter.InputWithDefault("Password ref", defaultPasswordRef(cfg, provider, host))
+	return promptInputWithBack(prompter, "Password ref", defaultPasswordRef(cfg, provider, host), true)
 }
 
 func defaultPasswordRef(cfg *config.Config, provider, host string) string {
@@ -688,7 +787,48 @@ func promptInventoryGroupOptions(options []ui.SelectOption) (string, error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return "", fmt.Errorf("group is required")
 	}
-	return ui.Select("Group", options)
+	for {
+		options := inventoryGroupPromptOptions(options)
+		selected, err := ui.Select("Group", options)
+		if err != nil {
+			return "", err
+		}
+		if selected == promptBackValue {
+			return "", errPromptBack
+		}
+		if selected != promptCreateGroupValue {
+			return selected, err
+		}
+		group, err := promptNewInventoryGroupName()
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(group) == promptBackInput {
+			continue
+		}
+		return normalizePromptedLocalGroup(group)
+	}
+}
+
+func inventoryGroupPromptOptions(options []ui.SelectOption) []ui.SelectOption {
+	options = append(append([]ui.SelectOption(nil), options...),
+		ui.SelectOption{Label: "Create new group", Value: promptCreateGroupValue},
+	)
+	return options
+}
+
+func normalizePromptedLocalGroup(group string) (string, error) {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return "", fmt.Errorf("group is required")
+	}
+	if !strings.Contains(group, "/") {
+		group = config.FormatInventoryGroupID(config.ProviderLocal, group)
+	}
+	if err := validateLocalGroupID(group); err != nil {
+		return "", err
+	}
+	return group, nil
 }
 
 func removeLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, hostName string) (bool, error) {
@@ -1147,9 +1287,124 @@ func backupFile(srcPath, backupDir string) error {
 		}
 		return fmt.Errorf("create backup: %w", err)
 	}
-	defer func() { _ = dst.Close() }()
 	if _, err := io.Copy(dst, src); err != nil {
+		_ = dst.Close()
 		return fmt.Errorf("write backup: %w", err)
 	}
+	if err := dst.Close(); err != nil {
+		return fmt.Errorf("close backup: %w", err)
+	}
+	return pruneLocalBackups(backupDir, filepath.Base(srcPath), time.Now())
+}
+
+type localBackupInfo struct {
+	name string
+	path string
+	when time.Time
+}
+
+func pruneLocalBackups(backupDir, sourceBase string, now time.Time) error {
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read backup dir: %w", err)
+	}
+
+	backups := make([]localBackupInfo, 0, len(entries))
+	for _, entry := range entries {
+		if backup, ok := localBackupFromEntry(backupDir, sourceBase, entry, now.Location()); ok {
+			backups = append(backups, backup)
+		}
+	}
+	if len(backups) <= 1 {
+		return nil
+	}
+	sort.Slice(backups, func(i, j int) bool {
+		if backups[i].when.Equal(backups[j].when) {
+			return backups[i].name > backups[j].name
+		}
+		return backups[i].when.After(backups[j].when)
+	})
+
+	keep := make(map[string]bool)
+	keepCount := func(backup localBackupInfo) {
+		keep[backup.name] = true
+	}
+
+	hourCutoff := now.Add(-time.Hour)
+	dayCutoff := now.Add(-24 * time.Hour)
+	dailyStart := startOfLocalDay(now).AddDate(0, 0, -localBackupDayHistory)
+
+	hourly := 0
+	for _, backup := range backups {
+		if backup.when.After(now) || backup.when.Before(hourCutoff) || hourly >= localBackupHourlyKeep {
+			continue
+		}
+		keepCount(backup)
+		hourly++
+	}
+
+	daily := 0
+	for _, backup := range backups {
+		if keep[backup.name] || backup.when.After(now) || !backup.when.Before(hourCutoff) || backup.when.Before(dayCutoff) || daily >= localBackupDailyKeep {
+			continue
+		}
+		keepCount(backup)
+		daily++
+	}
+
+	seenDays := make(map[string]bool)
+	for _, backup := range backups {
+		if keep[backup.name] || backup.when.After(now) || !backup.when.Before(dayCutoff) || backup.when.Before(dailyStart) {
+			continue
+		}
+		day := backup.when.In(now.Location()).Format("2006-01-02")
+		if seenDays[day] {
+			continue
+		}
+		keepCount(backup)
+		seenDays[day] = true
+	}
+
+	if len(keep) == 0 {
+		keepCount(backups[0])
+	}
+
+	for _, backup := range backups {
+		if keep[backup.name] {
+			continue
+		}
+		if err := os.Remove(backup.path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("prune backup %s: %w", backup.name, err)
+		}
+	}
 	return nil
+}
+
+func localBackupFromEntry(backupDir, sourceBase string, entry os.DirEntry, loc *time.Location) (localBackupInfo, bool) {
+	if entry.IsDir() {
+		return localBackupInfo{}, false
+	}
+	name := entry.Name()
+	prefix := sourceBase + "."
+	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".bak") {
+		return localBackupInfo{}, false
+	}
+	stamp := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".bak")
+	when, err := time.ParseInLocation(localBackupTimestampLayout, stamp, loc)
+	if err != nil {
+		return localBackupInfo{}, false
+	}
+	return localBackupInfo{
+		name: name,
+		path: filepath.Join(backupDir, name),
+		when: when,
+	}, true
+}
+
+func startOfLocalDay(t time.Time) time.Time {
+	local := t.In(t.Location())
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, local.Location())
 }

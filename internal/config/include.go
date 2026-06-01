@@ -16,11 +16,13 @@ type configDocument struct {
 	root      map[string]any
 	effective map[string]any
 	sources   map[string]string
+	files     []string
 }
 
 type configLoadResult struct {
 	table   map[string]any
 	sources map[string]string
+	files   []string
 }
 
 func loadConfigDocument(path string) (*configDocument, error) {
@@ -41,6 +43,7 @@ func loadConfigDocument(path string) (*configDocument, error) {
 		root:      root,
 		effective: result.table,
 		sources:   result.sources,
+		files:     uniqueConfigFiles(append([]string{abs}, result.files...)),
 	}, nil
 }
 
@@ -88,6 +91,7 @@ func resolveConfigTable(path string, table map[string]any, scope string, stack m
 			if err != nil {
 				return result, err
 			}
+			result.files = append(result.files, match)
 			result = mergeConfigResults(result, resolved)
 		}
 	}
@@ -112,6 +116,7 @@ func resolveConfigTable(path string, table map[string]any, scope string, stack m
 			for sourceKey, sourceFile := range resolved.sources {
 				local.sources[sourceKey] = sourceFile
 			}
+			local.files = append(local.files, resolved.files...)
 		case []any:
 			items := make([]any, 0, len(typed))
 			for _, item := range typed {
@@ -128,6 +133,7 @@ func resolveConfigTable(path string, table map[string]any, scope string, stack m
 				for sourceKey, sourceFile := range resolved.sources {
 					local.sources[sourceKey] = sourceFile
 				}
+				local.files = append(local.files, resolved.files...)
 			}
 			local.table[key] = items
 		default:
@@ -206,7 +212,24 @@ func mergeConfigResults(base, override configLoadResult) configLoadResult {
 	for key, value := range override.sources {
 		base.sources[key] = value
 	}
+	base.files = append(base.files, override.files...)
 	return base
+}
+
+func uniqueConfigFiles(files []string) []string {
+	seen := make(map[string]bool, len(files))
+	out := make([]string, 0, len(files))
+	for _, file := range files {
+		if seen[file] {
+			continue
+		}
+		seen[file] = true
+		out = append(out, file)
+	}
+	if len(out) > 1 {
+		sort.Strings(out[1:])
+	}
+	return out
 }
 
 func mergeConfigMaps(base, override map[string]any) map[string]any {
@@ -257,6 +280,13 @@ func (c *Config) InventoryProviderSource(provider string) string {
 
 func (c *Config) InventoryHostSource(name string) string {
 	return c.sourceFor("inventory", "host", name)
+}
+
+func (c *Config) ConfigFiles() []string {
+	if c == nil || c.document == nil {
+		return nil
+	}
+	return append([]string(nil), c.document.files...)
 }
 
 func (c *Config) sourceFor(parts ...string) string {

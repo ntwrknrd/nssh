@@ -52,7 +52,8 @@ Path resolution lives in `internal/config/paths.go`.
 - Recordings: `config.Paths.RecordingsDir`, defaulting to
   `~/.local/state/nssh/casts`.
 - Backups: `config.Paths.BackupDir`, defaulting to
-  `~/.local/share/nssh/backups`.
+  `~/.local/share/nssh/backups`. This is used for local inventory SSH config
+  writes, currently `provider_local.conf`, with fixed tiered retention.
 - SSH config: `~/.ssh/config` plus managed include files under `~/.ssh/nssh.d/`.
 
 `nssh self init` should ensure the SSH config includes the managed directory and
@@ -94,6 +95,10 @@ Primary packages:
 
 There is an implicit local provider named `local`. Its include file is
 `inventory.LocalProviderIncludeFile()`, currently `nssh.d/provider_local.conf`.
+Writes to that file create timestamped backups under
+`~/.local/share/nssh/backups` and prune them with fixed tiered retention:
+10 from the last hour, 5 more from the last day, and 1 per day for the previous
+7 days.
 External providers write deterministic include files through
 `inventory.ProviderIncludeFile(provider)`, currently
 `nssh.d/provider_<provider>.conf`.

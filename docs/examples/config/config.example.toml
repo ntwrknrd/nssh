@@ -181,10 +181,6 @@ domain_suffix = [".example.com"]
 # Common value: true.
 # enabled = true
 
-# Maximum rotated audit/config backup files to retain.
-# Common value: 10.
-# max_backup_files = 10
-
 # Maximum audit log size before rotation.
 # Common value: "10MB".
 # max_size = "10MB"

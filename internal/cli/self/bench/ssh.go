@@ -54,6 +54,12 @@ func runSSHBenchmark(host string, warmups, samples int, simpleOnly bool) error {
 		return fmt.Errorf("--warmups must be >= 0")
 	}
 
+	resolvedHost, err := resolveBenchmarkHost(host)
+	if err != nil {
+		return err
+	}
+	host = resolvedHost
+
 	ui.CommandStart("SSH BENCHMARK")
 
 	fmt.Printf("  %s: %s\n", ui.Gray("Host"), ui.Cyan(host))

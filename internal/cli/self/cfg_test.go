@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ntwrknrd/nssh/internal/config"
 )
 
 func TestRunCfgDefaultUsesCommandBanners(t *testing.T) {
@@ -34,7 +36,7 @@ func TestRunCfgDefaultUsesCommandBanners(t *testing.T) {
 	}
 }
 
-func TestRunCfgPathOnlyStaysRawPath(t *testing.T) {
+func TestRunCfgPathsOnlyStaysRawPath(t *testing.T) {
 	got := captureStdout(t, func() {
 		if err := runCfg(false, true); err != nil {
 			t.Fatal(err)
@@ -42,10 +44,41 @@ func TestRunCfgPathOnlyStaysRawPath(t *testing.T) {
 	})
 
 	if strings.Contains(got, "NSSH CONFIG") || strings.Contains(got, "OK") {
-		t.Fatalf("path-only output should not include command UI:\n%s", got)
+		t.Fatalf("paths-only output should not include command UI:\n%s", got)
 	}
 	if !strings.HasSuffix(strings.TrimSpace(got), filepath.Join("nssh", "config.toml")) {
-		t.Fatalf("path-only output should be only the config path, got %q", got)
+		t.Fatalf("paths-only output should include the config path, got %q", got)
+	}
+}
+
+func TestConfigFilesIncludesResolvedIncludes(t *testing.T) {
+	tmp := t.TempDir()
+	configDir := filepath.Join(tmp, "config", "nssh")
+	includeDir := filepath.Join(configDir, "conf.d")
+	if err := os.MkdirAll(includeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(configDir, "config.toml")
+	first := filepath.Join(includeDir, "01-base.toml")
+	second := filepath.Join(includeDir, "02-inventory.toml")
+	if err := os.WriteFile(first, []byte("[agent]\nidle_timeout = \"30m\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(second, []byte("[inventory.provider.local]\ntype = \"local\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root, []byte("include = [\"conf.d/*.toml\"]\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := configFiles(&config.Paths{ConfigFile: root})
+	if err != nil {
+		t.Fatalf("configFiles: %v", err)
+	}
+	want := strings.Join([]string{root, first, second}, "\n")
+	got := strings.Join(files, "\n")
+	if got != want {
+		t.Fatalf("config files:\nwant %s\n got %s", want, got)
 	}
 }
 

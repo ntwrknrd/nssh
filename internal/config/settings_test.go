@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -46,9 +47,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.SSH.Connection.PasswordTimeout.Duration() != 10*time.Second {
 		t.Errorf("default password_timeout = %v, want 10s", cfg.SSH.Connection.PasswordTimeout.Duration())
 	}
-	if cfg.Logging.Audit.MaxBackupFiles != 10 {
-		t.Errorf("default logging.audit.max_backup_files = %d, want 10", cfg.Logging.Audit.MaxBackupFiles)
-	}
 	if !cfg.Agent.AutoStart {
 		t.Error("default agent.auto_start = false, want true")
 	}
@@ -76,7 +74,7 @@ timeout = "60s"
 password_timeout = "20s"
 
 [logging.audit]
-max_backup_files = 20
+max_size = "20MB"
 
 [agent]
 auto_start = false
@@ -96,11 +94,32 @@ auto_start = false
 	if cfg.SSH.Connection.PasswordTimeout.Duration() != 20*time.Second {
 		t.Errorf("password_timeout = %v, want 20s", cfg.SSH.Connection.PasswordTimeout.Duration())
 	}
-	if cfg.Logging.Audit.MaxBackupFiles != 20 {
-		t.Errorf("logging.audit.max_backup_files = %d, want 20", cfg.Logging.Audit.MaxBackupFiles)
+	if cfg.Logging.Audit.MaxSize != "20MB" {
+		t.Errorf("logging.audit.max_size = %q, want 20MB", cfg.Logging.Audit.MaxSize)
 	}
 	if cfg.Agent.AutoStart {
 		t.Error("agent.auto_start = true, want false")
+	}
+}
+
+func TestLoad_RejectsObsoleteMaxBackupFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+
+	content := `
+[logging.audit]
+max_backup_files = 20
+`
+	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() should reject obsolete max_backup_files")
+	}
+	if !strings.Contains(err.Error(), "unknown config key logging.audit.max_backup_files") {
+		t.Fatalf("Load() error = %v, want unknown max_backup_files", err)
 	}
 }
 

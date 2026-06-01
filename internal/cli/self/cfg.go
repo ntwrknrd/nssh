@@ -14,8 +14,8 @@ import (
 // NewCfgCmd creates the cfg subcommand.
 func NewCfgCmd() *cobra.Command {
 	var (
-		edit     bool
-		pathOnly bool
+		edit      bool
+		pathsOnly bool
 	)
 
 	cmd := &cobra.Command{
@@ -27,25 +27,23 @@ By default, prints the effective configuration (merged from file,
 environment variables, and defaults) in TOML format.
 
 Use --edit to open the config file in your editor ($VISUAL or $EDITOR).
-Use --path to print just the config file path.`,
+Use --paths to print config file paths, including resolved includes.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCfg(edit, pathOnly)
+			return runCfg(edit, pathsOnly)
 		},
 	}
 
 	cmd.Flags().BoolVar(&edit, "edit", false, "open config in editor")
-	cmd.Flags().BoolVar(&pathOnly, "path", false, "print config file path only")
+	cmd.Flags().BoolVar(&pathsOnly, "paths", false, "print config file paths only")
 
 	return cmd
 }
 
-func runCfg(edit, pathOnly bool) error {
+func runCfg(edit, pathsOnly bool) error {
 	paths := config.DefaultPaths()
 
-	// --path: just print path and exit
-	if pathOnly {
-		fmt.Println(paths.ConfigFile)
-		return nil
+	if pathsOnly {
+		return printConfigPaths(paths)
 	}
 
 	// --edit: open in editor
@@ -55,6 +53,32 @@ func runCfg(edit, pathOnly bool) error {
 
 	// Default: print effective config
 	return printEffectiveConfig(paths)
+}
+
+func printConfigPaths(paths *config.Paths) error {
+	files, err := configFiles(paths)
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		fmt.Println(file)
+	}
+	return nil
+}
+
+func configFiles(paths *config.Paths) ([]string, error) {
+	if paths == nil {
+		paths = config.DefaultPaths()
+	}
+	cfg, err := config.Load(paths.ConfigFile)
+	if err != nil {
+		return nil, err
+	}
+	files := cfg.ConfigFiles()
+	if len(files) == 0 {
+		files = []string{paths.ConfigFile}
+	}
+	return files, nil
 }
 
 func openInEditor(path string) error {

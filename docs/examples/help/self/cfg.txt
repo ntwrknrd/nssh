@@ -4,7 +4,7 @@ $ nssh self cfg --help
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
 │   --edit                            open config in editor                    │
-│   --path                            print config file path only              │
+│   --paths                           print config file paths only             │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

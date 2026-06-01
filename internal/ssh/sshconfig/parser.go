@@ -82,26 +82,14 @@ type ParsedConfig struct {
 type Parser struct {
 	// configFile is the main SSH config path (default: ~/.ssh/config)
 	configFile string
-
-	// backupDir is where backups are stored
-	backupDir string
-
-	// maxBackups is the maximum number of backups to keep
-	maxBackups int
 }
 
 // NewParser creates a parser with default paths.
 func NewParser() *Parser {
 	paths := config.DefaultPaths()
-	cfg, err := config.LoadDefault()
-	if err != nil {
-		cfg = config.DefaultConfig()
-	}
 
 	return &Parser{
 		configFile: paths.SSHConfigFile,
-		backupDir:  paths.BackupDir,
-		maxBackups: cfg.Logging.Audit.MaxBackupFiles,
 	}
 }
 
@@ -109,8 +97,6 @@ func NewParser() *Parser {
 func NewParserWithPaths(configFile, backupDir string, maxBackups int) *Parser {
 	return &Parser{
 		configFile: configFile,
-		backupDir:  backupDir,
-		maxBackups: maxBackups,
 	}
 }
 

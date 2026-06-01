@@ -9,6 +9,7 @@ import (
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/credential"
+	"github.com/ntwrknrd/nssh/internal/inventory"
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
@@ -219,6 +220,39 @@ func TestPromptLocalHostAddDetailsCanUseGroupCredential(t *testing.T) {
 	}
 	if got := options[0].Label; strings.Contains(got, "/password") || !strings.Contains(got, "op://Expedient/bdmuxl2pscoec17gsdt5geodzu") {
 		t.Fatalf("group credential label = %q", got)
+	}
+}
+
+func TestPromptLocalHostAddDetailsCanBackOutOfCredentialProvider(t *testing.T) {
+	cfg := &config.Config{
+		Credential: config.CredentialConfig{Provider: map[string]config.CredentialProviderConfig{
+			"op-network": {Type: config.CredentialProvider1Password, Config: config.CredentialProviderDetailConfig{Vault: "Network"}},
+		}},
+	}
+	prompter := &fakeLocalHostAddPrompter{
+		inputs: map[string]string{
+			"User": "admin",
+		},
+		selectQueue: map[string][]string{
+			"Authentication":      {config.AuthModePassword, config.AuthModeKey},
+			"Credential source":   {"host", promptBackValue},
+			"Credential provider": {promptBackValue},
+		},
+	}
+
+	patch, err := promptLocalHostAddDetails(cfg, hostPatch{Host: "edge01", Group: "local/lab"}, prompter)
+	if err != nil {
+		t.Fatalf("promptLocalHostAddDetails: %v", err)
+	}
+	if patch.AuthMode != config.AuthModeKey || patch.User != "admin" {
+		t.Fatalf("patch = %+v, want public key admin after backing out", patch)
+	}
+	wantPrompts := "Host,HostName,Port,Authentication,Credential source,Credential provider,Credential source,Authentication,User"
+	if got := strings.Join(prompter.prompts, ","); got != wantPrompts {
+		t.Fatalf("prompts = %s, want %s", got, wantPrompts)
+	}
+	if options := prompter.options["Credential provider"]; options[len(options)-1].Value != promptBackValue {
+		t.Fatalf("credential provider options missing back: %+v", options)
 	}
 }
 
@@ -537,6 +571,55 @@ func TestResolveLocalHostGroupPromptsWhenDomainDoesNotMatch(t *testing.T) {
 	}
 }
 
+func TestResolveLocalHostGroupPromptsWithoutExistingGroups(t *testing.T) {
+	cfg := &config.Config{}
+	var prompted bool
+
+	group, err := resolveLocalHostGroup(cfg, hostPatch{Host: "lab-router"}, nil, func(g []string) (string, error) {
+		prompted = true
+		if len(g) != 0 {
+			t.Fatalf("prompt groups = %v, want empty", g)
+		}
+		return "local/lab", nil
+	})
+	if err != nil {
+		t.Fatalf("resolveLocalHostGroup: %v", err)
+	}
+	if !prompted {
+		t.Fatal("expected prompt")
+	}
+	if group != "local/lab" {
+		t.Fatalf("group = %q, want local/lab", group)
+	}
+}
+
+func TestNormalizePromptedLocalGroupAcceptsBareLocalName(t *testing.T) {
+	group, err := normalizePromptedLocalGroup(" lab ")
+	if err != nil {
+		t.Fatalf("normalizePromptedLocalGroup: %v", err)
+	}
+	if group != "local/lab" {
+		t.Fatalf("group = %q, want local/lab", group)
+	}
+}
+
+func TestNormalizePromptedLocalGroupRejectsInvalidName(t *testing.T) {
+	_, err := normalizePromptedLocalGroup("local/bad group")
+	if err == nil {
+		t.Fatal("expected invalid group error")
+	}
+}
+
+func TestInventoryGroupPromptOptionsIncludesCreate(t *testing.T) {
+	options := inventoryGroupPromptOptions([]ui.SelectOption{{Label: "local/lab", Value: "local/lab"}})
+	if len(options) != 2 {
+		t.Fatalf("options = %d, want 2", len(options))
+	}
+	if options[1].Value != promptCreateGroupValue {
+		t.Fatalf("options = %+v, want create option", options)
+	}
+}
+
 func TestDefaultHostNameForGroupDoesNotAppendDomainSuffix(t *testing.T) {
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Group: map[string]config.GroupConfig{
@@ -663,6 +746,134 @@ func TestRemoveLocalHostRemovesOnlyLocalHosts(t *testing.T) {
 	}
 	if !strings.Contains(got, "Host edge02") {
 		t.Fatalf("other host missing:\n%s", got)
+	}
+}
+
+func TestRemoveInventoryHostConfigClearsAuthOverride(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.toml")
+	if err := os.WriteFile(configPath, []byte(strings.TrimSpace(`
+[inventory.host.edge01]
+auth = { credential_provider = "pass-local", password_ref = "nssh/hosts/edge01" }
+
+[inventory.host.edge02]
+auth = { username = "netops" }
+`)+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := removeInventoryHostConfig(configPath, cfg, "edge01"); err != nil {
+		t.Fatalf("removeInventoryHostConfig: %v", err)
+	}
+	if _, ok := cfg.Inventory.Host["edge01"]; ok {
+		t.Fatalf("host auth still present in loaded config: %+v", cfg.Inventory.Host)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "edge01") || strings.Contains(got, "nssh/hosts/edge01") {
+		t.Fatalf("removed host auth still present:\n%s", got)
+	}
+	if !strings.Contains(got, "[inventory.host.edge02]") {
+		t.Fatalf("unrelated host auth missing:\n%s", got)
+	}
+}
+
+func TestRemovedConfigTextIndentsBlocks(t *testing.T) {
+	got := removedConfigText("Host edge01\n  HostName edge01.lab.local\n", "[inventory.host.edge01]\nauth_disabled = true\n")
+	for _, want := range []string{
+		"    Host edge01",
+		"      HostName edge01.lab.local",
+		"    [inventory.host.edge01]",
+		"    auth_disabled = true",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("removed config text missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestEnsureInventoryGroupEmptyRefusesNonEmptyGroup(t *testing.T) {
+	tmp := t.TempDir()
+	sshDir := filepath.Join(tmp, ".ssh")
+	localFile := filepath.Join(sshDir, "nssh.d", "provider_local.conf")
+	host := sshconfig.CreateHostEntry("edge01", "edge01.lab.local", "", 22, false, localFile)
+	inventory.SetLocalHostGroup(host, "local/lab")
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Provider: map[string]config.InventoryProviderConfig{
+			config.ProviderLocal: {
+				Type:  config.ProviderLocal,
+				Group: map[string]config.GroupConfig{"lab": {}},
+			},
+		},
+	}}
+	paths := &config.Paths{SSHConfigDir: sshDir}
+
+	err := ensureInventoryGroupEmpty("local/lab", []*sshconfig.HostEntry{host}, cfg, paths)
+	if err == nil {
+		t.Fatal("expected non-empty group refusal")
+	}
+	if !strings.Contains(err.Error(), `group "local/lab" still contains host "edge01"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRemoveInventoryGroupConfigDeletesProviderSourceGroup(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.toml")
+	providerPath := filepath.Join(tmp, "inventory", "local.toml")
+	if err := os.MkdirAll(filepath.Dir(providerPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(providerPath, []byte(strings.TrimSpace(`
+[provider.local]
+type = "local"
+
+[provider.local.group.lab.match]
+domain_suffix = [".lab.local"]
+
+[provider.local.group.keep.match]
+domain_suffix = [".keep.local"]
+`)+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(strings.TrimSpace(`
+[inventory]
+include = ["inventory/local.toml"]
+`)+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := removeInventoryGroupConfig(configPath, cfg, "local/lab"); err != nil {
+		t.Fatalf("removeInventoryGroupConfig: %v", err)
+	}
+	providerData, err := os.ReadFile(providerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(providerData)
+	if strings.Contains(got, "group.lab") || strings.Contains(got, ".lab.local") {
+		t.Fatalf("removed group still present:\n%s", got)
+	}
+	if !strings.Contains(got, "[provider.local.group.keep.match]") {
+		t.Fatalf("unrelated group missing:\n%s", got)
+	}
+	rootData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rootData), "group.keep") {
+		t.Fatalf("provider config was flattened into root:\n%s", rootData)
 	}
 }
 
@@ -915,16 +1126,40 @@ func TestEnsureGroupCreatesMetadataOnlyGroup(t *testing.T) {
 	}
 }
 
+func TestEnsureLocalGroupCreatesMissingGroup(t *testing.T) {
+	cfg := &config.Config{}
+	created, err := ensureLocalGroup(cfg, "local/lab", hostPatch{Host: "edge01", HostName: "edge01.lab.local"})
+	if err != nil {
+		t.Fatalf("ensureLocalGroup: %v", err)
+	}
+	if !created {
+		t.Fatal("expected group creation")
+	}
+	if _, ok := cfg.Inventory.Provider[config.ProviderLocal].Group["lab"]; !ok {
+		t.Fatalf("local/lab missing from config: %+v", cfg.Inventory.Provider)
+	}
+	if got := cfg.Inventory.Provider[config.ProviderLocal].Group["lab"].Match["domain_suffix"]; strings.Join(got, ",") != ".lab.local" {
+		t.Fatalf("local/lab match domain_suffix = %v, want .lab.local", got)
+	}
+}
+
 type fakeLocalHostAddPrompter struct {
-	inputs  map[string]string
-	selects map[string]string
-	secrets map[string]string
-	options map[string][]ui.SelectOption
-	prompts []string
+	inputs      map[string]string
+	selects     map[string]string
+	inputQueue  map[string][]string
+	selectQueue map[string][]string
+	secrets     map[string]string
+	options     map[string][]ui.SelectOption
+	prompts     []string
 }
 
 func (p *fakeLocalHostAddPrompter) InputWithDefault(title, defaultValue string) (string, error) {
 	p.prompts = append(p.prompts, title)
+	if values := p.inputQueue[title]; len(values) > 0 {
+		value := values[0]
+		p.inputQueue[title] = values[1:]
+		return value, nil
+	}
 	if value, ok := p.inputs[title]; ok {
 		return value, nil
 	}
@@ -937,6 +1172,11 @@ func (p *fakeLocalHostAddPrompter) Select(title string, options []ui.SelectOptio
 		p.options = make(map[string][]ui.SelectOption)
 	}
 	p.options[title] = append([]ui.SelectOption(nil), options...)
+	if values := p.selectQueue[title]; len(values) > 0 {
+		value := values[0]
+		p.selectQueue[title] = values[1:]
+		return value, nil
+	}
 	if value, ok := p.selects[title]; ok {
 		return value, nil
 	}

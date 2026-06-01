@@ -19,7 +19,7 @@ Default paths:
 - Managed SSH includes: `~/.ssh/nssh.d/`
 - Runtime state: `~/.local/state/nssh/`
 - Recordings: `~/.local/state/nssh/casts`
-- Data/backups/benchmarks: `~/.local/share/nssh/`
+- Data/benchmarks/local inventory backups: `~/.local/share/nssh/`
 
 Config is TOML. `include = [...]` can appear at the root or under tables.
 Included files are merged first; the importing file wins.
@@ -47,6 +47,10 @@ nssh inv refresh local
 Local inventory is the implicit `local` provider and writes
 `~/.ssh/nssh.d/provider_local.conf`. Local host groups are stored in SSH config
 comments as canonical IDs such as `local/custcbb`.
+Each local inventory write creates a timestamped backup of
+`provider_local.conf` under `~/.local/share/nssh/backups`. Retention is fixed:
+keep 10 from the last hour, 5 more from the last day, and 1 per day for the
+previous 7 days.
 
 External inventory providers write provider-owned include files named
 `~/.ssh/nssh.d/provider_<name>.conf` and non-secret state under

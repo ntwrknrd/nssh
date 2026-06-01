@@ -29,6 +29,94 @@ func SaveSparse(path string, cfg *Config) error {
 }
 
 func SaveInventoryGroup(path string, cfg *Config, groupID string) error {
+	targetPath, err := inventoryGroupSavePath(path, cfg, groupID)
+	if err != nil {
+		return err
+	}
+	root, err := rootTableForPath(path, cfg, targetPath)
+	if err != nil {
+		return err
+	}
+	if err := setInventoryGroupInRoot(root, cfg, groupID); err != nil {
+		return err
+	}
+	return saveInventoryProviderTable(targetPath, root)
+}
+
+func SaveInventoryGroupAndHostAuth(path string, cfg *Config, groupID, host string) error {
+	targetPath, err := inventoryGroupSavePath(path, cfg, groupID)
+	if err != nil {
+		return err
+	}
+	groupRoot, err := rootTableForPath(path, cfg, targetPath)
+	if err != nil {
+		return err
+	}
+	if err := setInventoryGroupInRoot(groupRoot, cfg, groupID); err != nil {
+		return err
+	}
+	if sameConfigPath(path, targetPath) {
+		if err := setInventoryHostAuthInRoot(groupRoot, path, cfg, host); err != nil {
+			return err
+		}
+		return saveRootTable(path, groupRoot)
+	}
+	if err := saveInventoryProviderTable(targetPath, groupRoot); err != nil {
+		return err
+	}
+	hostRoot := rootTableForSave(cfg)
+	if err := setInventoryHostAuthInRoot(hostRoot, path, cfg, host); err != nil {
+		return err
+	}
+	return saveRootTable(path, hostRoot)
+}
+
+func inventoryGroupSavePath(rootPath string, cfg *Config, groupID string) (string, error) {
+	providerName, _, err := ParseInventoryGroupID(groupID)
+	if err != nil {
+		return "", err
+	}
+	if cfg != nil {
+		if source := cfg.InventoryProviderSource(providerName); source != "" {
+			return source, nil
+		}
+	}
+	return rootPath, nil
+}
+
+func inventoryGroupDeletePath(rootPath string, cfg *Config, providerName, groupName string) string {
+	if cfg != nil {
+		if source := cfg.InventoryGroupSource(providerName, groupName); source != "" {
+			return source
+		}
+		if source := cfg.InventoryProviderSource(providerName); source != "" {
+			return source
+		}
+	}
+	return rootPath
+}
+
+func inventoryHostAuthDeletePath(rootPath string, cfg *Config, host string) string {
+	if cfg != nil {
+		if source := cfg.InventoryHostSource(host); source != "" {
+			return source
+		}
+	}
+	return rootPath
+}
+
+func rootTableForPath(rootPath string, cfg *Config, targetPath string) (map[string]any, error) {
+	if sameConfigPath(rootPath, targetPath) {
+		return rootTableForSave(cfg), nil
+	}
+	table, err := readTOMLMap(targetPath)
+	if err != nil {
+		return nil, err
+	}
+	return table, nil
+}
+
+func setInventoryGroupInRoot(root map[string]any, cfg *Config, groupID string) error {
 	if cfg == nil {
 		return fmt.Errorf("config is required")
 	}
@@ -44,26 +132,171 @@ func SaveInventoryGroup(path string, cfg *Config, groupID string) error {
 	if !ok {
 		return fmt.Errorf("inventory group %q is not configured", groupID)
 	}
-	root := rootTableForSave(cfg)
-	setMapPath(root, []string{"inventory", "provider", providerName, "group", groupName}, groupTable(groupCfg))
-	return saveRootTable(path, root)
+	setMapPath(root, inventoryProviderGroupPath(root, providerName, groupName), groupTable(groupCfg))
+	return nil
+}
+
+func inventoryProviderGroupPath(root map[string]any, providerName, groupName string) []string {
+	if tablePathDefined(root, "provider", providerName) && !tablePathDefined(root, "inventory", "provider", providerName) {
+		return []string{"provider", providerName, "group", groupName}
+	}
+	return []string{"inventory", "provider", providerName, "group", groupName}
+}
+
+func inventoryHostPath(root map[string]any, host string) []string {
+	if tablePathDefined(root, "host", host) && !tablePathDefined(root, "inventory", "host", host) {
+		return []string{"host", host}
+	}
+	return []string{"inventory", "host", host}
+}
+
+func saveInventoryProviderTable(path string, table map[string]any) error {
+	if !isInventoryScopedTable(table) {
+		return saveRootTable(path, table)
+	}
+	stripLegacyIdentityKeys(table)
+	text, err := marshalInventoryScopedTable(table)
+	if err != nil {
+		return err
+	}
+	return writeConfigText(path, text)
+}
+
+func isInventoryScopedTable(table map[string]any) bool {
+	if tablePathDefined(table, "provider") && !tablePathDefined(table, "inventory", "provider") {
+		return true
+	}
+	return tablePathDefined(table, "host") && !tablePathDefined(table, "inventory", "host")
+}
+
+func marshalInventoryScopedTable(table map[string]any) (string, error) {
+	var b bytes.Buffer
+	writeRootScalars(&b, table)
+	hosts, _ := asMap(table["host"])
+	for _, name := range sortedMapKeys(hosts) {
+		path := "host." + name
+		host, _ := asMap(hosts[name])
+		writeTableHeader(&b, path)
+		writeOptionIfPresent(&b, path, host, "auth_disabled")
+		writeInlineMapIfPresent(&b, path, host, "auth")
+	}
+	providers, _ := asMap(table["provider"])
+	for _, name := range sortedMapKeys(providers) {
+		path := "provider." + name
+		provider, _ := asMap(providers[name])
+		writeTableHeader(&b, path)
+		writeOptionIfPresent(&b, path, provider, "type")
+		writeInlineMapIfPresent(&b, path, provider, "auth")
+		writeInlineMapIfPresent(&b, path, provider, "config")
+		groups, _ := asMap(provider["group"])
+		for _, groupName := range sortedMapKeys(groups) {
+			groupPath := path + ".group." + groupName
+			group, _ := asMap(groups[groupName])
+			writeTableHeader(&b, groupPath)
+			writeOptionIfPresent(&b, groupPath, group, "domain_suffix")
+			writeInlineMapIfPresent(&b, groupPath, group, "auth")
+			if match, ok := asMap(group["match"]); ok && len(match) > 0 {
+				matchPath := groupPath + ".match"
+				writeTableHeader(&b, matchPath)
+				for _, key := range sortedMapKeys(match) {
+					writeOption(&b, matchPath, key, match[key])
+				}
+			}
+		}
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n", nil
 }
 
 func SaveInventoryHostAuth(path string, cfg *Config, host string) error {
+	root := rootTableForSave(cfg)
+	if err := setInventoryHostAuthInRoot(root, path, cfg, host); err != nil {
+		return err
+	}
+	return saveRootTable(path, root)
+}
+
+func InventoryHostAuthConfigText(path string, cfg *Config, host string) (string, error) {
+	if cfg == nil {
+		return "", fmt.Errorf("config is required")
+	}
+	hostCfg, ok := cfg.Inventory.Host[host]
+	if !ok || (!hostCfg.Auth.IsSet() && !hostCfg.AuthDisabled) {
+		return "", nil
+	}
+	targetPath := inventoryHostAuthDeletePath(path, cfg, host)
+	root, err := rootTableForPath(path, cfg, targetPath)
+	if err != nil {
+		return "", err
+	}
+	var b bytes.Buffer
+	hostPath := strings.Join(inventoryHostPath(root, host), ".")
+	hostTable := inventoryHostTable(hostCfg)
+	writeTableHeader(&b, hostPath)
+	writeRawOptionIfPresent(&b, hostTable, "auth_disabled")
+	writeRawOptionIfPresent(&b, hostTable, "auth")
+	return strings.TrimRight(b.String(), "\n") + "\n", nil
+}
+
+func DeleteInventoryHostAuth(path string, cfg *Config, host string) error {
 	if cfg == nil {
 		return fmt.Errorf("config is required")
 	}
-	root := rootTableForSave(cfg)
+	targetPath := inventoryHostAuthDeletePath(path, cfg, host)
+	root, err := rootTableForPath(path, cfg, targetPath)
+	if err != nil {
+		return err
+	}
+	deleteMapPath(root, inventoryHostPath(root, host))
+	return saveInventoryProviderTable(targetPath, root)
+}
+
+func setInventoryHostAuthInRoot(root map[string]any, path string, cfg *Config, host string) error {
+	if cfg == nil {
+		return fmt.Errorf("config is required")
+	}
 	hostCfg, ok := cfg.Inventory.Host[host]
 	if !ok || (!hostCfg.Auth.IsSet() && !hostCfg.AuthDisabled) {
 		if isImportedOnlySource(path, cfg.InventoryHostSource(host)) {
 			return fmt.Errorf("inventory host %q auth is imported from %s", host, cfg.InventoryHostSource(host))
 		}
 		deleteMapPath(root, []string{"inventory", "host", host})
-		return saveRootTable(path, root)
+		return nil
 	}
 	setMapPath(root, []string{"inventory", "host", host}, inventoryHostTable(hostCfg))
-	return saveRootTable(path, root)
+	return nil
+}
+
+func InventoryGroupConfigText(path string, cfg *Config, groupID string) (string, error) {
+	if cfg == nil {
+		return "", fmt.Errorf("config is required")
+	}
+	providerName, groupName, err := ParseInventoryGroupID(groupID)
+	if err != nil {
+		return "", err
+	}
+	groupCfg, ok := cfg.Inventory.ProviderGroup(providerName, groupName)
+	if !ok {
+		return "", nil
+	}
+	targetPath := inventoryGroupDeletePath(path, cfg, providerName, groupName)
+	root, err := rootTableForPath(path, cfg, targetPath)
+	if err != nil {
+		return "", err
+	}
+	var b bytes.Buffer
+	groupPath := strings.Join(inventoryProviderGroupPath(root, providerName, groupName), ".")
+	group := groupTable(groupCfg)
+	writeTableHeader(&b, groupPath)
+	writeRawOptionIfPresent(&b, group, "domain_suffix")
+	writeRawOptionIfPresent(&b, group, "auth")
+	if match, ok := asMap(group["match"]); ok && len(match) > 0 {
+		matchPath := groupPath + ".match"
+		writeTableHeader(&b, matchPath)
+		for _, key := range sortedMapKeys(match) {
+			writeRawOption(&b, key, match[key])
+		}
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n", nil
 }
 
 func DeleteInventoryGroup(path string, cfg *Config, groupID string) error {
@@ -74,12 +307,13 @@ func DeleteInventoryGroup(path string, cfg *Config, groupID string) error {
 	if err != nil {
 		return err
 	}
-	if isImportedOnlySource(path, cfg.InventoryGroupSource(providerName, groupName)) {
-		return fmt.Errorf("inventory group %q is imported from %s; imported config is read-only", groupID, cfg.InventoryGroupSource(providerName, groupName))
+	targetPath := inventoryGroupDeletePath(path, cfg, providerName, groupName)
+	root, err := rootTableForPath(path, cfg, targetPath)
+	if err != nil {
+		return err
 	}
-	root := rootTableForSave(cfg)
-	deleteMapPath(root, []string{"inventory", "provider", providerName, "group", groupName})
-	return saveRootTable(path, root)
+	deleteMapPath(root, inventoryProviderGroupPath(root, providerName, groupName))
+	return saveInventoryProviderTable(targetPath, root)
 }
 
 func saveRootTable(path string, table map[string]any) error {
@@ -135,15 +369,19 @@ func isImportedOnlySource(rootPath, source string) bool {
 	if source == "" {
 		return false
 	}
-	rootAbs, err := filepath.Abs(rootPath)
-	if err != nil {
-		rootAbs = rootPath
+	return !sameConfigPath(rootPath, source)
+}
+
+func sameConfigPath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
 	}
-	sourceAbs, err := filepath.Abs(source)
-	if err != nil {
-		sourceAbs = source
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA == nil && errB == nil {
+		return filepath.Clean(absA) == filepath.Clean(absB)
 	}
-	return rootAbs != sourceAbs
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 func setMapPath(root map[string]any, parts []string, value any) {
@@ -354,9 +592,6 @@ func loggingTable(cfg LoggingConfig) map[string]any {
 	audit := make(map[string]any)
 	if cfg.Audit.Enabled {
 		audit["enabled"] = cfg.Audit.Enabled
-	}
-	if cfg.Audit.MaxBackupFiles > 0 {
-		audit["max_backup_files"] = cfg.Audit.MaxBackupFiles
 	}
 	addString(audit, "max_size", cfg.Audit.MaxSize)
 	if len(audit) > 0 {
@@ -637,6 +872,16 @@ func writeInlineMapIfPresent(b *bytes.Buffer, path string, table map[string]any,
 	writeOption(b, path, key, value)
 }
 
+func writeRawOptionIfPresent(b *bytes.Buffer, table map[string]any, key string) {
+	if value, ok := table[key]; ok {
+		writeRawOption(b, key, value)
+	}
+}
+
+func writeRawOption(b *bytes.Buffer, key string, value any) {
+	fmt.Fprintf(b, "%s = %s\n", key, formatTOMLValue(value))
+}
+
 func writeOption(b *bytes.Buffer, path, key string, value any) {
 	for _, line := range optionComment(path, key) {
 		fmt.Fprintf(b, "# %s\n", line)
@@ -668,7 +913,6 @@ func optionComment(path, key string) []string {
 		"inventory.provider.type":                {"Inventory provider type.", `Acceptable values: "local", "netbox", "containerlab".`},
 		"inventory.provider.config":              {"Inventory provider connection settings.", "Common value: environment-backed URL/token so secrets are not stored in config."},
 		"logging.audit.enabled":                  {"Enable security event logging.", "Common value: true."},
-		"logging.audit.max_backup_files":         {"Maximum rotated audit/config backup files to retain.", "Common value: 10."},
 		"logging.audit.max_size":                 {"Maximum audit log size before rotation.", `Common value: "10MB".`},
 		"logging.session.enabled":                {"Record SSH sessions automatically.", "Common value: true for audit-heavy workflows, false to disable."},
 		"logging.session.append_mode":            {"Append sessions to a daily cast file instead of separate files.", "Common value: true."},
@@ -791,7 +1035,7 @@ func optionOrder(path string) []string {
 	case "agent":
 		return []string{"auto_start", "idle_timeout", "activity_increment", "max_lifetime"}
 	case "logging.audit":
-		return []string{"enabled", "max_backup_files", "max_size"}
+		return []string{"enabled", "max_size"}
 	case "logging.session":
 		return []string{"enabled", "append_mode", "dir", "asciinema_server_url", "exclude_hosts", "include_hosts", "idle_time_limit", "idle_time_limit_mode", "title_format", "window_size", "auto_export_txt", "archive"}
 	case "logging.session.archive":

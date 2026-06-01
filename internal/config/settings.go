@@ -65,8 +65,6 @@ type LoggingConfig struct {
 type AuditConfig struct {
 	// Enabled enables security event logging to file (default: true)
 	Enabled bool `toml:"enabled"`
-	// MaxBackupFiles is the maximum number of backup files to retain (default: 10)
-	MaxBackupFiles int `toml:"max_backup_files"`
 	// MaxSize is the max audit log size before rotation (default: "10MB")
 	MaxSize string `toml:"max_size"`
 }
@@ -223,9 +221,8 @@ func DefaultConfig() *Config {
 		},
 		Logging: LoggingConfig{
 			Audit: AuditConfig{
-				Enabled:        true,
-				MaxBackupFiles: 10,
-				MaxSize:        "10MB",
+				Enabled: true,
+				MaxSize: "10MB",
 			},
 			Session: SessionConfig{
 				Archive: SessionArchiveConfig{
@@ -484,13 +481,6 @@ func (c *AgentConfig) Validate() error {
 
 // Validate checks AuditConfig values are within acceptable bounds.
 func (c *AuditConfig) Validate() error {
-	// Validate max backup files (reasonable bounds)
-	if c.MaxBackupFiles < 1 {
-		return fmt.Errorf("logging.audit.max_backup_files must be >= 1 (got %d)", c.MaxBackupFiles)
-	}
-	if c.MaxBackupFiles > 100 {
-		return fmt.Errorf("logging.audit.max_backup_files must be <= 100 (got %d)", c.MaxBackupFiles)
-	}
 	return nil
 }
 
