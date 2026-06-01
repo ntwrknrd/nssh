@@ -125,6 +125,18 @@ domain_suffix = [".example.com"]
 # # Host nssh-owned SSH identity and auth routing override.
 # # Common value: credential_provider plus a stable provider password_ref.
 # auth = { credential_provider = "pass-local", password_ref = "nssh/hosts/edge01", username = "netops" }
+#
+# Fastest password-auth form:
+# - Use a literal username when possible.
+# - Point password_ref at the exact password field.
+# - Use username_ref when treating the SSH username as sensitive.
+#   It costs an extra provider call, so time to first prompt is slower.
+# Each external provider call adds connection startup time.
+#
+# auth = { credential_provider = "op-network", password_ref = "op://Network/edge01/password", username = "netops" }
+#
+# Supported but slower because it requires an extra provider lookup before SSH starts:
+# auth = { credential_provider = "op-network", password_ref = "op://Network/edge01/password", username_ref = "op://Network/edge01/username" }
 
 # NetBox provider example.
 # [inventory.provider.netbox-prod]

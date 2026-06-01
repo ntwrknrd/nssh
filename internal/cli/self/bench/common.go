@@ -267,6 +267,32 @@ func ComputeWallClockStats(wallClocks []time.Duration) StageStats {
 	}
 }
 
+func computeDeltaStats(name string, samples []map[string]time.Duration, endStage, startStage string) StageStats {
+	durations := make([]time.Duration, 0, len(samples))
+	for _, sample := range samples {
+		end, okEnd := sample[endStage]
+		start, okStart := sample[startStage]
+		if okEnd && okStart && end >= start {
+			durations = append(durations, end-start)
+		}
+	}
+	return computeStatsFromDurations(name, durations)
+}
+
+func computeWallMinusStageStats(name string, wallClocks []time.Duration, samples []map[string]time.Duration, stage string) StageStats {
+	limit := len(samples)
+	if len(wallClocks) < limit {
+		limit = len(wallClocks)
+	}
+	durations := make([]time.Duration, 0, limit)
+	for i := 0; i < limit; i++ {
+		if d, ok := samples[i][stage]; ok && wallClocks[i] >= d {
+			durations = append(durations, wallClocks[i]-d)
+		}
+	}
+	return computeStatsFromDurations(name, durations)
+}
+
 // renderResults displays benchmark results in a formatted table.
 func renderResults(result *BenchmarkResult, simpleOnly bool) {
 	fmt.Println()
@@ -282,22 +308,19 @@ func renderResults(result *BenchmarkResult, simpleOnly bool) {
 
 		table := ui.NewTable("Stage", "Mean", "Median", "Min", "Max", "Description")
 
-		// Add startup overhead first (wall_clock - connector_total)
-		// This represents Go subprocess initialization before connector.Run()
-		connectorStats := allStats[connector.TimingTotal]
-		if connectorStats.Mean > 0 && wallStats.Mean > connectorStats.Mean {
+		// Add pre-connector overhead first (wall_clock - connector_total).
+		// This includes subprocess startup plus all work before Connector.Run().
+		preConnectorStats := computeWallMinusStageStats("pre_connector", result.WallClocks, result.Samples, connector.TimingTotal)
+		if preConnectorStats.Mean > 0 {
 			table.AddRow(
-				"startup",
-				formatDuration(wallStats.Mean-connectorStats.Mean),
-				formatDuration(wallStats.Median-connectorStats.Median),
-				formatDuration(wallStats.Min-connectorStats.Min),
-				formatDuration(wallStats.Max-connectorStats.Max),
-				ui.Gray("Go subprocess initialization"),
+				"pre_connector",
+				formatDuration(preConnectorStats.Mean),
+				formatDuration(preConnectorStats.Median),
+				formatDuration(preConnectorStats.Min),
+				formatDuration(preConnectorStats.Max),
+				ui.Gray("Process startup + pre-connector work"),
 			)
 		}
-
-		// Get first_read stats for computing session_io
-		firstReadStats := allStats[connector.TimingFirstRead]
 
 		for _, stageName := range sortedStages {
 			// Skip total - we show wall_clock as the total instead
@@ -313,18 +336,14 @@ func renderResults(result *BenchmarkResult, simpleOnly bool) {
 
 			// Convert session_end from cumulative to delta (session_io = session_end - first_read)
 			if stageName == connector.TimingSessionEnd {
-				if firstReadStats.Mean > 0 {
-					// Compute delta: time after first_read until session close
-					deltaMean := stats.Mean - firstReadStats.Mean
-					deltaMedian := stats.Median - firstReadStats.Median
-					deltaMin := stats.Min - firstReadStats.Min
-					deltaMax := stats.Max - firstReadStats.Max
+				sessionIOStats := computeDeltaStats("session_io", result.Samples, connector.TimingSessionEnd, connector.TimingFirstRead)
+				if sessionIOStats.Mean > 0 {
 					table.AddRow(
 						"session_io",
-						formatDuration(deltaMean),
-						formatDuration(deltaMedian),
-						formatDuration(deltaMin),
-						formatDuration(deltaMax),
+						formatDuration(sessionIOStats.Mean),
+						formatDuration(sessionIOStats.Median),
+						formatDuration(sessionIOStats.Min),
+						formatDuration(sessionIOStats.Max),
 						ui.Gray("I/O after first read until session close"),
 					)
 					continue
@@ -482,19 +501,17 @@ func renderResultsToString(benchType, host string, result *BenchmarkResult, simp
 		fmt.Fprintf(&buf, "%-20s %10s %10s %10s %10s\n", "Stage", "Mean", "Median", "Min", "Max")
 		buf.WriteString(strings.Repeat("-", 62) + "\n")
 
-		// Startup overhead
-		connectorStats := allStats[connector.TimingTotal]
-		if connectorStats.Mean > 0 && wallStats.Mean > connectorStats.Mean {
+		// Pre-connector overhead.
+		preConnectorStats := computeWallMinusStageStats("pre_connector", result.WallClocks, result.Samples, connector.TimingTotal)
+		if preConnectorStats.Mean > 0 {
 			fmt.Fprintf(&buf, "%-20s %10s %10s %10s %10s\n",
-				"startup",
-				formatDuration(wallStats.Mean-connectorStats.Mean),
-				formatDuration(wallStats.Median-connectorStats.Median),
-				formatDuration(wallStats.Min-connectorStats.Min),
-				formatDuration(wallStats.Max-connectorStats.Max),
+				"pre_connector",
+				formatDuration(preConnectorStats.Mean),
+				formatDuration(preConnectorStats.Median),
+				formatDuration(preConnectorStats.Min),
+				formatDuration(preConnectorStats.Max),
 			)
 		}
-
-		firstReadStats := allStats[connector.TimingFirstRead]
 
 		for _, stageName := range sortedStages {
 			if stageName == connector.TimingTotal {
@@ -503,13 +520,17 @@ func renderResultsToString(benchType, host string, result *BenchmarkResult, simp
 
 			stats := allStats[stageName]
 
-			if stageName == connector.TimingSessionEnd && firstReadStats.Mean > 0 {
+			if stageName == connector.TimingSessionEnd {
+				sessionIOStats := computeDeltaStats("session_io", result.Samples, connector.TimingSessionEnd, connector.TimingFirstRead)
+				if sessionIOStats.Mean == 0 {
+					continue
+				}
 				fmt.Fprintf(&buf, "%-20s %10s %10s %10s %10s\n",
 					"session_io",
-					formatDuration(stats.Mean-firstReadStats.Mean),
-					formatDuration(stats.Median-firstReadStats.Median),
-					formatDuration(stats.Min-firstReadStats.Min),
-					formatDuration(stats.Max-firstReadStats.Max),
+					formatDuration(sessionIOStats.Mean),
+					formatDuration(sessionIOStats.Median),
+					formatDuration(sessionIOStats.Min),
+					formatDuration(sessionIOStats.Max),
 				)
 				continue
 			}

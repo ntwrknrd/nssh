@@ -4,18 +4,40 @@ package connector
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/ntwrknrd/nssh/internal/secret"
 )
 
+func (c *Connector) resolvePassword(ctx context.Context) (*secret.Secret, error) {
+	if c.password != nil {
+		return c.password, nil
+	}
+	if c.passwordResolver == nil {
+		return nil, nil
+	}
+	pw, err := c.passwordResolver(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.password = pw
+	return c.password, nil
+}
+
 // injectPassword writes the password to the PTY.
-func (c *Connector) injectPassword() error {
-	if c.password == nil {
+func (c *Connector) injectPassword(ctx context.Context) error {
+	password, err := c.resolvePassword(ctx)
+	if err != nil {
+		return err
+	}
+	if password == nil {
 		return fmt.Errorf("no password configured")
 	}
 
-	err := c.password.Use(func(pw []byte) error {
+	err = password.Use(func(pw []byte) error {
 		// Write password + newline to PTY master
 		if _, err := c.ptyFile.Write(pw); err != nil {
 			return err

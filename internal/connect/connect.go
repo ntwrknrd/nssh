@@ -107,6 +107,9 @@ func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArg
 	}
 
 	conn := connector.NewConnector(resolved.Hostname, resolved.Username, retryPassword, sshArgs)
+	if retryResolved != nil && retryResolved.Credential != nil {
+		conn.SetPasswordResolver(retryResolved.Credential.PasswordResolver)
+	}
 	conn.SetHostKeyPromptFunc(newHostKeyPromptFunc())
 	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 	conn.SetTimeouts(&cfg.SSH.Connection)
@@ -120,6 +123,9 @@ func newConnector(resolved *ResolvedHost, sshArgs []string, cfg *config.Config) 
 		slog.Debug("resolved credential", "username", resolved.Username, "source", resolved.Credential.Source)
 	}
 	conn := connector.NewConnector(resolved.Hostname, resolved.Username, password, sshArgs)
+	if resolved.Credential != nil {
+		conn.SetPasswordResolver(resolved.Credential.PasswordResolver)
+	}
 	conn.SetHostKeyPromptFunc(newHostKeyPromptFunc())
 	if resolved.HostEntry != nil {
 		conn.SetResolvedEndpoint(resolved.HostEntry.HostName, resolved.HostEntry.Port())

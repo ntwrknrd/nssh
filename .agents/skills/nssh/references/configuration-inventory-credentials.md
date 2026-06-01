@@ -100,6 +100,13 @@ Every set auth mapping needs `credential_provider` and either `password_ref` or
 `username_ref`. `username` and `username_ref` are optional and mutually
 exclusive.
 
+For faster password-auth connections, prefer a literal `username` plus a direct
+password field reference such as `op://Network/edge01/password`. Use
+`username_ref` when treating the SSH username as sensitive; it remains
+supported, but it costs an extra external provider call, so time to first
+prompt is slower. Item-base refs can also add provider calls. Each `op`,
+`pass`, or `bw` call adds connection time.
+
 Resolution order:
 
 1. Host auth override.

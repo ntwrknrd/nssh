@@ -3,6 +3,7 @@
 package connect
 
 import (
+	"context"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -20,9 +21,10 @@ const (
 )
 
 type ResolvedCredential struct {
-	Username string
-	Password *secret.Secret
-	Source   string
+	Username         string
+	Password         *secret.Secret
+	PasswordResolver func(context.Context) (*secret.Secret, error)
+	Source           string
 }
 
 // ResolvedHost holds the result of host resolution: everything needed to
@@ -239,12 +241,47 @@ func resolveInventoryCredential(registry providerRegistry, auth config.Inventory
 	if provider == nil {
 		return nil, nil
 	}
-	record, err := provider.GetRef(config.CredentialRefConfig{
+	ref := config.CredentialRefConfig{
 		Provider:    auth.CredentialProvider,
 		Ref:         auth.PasswordRef,
 		Username:    auth.Username,
 		UsernameRef: auth.UsernameRef,
-	})
+	}
+	source := auth.Source
+	if strings.HasPrefix(source, "group ") {
+		source = CredSourceGroup
+	} else if strings.HasPrefix(source, "host ") {
+		source = CredSourceHost
+	}
+
+	if canDeferCredentialLookup(ref, explicitUser) {
+		username := strings.TrimSpace(ref.Username)
+		if username == "" {
+			username = strings.TrimSpace(explicitUser)
+			ref.Username = username
+		}
+		return &ResolvedCredential{
+			Username: username,
+			PasswordResolver: func(ctx context.Context) (*secret.Secret, error) {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				default:
+				}
+				record, err := provider.GetRef(ref)
+				if err != nil || record == nil {
+					return nil, err
+				}
+				if !credentialMatchesUser(record, username) {
+					return nil, nil
+				}
+				return record.Secret, nil
+			},
+			Source: source,
+		}, nil
+	}
+
+	record, err := provider.GetRef(ref)
 	if err != nil || record == nil {
 		return nil, err
 	}
@@ -258,13 +295,22 @@ func resolveInventoryCredential(registry providerRegistry, auth config.Inventory
 	if username == "" {
 		username = strings.TrimSpace(explicitUser)
 	}
-	source := auth.Source
-	if strings.HasPrefix(source, "group ") {
-		source = CredSourceGroup
-	} else if strings.HasPrefix(source, "host ") {
-		source = CredSourceHost
-	}
 	return &ResolvedCredential{Username: username, Password: record.Secret, Source: source}, nil
+}
+
+func canDeferCredentialLookup(ref config.CredentialRefConfig, explicitUser string) bool {
+	if strings.TrimSpace(ref.UsernameRef) != "" {
+		return false
+	}
+	if strings.TrimSpace(ref.Username) != "" {
+		return true
+	}
+	return strings.TrimSpace(explicitUser) != "" && isDirectSecretRef(ref.Ref)
+}
+
+func isDirectSecretRef(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	return strings.HasPrefix(ref, "op://") && !strings.HasSuffix(ref, "/")
 }
 
 func resolveGroup(hostEntry *sshconfig.HostEntry, cfg *config.Config) string {

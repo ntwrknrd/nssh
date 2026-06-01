@@ -13,7 +13,7 @@
         ╭───────────────────┬──────────┬──────────┬──────────┬──────────┬──────────────────────────────────────────╮
         │ Stage             │ Mean     │ Median   │ Min      │ Max      │ Description                              │
         ├───────────────────┼──────────┼──────────┼──────────┼──────────┼──────────────────────────────────────────┤
-        │ startup           │ 18.2ms   │ 17.9ms   │ 17.8ms   │ 19.0ms   │ Go subprocess initialization             │
+        │ pre_connector     │ 18.2ms   │ 17.9ms   │ 17.8ms   │ 19.0ms   │ Process startup + pre-connector work     │
         │ config_load       │ 98.33us  │ 100.00us │ 94.00us  │ 101.00us │ Load config.toml                         │
         │ credential_lookup │ 766.67us │ 738.00us │ 697.00us │ 865.00us │ Provider credential resolution           │
         │ pty_start         │ 1.1ms    │ 1.1ms    │ 999.00us │ 1.2ms    │ Spawn PTY + SSH process                  │

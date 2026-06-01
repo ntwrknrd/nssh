@@ -1,6 +1,7 @@
 package connect
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -48,6 +49,24 @@ type fakeProviderRegistry struct {
 
 func (r fakeProviderRegistry) Provider(name string) credential.Provider {
 	return r.providers[name]
+}
+
+type countingCredentialProvider struct {
+	calls  []config.CredentialRefConfig
+	record *credential.Record
+}
+
+func (p *countingCredentialProvider) GetHost(host string) (*credential.Record, error) {
+	return nil, nil
+}
+
+func (p *countingCredentialProvider) GetGroup(group string) (*credential.Record, error) {
+	return nil, nil
+}
+
+func (p *countingCredentialProvider) GetRef(ref config.CredentialRefConfig) (*credential.Record, error) {
+	p.calls = append(p.calls, ref)
+	return p.record, nil
 }
 
 func setTestGroupAuth(cfg *config.Config, group string, auth config.InventoryAuthConfig) string {
@@ -188,6 +207,63 @@ func TestResolveBoundCredentialSkipsDisabledHostAuth(t *testing.T) {
 	}
 	if cred != nil {
 		t.Fatalf("credential = %+v, want nil when host auth is disabled", cred)
+	}
+}
+
+func TestResolveInventoryCredentialDefersDirectPasswordRefWithLiteralUsername(t *testing.T) {
+	provider := &countingCredentialProvider{
+		record: &credential.Record{Username: "netops", Secret: secret.NewFromString("secret"), Ref: "op://Network/Edge/password"},
+	}
+	registry := fakeProviderRegistry{providers: map[string]credential.Provider{"op-network": provider}}
+	auth := config.InventoryAuthResolution{
+		CredentialProvider: "op-network",
+		PasswordRef:        "op://Network/Edge/password",
+		Username:           "netops",
+		Source:             "group local/customer",
+	}
+
+	cred, err := resolveInventoryCredential(registry, auth, "")
+	if err != nil {
+		t.Fatalf("resolveInventoryCredential: %v", err)
+	}
+	if cred == nil || cred.Username != "netops" || cred.Password != nil || cred.PasswordResolver == nil {
+		t.Fatalf("credential = %+v, want lazy resolver with literal username", cred)
+	}
+	if len(provider.calls) != 0 {
+		t.Fatalf("provider calls = %d, want 0 before password prompt", len(provider.calls))
+	}
+	resolved, err := cred.PasswordResolver(context.Background())
+	if err != nil {
+		t.Fatalf("PasswordResolver: %v", err)
+	}
+	if resolved == nil {
+		t.Fatal("resolved password is nil")
+	}
+	if len(provider.calls) != 1 {
+		t.Fatalf("provider calls after resolver = %d, want 1", len(provider.calls))
+	}
+}
+
+func TestResolveInventoryCredentialResolvesUsernameRefBeforeSSHStart(t *testing.T) {
+	provider := &countingCredentialProvider{
+		record: &credential.Record{Username: "netops", Secret: secret.NewFromString("secret"), Ref: "op://Network/Edge/password"},
+	}
+	registry := fakeProviderRegistry{providers: map[string]credential.Provider{"op-network": provider}}
+	auth := config.InventoryAuthResolution{
+		CredentialProvider: "op-network",
+		PasswordRef:        "op://Network/Edge/password",
+		UsernameRef:        "op://Network/Edge/username",
+	}
+
+	cred, err := resolveInventoryCredential(registry, auth, "")
+	if err != nil {
+		t.Fatalf("resolveInventoryCredential: %v", err)
+	}
+	if cred == nil || cred.Username != "netops" {
+		t.Fatalf("credential = %+v, want username resolved before SSH start", cred)
+	}
+	if len(provider.calls) != 1 {
+		t.Fatalf("provider calls = %d, want 1 for username_ref", len(provider.calls))
 	}
 }
 

@@ -250,10 +250,10 @@ func (c *Connector) relay(ctx context.Context) error {
 			c.hostKeyHandled = true
 			EmitWithValue(TimingPasswordPrompt, time.Since(c.sessionStart))
 
-			if c.password != nil {
+			if c.password != nil || c.passwordResolver != nil {
 				// We have a password - inject it once
 				passwordTimer := StartTiming(TimingPasswordSent)
-				if err := c.injectPassword(); err != nil {
+				if err := c.injectPassword(ctx); err != nil {
 					slog.Debug("password injection failed", "err", err)
 				} else {
 					passwordTimer.Emit()

@@ -3,6 +3,7 @@
 package connector
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"strings"
@@ -22,11 +23,12 @@ const (
 
 // Connector manages a PTY-based SSH connection with credential injection.
 type Connector struct {
-	hostname       string
-	username       string
-	password       *secret.Secret
-	sshArgs        []string
-	acceptOnceMode string
+	hostname         string
+	username         string
+	password         *secret.Secret
+	passwordResolver func(context.Context) (*secret.Secret, error)
+	sshArgs          []string
+	acceptOnceMode   string
 
 	ptyFile *os.File  // PTY master from creack/pty.Start()
 	sshCmd  *exec.Cmd // SSH child process
@@ -102,4 +104,9 @@ func (c *Connector) SetTimeouts(cfg *config.SSHConnectionConfig) {
 // SetHostKeyPromptFunc configures the interactive host-key prompt callback.
 func (c *Connector) SetHostKeyPromptFunc(fn HostKeyPromptFunc) {
 	c.hostKeyPrompt = fn
+}
+
+// SetPasswordResolver configures deferred password lookup for prompt-driven auth.
+func (c *Connector) SetPasswordResolver(fn func(context.Context) (*secret.Secret, error)) {
+	c.passwordResolver = fn
 }

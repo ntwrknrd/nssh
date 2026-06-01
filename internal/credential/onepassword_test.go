@@ -159,6 +159,33 @@ func TestOnePasswordGetHostReadsItemBaseRefFields(t *testing.T) {
 	}
 }
 
+func TestOnePasswordDirectPasswordRefWithLiteralUsernameUsesOneProviderRead(t *testing.T) {
+	runner := &fakeOPRunner{outs: []fakeOPOut{{data: "secret"}}}
+	provider := &onePasswordProvider{
+		hostRefs: map[string]config.CredentialRefConfig{
+			"edge01": {
+				Ref:      "op://Network/Edge 01/password",
+				Username: "netops",
+			},
+		},
+		runner: runner,
+	}
+
+	got, err := provider.GetHost("edge01")
+	if err != nil {
+		t.Fatalf("GetHost: %v", err)
+	}
+	if got == nil || got.Username != "netops" || revealTestSecret(t, got) != "secret" {
+		t.Fatalf("record = %+v secret=%q", got, revealTestSecret(t, got))
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("op calls = %d, want 1", len(runner.calls))
+	}
+	if strings.Join(runner.calls[0].args, " ") != "read op://Network/Edge 01/password" {
+		t.Fatalf("args = %#v", runner.calls[0].args)
+	}
+}
+
 func TestOnePasswordAgentSessionGetsThroughAgent(t *testing.T) {
 	socketPath := fmt.Sprintf("/tmp/nssh-cred-%d-%d.sock", os.Getpid(), time.Now().UnixNano())
 	t.Cleanup(func() { _ = os.Remove(socketPath) })
