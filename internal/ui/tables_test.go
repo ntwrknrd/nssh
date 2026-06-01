@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"strings"
 	"testing"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 func TestStreamTableWritesRowsBeforeClose(t *testing.T) {
@@ -60,37 +58,5 @@ func TestRenderTitledTablesSideBySideStringLabelsEachTable(t *testing.T) {
 
 	if !strings.Contains(rendered, "Groups") || !strings.Contains(rendered, "Provider counts") {
 		t.Fatalf("side-by-side render missing titles:\n%s", rendered)
-	}
-}
-
-func TestTableWithMinWidthExpandsRenderedWidth(t *testing.T) {
-	table := NewTable("Name")
-	table.AddRow("x")
-
-	natural := table.Width()
-	table.WithMinWidth(natural + 12)
-
-	if got := table.Width(); got != natural+12 {
-		t.Fatalf("width = %d, want %d", got, natural+12)
-	}
-	for _, line := range strings.Split(table.String(), "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		if lipgloss.Width(line) < natural+12 {
-			t.Fatalf("line width = %d, want at least %d: %q", lipgloss.Width(line), natural+12, line)
-		}
-	}
-}
-
-func TestTableWithMinWidthPreservesVisibleCellText(t *testing.T) {
-	table := NewTable("Name", "Value").WithMinWidth(60)
-	table.AddRow("provider", "provider_local.conf")
-
-	rendered := table.String()
-	for _, want := range []string{"provider", "provider_local.conf"} {
-		if !strings.Contains(rendered, want) {
-			t.Fatalf("rendered table missing %q:\n%s", want, rendered)
-		}
 	}
 }

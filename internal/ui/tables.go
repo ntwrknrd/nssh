@@ -16,7 +16,6 @@ type Table struct {
 	headers    []string
 	rows       [][]string
 	footerRows [][]string // footer rows rendered with separator border
-	minWidth   int
 }
 
 // StreamTable renders rows as they are added. Column widths must be known up
@@ -258,14 +257,6 @@ func (t *Table) AddFooterRow(cells ...string) {
 	t.footerRows = append(t.footerRows, row)
 }
 
-// WithMinWidth sets the minimum rendered table width.
-func (t *Table) WithMinWidth(width int) *Table {
-	if width > 0 {
-		t.minWidth = width
-	}
-	return t
-}
-
 // Render prints the table to stdout (centered) and returns the left margin used for centering.
 func (t *Table) Render() int {
 	rendered, margin := t.renderString()
@@ -273,17 +264,6 @@ func (t *Table) Render() int {
 		fmt.Println(rendered)
 	}
 	return margin
-}
-
-// String renders the table without printing it.
-func (t *Table) String() string {
-	rendered, _ := t.renderString()
-	return rendered
-}
-
-// Width returns the rendered table width without printing it.
-func (t *Table) Width() int {
-	return lipgloss.Width(t.renderRawString())
 }
 
 // RenderTablesSideBySide prints two tables next to each other and returns the
@@ -430,26 +410,12 @@ func (t *Table) renderRawString() string {
 	for _, w := range colWidths {
 		totalNatural += w
 	}
-	var targetWidths []int
-	if t.minWidth > 0 {
-		targetWidth := t.minWidth
-		if targetWidth > termW {
-			targetWidth = termW
-		}
-		extra := targetWidth - (totalNatural + totalOverhead)
-		if extra > 0 {
-			for i := 0; i < extra; i++ {
-				colWidths[i%numCols]++
-			}
-			totalNatural += extra
-			targetWidths = append([]int(nil), colWidths...)
-		}
-	}
 
 	// Truncate columns if table would exceed terminal width
 	rows := t.rows
 	footerRows := t.footerRows
 	headers := t.headers
+	var targetWidths []int
 	if totalNatural+totalOverhead > termW {
 		availableWidth := termW - totalOverhead
 		if availableWidth < numCols*3 { // Minimum 3 chars per column
@@ -586,11 +552,6 @@ func (t *Table) renderRawString() string {
 		}
 		footerRows = truncFooterRows
 	}
-	if targetWidths != nil {
-		headers = fitTableCells(headers, targetWidths)
-		rows = fitTableRows(rows, targetWidths)
-		footerRows = fitTableRows(footerRows, targetWidths)
-	}
 
 	// Header style - cyan and bold
 	headerStyle := lipgloss.NewStyle().
@@ -627,34 +588,6 @@ func (t *Table) renderRawString() string {
 	}
 
 	return rendered
-}
-
-func fitTableRows(rows [][]string, widths []int) [][]string {
-	out := make([][]string, len(rows))
-	for i, row := range rows {
-		out[i] = fitTableCells(row, widths)
-	}
-	return out
-}
-
-func fitTableCells(cells []string, widths []int) []string {
-	out := make([]string, len(widths))
-	for i, width := range widths {
-		cell := ""
-		if i < len(cells) {
-			cell = cells[i]
-		}
-		out[i] = fitTableCell(cell, width)
-	}
-	return out
-}
-
-func fitTableCell(cell string, width int) string {
-	cell = Truncate(cell, width)
-	if padding := width - runewidth.StringWidth(cell); padding > 0 {
-		cell += strings.Repeat(" ", padding)
-	}
-	return cell
 }
 
 // insertFooterRows manipulates the rendered table string to add a separator and footer rows.

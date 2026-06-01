@@ -2,7 +2,7 @@ package inv
 
 import (
 	"fmt"
-	"path/filepath"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -70,40 +70,56 @@ func renderStatusTree(
 		return renderStatusDashboard(cfg, paths, now)
 	}
 
-	var b strings.Builder
-	count := 0
-	if providerName == "" || providerName == "local" {
-		wroteLocal, err := writeLocalStatus(&b, cfg, paths)
-		if err != nil {
-			return "", err
-		}
-		if wroteLocal {
-			count++
-		}
+	snapshot, ok, err := statusProviderSnapshotForName(cfg, paths, providerName, now)
+	if err != nil {
+		return "", err
 	}
-
-	names := make([]string, 0, len(cfg.Inventory.Provider))
-	for name := range cfg.Inventory.Provider {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if name == config.ProviderLocal {
-			continue
-		}
-		if providerName != "" && name != providerName {
-			continue
-		}
-		if count > 0 {
-			b.WriteByte('\n')
-		}
-		writeExternalProviderStatus(&b, cfg, name, cfg.Inventory.Provider[name], paths, now)
-		count++
-	}
-	if count == 0 {
+	if !ok {
 		return "", fmt.Errorf("provider %q not found", providerName)
 	}
+	var b strings.Builder
+	writeStatusProvider(&b, snapshot, true)
+	if providerName == config.ProviderLocal {
+		if err := writeLocalFindings(&b, cfg, paths); err != nil {
+			return "", err
+		}
+	}
 	return b.String(), nil
+}
+
+func statusProviderSnapshotForName(
+	cfg *config.Config,
+	paths *config.Paths,
+	providerName string,
+	now time.Time,
+) (statusProviderSnapshot, bool, error) {
+	if providerName == config.ProviderLocal {
+		return localStatusSnapshot(cfg, paths)
+	}
+	providerCfg, ok := cfg.Inventory.Provider[providerName]
+	if !ok {
+		return statusProviderSnapshot{}, false, nil
+	}
+	return externalStatusSnapshot(cfg, providerName, providerCfg, paths, now), true, nil
+}
+
+func writeLocalFindings(b *strings.Builder, cfg *config.Config, paths *config.Paths) error {
+	localFile := localFilePath(paths, inventory.LocalProviderIncludeFile())
+	parsed, err := sshconfig.NewParser().ParseFile(localFile)
+	if err != nil {
+		return err
+	}
+	var findings []localRefreshFinding
+	visitLocalRefreshFindings(parsed.Hosts, cfg, paths, nil, localRefreshSkipDNS, func(finding localRefreshFinding) {
+		findings = append(findings, finding)
+	})
+	if len(findings) > 0 {
+		fmt.Fprintf(b, "  %s\n", statusSection("findings:"))
+		for _, finding := range findings {
+			fmt.Fprintf(b, "    %s [%s] %s: %s\n", finding.Host, finding.Group, finding.Issue, finding.Detail)
+		}
+	}
+	return nil
 }
 
 func renderStatusDashboard(cfg *config.Config, paths *config.Paths, now time.Time) (string, error) {
@@ -129,39 +145,132 @@ func renderStatusDashboard(cfg *config.Config, paths *config.Paths, now time.Tim
 		return "", fmt.Errorf("provider %q not found", "")
 	}
 
-	providers := ui.NewTable("Provider", "Type", "Cache", "Hosts", "Groups", "Output")
-	groups := ui.NewTable("Group", "Hosts", "Config", "Auth")
-	for _, snapshot := range snapshots {
-		providers.AddRow(
-			snapshot.Name,
-			snapshot.Type,
-			dashboardCache(snapshot),
-			pluralizeHosts(snapshot.Hosts),
-			pluralizeGroups(len(snapshot.Groups)),
-			displayStatusFile(snapshot.OutputFile),
-		)
-		for _, group := range snapshot.Groups {
-			groups.AddRow(
-				group.Name,
-				fmt.Sprintf("%d", group.Hosts),
-				displayStatusConfig(group.ConfigFile),
-				dashboardAuth(group.Auth),
-			)
-		}
-	}
-	width := providers.Width()
-	if groupWidth := groups.Width(); groupWidth > width {
-		width = groupWidth
-	}
-	providers.WithMinWidth(width)
-	groups.WithMinWidth(width)
-
 	var b strings.Builder
-	b.WriteString(providers.String())
-	b.WriteString("\n\n")
-	b.WriteString(groups.String())
-	b.WriteByte('\n')
+	for i, snapshot := range snapshots {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		writeStatusProvider(&b, snapshot, false)
+	}
 	return b.String(), nil
+}
+
+func writeStatusProvider(b *strings.Builder, snapshot statusProviderSnapshot, detailed bool) {
+	fmt.Fprintf(b, "%s %s\n", statusProviderName(snapshot.Name), statusProviderType(snapshot.Type))
+	if snapshot.Name != config.ProviderLocal {
+		cache := dashboardCache(snapshot)
+		if detailed {
+			cache = snapshot.Cache
+		}
+		fmt.Fprintf(b, "  %s %s\n", statusLabel("cache:"), statusCache(cache))
+	}
+	fmt.Fprintf(b, "  %s %s\n", statusLabel("output:"), statusPath(displayStatusFile(snapshot.OutputFile)))
+	if detailed && snapshot.Name != config.ProviderLocal {
+		fmt.Fprintf(b, "  %s %s\n", statusLabel("last error:"), statusMaybeError(snapshot.LastError))
+	}
+	fmt.Fprintf(b, "  %s %s\n", statusLabel("hosts:"), pluralizeHosts(snapshot.Hosts))
+	fmt.Fprintf(b, "  %s\n", statusSection("groups:"))
+	if len(snapshot.Groups) == 0 {
+		fmt.Fprintf(b, "    %s\n", statusDash("-"))
+		return
+	}
+	for _, group := range snapshot.Groups {
+		writeStatusGroup(b, group, detailed)
+	}
+}
+
+func writeStatusGroup(b *strings.Builder, group statusProviderGroup, detailed bool) {
+	fmt.Fprintf(b, "    %s\n", statusGroupName(group.Name))
+	fmt.Fprintf(b, "      %s %s\n", statusLabel("hosts:"), pluralizeHosts(group.Hosts))
+	fmt.Fprintf(b, "      %s %s\n", statusLabel("config:"), statusPath(displayStatusConfig(group.ConfigFile)))
+	if detailed {
+		fmt.Fprintf(b, "      %s %s\n", statusLabel("output:"), statusPath(displayStatusFile(group.OutputFile)))
+		writeStatusGroupMatchTree(b, group.Match)
+	}
+	fmt.Fprintf(b, "      %s\n", statusSection("auth:"))
+	if detailed {
+		fmt.Fprintf(b, "        %s %s\n", statusLabel("mode:"), statusValue(group.Auth.AuthMode))
+		fmt.Fprintf(b, "        %s %s\n", statusLabel("credential provider:"), statusValue(group.Auth.CredentialProvider))
+	}
+	fmt.Fprintf(b, "        %s %s\n", statusLabel("username:"), statusValue(dashboardUsername(group.Auth)))
+	fmt.Fprintf(b, "        %s %s\n", statusLabel("username ref:"), statusPath(dashboardUsernameRef(group.Auth)))
+	fmt.Fprintf(b, "        %s %s\n", statusLabel("password ref:"), statusPath(dashboardPasswordRef(group.Auth)))
+}
+
+func writeStatusGroupMatchTree(b *strings.Builder, match config.InventoryMatch) {
+	if len(match) == 0 {
+		fmt.Fprintf(b, "      %s %s\n", statusLabel("match:"), statusDash("-"))
+		return
+	}
+	fmt.Fprintf(b, "      %s\n", statusSection("match:"))
+	fields := make([]string, 0, len(match))
+	for field := range match {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	for _, field := range fields {
+		values := append([]string(nil), match[field]...)
+		sort.Strings(values)
+		fmt.Fprintf(b, "        %s %s\n", statusLabel(field+":"), statusValue(strings.Join(values, ", ")))
+	}
+}
+
+func statusProviderName(value string) string {
+	return ui.StyleCyan.Render(value)
+}
+
+func statusProviderType(value string) string {
+	return ui.StyleDim.Render("(" + value + ")")
+}
+
+func statusGroupName(value string) string {
+	return ui.StyleWhite.Render(value)
+}
+
+func statusSection(value string) string {
+	return ui.StyleCyan.Faint(true).Render(value)
+}
+
+func statusLabel(value string) string {
+	return ui.StyleDim.Render(value)
+}
+
+func statusValue(value string) string {
+	if value == "-" {
+		return statusDash(value)
+	}
+	return value
+}
+
+func statusPath(value string) string {
+	if value == "-" {
+		return statusDash(value)
+	}
+	return value
+}
+
+func statusDash(value string) string {
+	return ui.StyleDim.Render(value)
+}
+
+func statusMaybeError(value string) string {
+	if value != "" && value != "-" {
+		return ui.StyleRed.Render(value)
+	}
+	return statusValue(value)
+}
+
+func statusCache(value string) string {
+	switch {
+	case strings.HasSuffix(value, " ok"):
+		return strings.TrimSuffix(value, " ok") + " " + ui.StyleGreen.Render("ok")
+	case strings.HasSuffix(value, " error"):
+		return strings.TrimSuffix(value, " error") + " " + ui.StyleRed.Render("error")
+	case strings.HasPrefix(value, "stale"), strings.HasPrefix(value, "missing"), strings.HasPrefix(value, "never"):
+		return ui.StyleYellow.Render(value)
+	default:
+		return value
+	}
 }
 
 type statusProviderSnapshot struct {
@@ -271,20 +380,25 @@ func dashboardCacheAge(cache string) string {
 	return ""
 }
 
-func dashboardAuth(auth inventoryAuthView) string {
-	values := make([]string, 0, 2)
-	if auth.CredentialProvider != "" && auth.CredentialProvider != "-" {
-		values = append(values, auth.CredentialProvider)
-	} else if auth.AuthMode != "" && auth.AuthMode != "-" {
-		values = append(values, auth.AuthMode)
-	}
+func dashboardUsername(auth inventoryAuthView) string {
 	if auth.Username != "" && auth.Username != "-" {
-		values = append(values, auth.Username)
+		return auth.Username
 	}
-	if len(values) == 0 {
-		return "-"
+	return "-"
+}
+
+func dashboardUsernameRef(auth inventoryAuthView) string {
+	if auth.UsernameRef != "" && auth.UsernameRef != "-" {
+		return auth.UsernameRef
 	}
-	return strings.Join(values, "/")
+	return "-"
+}
+
+func dashboardPasswordRef(auth inventoryAuthView) string {
+	if auth.PasswordRef != "" && auth.PasswordRef != "-" {
+		return auth.PasswordRef
+	}
+	return "-"
 }
 
 func displayStatusFile(path string) string {
@@ -292,50 +406,26 @@ func displayStatusFile(path string) string {
 	if path == "" || path == "-" {
 		return "-"
 	}
-	return filepath.Base(path)
+	return abbreviateHomePath(path)
 }
 
 func displayStatusConfig(path string) string {
-	base := displayStatusFile(path)
-	if strings.HasSuffix(base, ".toml") {
-		return strings.TrimSuffix(base, ".toml")
-	}
-	return base
+	return displayStatusFile(path)
 }
 
-func writeLocalStatus(b *strings.Builder, cfg *config.Config, paths *config.Paths) (bool, error) {
-	localFile := localFilePath(paths, inventory.LocalProviderIncludeFile())
-	parsed, err := sshconfig.NewParser().ParseFile(localFile)
-	if err != nil {
-		return false, err
+func abbreviateHomePath(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
 	}
-	if len(parsed.Hosts) == 0 && !hasConfiguredLocalGroups(cfg) {
-		return false, nil
+	home = strings.TrimRight(home, "/")
+	if path == home {
+		return "~"
 	}
-
-	b.WriteString("local\n")
-	b.WriteString("  type: local\n")
-	fmt.Fprintf(b, "  output: %s\n", localFile)
-	fmt.Fprintf(b, "  hosts: %d\n", len(parsed.Hosts))
-
-	groupCounts := make(map[string]int)
-	for _, host := range parsed.Hosts {
-		group := normalizeStatusGroup(inventory.LocalHostGroup(host, "-"))
-		groupCounts[group]++
+	if strings.HasPrefix(path, home+"/") {
+		return "~" + strings.TrimPrefix(path, home)
 	}
-	writeProviderGroups(b, cfg, paths, config.ProviderLocal, groupCounts)
-
-	var findings []localRefreshFinding
-	visitLocalRefreshFindings(parsed.Hosts, cfg, paths, nil, localRefreshSkipDNS, func(finding localRefreshFinding) {
-		findings = append(findings, finding)
-	})
-	if len(findings) > 0 {
-		b.WriteString("  findings\n")
-		for _, finding := range findings {
-			fmt.Fprintf(b, "    %s [%s] %s: %s\n", finding.Host, finding.Group, finding.Issue, finding.Detail)
-		}
-	}
-	return true, nil
+	return path
 }
 
 func hasConfiguredLocalGroups(cfg *config.Config) bool {
@@ -355,79 +445,8 @@ func pluralizeHosts(count int) string {
 	return fmt.Sprintf("%d hosts", count)
 }
 
-func pluralizeGroups(count int) string {
-	if count == 1 {
-		return "1 group"
-	}
-	return fmt.Sprintf("%d groups", count)
-}
-
 func localRefreshSkipDNS(string) localRefreshDNSResult {
 	return localRefreshDNSResult{status: "skip"}
-}
-
-func writeExternalProviderStatus(
-	b *strings.Builder,
-	cfg *config.Config,
-	name string,
-	providerCfg config.InventoryProviderConfig,
-	paths *config.Paths,
-	now time.Time,
-) {
-	state, err := inventory.LoadProviderState(name)
-	cache := "missing"
-	lastError := "-"
-	var groupCounts map[string]int
-	if err != nil {
-		if inventory.IsUnsupportedStateVersion(err) {
-			cache = "stale, refresh required"
-		} else {
-			lastError = err.Error()
-		}
-	} else if state != nil {
-		objectCount := len(state.Objects)
-		if state.LastRefresh.IsZero() {
-			cache = fmt.Sprintf("never refreshed, %d objects", objectCount)
-		} else {
-			cache = fmt.Sprintf("%s old, %d objects", formatCacheAge(now, state.LastRefresh), objectCount)
-		}
-		if state.LastError != "" {
-			lastError = state.LastError
-		}
-		groupCounts = providerGroupCounts(state)
-	}
-
-	b.WriteString(name)
-	b.WriteByte('\n')
-	fmt.Fprintf(b, "  type: %s\n", providerCfg.Type)
-	fmt.Fprintf(b, "  cache: %s\n", cache)
-	fmt.Fprintf(b, "  output: %s\n", localFilePath(paths, inventory.ProviderIncludeFile(name)))
-	fmt.Fprintf(b, "  last error: %s\n", lastError)
-	if state != nil {
-		fmt.Fprintf(b, "  hosts: %d\n", len(state.Objects))
-	}
-	writeProviderGroups(b, cfg, paths, name, groupCounts)
-}
-
-func writeProviderGroups(b *strings.Builder, cfg *config.Config, paths *config.Paths, provider string, groupCounts map[string]int) {
-	b.WriteString("  groups\n")
-	groups := statusProviderGroups(cfg, paths, provider, groupCounts)
-	if len(groups) == 0 {
-		b.WriteString("    -\n")
-		return
-	}
-	for _, group := range groups {
-		fmt.Fprintf(b, "    %s\n", group.Name)
-		fmt.Fprintf(b, "      config: %s\n", valueOrDash(group.ConfigFile))
-		fmt.Fprintf(b, "      output: %s\n", valueOrDash(group.OutputFile))
-		fmt.Fprintf(b, "      hosts: %s\n", pluralizeHosts(group.Hosts))
-		writeStatusGroupMatch(b, group.Match)
-		fmt.Fprintf(b, "      auth mode: %s\n", group.Auth.AuthMode)
-		fmt.Fprintf(b, "      credential provider: %s\n", group.Auth.CredentialProvider)
-		fmt.Fprintf(b, "      username: %s\n", group.Auth.Username)
-		fmt.Fprintf(b, "      username ref: %s\n", group.Auth.UsernameRef)
-		fmt.Fprintf(b, "      password ref: %s\n", group.Auth.PasswordRef)
-	}
 }
 
 type statusProviderGroup struct {
@@ -519,23 +538,6 @@ func normalizeStatusGroup(group string) string {
 		return "-"
 	}
 	return group
-}
-
-func writeStatusGroupMatch(b *strings.Builder, match config.InventoryMatch) {
-	if len(match) == 0 {
-		b.WriteString("      match: -\n")
-		return
-	}
-	fields := make([]string, 0, len(match))
-	for field := range match {
-		fields = append(fields, field)
-	}
-	sort.Strings(fields)
-	for _, field := range fields {
-		values := append([]string(nil), match[field]...)
-		sort.Strings(values)
-		fmt.Fprintf(b, "      match %s = %s\n", field, strings.Join(values, ", "))
-	}
 }
 
 func formatCacheAge(now, lastRefresh time.Time) string {
