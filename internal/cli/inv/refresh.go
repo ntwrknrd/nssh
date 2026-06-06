@@ -40,14 +40,11 @@ func runRefresh(target string) error {
 		return runLocalRefresh()
 	}
 
-	ui.CommandStart("INVENTORY REFRESH")
 	cfg, err := config.LoadDefault()
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	if err := validateRefreshTarget(cfg, target); err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 
@@ -64,7 +61,6 @@ func runRefresh(target string) error {
 		}
 		ui.Success("%s: %s", name, results[name])
 	}
-	ui.CommandEnd(refreshResultStatus(results))
 	return nil
 }
 
@@ -121,15 +117,6 @@ func refreshProviderCaches(cfg *config.Config, providerName string) map[string]s
 		results[name] = fmt.Sprintf("ok (%d objects)", count)
 	}
 	return results
-}
-
-func refreshResultStatus(results map[string]string) ui.StatusType {
-	for _, result := range results {
-		if strings.HasPrefix(result, "error") {
-			return ui.StatusWarning
-		}
-	}
-	return ui.StatusSuccess
 }
 
 func newConfigOnlyRunner(parser *sshconfig.Parser) inventory.RemoteRunner {

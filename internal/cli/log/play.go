@@ -36,25 +36,20 @@ func runPlay(dryRun bool) error {
 	settings := recording.LoadRecordingSettings()
 	sessions := recording.IterSessionRecords(settings)
 
-	ui.CommandStart("PLAY RECORDING")
-
 	if len(sessions) == 0 {
 		ui.Warning("No recordings found in %s", settings.Directory)
-		ui.CommandEnd(ui.StatusWarning)
 		return nil
 	}
 
 	session, err := SelectSession(sessions, "Select recording:")
 	if err != nil {
 		ui.Abort("%s", err)
-		ui.CommandEnd(ui.StatusAbort)
 		return nil
 	}
 
 	asciinemaPath, err := RequireBinary("asciinema")
 	if err != nil {
 		ui.Error("%s", err)
-		ui.CommandEnd(ui.StatusError)
 		return &exit.ExitError{Code: 1}
 	}
 
@@ -72,7 +67,6 @@ func runPlay(dryRun bool) error {
 	if dryRun {
 		ui.Info("[dry-run] %s %s", asciinemaPath, strings.Join(cmdArgs, " "))
 		ui.Warning("Run without --dry-run to actually play")
-		ui.CommandEnd(ui.StatusWarning)
 		return nil
 	}
 
@@ -89,16 +83,13 @@ func runPlay(dryRun bool) error {
 
 	// Check if playback was interrupted
 	if strings.Contains(outputBuf.String(), "interrupted") {
-		ui.CommandEnd(ui.StatusAbort)
 		return nil
 	}
 
 	if err != nil {
 		ui.Error("%s", err)
-		ui.CommandEnd(ui.StatusError)
 		return &exit.ExitError{Code: 1}
 	}
 
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }

@@ -62,8 +62,6 @@ func runSearch(pattern, selectPattern string, lastN int, caseSensitive bool, con
 	settings := recording.LoadRecordingSettings()
 	localTZ := time.Now().Location()
 
-	ui.CommandStart("SEARCH RECORDINGS")
-
 	var sessions []recording.SessionRecord
 	if lastN > 0 && selectPattern == "" {
 		sessions = recording.IterSessionRecordsLimit(settings, lastN)
@@ -76,7 +74,6 @@ func runSearch(pattern, selectPattern string, lastN int, caseSensitive bool, con
 		re, err := regexp.Compile("(?i)" + selectPattern)
 		if err != nil {
 			ui.Error("Invalid regex pattern: %s", err)
-			ui.CommandEnd(ui.StatusError)
 			return &exit.ExitError{Code: 1}
 		}
 
@@ -97,7 +94,6 @@ func runSearch(pattern, selectPattern string, lastN int, caseSensitive bool, con
 
 	if len(sessions) == 0 {
 		ui.Warning("No sessions to search")
-		ui.CommandEnd(ui.StatusWarning)
 		return nil
 	}
 
@@ -112,7 +108,6 @@ func runSearch(pattern, selectPattern string, lastN int, caseSensitive bool, con
 	}
 	if err != nil {
 		ui.Error("Invalid search pattern: %s", err)
-		ui.CommandEnd(ui.StatusError)
 		return &exit.ExitError{Code: 1}
 	}
 
@@ -132,14 +127,12 @@ func runSearch(pattern, selectPattern string, lastN int, caseSensitive bool, con
 
 	if len(allMatches) == 0 {
 		ui.Warning("No matches found for: %s", pattern)
-		ui.CommandEnd(ui.StatusWarning)
 		return nil
 	}
 
 	printSearchResults(allMatches, searchRe, localTZ)
 
 	ui.Info("Found %d match(es) in %d session(s)", len(allMatches), sessionsWithMatches)
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 

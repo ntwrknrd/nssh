@@ -46,6 +46,4 @@
 // Visual components for command output:
 //
 //	ui.Ruler("SECTION TITLE")   // Horizontal rule with title
-//	ui.CommandStart("CONNECT")  // Command header
-//	ui.CommandEnd(ui.StatusSuccess)  // Command footer with status
 package ui

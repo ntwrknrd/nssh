@@ -31,24 +31,19 @@ func newGetCmd() *cobra.Command {
 }
 
 func runGet(hostName string) error {
-	ui.CommandStart("INVENTORY HOST")
 	cfg, err := config.LoadDefault()
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	index, err := inventory.BuildProviderIndex()
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	host, _, err := findInventoryHostWithLocation(sshconfig.NewParser(), cfg, config.DefaultPaths(), hostName)
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	if host == nil {
-		ui.CommandEnd(ui.StatusError)
 		return fmt.Errorf("host %q not found", hostName)
 	}
 	meta := metadataForHost(host, cfg, config.DefaultPaths(), index)
@@ -60,7 +55,6 @@ func runGet(hostName string) error {
 			{Label: "Group", Value: meta.Group},
 		}, inventoryAuthDisplayRows(auth)...),
 	))
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 

@@ -66,8 +66,6 @@ func runSSHBenchmarkWithOptions(host string, warmups, samples int, simpleOnly, p
 	}
 	host = resolvedHost
 
-	ui.CommandStart("SSH BENCHMARK")
-
 	fmt.Printf("  %s: %s\n", ui.Gray("Host"), ui.Cyan(host))
 	fmt.Printf("  %s: %d samples, %d warmup\n", ui.Gray("Config"), samples, warmups)
 	fmt.Println()
@@ -78,7 +76,6 @@ func runSSHBenchmarkWithOptions(host string, warmups, samples int, simpleOnly, p
 
 	result, err := run(cmdArgs, warmups, samples, simpleOnly)
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return fmt.Errorf("benchmark failed: %w", err)
 	}
 
@@ -87,7 +84,6 @@ func runSSHBenchmarkWithOptions(host string, warmups, samples int, simpleOnly, p
 	// Save results to file
 	PrintSavedPath(SaveResults("ssh", host, result, simpleOnly))
 
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 

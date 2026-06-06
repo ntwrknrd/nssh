@@ -37,10 +37,8 @@ func newRemoveCmd() *cobra.Command {
 }
 
 func runRemoveHost(host string) error {
-	ui.CommandStart("REMOVE INVENTORY HOST")
 	cfg, err := config.LoadDefault()
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	paths := config.DefaultPaths()
@@ -48,26 +46,21 @@ func runRemoveHost(host string) error {
 	removedSSHConfig, _ := localWrittenHostConfig(parser, cfg, paths, host)
 	removedHostConfig, err := config.InventoryHostAuthConfigText(paths.ConfigFile, cfg, host)
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	removed, err := removeLocalHost(parser, cfg, paths, host)
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	if !removed {
 		ui.Noop("Host %q not found", host)
-		ui.CommandEnd(ui.StatusNoop)
 		return nil
 	}
 	if err := removeInventoryHostConfig(config.DefaultPaths().ConfigFile, cfg, host); err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	ui.Success("Host %q removed", host)
 	printRemovedConfig(removedSSHConfig, removedHostConfig)
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 
@@ -80,47 +73,37 @@ func removeInventoryHostConfig(configPath string, cfg *config.Config, host strin
 }
 
 func runRemoveGroup(group string) error {
-	ui.CommandStart("REMOVE INVENTORY GROUP")
 	cfg, err := config.LoadDefault()
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	providerName, groupName, err := config.ParseInventoryGroupID(group)
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	if providerName != config.ProviderLocal {
-		ui.CommandEnd(ui.StatusError)
 		return fmt.Errorf("local inventory group must use local/<group>")
 	}
 	if _, ok := cfg.Inventory.ProviderGroup(providerName, groupName); !ok {
 		ui.Noop("Group %q not found", group)
-		ui.CommandEnd(ui.StatusNoop)
 		return nil
 	}
 	hosts, err := inventoryHosts(sshconfig.NewParser(), cfg, config.DefaultPaths())
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	if err := ensureInventoryGroupEmpty(group, hosts, cfg, config.DefaultPaths()); err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	removedGroupConfig, err := config.InventoryGroupConfigText(config.DefaultPaths().ConfigFile, cfg, group)
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	if err := removeInventoryGroupConfig(config.DefaultPaths().ConfigFile, cfg, group); err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	ui.Success("Group %q removed", group)
 	printRemovedConfig(removedGroupConfig)
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 

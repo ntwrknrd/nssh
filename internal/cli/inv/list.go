@@ -40,20 +40,16 @@ Examples:
 }
 
 func runList(selectPattern string) error {
-	ui.CommandStart("INVENTORY")
 	cfg, err := config.LoadDefault()
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	index, err := inventory.BuildProviderIndex()
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	hosts, err := inventoryHosts(sshconfig.NewParser(), cfg, config.DefaultPaths())
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 
@@ -64,12 +60,10 @@ func runList(selectPattern string) error {
 	if selectPattern != "" {
 		hosts, err = filterInventoryHosts(hosts, selectPattern, metaForHost)
 		if err != nil {
-			ui.CommandEnd(ui.StatusError)
 			return &exit.ExitError{Code: 1, Message: fmt.Sprintf("invalid regex pattern: %s", err)}
 		}
 		if len(hosts) == 0 {
 			ui.WarningCentered("No hosts matching pattern: %s", selectPattern)
-			ui.CommandEnd(ui.StatusWarning)
 			return nil
 		}
 	}
@@ -93,7 +87,6 @@ func runList(selectPattern string) error {
 	}
 	table.Render()
 	ui.InfoWithMargin(table.LeftMargin(), "Total: %d hosts", count)
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 

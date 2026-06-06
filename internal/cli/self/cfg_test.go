@@ -10,7 +10,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/config"
 )
 
-func TestRunCfgDefaultUsesCommandBanners(t *testing.T) {
+func TestRunCfgDefaultOmitsCommandBanners(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -22,13 +22,16 @@ func TestRunCfgDefaultUsesCommandBanners(t *testing.T) {
 		}
 	})
 
-	if !strings.HasPrefix(got, "\n") {
-		t.Fatalf("cfg output should start with blank line before banner, got %q", got)
+	if strings.HasPrefix(got, "\n") {
+		t.Fatalf("cfg output should not start with banner spacing, got %q", got)
+	}
+	for _, unwanted := range []string{"──", "OK"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("cfg output should not include command banner %q:\n%s", unwanted, got)
+		}
 	}
 	for _, want := range []string{
-		filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "nssh", "config.toml"),
 		"[agent]",
-		"OK",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("cfg output missing %q:\n%s", want, got)

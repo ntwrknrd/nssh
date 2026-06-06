@@ -69,28 +69,22 @@ func runSetGroup(group string) error {
 	if err := validateLocalGroupID(group); err != nil {
 		return err
 	}
-	ui.CommandStart("SET INVENTORY GROUP")
 	cfg, err := config.LoadDefault()
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	created := ensureGroup(cfg, group)
 	if err := cfg.Inventory.Validate(); err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	if !created {
 		ui.Noop("Group %q already exists", group)
-		ui.CommandEnd(ui.StatusNoop)
 		return nil
 	}
 	if err := config.SaveInventoryGroup(config.DefaultPaths().ConfigFile, cfg, group); err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	ui.Success("Group %q created", group)
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 
@@ -169,14 +163,11 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 			return err
 		}
 	}
-	ui.CommandStart("SET INVENTORY HOST")
 	cfg, err := config.LoadDefault()
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	if err := authPatch.Validate(cfg); err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	parser := sshconfig.NewParser()
@@ -185,11 +176,9 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 	if group != "" || hostname != "" || user != "" || portSet || !authPatch.HasChange() {
 		existing, _, err := findInventoryHostWithLocation(parser, cfg, paths, host)
 		if err != nil {
-			ui.CommandEnd(ui.StatusError)
 			return err
 		}
 		if existing != nil && metadataForHost(existing, cfg, paths, nil).Owner != "local" {
-			ui.CommandEnd(ui.StatusError)
 			return fmt.Errorf("host %q is provider-owned; change provider group selector config instead", host)
 		}
 		interactiveAdd := shouldPromptLocalHostAddDetails(existing, group, hostname, user, portSet, authPatch)
@@ -223,10 +212,8 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 			}, existing, groupPrompt)
 			if err != nil {
 				if errors.Is(err, errPromptBack) {
-					ui.CommandEnd(ui.StatusAbort)
 					return nil
 				}
-				ui.CommandEnd(ui.StatusError)
 				return err
 			}
 			patch.Group = resolvedGroup
@@ -236,14 +223,12 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 					continue
 				}
 				if err != nil {
-					ui.CommandEnd(ui.StatusError)
 					return err
 				}
 				host = patch.Host
 			}
 			groupCreated, err = ensureLocalGroup(cfg, patch.Group, patch)
 			if err != nil {
-				ui.CommandEnd(ui.StatusError)
 				return err
 			}
 			if groupCreated {
@@ -253,7 +238,6 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 				hostAuthChanged = applyInteractiveHostAuthSelection(cfg, patch)
 				credentialRecord, err := resolveLocalHostCredentialRecord(cfg, patch)
 				if err != nil {
-					ui.CommandEnd(ui.StatusError)
 					return err
 				}
 				var credentialSecret *secret.Secret
@@ -270,7 +254,6 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 				}
 				result, err := runLocalHostCompatCheck(context.Background(), cfg, draft, 5, credentialSecret)
 				if err != nil {
-					ui.CommandEnd(ui.StatusError)
 					return err
 				}
 				if len(result.FixesApplied) > 0 {
@@ -282,7 +265,6 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 					ui.Warning("Connection test did not pass: %s", result.StoppedReason)
 					keep, err := ui.Confirm("Add host entry anyway?", false)
 					if err != nil || !keep {
-						ui.CommandEnd(ui.StatusAbort)
 						return nil
 					}
 				}
@@ -292,12 +274,10 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 			break
 		}
 		if err := upsertLocalHost(parser, cfg, paths, patch); err != nil {
-			ui.CommandEnd(ui.StatusError)
 			return err
 		}
 		if groupCreated && hostAuthChanged {
 			if err := config.SaveInventoryGroupAndHostAuth(config.DefaultPaths().ConfigFile, cfg, patch.Group, patch.Host); err != nil {
-				ui.CommandEnd(ui.StatusError)
 				return err
 			}
 			ui.Success("Group %q created", patch.Group)
@@ -305,14 +285,12 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 			pendingCreatedGroup = ""
 		} else if groupCreated && !authPatch.HasChange() {
 			if err := config.SaveInventoryGroup(config.DefaultPaths().ConfigFile, cfg, patch.Group); err != nil {
-				ui.CommandEnd(ui.StatusError)
 				return err
 			}
 			ui.Success("Group %q created", patch.Group)
 			pendingCreatedGroup = ""
 		} else if hostAuthChanged {
 			if err := config.SaveInventoryHostAuth(config.DefaultPaths().ConfigFile, cfg, patch.Host); err != nil {
-				ui.CommandEnd(ui.StatusError)
 				return err
 			}
 			stopAgentAfterInventoryAuthMutation()
@@ -323,21 +301,17 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 	}
 	if authPatch.HasChange() {
 		if err := applyHostAuthPatch(parser, cfg, config.DefaultPaths(), host, authPatch); err != nil {
-			ui.CommandEnd(ui.StatusError)
 			return err
 		}
 		if pendingCreatedGroup != "" {
 			if err := config.SaveInventoryGroupAndHostAuth(config.DefaultPaths().ConfigFile, cfg, pendingCreatedGroup, host); err != nil {
-				ui.CommandEnd(ui.StatusError)
 				return err
 			}
 			ui.Success("Group %q created", pendingCreatedGroup)
 		} else if err := config.SaveInventoryHostAuth(config.DefaultPaths().ConfigFile, cfg, host); err != nil {
-			ui.CommandEnd(ui.StatusError)
 			return err
 		}
 		stopAgentAfterInventoryAuthMutation()
 	}
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }

@@ -74,7 +74,6 @@ func resolveCredentialBenchmarkTarget(host string) (*connect.CredentialTarget, e
 }
 
 func runCredentialBenchmarkForTarget(target *connect.CredentialTarget, warmups, samples int, timeout time.Duration) error {
-	ui.CommandStart("CREDENTIAL AUTH BENCHMARK")
 	printCredentialTarget(target)
 	fmt.Printf("  %s: %d samples, %d warmup, %s timeout\n", ui.Gray("Config"), samples, warmups, timeout)
 	fmt.Println()
@@ -82,7 +81,6 @@ func runCredentialBenchmarkForTarget(target *connect.CredentialTarget, warmups, 
 	ui.SubSection("Credential Lookup")
 	result, err := runCredentialTargetBenchmarkWithTimeout(context.Background(), target, warmups, samples, timeout)
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 

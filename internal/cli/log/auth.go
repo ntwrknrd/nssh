@@ -36,7 +36,6 @@ func runAuth(serverURL string, quiet bool) error {
 	settings := recording.LoadRecordingSettings()
 
 	if !quiet {
-		ui.CommandStart("AUTHENTICATE WITH ASCIINEMA")
 	}
 
 	// Determine server URL (flag > env > config > default)
@@ -54,7 +53,6 @@ func runAuth(serverURL string, quiet bool) error {
 	if err != nil {
 		if !quiet {
 			ui.Error("%s", err)
-			ui.CommandEnd(ui.StatusError)
 		}
 		return &exit.ExitError{Code: 1}
 	}
@@ -78,13 +76,11 @@ func runAuth(serverURL string, quiet bool) error {
 	if err := cmd.Run(); err != nil {
 		if !quiet {
 			ui.Error("Authentication failed: %s", err)
-			ui.CommandEnd(ui.StatusError)
 		}
 		return &exit.ExitError{Code: 1}
 	}
 
 	if !quiet {
-		ui.CommandEnd(ui.StatusSuccess)
 	}
 	return nil
 }

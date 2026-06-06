@@ -76,12 +76,10 @@ func newDoctorCmd() *cobra.Command {
 }
 
 func runStatus() error {
-	ui.CommandStart("AGENT")
 	client, err := runtimeagent.Connect()
 	if err != nil {
 		if errors.Is(err, runtimeagent.ErrAgentNotRunning) {
 			ui.PrintKeyValue("Agent", "inactive")
-			ui.CommandEnd(ui.StatusNoop)
 			return nil
 		}
 		return err
@@ -96,7 +94,6 @@ func runStatus() error {
 	ui.PrintKeyValue("Provider sessions", formatProviderSessions(status.ProviderSessionNames, status.ProviderSessions))
 	ui.PrintKeyValue("Idle shutdown in", formatAgentSeconds(status.RemainingIdle))
 	ui.PrintKeyValue("Max lifetime ends in", formatAgentSeconds(status.RemainingLife))
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 
@@ -129,14 +126,12 @@ func runRestart() error {
 }
 
 func runDoctor() error {
-	ui.CommandStart("AGENT DOCTOR")
 	if runtimeagent.IsRunning() {
 		ui.PrintKeyValue("Socket", "active")
 	} else {
 		ui.PrintKeyValue("Socket", "inactive")
 	}
 	ui.PrintKeyValue("Peer verification", "enabled")
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 

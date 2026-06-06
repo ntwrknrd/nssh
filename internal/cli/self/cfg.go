@@ -98,21 +98,17 @@ func openInEditor(path string) error {
 }
 
 func printEffectiveConfig(paths *config.Paths) error {
-	ui.CommandStart(paths.ConfigFile)
 
 	cfg, err := config.LoadDefault()
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 
 	text, err := config.MarshalSparse(cfg)
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	fmt.Print(renderConfigText(text, term.IsTerminal(int(os.Stdout.Fd()))))
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 

@@ -18,12 +18,12 @@ func TestRunStatusDoesNotShowAgentRuntimeSession(t *testing.T) {
 		}
 	})
 
-	for _, want := range []string{"NSSH STATUS", "Version", "Dependencies", "Configuration", "SSH Config", "Logging"} {
+	for _, want := range []string{"Version", "Dependencies", "Configuration", "SSH Config", "Logging"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status output missing %q:\n%s", want, got)
 		}
 	}
-	for _, reject := range []string{"Session", "provider runtime active", "Idle in", "Ends in"} {
+	for _, reject := range []string{"NSSH STATUS", "Session", "provider runtime active", "Idle in", "Ends in"} {
 		if strings.Contains(got, reject) {
 			t.Fatalf("self status should not include agent runtime %q:\n%s", reject, got)
 		}

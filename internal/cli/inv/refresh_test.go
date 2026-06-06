@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/ui"
 )
 
 func TestRefreshTargetRejectsUnknownProvider(t *testing.T) {
@@ -35,23 +34,5 @@ func TestRefreshTargetAcceptsLocalAndConfiguredProvider(t *testing.T) {
 		if err := validateRefreshTarget(cfg, target); err != nil {
 			t.Fatalf("validateRefreshTarget(%q): %v", target, err)
 		}
-	}
-}
-
-func TestRefreshResultStatusWarnsOnProviderErrors(t *testing.T) {
-	got := refreshResultStatus(map[string]string{
-		"netbox-prod": "error: api timeout",
-	})
-	if got != ui.StatusWarning {
-		t.Fatalf("refreshResultStatus = %v, want warning", got)
-	}
-}
-
-func TestRefreshResultStatusSucceedsWhenProvidersRefresh(t *testing.T) {
-	got := refreshResultStatus(map[string]string{
-		"netbox-prod": "ok (12 objects)",
-	})
-	if got != ui.StatusSuccess {
-		t.Fatalf("refreshResultStatus = %v, want success", got)
 	}
 }

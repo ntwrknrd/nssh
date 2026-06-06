@@ -35,8 +35,6 @@ func runList(selectPattern string, lastN int) error {
 	settings := recording.LoadRecordingSettings()
 	localTZ := time.Now().Location()
 
-	ui.CommandStart("SESSION RECORDINGS")
-
 	// Use lazy loading optimization when --last is specified without filter
 	// This avoids loading all session metadata when only a few are needed
 	var sessions []recording.SessionRecord
@@ -51,7 +49,6 @@ func runList(selectPattern string, lastN int) error {
 		pattern, err := regexp.Compile("(?i)" + selectPattern)
 		if err != nil {
 			ui.Error("Invalid regex pattern: %s", err)
-			ui.CommandEnd(ui.StatusError)
 			return &exit.ExitError{Code: 1}
 		}
 
@@ -67,7 +64,6 @@ func runList(selectPattern string, lastN int) error {
 
 		if len(sessions) == 0 {
 			ui.WarningCentered("No sessions matching pattern: %s", selectPattern)
-			ui.CommandEnd(ui.StatusWarning)
 			return nil
 		}
 
@@ -79,6 +75,5 @@ func runList(selectPattern string, lastN int) error {
 
 	PrintSessions(sessions, selectPattern)
 
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }

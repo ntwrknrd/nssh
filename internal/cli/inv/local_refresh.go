@@ -49,20 +49,16 @@ type localRefreshDNSResult struct {
 }
 
 func runLocalRefresh() error {
-	ui.CommandStart("INVENTORY LOCAL REFRESH")
 	cfg, err := config.LoadDefault()
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	index, err := inventory.BuildProviderIndex()
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	hosts, err := inventoryHosts(sshconfig.NewParser(), cfg, config.DefaultPaths())
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	table := ui.NewStreamTable("Host", "Group", "Issue", "Detail").
@@ -74,37 +70,31 @@ func runLocalRefresh() error {
 	})
 	if count == 0 {
 		ui.Noop("No inventory issues found")
-		ui.CommandEnd(ui.StatusNoop)
 		return nil
 	}
 	table.Close()
 	fixable := fixableLocalRefreshFindings(findings)
 	if len(fixable) == 0 {
 		ui.Warning("No local fixes are available for these findings")
-		ui.CommandEnd(ui.StatusWarning)
 		return nil
 	}
 
 	selected, err := selectLocalRefreshFixes(fixable)
 	if err != nil {
 		ui.Abort("Selection failed: %s", err)
-		ui.CommandEnd(ui.StatusAbort)
 		return nil
 	}
 	if len(selected) == 0 {
 		ui.Abort("No fixes selected")
-		ui.CommandEnd(ui.StatusAbort)
 		return nil
 	}
 
 	ui.SubSection("Applying")
 	applied, err := applyLocalRefreshFixes(sshconfig.NewParser(), config.DefaultPaths(), selected)
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	ui.Success("Applied %d fix(es)", applied)
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 

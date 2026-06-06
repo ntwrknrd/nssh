@@ -66,8 +66,6 @@ Use --force to skip the confirmation prompt (for scripts).`,
 func runReset(dryRun, force bool) error {
 	paths := config.DefaultPaths()
 
-	ui.CommandStart("RESET NSSH")
-
 	if dryRun {
 		ui.Info("Dry run mode - no changes will be made")
 		fmt.Println()
@@ -104,13 +102,11 @@ func runReset(dryRun, force bool) error {
 		if err != nil {
 			// User canceled (Ctrl+C)
 			ui.Info("Reset canceled")
-			ui.CommandEnd(ui.StatusAbort)
 			return &exit.ExitError{Code: exitResetCancelled}
 		}
 
 		if strings.TrimSpace(response) != "DESTROY" {
 			ui.Info("Reset canceled (you must type DESTROY exactly)")
-			ui.CommandEnd(ui.StatusAbort)
 			return &exit.ExitError{Code: exitResetCancelled}
 		}
 		fmt.Println()
@@ -119,7 +115,6 @@ func runReset(dryRun, force bool) error {
 	// Dry run stops here
 	if dryRun {
 		ui.Info("Dry run complete - no changes were made")
-		ui.CommandEnd(ui.StatusNoop)
 		return nil
 	}
 
@@ -188,13 +183,11 @@ func runReset(dryRun, force bool) error {
 	fmt.Println()
 	if hasErrors {
 		ui.Warning("Reset completed with warnings")
-		ui.CommandEnd(ui.StatusWarning)
 		return &exit.ExitError{Code: exitResetError, Message: "reset completed with errors"}
 	}
 
 	ui.Success("nssh reset to initial state")
 	ui.Info("Run 'nssh self init' to set up again")
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 

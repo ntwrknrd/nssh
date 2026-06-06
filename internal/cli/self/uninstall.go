@@ -50,8 +50,6 @@ Use --dry-run to preview what would be removed.`,
 func runUninstall(keepConfig, keepRecordings, dryRun, yes bool) error {
 	paths := config.DefaultPaths()
 
-	ui.CommandStart("UNINSTALL NSSH")
-
 	if dryRun {
 		ui.Info("Dry run mode - no changes will be made")
 		fmt.Println()
@@ -62,7 +60,6 @@ func runUninstall(keepConfig, keepRecordings, dryRun, yes bool) error {
 		result, _ := ui.Confirm("Are you sure you want to uninstall nssh?", false)
 		if !result {
 			ui.Info("Uninstall canceled")
-			ui.CommandEnd(ui.StatusAbort)
 			return nil
 		}
 		fmt.Println()
@@ -172,13 +169,10 @@ skipRecordings:
 	switch {
 	case dryRun:
 		ui.Info("Dry run complete - no changes were made")
-		ui.CommandEnd(ui.StatusNoop)
 	case hasErrors:
 		ui.Warning("Uninstall completed with warnings")
-		ui.CommandEnd(ui.StatusWarning)
 	default:
 		ui.Success("nssh uninstalled successfully")
-		ui.CommandEnd(ui.StatusSuccess)
 	}
 
 	return nil

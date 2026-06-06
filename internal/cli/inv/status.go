@@ -32,19 +32,15 @@ func newStatusCmd() *cobra.Command {
 }
 
 func runStatus(providerName string) error {
-	ui.CommandStart("INVENTORY PROVIDERS")
 	cfg, err := config.LoadDefault()
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	out, err := renderStatusTree(cfg, config.DefaultPaths(), providerName, time.Now().UTC())
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	fmt.Print(out)
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 

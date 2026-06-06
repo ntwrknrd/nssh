@@ -25,15 +25,12 @@ func newImportCmd() *cobra.Command {
 }
 
 func runImport(path, group string) error {
-	ui.CommandStart("IMPORT INVENTORY")
 	cfg, err := config.LoadDefault()
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	result, err := importLocalCSV(sshconfig.NewParser(), cfg, config.DefaultPaths(), path, group)
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return err
 	}
 	for _, msg := range result.Errors {
@@ -43,9 +40,7 @@ func runImport(path, group string) error {
 	ui.PrintKeyValue("Skipped", fmt.Sprintf("%d", result.Skipped))
 	ui.PrintKeyValue("Failed", fmt.Sprintf("%d", result.Failed))
 	if result.Failed > 0 {
-		ui.CommandEnd(ui.StatusError)
 		return nil
 	}
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }

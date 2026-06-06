@@ -48,9 +48,6 @@ This helps diagnose setup issues and shows next steps for configuration.`,
 func runStatus() error {
 	paths := config.DefaultPaths()
 
-	ui.CommandStart("NSSH STATUS")
-
-	// Version (skip newline - CommandStart already added one)
 	ui.SubSection("Version", true)
 	var versionStr string
 	if commit != "" {
@@ -157,7 +154,6 @@ func runStatus() error {
 		printStatus(false, "Recordings", "not configured")
 	}
 
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 

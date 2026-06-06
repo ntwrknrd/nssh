@@ -42,18 +42,14 @@ func runExport(yes, dryRun bool) error {
 	settings := recording.LoadRecordingSettings()
 	sessions := recording.IterSessionRecords(settings)
 
-	ui.CommandStart("EXPORT RECORDING")
-
 	if len(sessions) == 0 {
 		ui.Warning("No recordings found in %s", settings.Directory)
-		ui.CommandEnd(ui.StatusWarning)
 		return nil
 	}
 
 	session, err := SelectSession(sessions, "Select recording:")
 	if err != nil {
 		ui.Abort("%s", err)
-		ui.CommandEnd(ui.StatusAbort)
 		return nil
 	}
 
@@ -67,7 +63,6 @@ func runExport(yes, dryRun bool) error {
 		result, err := ui.InputWithDefault("Output path (.txt or .gif)", defaultDest)
 		if err != nil {
 			ui.Abort("%s", err)
-			ui.CommandEnd(ui.StatusAbort)
 			return err
 		}
 		destination = result
@@ -77,7 +72,6 @@ func runExport(yes, dryRun bool) error {
 	format, err := resolveExportFormat(destination)
 	if err != nil {
 		ui.Error("%s", err)
-		ui.CommandEnd(ui.StatusError)
 		return &exit.ExitError{Code: 1}
 	}
 
@@ -89,7 +83,6 @@ func runExport(yes, dryRun bool) error {
 		toolPath, err := findGifConverter()
 		if err != nil {
 			ui.Error("%s", err)
-			ui.CommandEnd(ui.StatusError)
 			return &exit.ExitError{Code: 1}
 		}
 		cmd = []string{toolPath, session.CastPath, destination}
@@ -98,7 +91,6 @@ func runExport(yes, dryRun bool) error {
 		asciinemaPath, err := RequireBinary("asciinema")
 		if err != nil {
 			ui.Error("%s", err)
-			ui.CommandEnd(ui.StatusError)
 			return &exit.ExitError{Code: 1}
 		}
 		cmd = []string{asciinemaPath, "convert", "--overwrite", session.CastPath, destination}
@@ -112,16 +104,13 @@ func runExport(yes, dryRun bool) error {
 	}
 	if runErr != nil {
 		ui.Error("%s", runErr)
-		ui.CommandEnd(ui.StatusError)
 		return &exit.ExitError{Code: 1}
 	}
 
 	if dryRun {
 		ui.Warning("Run without --dry-run to actually export")
-		ui.CommandEnd(ui.StatusWarning)
 	} else {
 		ui.Success("Exported to %s", destination)
-		ui.CommandEnd(ui.StatusSuccess)
 	}
 
 	return nil

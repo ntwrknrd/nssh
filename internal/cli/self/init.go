@@ -56,7 +56,6 @@ func runInit(opts InitOptions) error {
 
 	// Header (skip in quiet mode)
 	if !opts.Quiet {
-		ui.CommandStart("INSTALL NSSH")
 	}
 
 	if opts.DryRun {
@@ -212,7 +211,6 @@ func runInit(opts InitOptions) error {
 
 	// Footer (skip in quiet mode)
 	if !opts.Quiet {
-		ui.CommandEnd(finalStatus)
 	}
 
 	return nil

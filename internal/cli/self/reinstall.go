@@ -51,7 +51,6 @@ To reinitialize credentials, use 'nssh self rekey' or 'nssh self reset'.`,
 }
 
 func runReinstallRelease(release string) error {
-	ui.CommandStart("REINSTALL NSSH")
 
 	// Run install script from GitHub
 	ui.SubSection("Download and Install")
@@ -69,7 +68,6 @@ func runReinstallRelease(release string) error {
 
 	if err := installCmd.Run(); err != nil {
 		ui.Error("Installation failed: %v", err)
-		ui.CommandEnd(ui.StatusError)
 		return &exit.ExitError{Code: 1}
 	}
 
@@ -78,11 +76,9 @@ func runReinstallRelease(release string) error {
 	if FindBinary() == "" {
 		fmt.Println()
 		ui.Warning("Add to PATH: export PATH=\"%s:$PATH\"", AbbreviatePath(installDir))
-		ui.CommandEnd(ui.StatusWarning)
 		return nil
 	}
 
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 
@@ -114,7 +110,6 @@ func normalizeRelease(release string) (string, error) {
 }
 
 func runReinstallDev() error {
-	ui.CommandStart("REINSTALL NSSH (DEV)")
 
 	// Find project root
 	projectRoot := FindProjectRoot()
@@ -123,7 +118,6 @@ func runReinstallDev() error {
 		fmt.Println()
 		fmt.Println("This command must be run from within the nssh source directory.")
 		fmt.Println("The directory must contain a go.mod file.")
-		ui.CommandEnd(ui.StatusError)
 		return &exit.ExitError{Code: 1}
 	}
 	ui.Info("Project root: %s", AbbreviatePath(projectRoot))
@@ -135,7 +129,6 @@ func runReinstallDev() error {
 
 	if err := os.MkdirAll(installDir, 0755); err != nil {
 		ui.Error("Failed to create install dir: %v", err)
-		ui.CommandEnd(ui.StatusError)
 		return &exit.ExitError{Code: 1}
 	}
 
@@ -147,7 +140,6 @@ func runReinstallDev() error {
 
 	if err := buildCmd.Run(); err != nil {
 		ui.Error("Build failed: %v", err)
-		ui.CommandEnd(ui.StatusError)
 		return &exit.ExitError{Code: 1}
 	}
 	ui.Success("Installed: %s", AbbreviatePath(binPath))
@@ -156,10 +148,8 @@ func runReinstallDev() error {
 	if FindBinary() == "" {
 		fmt.Println()
 		ui.Warning("Add to PATH: export PATH=\"%s:$PATH\"", AbbreviatePath(installDir))
-		ui.CommandEnd(ui.StatusWarning)
 		return nil
 	}
 
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
