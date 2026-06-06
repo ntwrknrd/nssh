@@ -37,6 +37,10 @@ func TestNewConfiguredRuntimeProviderRegistersAgentOwned1PasswordProviders(t *te
 	if provider.SessionCount() != 1 {
 		t.Fatalf("session count = %d, want 1", provider.SessionCount())
 	}
+	names := provider.SessionNames()
+	if len(names) != 1 || names[0] != "op-network" {
+		t.Fatalf("session names = %v, want [op-network]", names)
+	}
 }
 
 func TestNewConfiguredRuntimeProviderTreatsBlank1PasswordSessionAsAgentOwned(t *testing.T) {

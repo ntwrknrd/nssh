@@ -59,10 +59,23 @@ func TestAgentStatusShowsRuntimeState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("agent status: %v", err)
 	}
-	for _, want := range []string{"Agent", "active", "Provider sessions", "Idle in", "Ends in"} {
+	for _, want := range []string{"Agent", "active", "Provider sessions", "Idle shutdown in", "Max lifetime ends in"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("status missing %q:\n%s", want, output)
 		}
+	}
+}
+
+func TestAgentStatusFormatsProviderSessionsAndDurations(t *testing.T) {
+	got := formatProviderSessions([]string{"op-private", "op-expedient"}, 2)
+	if got != "2 (op-expedient, op-private)" {
+		t.Fatalf("provider sessions = %q", got)
+	}
+	if got := formatAgentSeconds(14345); got != "3h 59m 5s" {
+		t.Fatalf("formatted duration = %q, want 3h 59m 5s", got)
+	}
+	if got := formatAgentSeconds(20861); got != "5h 47m 41s" {
+		t.Fatalf("formatted duration = %q, want 5h 47m 41s", got)
 	}
 }
 

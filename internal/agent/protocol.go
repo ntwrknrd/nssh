@@ -32,11 +32,12 @@ const (
 
 // StatusInfo is returned by the status operation.
 type StatusInfo struct {
-	IdleTimeout      int64 `json:"idle_timeout"`      // Configured idle timeout in seconds
-	MaxLifetime      int64 `json:"max_lifetime"`      // Configured max lifetime in seconds
-	RemainingLife    int64 `json:"remaining_life"`    // Seconds until max lifetime expires
-	RemainingIdle    int64 `json:"remaining_idle"`    // Seconds until idle timeout (approximate)
-	ProviderSessions int   `json:"provider_sessions"` // Active provider-session count
+	IdleTimeout          int64    `json:"idle_timeout"`           // Configured idle timeout in seconds
+	MaxLifetime          int64    `json:"max_lifetime"`           // Configured max lifetime in seconds
+	RemainingLife        int64    `json:"remaining_life"`         // Seconds until max lifetime expires
+	RemainingIdle        int64    `json:"remaining_idle"`         // Seconds until idle timeout (approximate)
+	ProviderSessions     int      `json:"provider_sessions"`      // Active provider-session count
+	ProviderSessionNames []string `json:"provider_session_names"` // Active provider-session names
 }
 
 // ProviderRequest describes a provider-scoped operation brokered by the agent.

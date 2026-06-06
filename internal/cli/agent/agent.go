@@ -4,6 +4,9 @@ package agentcmd
 import (
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
+	"time"
 
 	runtimeagent "github.com/ntwrknrd/nssh/internal/agent"
 	"github.com/ntwrknrd/nssh/internal/ui"
@@ -90,9 +93,9 @@ func runStatus() error {
 		return err
 	}
 	ui.PrintKeyValue("Agent", "active")
-	ui.PrintKeyValue("Provider sessions", fmt.Sprintf("%d", status.ProviderSessions))
-	ui.PrintKeyValue("Idle in", formatAgentSeconds(status.RemainingIdle))
-	ui.PrintKeyValue("Ends in", formatAgentSeconds(status.RemainingLife))
+	ui.PrintKeyValue("Provider sessions", formatProviderSessions(status.ProviderSessionNames, status.ProviderSessions))
+	ui.PrintKeyValue("Idle shutdown in", formatAgentSeconds(status.RemainingIdle))
+	ui.PrintKeyValue("Max lifetime ends in", formatAgentSeconds(status.RemainingLife))
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
@@ -141,5 +144,31 @@ func formatAgentSeconds(seconds int64) string {
 	if seconds <= 0 {
 		return "0s"
 	}
-	return fmt.Sprintf("%ds", seconds)
+	duration := time.Duration(seconds) * time.Second
+	hours := int(duration / time.Hour)
+	duration -= time.Duration(hours) * time.Hour
+	minutes := int(duration / time.Minute)
+	duration -= time.Duration(minutes) * time.Minute
+	secs := int(duration / time.Second)
+
+	parts := make([]string, 0, 3)
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if minutes > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", minutes))
+	}
+	if secs > 0 || len(parts) == 0 {
+		parts = append(parts, fmt.Sprintf("%ds", secs))
+	}
+	return strings.Join(parts, " ")
+}
+
+func formatProviderSessions(names []string, count int) string {
+	if len(names) == 0 {
+		return fmt.Sprintf("%d", count)
+	}
+	sorted := append([]string(nil), names...)
+	sort.Strings(sorted)
+	return fmt.Sprintf("%d (%s)", len(sorted), strings.Join(sorted, ", "))
 }

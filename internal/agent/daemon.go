@@ -285,10 +285,16 @@ func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger
 		case OpStatus:
 			// Status checks don't count as activity - they're just observing state
 			sessionCount := 0
+			var sessionNames []string
 			if p, ok := provider.(interface{ SessionCount() int }); ok {
 				sessionCount = p.SessionCount()
 			}
-			statusData, _ := json.Marshal(state.status(sessionCount))
+			if p, ok := provider.(interface{ SessionNames() []string }); ok {
+				sessionNames = p.SessionNames()
+			}
+			status := state.status(sessionCount)
+			status.ProviderSessionNames = sessionNames
+			statusData, _ := json.Marshal(status)
 			resp = Response{ID: req.ID, OK: true, Data: statusData}
 
 		case OpProviderRequest:

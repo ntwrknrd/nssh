@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 
@@ -122,6 +123,17 @@ func (p *RuntimeProvider) SessionCount() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return len(p.onePassword)
+}
+
+func (p *RuntimeProvider) SessionNames() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	names := make([]string, 0, len(p.onePassword))
+	for name := range p.onePassword {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (p *RuntimeProvider) handleOnePasswordGet(ctx context.Context, cfg OnePasswordSessionConfig, req ProviderRequest) (ProviderResponse, error) {

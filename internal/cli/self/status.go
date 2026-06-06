@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/ntwrknrd/nssh/internal/agent"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
@@ -158,21 +157,6 @@ func runStatus() error {
 		printStatus(false, "Recordings", "not configured")
 	}
 
-	// Session status (at the bottom - most actionable info)
-	ui.SubSection("Session")
-	if client, err := agent.Connect(); err == nil {
-		if status, err := client.Status(); err == nil {
-			printStatus(true, "Status", "provider runtime active")
-			ui.StatusLineNeutral("Idle in", formatDuration(status.RemainingIdle))
-			ui.StatusLineNeutral("Ends in", formatDuration(status.RemainingLife))
-		} else {
-			printStatus(false, "Status", "not running")
-		}
-		_ = client.Close()
-	} else {
-		printStatus(false, "Status", "not running")
-	}
-
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
@@ -220,25 +204,5 @@ func formatBytes(bytes int64) string {
 		return fmt.Sprintf("%.1f KB", float64(bytes)/float64(KB))
 	default:
 		return fmt.Sprintf("%d B", bytes)
-	}
-}
-
-// formatDuration formats seconds into a human-readable duration.
-func formatDuration(seconds int64) string {
-	if seconds <= 0 {
-		return "0s"
-	}
-
-	hours := seconds / 3600
-	minutes := (seconds % 3600) / 60
-	secs := seconds % 60
-
-	switch {
-	case hours > 0:
-		return fmt.Sprintf("%dh %dm", hours, minutes)
-	case minutes > 0:
-		return fmt.Sprintf("%dm %ds", minutes, secs)
-	default:
-		return fmt.Sprintf("%ds", secs)
 	}
 }
