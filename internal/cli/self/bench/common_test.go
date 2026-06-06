@@ -1,6 +1,9 @@
 package bench
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -29,5 +32,89 @@ func TestComputeStartupOverheadUsesPerSampleDurations(t *testing.T) {
 	stats := computeWallMinusStageStats("pre_connector", wallClocks, samples, connector.TimingTotal)
 	if stats.Mean != 35*time.Millisecond || stats.Min != 30*time.Millisecond || stats.Max != 40*time.Millisecond {
 		t.Fatalf("stats = %+v", stats)
+	}
+}
+
+func TestSortStageNamesOrdersCredentialPrefetchBeforePTYStart(t *testing.T) {
+	got := sortStageNames([]string{
+		connector.TimingPasswordWrite,
+		connector.TimingPasswordSent,
+		connector.TimingCredentialLookupLazy,
+		connector.TimingCredentialLookupPrefetch,
+		connector.TimingPasswordPrompt,
+		connector.TimingPTYStart,
+	})
+	want := []string{
+		connector.TimingCredentialLookupPrefetch,
+		connector.TimingPTYStart,
+		connector.TimingPasswordPrompt,
+		connector.TimingCredentialLookupLazy,
+		connector.TimingPasswordWrite,
+		connector.TimingPasswordSent,
+	}
+
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("sortStageNames = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestBuildSSHBenchmarkArgsAddsPasswordAuthOptionsBeforeCommand(t *testing.T) {
+	got := buildSSHBenchmarkArgs("edge01", true)
+	want := []string{
+		"edge01",
+		"-o", "ControlMaster=no",
+		"-o", "ControlPath=none",
+		"-o", "ControlPersist=no",
+		"-o", "PubkeyAuthentication=no",
+		"-o", "PasswordAuthentication=yes",
+		"-o", "KbdInteractiveAuthentication=yes",
+		"-o", "PreferredAuthentications=password,keyboard-interactive",
+		"--", "echo", "nssh-benchmark-test",
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("args = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestSaveResultsWritesRawJSONArtifact(t *testing.T) {
+	dataHome := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	result := &BenchmarkResult{
+		Samples: []map[string]time.Duration{{
+			connector.TimingTotal: 10 * time.Millisecond,
+		}},
+		WallClocks:   []time.Duration{12 * time.Millisecond},
+		StageNames:   []string{connector.TimingTotal},
+		TotalRuns:    1,
+		MeasuredRuns: 1,
+	}
+
+	textPath := SaveResults("ssh", "edge01", result, false)
+	jsonPath := textPath[:len(textPath)-len(filepath.Ext(textPath))] + ".json"
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatalf("read json artifact: %v", err)
+	}
+
+	var artifact rawBenchmarkArtifact
+	if err := json.Unmarshal(data, &artifact); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	if artifact.Type != "ssh" || artifact.Host != "edge01" {
+		t.Fatalf("artifact = %+v", artifact)
+	}
+	if len(artifact.Samples) != 1 || artifact.Samples[0].Stages[connector.TimingTotal] != 10 {
+		t.Fatalf("samples = %+v", artifact.Samples)
+	}
+	if artifact.Samples[0].WallClockMS != 12 {
+		t.Fatalf("wall clock = %v, want 12", artifact.Samples[0].WallClockMS)
 	}
 }

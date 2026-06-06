@@ -12,19 +12,92 @@ import (
 	"github.com/ntwrknrd/nssh/internal/secret"
 )
 
+type passwordPrefetchResult struct {
+	password *secret.Secret
+	err      error
+}
+
+// StartPasswordPrefetch begins deferred password resolution before SSH asks for
+// the password. The prompt-time path waits for and reuses this result.
+func (c *Connector) StartPasswordPrefetch(ctx context.Context) {
+	c.passwordMu.Lock()
+	if c.password != nil || c.passwordResolver == nil || c.passwordPrefetchStarted {
+		c.passwordMu.Unlock()
+		return
+	}
+	resolver := c.passwordResolver
+	done := make(chan struct{})
+	c.passwordPrefetchStarted = true
+	c.passwordPrefetchDone = done
+	c.passwordMu.Unlock()
+
+	go func() {
+		timer := StartTiming(TimingCredentialLookupPrefetch)
+		pw, err := resolver(ctx)
+		if err == nil {
+			timer.Emit()
+		}
+
+		c.passwordMu.Lock()
+		defer c.passwordMu.Unlock()
+		defer close(done)
+
+		if c.passwordPrefetchAbandoned {
+			if pw != nil {
+				pw.Destroy()
+			}
+			return
+		}
+		c.passwordPrefetchResult = passwordPrefetchResult{password: pw, err: err}
+		if err == nil {
+			c.password = pw
+		}
+	}()
+}
+
+func (c *Connector) hasPasswordSource() bool {
+	c.passwordMu.Lock()
+	defer c.passwordMu.Unlock()
+	return c.password != nil || c.passwordResolver != nil
+}
+
 func (c *Connector) resolvePassword(ctx context.Context) (*secret.Secret, error) {
+	c.passwordMu.Lock()
 	if c.password != nil {
-		return c.password, nil
+		pw := c.password
+		c.passwordMu.Unlock()
+		return pw, nil
+	}
+	if c.passwordPrefetchStarted {
+		done := c.passwordPrefetchDone
+		c.passwordMu.Unlock()
+		select {
+		case <-done:
+			c.passwordMu.Lock()
+			result := c.passwordPrefetchResult
+			c.passwordMu.Unlock()
+			return result.password, result.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	if c.passwordResolver == nil {
+		c.passwordMu.Unlock()
 		return nil, nil
 	}
-	pw, err := c.passwordResolver(ctx)
+	resolver := c.passwordResolver
+	c.passwordMu.Unlock()
+
+	lookupTimer := StartTiming(TimingCredentialLookupLazy)
+	pw, err := resolver(ctx)
 	if err != nil {
 		return nil, err
 	}
+	lookupTimer.Emit()
+	c.passwordMu.Lock()
 	c.password = pw
-	return c.password, nil
+	c.passwordMu.Unlock()
+	return pw, nil
 }
 
 // injectPassword writes the password to the PTY.
@@ -37,6 +110,7 @@ func (c *Connector) injectPassword(ctx context.Context) error {
 		return fmt.Errorf("no password configured")
 	}
 
+	writeTimer := StartTiming(TimingPasswordWrite)
 	err = password.Use(func(pw []byte) error {
 		// Write password + newline to PTY master
 		if _, err := c.ptyFile.Write(pw); err != nil {
@@ -47,6 +121,7 @@ func (c *Connector) injectPassword(ctx context.Context) error {
 	})
 
 	if err == nil {
+		writeTimer.Emit()
 		c.passwordSentAt = time.Now()
 	}
 	return err
@@ -63,12 +138,18 @@ func (c *Connector) filterOutput(data []byte, suppressPrompt bool) []byte {
 	}
 
 	// Only filter password echo if we recently sent a password
-	if c.recentPasswordSent() && c.password != nil {
+	if c.recentPasswordSent() {
+		c.passwordMu.Lock()
+		password := c.password
+		c.passwordMu.Unlock()
+		if password == nil {
+			return result
+		}
 		// Strip leading newlines (echo from password submission)
 		result = bytes.TrimLeft(result, "\r\n")
 
 		// Check if password appears in output (echo from misconfigured server)
-		if err := c.password.Use(func(pw []byte) error {
+		if err := password.Use(func(pw []byte) error {
 			if bytes.Contains(result, pw) {
 				result = bytes.ReplaceAll(result, pw, []byte("********"))
 			}

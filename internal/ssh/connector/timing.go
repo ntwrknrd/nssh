@@ -73,6 +73,13 @@ const (
 	// TimingCredentialLookup is emitted after credential resolution completes.
 	TimingCredentialLookup = "credential_lookup"
 
+	// TimingCredentialLookupLazy is emitted when a deferred password resolver runs.
+	TimingCredentialLookupLazy = "credential_lookup_lazy"
+
+	// TimingCredentialLookupPrefetch is emitted when a deferred password resolver
+	// runs before the password prompt.
+	TimingCredentialLookupPrefetch = "credential_lookup_prefetch"
+
 	// Connector stages (emitted from connector)
 
 	// TimingPTYStart is emitted after PTY allocation completes.
@@ -86,6 +93,9 @@ const (
 
 	// TimingPasswordSent is emitted after password is injected (duration of injection).
 	TimingPasswordSent = "password_sent"
+
+	// TimingPasswordWrite is emitted for PTY password write time after lookup is complete.
+	TimingPasswordWrite = "password_write"
 
 	// TimingSessionEnd is emitted when the session ends (total session duration).
 	TimingSessionEnd = "session_end"

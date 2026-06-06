@@ -244,6 +244,63 @@ func TestResolveInventoryCredentialDefersDirectPasswordRefWithLiteralUsername(t 
 	}
 }
 
+func TestResolveHostForConnectCarriesResolvedAuthMode(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{
+		"op-network": {Type: config.CredentialProvider1Password},
+	}
+	cfg.Inventory.Auth = config.InventoryAuthConfig{
+		CredentialProvider: "op-network",
+		PasswordRef:        "op://Network/Edge/password",
+		Username:           "netops",
+		AuthMode:           config.AuthModePassword,
+	}
+
+	resolved, err := ResolveHostForConnect("edge01", "", cfg)
+	if err != nil {
+		t.Fatalf("ResolveHostForConnect: %v", err)
+	}
+	if resolved.AuthMode != config.AuthModePassword {
+		t.Fatalf("auth mode = %q, want %q", resolved.AuthMode, config.AuthModePassword)
+	}
+}
+
+func TestCredentialTargetFromResolvedHostExposesSafeMetadataAndResolver(t *testing.T) {
+	cred := &ResolvedCredential{
+		Username: "netops",
+		Source:   CredSourceGroup,
+		PasswordResolver: func(ctx context.Context) (*secret.Secret, error) {
+			return secret.NewFromString("secret"), nil
+		},
+	}
+	resolved := &ResolvedHost{
+		Hostname:   "edge01",
+		Username:   "netops",
+		Credential: cred,
+	}
+
+	target, err := CredentialTargetFromResolvedHost(resolved)
+	if err != nil {
+		t.Fatalf("CredentialTargetFromResolvedHost: %v", err)
+	}
+	if target.Host != "edge01" || target.UsernamePresent != true || target.Source != CredSourceGroup {
+		t.Fatalf("target = %+v", target)
+	}
+	if target.Resolver == nil {
+		t.Fatal("resolver is nil")
+	}
+	if target.Password != nil {
+		t.Fatal("target exposes password before benchmark lookup")
+	}
+}
+
+func TestCredentialTargetFromResolvedHostRejectsMissingCredential(t *testing.T) {
+	_, err := CredentialTargetFromResolvedHost(&ResolvedHost{Hostname: "edge01"})
+	if err == nil || err.Error() != "host edge01 has no configured credential" {
+		t.Fatalf("error = %v, want no configured credential", err)
+	}
+}
+
 func TestResolveInventoryCredentialResolvesUsernameRefBeforeSSHStart(t *testing.T) {
 	provider := &countingCredentialProvider{
 		record: &credential.Record{Username: "netops", Secret: secret.NewFromString("secret"), Ref: "op://Network/Edge/password"},
@@ -285,5 +342,33 @@ func TestSelectConnectionUsernameKeepsSSHUserForUnmanagedHosts(t *testing.T) {
 	got := selectConnectionUsername(false, "", "ssh-user", "", "credential-user", "cj")
 	if got != "ssh-user" {
 		t.Fatalf("username = %q, want ssh config user", got)
+	}
+}
+
+func TestShouldPrefetchPasswordAllowsForcedPasswordAuthArgs(t *testing.T) {
+	resolved := &ResolvedHost{
+		Credential: &ResolvedCredential{
+			PasswordResolver: func(context.Context) (*secret.Secret, error) {
+				return secret.NewFromString("secret"), nil
+			},
+		},
+	}
+
+	if !shouldPrefetchPassword(resolved, []string{"-o", "PubkeyAuthentication=no"}) {
+		t.Fatal("expected forced password auth args to enable prefetch")
+	}
+}
+
+func TestShouldPrefetchPasswordSkipsCredentialWithNoPasswordModeSignal(t *testing.T) {
+	resolved := &ResolvedHost{
+		Credential: &ResolvedCredential{
+			PasswordResolver: func(context.Context) (*secret.Secret, error) {
+				return secret.NewFromString("secret"), nil
+			},
+		},
+	}
+
+	if shouldPrefetchPassword(resolved, nil) {
+		t.Fatal("expected prefetch to stay disabled without auth_mode=password or forced password auth args")
 	}
 }

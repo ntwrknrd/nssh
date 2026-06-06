@@ -4,6 +4,7 @@ package connect
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,8 @@ type ResolvedCredential struct {
 	Password         *secret.Secret
 	PasswordResolver func(context.Context) (*secret.Secret, error)
 	Source           string
+	Provider         string
+	Ref              string
 }
 
 // ResolvedHost holds the result of host resolution: everything needed to
@@ -33,10 +36,45 @@ type ResolvedHost struct {
 	Query       string
 	Hostname    string
 	Username    string
+	AuthMode    string
 	IncludeFile string
 	HostEntry   *sshconfig.HostEntry
 	Credential  *ResolvedCredential
 	Config      *config.Config
+}
+
+type CredentialTarget struct {
+	Host            string
+	Provider        string
+	Source          string
+	Ref             string
+	RefKind         string
+	UsernamePresent bool
+	Password        *secret.Secret
+	Resolver        func(context.Context) (*secret.Secret, error)
+}
+
+func CredentialTargetFromResolvedHost(resolved *ResolvedHost) (*CredentialTarget, error) {
+	if resolved == nil {
+		return nil, nil
+	}
+	if resolved.Credential == nil {
+		return nil, fmt.Errorf("host %s has no configured credential", resolved.Hostname)
+	}
+	cred := resolved.Credential
+	if cred.Password == nil && cred.PasswordResolver == nil {
+		return nil, fmt.Errorf("host %s has no configured credential", resolved.Hostname)
+	}
+	return &CredentialTarget{
+		Host:            resolved.Hostname,
+		Provider:        cred.Provider,
+		Source:          cred.Source,
+		Ref:             cred.Ref,
+		RefKind:         credentialRefKind(cred.Ref),
+		UsernamePresent: strings.TrimSpace(resolved.Username) != "" || strings.TrimSpace(cred.Username) != "",
+		Password:        cred.Password,
+		Resolver:        cred.PasswordResolver,
+	}, nil
 }
 
 // ResolveHostForConnect performs host lookup, include-file discovery, and
@@ -103,6 +141,7 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 		Query:       query,
 		Hostname:    hostname,
 		Username:    username,
+		AuthMode:    auth.AuthMode,
 		IncludeFile: includeFile,
 		HostEntry:   hostEntry,
 		Credential:  cred,
@@ -203,6 +242,7 @@ func resolveScopedCredential(provider credential.Provider, scope credentialScope
 		Username: recordUsername,
 		Password: record.Secret,
 		Source:   source,
+		Ref:      record.Ref,
 	}, nil
 }
 
@@ -277,7 +317,9 @@ func resolveInventoryCredential(registry providerRegistry, auth config.Inventory
 				}
 				return record.Secret, nil
 			},
-			Source: source,
+			Source:   source,
+			Provider: auth.CredentialProvider,
+			Ref:      ref.Ref,
 		}, nil
 	}
 
@@ -295,7 +337,21 @@ func resolveInventoryCredential(registry providerRegistry, auth config.Inventory
 	if username == "" {
 		username = strings.TrimSpace(explicitUser)
 	}
-	return &ResolvedCredential{Username: username, Password: record.Secret, Source: source}, nil
+	return &ResolvedCredential{Username: username, Password: record.Secret, Source: source, Provider: auth.CredentialProvider, Ref: ref.Ref}, nil
+}
+
+func credentialRefKind(ref string) string {
+	ref = strings.TrimSpace(ref)
+	switch {
+	case ref == "":
+		return ""
+	case strings.HasPrefix(ref, "op://") && strings.HasSuffix(ref, "/"):
+		return "1password_item"
+	case strings.HasPrefix(ref, "op://"):
+		return "1password_secret"
+	default:
+		return "provider_ref"
+	}
 }
 
 func canDeferCredentialLookup(ref config.CredentialRefConfig, explicitUser string) bool {

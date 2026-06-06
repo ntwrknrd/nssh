@@ -273,6 +273,7 @@ func newBenchCmd() *cobra.Command {
 	}
 	cmd.AddCommand(bench.NewSSHCmd())
 	cmd.AddCommand(bench.NewSCPCmd())
+	cmd.AddCommand(bench.NewCredentialCmd())
 
 	return cmd
 }

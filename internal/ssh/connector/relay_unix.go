@@ -250,7 +250,7 @@ func (c *Connector) relay(ctx context.Context) error {
 			c.hostKeyHandled = true
 			EmitWithValue(TimingPasswordPrompt, time.Since(c.sessionStart))
 
-			if c.password != nil || c.passwordResolver != nil {
+			if c.hasPasswordSource() {
 				// We have a password - inject it once
 				passwordTimer := StartTiming(TimingPasswordSent)
 				if err := c.injectPassword(ctx); err != nil {

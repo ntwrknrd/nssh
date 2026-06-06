@@ -10,9 +10,10 @@ import (
 // NewSSHCmd creates the ssh benchmark subcommand.
 func NewSSHCmd() *cobra.Command {
 	var (
-		warmups    int
-		samples    int
-		simpleOnly bool
+		warmups      int
+		samples      int
+		simpleOnly   bool
+		passwordAuth bool
 	)
 
 	cmd := &cobra.Command{
@@ -35,18 +36,23 @@ Examples:
   nssh self bench ssh router1 --simple`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSSHBenchmark(args[0], warmups, samples, simpleOnly)
+			return runSSHBenchmarkWithOptions(args[0], warmups, samples, simpleOnly, passwordAuth)
 		},
 	}
 
 	cmd.Flags().IntVar(&warmups, "warmups", 1, "number of warmup runs (not measured)")
 	cmd.Flags().IntVar(&samples, "samples", 3, "number of measured runs")
 	cmd.Flags().BoolVar(&simpleOnly, "simple", false, "wall-clock timing only (no stage breakdown)")
+	cmd.Flags().BoolVar(&passwordAuth, "password-auth", false, "force SSH password authentication during benchmark")
 
 	return cmd
 }
 
 func runSSHBenchmark(host string, warmups, samples int, simpleOnly bool) error {
+	return runSSHBenchmarkWithOptions(host, warmups, samples, simpleOnly, false)
+}
+
+func runSSHBenchmarkWithOptions(host string, warmups, samples int, simpleOnly, passwordAuth bool) error {
 	if samples < 1 {
 		return fmt.Errorf("--samples must be at least 1")
 	}
@@ -68,7 +74,7 @@ func runSSHBenchmark(host string, warmups, samples int, simpleOnly bool) error {
 
 	// Build command args: nssh <host> -- echo nssh-benchmark-test
 	// The echo command runs on the remote and exits, giving us a quick roundtrip test
-	cmdArgs := []string{host, "--", "echo", "nssh-benchmark-test"}
+	cmdArgs := buildSSHBenchmarkArgs(host, passwordAuth)
 
 	result, err := run(cmdArgs, warmups, samples, simpleOnly)
 	if err != nil {
@@ -83,4 +89,20 @@ func runSSHBenchmark(host string, warmups, samples int, simpleOnly bool) error {
 
 	ui.CommandEnd(ui.StatusSuccess)
 	return nil
+}
+
+func buildSSHBenchmarkArgs(host string, passwordAuth bool) []string {
+	args := []string{host}
+	if passwordAuth {
+		args = append(args,
+			"-o", "ControlMaster=no",
+			"-o", "ControlPath=none",
+			"-o", "ControlPersist=no",
+			"-o", "PubkeyAuthentication=no",
+			"-o", "PasswordAuthentication=yes",
+			"-o", "KbdInteractiveAuthentication=yes",
+			"-o", "PreferredAuthentications=password,keyboard-interactive",
+		)
+	}
+	return append(args, "--", "echo", "nssh-benchmark-test")
 }

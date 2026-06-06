@@ -3,6 +3,7 @@ package bench
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,6 +32,23 @@ type BenchmarkResult struct {
 	TotalRuns    int
 	WarmupRuns   int
 	MeasuredRuns int
+}
+
+type rawBenchmarkArtifact struct {
+	Type         string               `json:"type"`
+	Host         string               `json:"host"`
+	Timestamp    string               `json:"timestamp"`
+	WarmupRuns   int                  `json:"warmup_runs"`
+	MeasuredRuns int                  `json:"measured_runs"`
+	TotalRuns    int                  `json:"total_runs"`
+	Metadata     map[string]string    `json:"metadata,omitempty"`
+	Samples      []rawBenchmarkSample `json:"samples"`
+}
+
+type rawBenchmarkSample struct {
+	Index       int                `json:"index"`
+	WallClockMS float64            `json:"wall_clock_ms"`
+	Stages      map[string]float64 `json:"stages"`
 }
 
 // StageStats holds statistics for a single timing stage.
@@ -393,9 +411,12 @@ func formatDuration(d time.Duration) string {
 var TimingStageOrder = []string{
 	connector.TimingConfigLoad,
 	connector.TimingCredentialLookup,
+	connector.TimingCredentialLookupPrefetch,
 	connector.TimingPTYStart,
 	connector.TimingFirstRead,
 	connector.TimingPasswordPrompt,
+	connector.TimingCredentialLookupLazy,
+	connector.TimingPasswordWrite,
 	connector.TimingPasswordSent,
 	connector.TimingSessionEnd,
 	connector.TimingTotal,
@@ -403,14 +424,17 @@ var TimingStageOrder = []string{
 
 // StageDescriptions provides human-readable descriptions for timing stages.
 var StageDescriptions = map[string]string{
-	connector.TimingConfigLoad:       "Load config.toml",
-	connector.TimingCredentialLookup: "Provider credential resolution",
-	connector.TimingPTYStart:         "Spawn PTY + SSH process",
-	connector.TimingFirstRead:        "Time to first SSH data (banner/prompt)",
-	connector.TimingPasswordPrompt:   "Time to password prompt (from session start)",
-	connector.TimingPasswordSent:     "Password injection duration",
-	connector.TimingSessionEnd:       "Total session duration (from session start)",
-	connector.TimingTotal:            "Connector.Run() total time",
+	connector.TimingConfigLoad:               "Load config.toml",
+	connector.TimingCredentialLookup:         "Provider credential resolution",
+	connector.TimingCredentialLookupPrefetch: "Provider credential resolution started before SSH prompt",
+	connector.TimingPTYStart:                 "Spawn PTY + SSH process",
+	connector.TimingFirstRead:                "Time to first SSH data (banner/prompt)",
+	connector.TimingPasswordPrompt:           "Time to password prompt (from session start)",
+	connector.TimingCredentialLookupLazy:     "Provider credential resolution performed at password prompt",
+	connector.TimingPasswordWrite:            "PTY password write duration",
+	connector.TimingPasswordSent:             "Password injection duration (lookup/prefetch wait + write)",
+	connector.TimingSessionEnd:               "Total session duration (from session start)",
+	connector.TimingTotal:                    "Connector.Run() total time",
 }
 
 // stageOrderIndex maps stage names to their display order.
@@ -460,6 +484,10 @@ func PrintSavedPath(path string) {
 // SaveResults saves benchmark results to a timestamped file and updates symlinks.
 // Returns the path to the saved file, or empty string if saving failed.
 func SaveResults(benchType, host string, result *BenchmarkResult, simpleOnly bool) string {
+	return SaveResultsWithMetadata(benchType, host, result, simpleOnly, nil)
+}
+
+func SaveResultsWithMetadata(benchType, host string, result *BenchmarkResult, simpleOnly bool, metadata map[string]string) string {
 	dir := benchmarksDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return ""
@@ -468,20 +496,57 @@ func SaveResults(benchType, host string, result *BenchmarkResult, simpleOnly boo
 	// Generate timestamped filename
 	timestamp := time.Now().Format("2006-01-02-150405")
 	filename := fmt.Sprintf("%s-%s-%s.txt", benchType, host, timestamp)
-	filepath := filepath.Join(dir, filename)
+	path := filepath.Join(dir, filename)
 
 	// Render results to string
 	content := renderResultsToString(benchType, host, result, simpleOnly)
 
 	// Write file
-	if err := os.WriteFile(filepath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return ""
 	}
+	_ = saveRawResults(path, benchType, host, timestamp, result, metadata)
 
 	// Update symlinks
 	updateSymlinks(dir, benchType, filename)
 
-	return filepath
+	return path
+}
+
+func saveRawResults(textPath, benchType, host, timestamp string, result *BenchmarkResult, metadata map[string]string) error {
+	artifact := rawBenchmarkArtifact{
+		Type:         benchType,
+		Host:         host,
+		Timestamp:    timestamp,
+		WarmupRuns:   result.WarmupRuns,
+		MeasuredRuns: result.MeasuredRuns,
+		TotalRuns:    result.TotalRuns,
+		Metadata:     metadata,
+		Samples:      make([]rawBenchmarkSample, 0, len(result.Samples)),
+	}
+	for i, sample := range result.Samples {
+		rawSample := rawBenchmarkSample{
+			Index:  i + 1,
+			Stages: make(map[string]float64, len(sample)),
+		}
+		if i < len(result.WallClocks) {
+			rawSample.WallClockMS = durationMilliseconds(result.WallClocks[i])
+		}
+		for stage, duration := range sample {
+			rawSample.Stages[stage] = durationMilliseconds(duration)
+		}
+		artifact.Samples = append(artifact.Samples, rawSample)
+	}
+	data, err := json.MarshalIndent(artifact, "", "  ")
+	if err != nil {
+		return err
+	}
+	jsonPath := strings.TrimSuffix(textPath, filepath.Ext(textPath)) + ".json"
+	return os.WriteFile(jsonPath, append(data, '\n'), 0644)
+}
+
+func durationMilliseconds(duration time.Duration) float64 {
+	return float64(duration.Nanoseconds()) / 1e6
 }
 
 // renderResultsToString renders benchmark results to a string (for file output).

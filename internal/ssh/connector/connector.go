@@ -30,6 +30,12 @@ type Connector struct {
 	sshArgs          []string
 	acceptOnceMode   string
 
+	passwordMu                sync.Mutex
+	passwordPrefetchStarted   bool
+	passwordPrefetchDone      chan struct{}
+	passwordPrefetchResult    passwordPrefetchResult
+	passwordPrefetchAbandoned bool
+
 	ptyFile *os.File  // PTY master from creack/pty.Start()
 	sshCmd  *exec.Cmd // SSH child process
 
