@@ -49,7 +49,6 @@ func PrintSessions(records []recording.SessionRecord, filter string) {
 	headers := []ui.TableHeader{
 		{Title: "Last Updated", Color: "cyan"},
 		{Title: "Host", Color: "dim"},
-		{Title: "Session", Color: "dim"},
 		{Title: "Duration", Color: "dim"},
 		{Title: "Cast", Color: ""},
 	}
@@ -65,17 +64,11 @@ func PrintSessions(records []recording.SessionRecord, filter string) {
 		seconds := recording.SessionDurationSeconds(record)
 		durationStr := formatDuration(seconds)
 
-		sessionLabel := record.SessionLabel
-		if sessionLabel == "" {
-			sessionLabel = "-"
-		}
-
 		castDisplay := homeReplace(record.CastPath)
 
 		rows = append(rows, []string{
 			mtimeStr,
 			record.Host,
-			sessionLabel,
 			durationStr,
 			castDisplay,
 		})

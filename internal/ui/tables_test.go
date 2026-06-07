@@ -29,6 +29,39 @@ func TestStreamTableWritesRowsBeforeClose(t *testing.T) {
 	}
 }
 
+func TestStreamTableStartsAtWindowEdge(t *testing.T) {
+	t.Setenv("COLUMNS", "120")
+	var out bytes.Buffer
+	table := NewStreamTable("Host", "Issue").
+		WithColumnWidths(10, 10).
+		WithWriter(&out)
+
+	table.AddRow("edge01", "stale-dns")
+
+	for _, line := range strings.Split(strings.TrimRight(out.String(), "\n"), "\n") {
+		if strings.HasPrefix(line, " ") {
+			t.Fatalf("stream table line should not be centered:\n%s", out.String())
+		}
+	}
+}
+
+func TestTableRenderStringStartsAtWindowEdge(t *testing.T) {
+	t.Setenv("COLUMNS", "120")
+	table := NewTable("Host", "Issue")
+	table.AddRow("edge01", "stale-dns")
+
+	rendered, margin := table.renderString()
+
+	if margin != 0 {
+		t.Fatalf("table margin = %d, want 0", margin)
+	}
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.HasPrefix(line, " ") {
+			t.Fatalf("table line should not be centered:\n%s", rendered)
+		}
+	}
+}
+
 func TestRenderTablesSideBySideStringJoinsTablesHorizontally(t *testing.T) {
 	left := NewTable("Group", "Total")
 	left.AddRow("custcbb", "1,090")
@@ -46,6 +79,25 @@ func TestRenderTablesSideBySideStringJoinsTablesHorizontally(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected table rows to render on the same line:\n%s", rendered)
+}
+
+func TestRenderTablesSideBySideStringStartsAtWindowEdge(t *testing.T) {
+	t.Setenv("COLUMNS", "120")
+	left := NewTable("Group", "Total")
+	left.AddRow("custcbb", "1,090")
+	right := NewTable("Provider", "Hosts")
+	right.AddRow("netbox-prod", "1,089")
+
+	rendered, margin := renderTablesSideBySideString(left, right, 4)
+
+	if margin != 0 {
+		t.Fatalf("side-by-side table margin = %d, want 0", margin)
+	}
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.HasPrefix(line, " ") {
+			t.Fatalf("side-by-side table line should not be centered:\n%s", rendered)
+		}
+	}
 }
 
 func TestRenderTitledTablesSideBySideStringLabelsEachTable(t *testing.T) {

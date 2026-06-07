@@ -124,11 +124,7 @@ func (t *StreamTable) Close() {
 func (t *StreamTable) start() {
 	termW := termWidth()
 	t.widths = fitStreamColumnWidths(t.headers, t.preferredWidth, termW)
-	tableWidth := streamTableWidth(t.widths)
-	t.margin = (termW - tableWidth) / 2
-	if t.margin < 0 {
-		t.margin = 0
-	}
+	t.margin = 0
 	_, _ = fmt.Fprintln(t.writer, t.prefix()+t.renderBorder("╭", "┬", "╮"))
 	_, _ = fmt.Fprintln(t.writer, t.prefix()+t.renderRow(t.headers, true))
 	_, _ = fmt.Fprintln(t.writer, t.prefix()+t.renderBorder("├", "┼", "┤"))
@@ -217,10 +213,6 @@ func fitStreamColumnWidths(headers []string, preferred []int, termW int) []int {
 	return widths
 }
 
-func streamTableWidth(widths []int) int {
-	return sumInts(widths) + streamTableOverhead(len(widths))
-}
-
 func streamTableOverhead(cols int) int {
 	return cols*2 + cols + 1
 }
@@ -257,7 +249,7 @@ func (t *Table) AddFooterRow(cells ...string) {
 	t.footerRows = append(t.footerRows, row)
 }
 
-// Render prints the table to stdout (centered) and returns the left margin used for centering.
+// Render prints the table to stdout and returns the left margin.
 func (t *Table) Render() int {
 	rendered, margin := t.renderString()
 	if rendered != "" {
@@ -267,7 +259,7 @@ func (t *Table) Render() int {
 }
 
 // RenderTablesSideBySide prints two tables next to each other and returns the
-// left margin used to center the combined output.
+// left margin used for the combined output.
 func RenderTablesSideBySide(left, right *Table, gap int) int {
 	rendered, margin := renderTablesSideBySideString(left, right, gap)
 	if rendered != "" {
@@ -277,7 +269,7 @@ func RenderTablesSideBySide(left, right *Table, gap int) int {
 }
 
 // RenderTitledTablesSideBySide prints two labeled tables next to each other and
-// returns the left margin used to center the combined output.
+// returns the left margin used for the combined output.
 func RenderTitledTablesSideBySide(leftTitle string, left *Table, rightTitle string, right *Table, gap int) int {
 	rendered, margin := renderTitledTablesSideBySideString(leftTitle, left, rightTitle, right, gap)
 	if rendered != "" {
@@ -305,12 +297,7 @@ func renderTablesSideBySideString(left, right *Table, gap int) (string, int) {
 		strings.Repeat(" ", gap),
 		right.renderRawString(),
 	)
-	termW := termWidth()
-	leftMargin := (termW - lipgloss.Width(rendered)) / 2
-	if leftMargin < 0 {
-		leftMargin = 0
-	}
-	return lipgloss.PlaceHorizontal(termW, lipgloss.Center, rendered), leftMargin
+	return rendered, 0
 }
 
 func renderTitledTablesSideBySideString(leftTitle string, left *Table, rightTitle string, right *Table, gap int) (string, int) {
@@ -326,12 +313,7 @@ func renderTitledTablesSideBySideString(leftTitle string, left *Table, rightTitl
 		gap = 1
 	}
 	rendered := lipgloss.JoinHorizontal(lipgloss.Top, leftRaw, strings.Repeat(" ", gap), rightRaw)
-	termW := termWidth()
-	leftMargin := (termW - lipgloss.Width(rendered)) / 2
-	if leftMargin < 0 {
-		leftMargin = 0
-	}
-	return lipgloss.PlaceHorizontal(termW, lipgloss.Center, rendered), leftMargin
+	return rendered, 0
 }
 
 func withTableTitle(title, rendered string) string {
@@ -344,26 +326,19 @@ func withTableTitle(title, rendered string) string {
 	return lipgloss.PlaceHorizontal(width, lipgloss.Center, label) + "\n" + rendered
 }
 
-// LeftMargin returns the left margin that would be used for centering without printing.
+// LeftMargin returns the left margin that would be used without printing.
 func (t *Table) LeftMargin() int {
 	_, margin := t.renderString()
 	return margin
 }
 
-// renderString renders the table and returns the centered string and left margin.
+// renderString renders the table and returns the string and left margin.
 func (t *Table) renderString() (string, int) {
 	rendered := t.renderRawString()
 	if rendered == "" {
 		return "", 0
 	}
-	termW := termWidth()
-	tableWidth := lipgloss.Width(rendered)
-	leftMargin := (termW - tableWidth) / 2
-	if leftMargin < 0 {
-		leftMargin = 0
-	}
-	centered := lipgloss.PlaceHorizontal(termW, lipgloss.Center, rendered)
-	return centered, leftMargin
+	return rendered, 0
 }
 
 func (t *Table) renderRawString() string {
