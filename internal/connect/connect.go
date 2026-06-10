@@ -79,9 +79,6 @@ func newConnectAudit(cfg *config.Config) *audit.Logger {
 
 func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger) error {
 	conn := newConnector(resolved, sshArgs, cfg)
-	if shouldPrefetchPassword(resolved, sshArgs) {
-		conn.StartPasswordPrefetch(ctx)
-	}
 	connErr := conn.Run(ctx)
 
 	if audit != nil {
@@ -113,9 +110,6 @@ func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArg
 	if retryResolved != nil && retryResolved.Credential != nil {
 		conn.SetPasswordResolver(retryResolved.Credential.PasswordResolver)
 	}
-	if shouldPrefetchPassword(retryResolved, sshArgs) {
-		conn.StartPasswordPrefetch(ctx)
-	}
 	conn.SetHostKeyPromptFunc(newHostKeyPromptFunc())
 	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 	conn.SetTimeouts(&cfg.SSH.Connection)
@@ -139,35 +133,6 @@ func newConnector(resolved *ResolvedHost, sshArgs []string, cfg *config.Config) 
 	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 	conn.SetTimeouts(&cfg.SSH.Connection)
 	return conn
-}
-
-func shouldPrefetchPassword(resolved *ResolvedHost, sshArgs []string) bool {
-	if resolved == nil || resolved.Credential == nil {
-		return false
-	}
-	if resolved.Credential.Password != nil || resolved.Credential.PasswordResolver == nil {
-		return false
-	}
-	return resolved.AuthMode == config.AuthModePassword || forcesPasswordAuth(sshArgs)
-}
-
-func forcesPasswordAuth(sshArgs []string) bool {
-	for i, arg := range sshArgs {
-		option := ""
-		switch {
-		case arg == "-o" && i+1 < len(sshArgs):
-			option = sshArgs[i+1]
-		case strings.HasPrefix(arg, "-o"):
-			option = strings.TrimPrefix(arg, "-o")
-		default:
-			continue
-		}
-		option = strings.TrimSpace(strings.ToLower(option))
-		if option == "pubkeyauthentication=no" || option == "pubkeyauthentication no" {
-			return true
-		}
-	}
-	return false
 }
 
 func isCompatibilityError(err error) bool {

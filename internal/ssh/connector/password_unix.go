@@ -12,49 +12,6 @@ import (
 	"github.com/ntwrknrd/nssh/internal/secret"
 )
 
-type passwordPrefetchResult struct {
-	password *secret.Secret
-	err      error
-}
-
-// StartPasswordPrefetch begins deferred password resolution before SSH asks for
-// the password. The prompt-time path waits for and reuses this result.
-func (c *Connector) StartPasswordPrefetch(ctx context.Context) {
-	c.passwordMu.Lock()
-	if c.password != nil || c.passwordResolver == nil || c.passwordPrefetchStarted {
-		c.passwordMu.Unlock()
-		return
-	}
-	resolver := c.passwordResolver
-	done := make(chan struct{})
-	c.passwordPrefetchStarted = true
-	c.passwordPrefetchDone = done
-	c.passwordMu.Unlock()
-
-	go func() {
-		timer := StartTiming(TimingCredentialLookupPrefetch)
-		pw, err := resolver(ctx)
-		if err == nil {
-			timer.Emit()
-		}
-
-		c.passwordMu.Lock()
-		defer c.passwordMu.Unlock()
-		defer close(done)
-
-		if c.passwordPrefetchAbandoned {
-			if pw != nil {
-				pw.Destroy()
-			}
-			return
-		}
-		c.passwordPrefetchResult = passwordPrefetchResult{password: pw, err: err}
-		if err == nil {
-			c.password = pw
-		}
-	}()
-}
-
 func (c *Connector) hasPasswordSource() bool {
 	c.passwordMu.Lock()
 	defer c.passwordMu.Unlock()
@@ -68,19 +25,9 @@ func (c *Connector) resolvePassword(ctx context.Context) (*secret.Secret, error)
 		c.passwordMu.Unlock()
 		return pw, nil
 	}
-	if c.passwordPrefetchStarted {
-		done := c.passwordPrefetchDone
-		c.passwordMu.Unlock()
-		select {
-		case <-done:
-			c.passwordMu.Lock()
-			result := c.passwordPrefetchResult
-			c.passwordMu.Unlock()
-			return result.password, result.err
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
+	// Resolve only after OpenSSH asks for a password. Existing control sessions
+	// can complete without prompting, and prefetching would touch credentials
+	// the connection never needs.
 	if c.passwordResolver == nil {
 		c.passwordMu.Unlock()
 		return nil, nil

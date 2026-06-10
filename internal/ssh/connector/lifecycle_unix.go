@@ -121,7 +121,6 @@ func (c *Connector) cleanup() {
 
 	c.passwordMu.Lock()
 	defer c.passwordMu.Unlock()
-	c.passwordPrefetchAbandoned = true
 	if c.password != nil {
 		c.password.Destroy()
 		c.password = nil

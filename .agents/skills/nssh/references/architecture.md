@@ -167,6 +167,11 @@ Resolved passwords must be wrapped in `*secret.Secret` from `internal/secret`.
 Use `secret.Use()` for temporary byte access. Do not format, log, or retain
 secret bytes.
 
+Password resolver execution is prompt-driven. The connector must not prefetch a
+password before OpenSSH asks for one because an existing control session can
+complete without any password prompt, and in that case nssh should not touch the
+credential provider at all.
+
 ## Agent Runtime
 
 `internal/agent` is a Unix-domain-socket runtime daemon. It is not a password

@@ -344,31 +344,3 @@ func TestSelectConnectionUsernameKeepsSSHUserForUnmanagedHosts(t *testing.T) {
 		t.Fatalf("username = %q, want ssh config user", got)
 	}
 }
-
-func TestShouldPrefetchPasswordAllowsForcedPasswordAuthArgs(t *testing.T) {
-	resolved := &ResolvedHost{
-		Credential: &ResolvedCredential{
-			PasswordResolver: func(context.Context) (*secret.Secret, error) {
-				return secret.NewFromString("secret"), nil
-			},
-		},
-	}
-
-	if !shouldPrefetchPassword(resolved, []string{"-o", "PubkeyAuthentication=no"}) {
-		t.Fatal("expected forced password auth args to enable prefetch")
-	}
-}
-
-func TestShouldPrefetchPasswordSkipsCredentialWithNoPasswordModeSignal(t *testing.T) {
-	resolved := &ResolvedHost{
-		Credential: &ResolvedCredential{
-			PasswordResolver: func(context.Context) (*secret.Secret, error) {
-				return secret.NewFromString("secret"), nil
-			},
-		},
-	}
-
-	if shouldPrefetchPassword(resolved, nil) {
-		t.Fatal("expected prefetch to stay disabled without auth_mode=password or forced password auth args")
-	}
-}

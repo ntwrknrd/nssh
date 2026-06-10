@@ -76,10 +76,6 @@ const (
 	// TimingCredentialLookupLazy is emitted when a deferred password resolver runs.
 	TimingCredentialLookupLazy = "credential_lookup_lazy"
 
-	// TimingCredentialLookupPrefetch is emitted when a deferred password resolver
-	// runs before the password prompt.
-	TimingCredentialLookupPrefetch = "credential_lookup_prefetch"
-
 	// Connector stages (emitted from connector)
 
 	// TimingPTYStart is emitted after PTY allocation completes.

@@ -411,7 +411,6 @@ func formatDuration(d time.Duration) string {
 var TimingStageOrder = []string{
 	connector.TimingConfigLoad,
 	connector.TimingCredentialLookup,
-	connector.TimingCredentialLookupPrefetch,
 	connector.TimingPTYStart,
 	connector.TimingFirstRead,
 	connector.TimingPasswordPrompt,
@@ -424,17 +423,16 @@ var TimingStageOrder = []string{
 
 // StageDescriptions provides human-readable descriptions for timing stages.
 var StageDescriptions = map[string]string{
-	connector.TimingConfigLoad:               "Load config.toml",
-	connector.TimingCredentialLookup:         "Provider credential resolution",
-	connector.TimingCredentialLookupPrefetch: "Provider credential resolution started before SSH prompt",
-	connector.TimingPTYStart:                 "Spawn PTY + SSH process",
-	connector.TimingFirstRead:                "Time to first SSH data (banner/prompt)",
-	connector.TimingPasswordPrompt:           "Time to password prompt (from session start)",
-	connector.TimingCredentialLookupLazy:     "Provider credential resolution performed at password prompt",
-	connector.TimingPasswordWrite:            "PTY password write duration",
-	connector.TimingPasswordSent:             "Password injection duration (lookup/prefetch wait + write)",
-	connector.TimingSessionEnd:               "Total session duration (from session start)",
-	connector.TimingTotal:                    "Connector.Run() total time",
+	connector.TimingConfigLoad:           "Load config.toml",
+	connector.TimingCredentialLookup:     "Provider credential resolution",
+	connector.TimingPTYStart:             "Spawn PTY + SSH process",
+	connector.TimingFirstRead:            "Time to first SSH data (banner/prompt)",
+	connector.TimingPasswordPrompt:       "Time to password prompt (from session start)",
+	connector.TimingCredentialLookupLazy: "Provider credential resolution performed at password prompt",
+	connector.TimingPasswordWrite:        "PTY password write duration",
+	connector.TimingPasswordSent:         "Password injection duration (lookup + write)",
+	connector.TimingSessionEnd:           "Total session duration (from session start)",
+	connector.TimingTotal:                "Connector.Run() total time",
 }
 
 // stageOrderIndex maps stage names to their display order.

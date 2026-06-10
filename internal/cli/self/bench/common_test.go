@@ -35,17 +35,15 @@ func TestComputeStartupOverheadUsesPerSampleDurations(t *testing.T) {
 	}
 }
 
-func TestSortStageNamesOrdersCredentialPrefetchBeforePTYStart(t *testing.T) {
+func TestSortStageNamesOrdersLazyCredentialLookupAfterPasswordPrompt(t *testing.T) {
 	got := sortStageNames([]string{
 		connector.TimingPasswordWrite,
 		connector.TimingPasswordSent,
 		connector.TimingCredentialLookupLazy,
-		connector.TimingCredentialLookupPrefetch,
 		connector.TimingPasswordPrompt,
 		connector.TimingPTYStart,
 	})
 	want := []string{
-		connector.TimingCredentialLookupPrefetch,
 		connector.TimingPTYStart,
 		connector.TimingPasswordPrompt,
 		connector.TimingCredentialLookupLazy,
