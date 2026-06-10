@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
@@ -31,6 +32,81 @@ func TestReconcileSelectorsObjectsToGroups(t *testing.T) {
 	}
 	if plan.Adds[0].Group != "netbox-prod/customer" {
 		t.Fatalf("group = %q", plan.Adds[0].Group)
+	}
+}
+
+func TestReconcileAddsShortHostPatternForFQDNProviderHost(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{{
+		Group:    "netbox-prod/customer",
+		Provider: "netbox-prod",
+		Match:    config.InventoryMatch{"status": {"active"}},
+	}}
+	objects := []Object{{
+		ObjectID: "device:1",
+		Name:     "acm-lab-agg-sw1.custcbb.local",
+		HostName: "acm-lab-agg-sw1.custcbb.local",
+		Attributes: map[string][]string{
+			"status": {"active"},
+		},
+	}}
+
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, nil)
+	if len(plan.Adds) != 1 {
+		t.Fatalf("adds = %d, want 1", len(plan.Adds))
+	}
+	want := []string{"acm-lab-agg-sw1.custcbb.local", "acm-lab-agg-sw1"}
+	if !slices.Equal(plan.Adds[0].Patterns, want) {
+		t.Fatalf("patterns = %#v, want %#v", plan.Adds[0].Patterns, want)
+	}
+}
+
+func TestReconcileDoesNotDuplicateShortHostPattern(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{{
+		Group:    "netbox-prod/customer",
+		Provider: "netbox-prod",
+		Match:    config.InventoryMatch{"status": {"active"}},
+	}}
+	objects := []Object{{
+		ObjectID: "device:1",
+		Name:     "acm-lab-agg-sw1",
+		HostName: "acm-lab-agg-sw1.custcbb.local",
+		Attributes: map[string][]string{
+			"status": {"active"},
+		},
+	}}
+
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, nil)
+	if len(plan.Adds) != 1 {
+		t.Fatalf("adds = %d, want 1", len(plan.Adds))
+	}
+	want := []string{"acm-lab-agg-sw1"}
+	if !slices.Equal(plan.Adds[0].Patterns, want) {
+		t.Fatalf("patterns = %#v, want %#v", plan.Adds[0].Patterns, want)
+	}
+}
+
+func TestReconcileDoesNotShortenIPAddressProviderHost(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{{
+		Group:    "netbox-prod/customer",
+		Provider: "netbox-prod",
+		Match:    config.InventoryMatch{"status": {"active"}},
+	}}
+	objects := []Object{{
+		ObjectID: "device:1",
+		Name:     "192.0.2.10",
+		HostName: "192.0.2.10",
+		Attributes: map[string][]string{
+			"status": {"active"},
+		},
+	}}
+
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, nil)
+	if len(plan.Adds) != 1 {
+		t.Fatalf("adds = %d, want 1", len(plan.Adds))
+	}
+	want := []string{"192.0.2.10"}
+	if !slices.Equal(plan.Adds[0].Patterns, want) {
+		t.Fatalf("patterns = %#v, want %#v", plan.Adds[0].Patterns, want)
 	}
 }
 

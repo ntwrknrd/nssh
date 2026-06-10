@@ -1,7 +1,9 @@
 package inventory
 
 import (
+	"net/netip"
 	"slices"
+	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 )
@@ -105,12 +107,42 @@ func objectToProviderHost(obj *Object, group string) *ProviderHost {
 	return &ProviderHost{
 		ObjectID:  obj.ObjectID,
 		Host:      obj.Name,
-		Patterns:  []string{obj.Name},
+		Patterns:  providerHostPatterns(obj.Name, obj.HostName),
 		Group:     group,
 		HostName:  obj.HostName,
 		Port:      obj.Port,
 		ProxyJump: obj.ProxyJump,
 	}
+}
+
+func providerHostPatterns(name, hostname string) []string {
+	patterns := make([]string, 0, 3)
+	add := func(pattern string) {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" || slices.Contains(patterns, pattern) {
+			return
+		}
+		patterns = append(patterns, pattern)
+	}
+	add(name)
+	add(shortDNSName(name))
+	add(shortDNSName(hostname))
+	return patterns
+}
+
+func shortDNSName(host string) string {
+	host = strings.TrimSuffix(strings.TrimSpace(host), ".")
+	if host == "" || !strings.Contains(host, ".") || strings.Contains(host, ":") {
+		return ""
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
+		return ""
+	}
+	short, _, ok := strings.Cut(host, ".")
+	if !ok {
+		return ""
+	}
+	return short
 }
 
 func providerHostChanged(old, new *ProviderHost) bool {
