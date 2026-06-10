@@ -25,7 +25,7 @@ func (c *Connector) Run(ctx context.Context) error {
 	totalTimer := StartTiming(TimingTotal)
 	defer totalTimer.Emit()
 
-	if isTerminal(os.Stdin.Fd()) {
+	if !c.captureMode && isTerminal(os.Stdin.Fd()) {
 		state, err := term.MakeRaw(int(os.Stdin.Fd()))
 		if err != nil {
 			return fmt.Errorf("failed to set raw mode: %w", err)
@@ -36,7 +36,9 @@ func (c *Connector) Run(ctx context.Context) error {
 	defer c.restoreTerminal()
 	defer c.cleanup()
 
-	c.ensureStdinReader()
+	if !c.stdinDisabled {
+		c.ensureStdinReader()
+	}
 
 	for {
 		if err := c.start(ctx); err != nil {
@@ -45,11 +47,13 @@ func (c *Connector) Run(ctx context.Context) error {
 
 		sessionCtx, sessionCancel := context.WithCancel(ctx)
 
-		c.wg.Add(1)
-		go func() {
-			defer c.wg.Done()
-			c.handleSignals(sessionCtx)
-		}()
+		if !c.disableSignals {
+			c.wg.Add(1)
+			go func() {
+				defer c.wg.Done()
+				c.handleSignals(sessionCtx)
+			}()
+		}
 
 		err := c.relay(sessionCtx)
 		sessionCancel()

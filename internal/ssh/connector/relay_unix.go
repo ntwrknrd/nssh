@@ -85,6 +85,9 @@ func (c *Connector) relay(ctx context.Context) error {
 	// with UI prompts for stdin input.
 	stdinRelayStarted := false
 	startStdinRelay := func() {
+		if c.stdinDisabled {
+			return
+		}
 		if stdinRelayStarted {
 			return
 		}
@@ -135,8 +138,13 @@ func (c *Connector) relay(ctx context.Context) error {
 	// Fallback timer to start stdin relay if no PTY output is received.
 	// This handles commands that wait for stdin without emitting any output first.
 	const stdinRelayFallbackDelay = 100 * time.Millisecond
-	stdinFallbackTimer := time.NewTimer(stdinRelayFallbackDelay)
-	defer stdinFallbackTimer.Stop()
+	var stdinFallbackTimer *time.Timer
+	var stdinFallbackCh <-chan time.Time
+	if !c.stdinDisabled {
+		stdinFallbackTimer = time.NewTimer(stdinRelayFallbackDelay)
+		stdinFallbackCh = stdinFallbackTimer.C
+		defer stdinFallbackTimer.Stop()
+	}
 
 	// Start PTY reader goroutine for non-blocking reads with idle timeout
 	type ptyResult struct {
@@ -174,7 +182,7 @@ func (c *Connector) relay(ctx context.Context) error {
 		case <-idleCh:
 			slog.Info("session idle timeout", "duration", c.timeouts.IdleTimeout.Duration())
 			return fmt.Errorf("session idle timeout (%v)", c.timeouts.IdleTimeout.Duration())
-		case <-stdinFallbackTimer.C:
+		case <-stdinFallbackCh:
 			// No PTY output received within the fallback window.
 			// Start stdin relay to handle commands that wait for input first.
 			slog.Debug("stdin relay fallback timer fired, starting relay")
@@ -193,10 +201,12 @@ func (c *Connector) relay(ctx context.Context) error {
 			currentResult = result
 			buf = result.data
 			// Stop fallback timer once we receive any PTY output
-			if !stdinFallbackTimer.Stop() {
-				select {
-				case <-stdinFallbackTimer.C:
-				default:
+			if stdinFallbackTimer != nil {
+				if !stdinFallbackTimer.Stop() {
+					select {
+					case <-stdinFallbackTimer.C:
+					default:
+					}
 				}
 			}
 			// Reset idle timer on PTY activity
@@ -225,6 +235,7 @@ func (c *Connector) relay(ctx context.Context) error {
 		if !c.hostKeyHandled {
 			if handled, hkResult := c.handleHostKeyPrompt(linearBuf); handled {
 				c.hostKeyHandled = true
+				c.hostKeyPromptHit = true
 				c.mu.Unlock()
 				// Return buffer to pool before handling result
 				if currentResult.pooled {
@@ -233,6 +244,14 @@ func (c *Connector) relay(ctx context.Context) error {
 				}
 				switch hkResult {
 				case HostKeyResultAbort:
+					if c.captureMode {
+						c.closeSession()
+						if c.sshCmd != nil && c.sshCmd.Process != nil {
+							_ = c.sshCmd.Process.Kill()
+						}
+						_ = c.waitChild()
+						return errHostKeyPromptCapture
+					}
 					return exit.ErrAuthFailed
 				case HostKeyResultRestart:
 					return errRestartRequired
@@ -267,7 +286,7 @@ func (c *Connector) relay(ctx context.Context) error {
 		// Start stdin relay once we're past host key handling phase.
 		// For known hosts with key auth, we never see a prompt, so start
 		// relay after first output that isn't a host key prompt.
-		if c.hostKeyHandled || (!matchUnknownHost(linearBuf) && !matchHostKeyChanged(linearBuf)) {
+		if c.hostKeyHandled || (!matchUnknownHost(linearBuf) && !matchHostKeyIntro(linearBuf) && !matchHostKeyChanged(linearBuf)) {
 			c.hostKeyHandled = true
 			startStdinRelay()
 		}
@@ -276,7 +295,7 @@ func (c *Connector) relay(ctx context.Context) error {
 		// Filter and write output
 		output := c.filterOutput(buf, suppressPrompt)
 		if len(output) > 0 {
-			if _, err := os.Stdout.Write(output); err != nil {
+			if _, err := c.output.Write(output); err != nil {
 				slog.Debug("failed to write to stdout", "err", err)
 			}
 		}
@@ -295,6 +314,10 @@ func (c *Connector) relay(ctx context.Context) error {
 func (c *Connector) GetStdinReader() io.Reader {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.stdinReaderLocked()
+}
+
+func (c *Connector) stdinReaderLocked() io.Reader {
 	if c.stdinCh == nil {
 		return nil
 	}

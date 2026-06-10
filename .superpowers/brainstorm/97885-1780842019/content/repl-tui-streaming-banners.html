@@ -1,0 +1,53 @@
+<h2>Transcript-first TUI with live banner blocks</h2>
+<p class="subtitle">Completed devices append immediately in completion order. The status line keeps slow or pending devices visible.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Preview: nssh repl TUI</div>
+  <div class="mockup-body">
+    <div style="height:520px;background:#111827;border-radius:10px;border:1px solid #374151;color:#d1d5db;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;display:flex;flex-direction:column;overflow:hidden">
+      <div style="padding:8px 12px;border-bottom:1px solid #374151;color:#9ca3af;display:flex;justify-content:space-between">
+        <span>nssh repl</span>
+        <span>concurrency 12</span>
+      </div>
+
+      <div style="flex:1;padding:12px 14px;overflow:hidden;font-size:12px;line-height:1.4">
+        <div style="color:#6ee7b7">@acm-lab-agg-sw(1,2,3) show hostname</div>
+
+        <div style="margin-top:12px;color:#67e8f9">---------------- acm-lab-agg-sw2.custcbb.local | show hostname ----------------</div>
+        <div>Hostname: acm-lab-agg-sw2<br>FQDN:     acm-lab-agg-sw2.custcbb.local</div>
+
+        <div style="margin-top:12px;color:#67e8f9">---------------- acm-lab-agg-sw1.custcbb.local | show hostname ----------------</div>
+        <div>Hostname: acm-lab-agg-sw1<br>FQDN:     acm-lab-agg-sw1.custcbb.local</div>
+
+        <div style="margin-top:14px;color:#9ca3af">waiting: acm-lab-agg-sw3.custcbb.local</div>
+      </div>
+
+      <div style="border-top:1px solid #374151;background:#0f172a">
+        <div style="padding:7px 12px;border-bottom:1px solid #1f2937;color:#fbbf24;font-size:12px">
+          running 1/3  done 2/3  failed 0/3  active: acm-lab-agg-sw3.custcbb.local
+        </div>
+        <div style="padding:10px 12px;color:#f9fafb;font-size:13px">
+          nssh&gt; @select:group:local/lab show interfaces status
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros">
+    <h4>Behavior locked in</h4>
+    <ul>
+      <li>Print each device block as soon as that device completes.</li>
+      <li>Use the existing REPL banner style for every output block.</li>
+      <li>Keep the bottom prompt and running status visible.</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>Tradeoff</h4>
+    <ul>
+      <li>Output order becomes completion order, not target order.</li>
+      <li>A slow device only delays its own banner block, not the whole batch.</li>
+    </ul>
+  </div>
+</div>

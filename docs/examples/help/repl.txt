@@ -1,15 +1,12 @@
-$ nssh --help
+$ nssh repl --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh [host] [flags]               Smart connect to host                    │
+│   nssh repl [flags]                 Run commands across SSH targets          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────╮
-│   agent                             Manage nssh agent                        │
-│   connect                           Connect to host                          │
-│   cp                                Copy files via SCP                       │
-│   inv                               Manage inventory                         │
-│   log                               Manage session recordings                │
-│   repl                              Run commands across SSH targets          │
-│   self                              Manage nssh                              │
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│   --concurrency INT                 maximum concurrent SSH commands          │
+│   --cursor STRING                   prompt cursor style: pipe or unders...   │
+│   --diff                            highlight split output differences       │
+│   --plain                           use plain line-oriented REPL             │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

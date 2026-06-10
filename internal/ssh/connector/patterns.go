@@ -31,6 +31,8 @@ var (
 // Host key prompt literals (lowercase, checked with bytes.Contains)
 var (
 	unknownHostLiteral    = []byte("are you sure you want to continue connecting")
+	hostKeyIntroLiteral   = []byte("the authenticity of host")
+	hostKeyFingerprint    = []byte("key fingerprint is")
 	hostKeyChangedLiteral = []byte("remote host identification has changed")
 
 	// Fingerprint extraction needs regex for capture groups
@@ -68,6 +70,11 @@ func matchPasswordPrompt(buf []byte) bool {
 // matchUnknownHost checks if the output contains an unknown host key prompt.
 func matchUnknownHost(buf []byte) bool {
 	return bytes.Contains(bytes.ToLower(buf), unknownHostLiteral)
+}
+
+func matchHostKeyIntro(buf []byte) bool {
+	lower := bytes.ToLower(buf)
+	return bytes.Contains(lower, hostKeyIntroLiteral) || bytes.Contains(lower, hostKeyFingerprint)
 }
 
 // matchHostKeyChanged checks if the output contains a host key changed warning.

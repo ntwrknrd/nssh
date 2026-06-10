@@ -1,0 +1,75 @@
+# Ratatui REPL Adapter Implementation Plan
+
+## Summary
+
+Build a Ratatui comparison frontend without rewriting the REPL core. Add a hidden Go broker command, `nssh repl broker --json`, that exposes existing `internal/repl` behavior over newline-delimited JSON. Add an experimental Rust app under `experiments/repl-ratatui/` that spawns the broker, renders the REPL in Ratatui, and lets us compare scrolling, mouse events, selection, colors, and split diff behavior against Bubble Tea.
+
+## Key Changes
+
+- Add broker mode under the existing `repl` command.
+  - `nssh repl broker --json --concurrency N` reads JSON requests from stdin and writes JSON events to stdout.
+  - Keep it hidden from normal help for v1; this is an adapter interface, not operator UX.
+  - Use existing `repl.ParseLine`, `ResolveTargets`, `ExecuteFanoutStream`, `DefaultTargetResolver`, `SSHCommandRunner`, and history store.
+
+- Define a minimal JSON protocol in Go and mirror it in Rust.
+  - Requests: `suggest`, `submit`, `cancel`, `history_load`, `history_append`, `exit`.
+  - Events: `suggestions`, `started`, `completed`, `status`, `history`, `error`, `ready`.
+  - `completed` includes `index`, `host`, `command`, `stdout`, `exit_code`, and `error`.
+  - Use base64 for `stdout` to avoid newline/control-character ambiguity in NDJSON.
+
+- Add shared broker implementation under `internal/repl/broker`.
+  - `Run(ctx, Options) error` owns request decoding, response encoding, active batch cancellation, and status counts.
+  - One active batch at a time.
+  - `submit` rejects while a batch is active.
+  - `cancel` cancels the active batch and emits final status.
+  - History requests use the same `HistoryStore` contract as the current TUI.
+
+- Add Ratatui experiment under `experiments/repl-ratatui/`.
+  - Rust binary spawns `nssh repl broker --json`.
+  - Use Ratatui with Crossterm.
+  - Implement bottom prompt, transcript viewport, mouse wheel scrolling, command history, host suggestions, and one active batch.
+  - Render two completed results side by side when terminal width allows; otherwise stack.
+  - Implement line-level split diff coloring in Rust using the same behavior as the Go TUI: red left background, green right background, line numbers, wrapping, and no gutter copying.
+
+- Keep the existing Bubble Tea TUI untouched except for any broker reuse tests.
+  - `nssh repl` continues to launch Bubble Tea.
+  - `nssh repl --plain` remains unchanged.
+  - The Ratatui app is experimental and launched from its own directory, not wired into default `nssh repl`.
+
+## Test Plan
+
+- Broker tests in Go:
+  - `ready` is emitted on startup.
+  - `suggest` returns host suggestions from a fake resolver.
+  - `history_load` and `history_append` use a fake history store.
+  - `submit` emits `status`, `started`, `completed`, and final `status`.
+  - `submit` while active emits an error and does not start a second batch.
+  - `cancel` cancels pending/running work and emits final status.
+  - `completed.stdout` is base64 and round-trips arbitrary output bytes.
+  - Parser/resolver errors emit `error` without running SSH.
+
+- CLI tests:
+  - `repl broker --json` is registered and executable.
+  - Hidden broker command does not appear in normal `nssh repl --help`.
+  - `--concurrency` is honored by broker mode.
+
+- Ratatui tests:
+  - Unit-test JSON encoding/decoding.
+  - Unit-test app state transitions for submit, status, completion, cancel, history, and suggestions.
+  - Unit-test split diff alignment, wrapping, and side-by-side eligibility.
+  - Run `cargo test` under `experiments/repl-ratatui`.
+  - Manual smoke: `cargo run --bin nssh-repl-ratatui`, run `@acm-lab-agg-sw(1,2) show hostname`, verify scrolling and no mouse escape leakage.
+
+- Verification:
+  - `go test ./internal/repl ./internal/cli/repl ./internal/app -count=1`
+  - `go test ./... -count=1`
+  - `cargo test --manifest-path experiments/repl-ratatui/Cargo.toml`
+  - `nssh self reinstall --dev`
+
+## Assumptions
+
+- V1 is a comparison spike, not a replacement for Bubble Tea.
+- The broker protocol is intentionally small and disposable until Ratatui proves better.
+- Ratatui uses Crossterm first; backend comparisons wait until the basic adapter works.
+- Split diff rendering is reimplemented in Rust for the experiment rather than trying to share Go TUI internals.
+- The broker is hidden from normal help to avoid committing to a public API too early.

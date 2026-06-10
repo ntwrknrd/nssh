@@ -9,6 +9,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/cli/cp"
 	"github.com/ntwrknrd/nssh/internal/cli/inv"
 	"github.com/ntwrknrd/nssh/internal/cli/log"
+	"github.com/ntwrknrd/nssh/internal/cli/repl"
 	"github.com/ntwrknrd/nssh/internal/cli/self"
 	"github.com/ntwrknrd/nssh/internal/cli/self/bench"
 	"github.com/ntwrknrd/nssh/internal/connect"
@@ -21,6 +22,7 @@ var (
 		"inv":                true,
 		"agent":              true,
 		"log":                true,
+		"repl":               true,
 		"cp":                 true,
 		"self":               true,
 		"connect":            true,
@@ -102,6 +104,7 @@ and record sessions.`,
 	rootCmd.AddCommand(agentCmd)
 	rootCmd.AddCommand(newInvCmd())
 	rootCmd.AddCommand(newLogCmd())
+	rootCmd.AddCommand(repl.NewCmd())
 	rootCmd.AddCommand(newCpCmd())
 	rootCmd.AddCommand(newSelfCmd())
 	rootCmd.AddCommand(newListSubcommandsCmd())

@@ -53,7 +53,7 @@ func (c *Connector) handleHostKeyPrompt(output []byte) (bool, HostKeyResult) {
 			KeyType:     keyType,
 			Fingerprint: fingerprint,
 			Changed:     true,
-			Stdin:       c.GetStdinReader(),
+			Stdin:       c.stdinReaderLocked(),
 		})
 		return true, c.respondToHostKey(action)
 	}
@@ -66,7 +66,7 @@ func (c *Connector) handleHostKeyPrompt(output []byte) (bool, HostKeyResult) {
 			KeyType:     keyType,
 			Fingerprint: fingerprint,
 			Changed:     false,
-			Stdin:       c.GetStdinReader(),
+			Stdin:       c.stdinReaderLocked(),
 		})
 		if action == HostKeyAcceptOnce && keyType != "" && fingerprint != "" {
 			c.pinnedHostKey = &pinnedKey{typeName: keyType, fingerprint: fingerprint}

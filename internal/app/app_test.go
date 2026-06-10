@@ -84,10 +84,22 @@ func TestPreprocessArgs(t *testing.T) {
 func TestRootCommandRegistersPublicCommands(t *testing.T) {
 	root := NewRootCmd(Options{Version: "test"})
 
-	for _, name := range []string{"agent", "inv", "connect", "cp", "self"} {
+	for _, name := range []string{"agent", "inv", "connect", "cp", "repl", "self"} {
 		if cmd, _, err := root.Find([]string{name}); err != nil || cmd == root || cmd.Name() != name {
 			t.Fatalf("expected public command %q, got cmd=%v err=%v", name, cmd, err)
 		}
+	}
+}
+
+func TestReplHelpIncludesPlainFlag(t *testing.T) {
+	root := NewRootCmd(Options{Version: "test"})
+	cmd, _, err := root.Find([]string{"repl"})
+	if err != nil {
+		t.Fatalf("find repl: %v", err)
+	}
+	help := ui.RenderStyledHelp(cmd, ui.StyledHelpConfig{ShowGlobalFlags: true, Width: 80})
+	if !strings.Contains(help, "--plain") {
+		t.Fatalf("repl help missing --plain:\n%s", help)
 	}
 }
 

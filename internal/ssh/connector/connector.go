@@ -3,7 +3,11 @@
 package connector
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -14,6 +18,8 @@ import (
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"golang.org/x/term"
 )
+
+var errHostKeyPromptCapture = errors.New("host key prompt in capture mode")
 
 // Default configuration values.
 const (
@@ -43,11 +49,17 @@ type Connector struct {
 	hostKeyPrompt  HostKeyPromptFunc
 
 	// Stdin handling
-	stdinCh      <-chan stdinResult
-	stdinStarted bool
+	stdinCh       <-chan stdinResult
+	stdinStarted  bool
+	stdinDisabled bool
 
-	mu sync.RWMutex
-	wg sync.WaitGroup
+	mu     sync.RWMutex
+	wg     sync.WaitGroup
+	output io.Writer
+
+	captureMode      bool
+	disableSignals   bool
+	hostKeyPromptHit bool
 
 	timeouts *config.SSHConnectionConfig
 
@@ -76,7 +88,25 @@ func NewConnector(host, user string, pass *secret.Secret, sshArgs []string) *Con
 		sshArgs:        sshArgs,
 		ringBuf:        NewRingBuffer(DefaultRingBufferSize),
 		acceptOnceMode: "pin",
+		output:         os.Stdout,
 	}
+}
+
+// RunCapture runs the SSH session with isolated stdin/stdout. It still uses the
+// PTY connector so password prompt detection and injection follow the normal
+// interactive path, but captured remote output is returned to the caller.
+func (c *Connector) RunCapture(ctx context.Context) ([]byte, error) {
+	var out bytes.Buffer
+	c.output = &out
+	c.stdinDisabled = true
+	c.captureMode = true
+	c.disableSignals = true
+
+	err := c.Run(ctx)
+	if errors.Is(err, errHostKeyPromptCapture) {
+		return out.Bytes(), fmt.Errorf("host key prompt requires an interactive nssh connection before REPL capture: %w", err)
+	}
+	return out.Bytes(), err
 }
 
 // SetResolvedEndpoint sets the concrete hostname and port derived from SSH config.
