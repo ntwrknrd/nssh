@@ -20,7 +20,15 @@ import (
 )
 
 // ConnectHost handles an interactive SSH connection.
-func ConnectHost(ctx context.Context, hostname string, sshArgs []string) error {
+type Options struct {
+	SSHVerbosity int
+}
+
+func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ...Options) error {
+	var options Options
+	if len(opts) > 0 {
+		options = opts[0]
+	}
 	recorded, err := maybeWrapWithRecording(hostname, sshArgs)
 	if err != nil {
 		return err
@@ -53,11 +61,11 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string) error {
 		audit.Info("ssh_connect_start", "host", resolved.Hostname, "ssh_args", sshArgs)
 	}
 
-	connErr := runResolvedConnection(ctx, resolved, sshArgs, cfg, audit)
+	connErr := runResolvedConnection(ctx, resolved, sshArgs, cfg, audit, options)
 	if connErr != nil && isCompatibilityError(connErr) {
 		if handleCompatibilityFix(ctx, resolved.Hostname, resolved.IncludeFile) {
 			slog.Debug("retrying connection after compatibility fixes")
-			return retryResolvedConnection(ctx, resolved, sshArgs, cfg)
+			return retryResolvedConnection(ctx, resolved, sshArgs, cfg, options)
 		}
 	}
 
@@ -77,8 +85,8 @@ func newConnectAudit(cfg *config.Config) *audit.Logger {
 	return logger
 }
 
-func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger) error {
-	conn := newConnector(resolved, sshArgs, cfg)
+func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger, opts Options) error {
+	conn := newConnector(resolved, sshArgs, cfg, opts)
 	connErr := conn.Run(ctx)
 
 	if audit != nil {
@@ -97,7 +105,7 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 	return connErr
 }
 
-func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config) error {
+func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options) error {
 	var retryPassword *secret.Secret
 	retryResolved, retryErr := ResolveHostForConnect(resolved.Hostname, resolved.Username, cfg)
 	if retryErr != nil {
@@ -113,10 +121,11 @@ func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArg
 	conn.SetHostKeyPromptFunc(newHostKeyPromptFunc())
 	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 	conn.SetTimeouts(&cfg.SSH.Connection)
+	conn.SetSSHVerbosity(opts.SSHVerbosity)
 	return conn.Run(ctx)
 }
 
-func newConnector(resolved *ResolvedHost, sshArgs []string, cfg *config.Config) *connector.Connector {
+func newConnector(resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options) *connector.Connector {
 	var password *secret.Secret
 	if resolved.Credential != nil {
 		password = resolved.Credential.Password
@@ -128,6 +137,7 @@ func newConnector(resolved *ResolvedHost, sshArgs []string, cfg *config.Config) 
 	}
 	conn.SetHostKeyPromptFunc(newHostKeyPromptFunc())
 	conn.SetSSHOptions(resolved.SSH)
+	conn.SetSSHVerbosity(opts.SSHVerbosity)
 	conn.SetResolvedEndpoint(resolved.Hostname, fmt.Sprintf("%d", resolved.Port))
 	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 	conn.SetTimeouts(&cfg.SSH.Connection)

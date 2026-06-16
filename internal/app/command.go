@@ -63,8 +63,8 @@ var (
 		"-h": true,
 	}
 
-	verbose     bool
-	showVersion bool
+	verboseCount int
+	showVersion  bool
 )
 
 // NewRootCmd creates and configures the root Cobra command with all subcommands.
@@ -81,14 +81,14 @@ and record sessions.`,
 			if showVersion {
 				self.RunVersionExit()
 			}
-			initLogging(verbose)
+			initLogging(verboseCount > 0)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
 
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Print debug messages")
+	rootCmd.PersistentFlags().CountVarP(&verboseCount, "verbose", "v", "Increase debug verbosity")
 	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "V", false, "Print command version")
 	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
 	rootCmd.PersistentFlags().BoolP("help", "h", false, "Print command help")
@@ -133,7 +133,7 @@ func PreprocessArgs(args []string) []string {
 		}
 
 		switch {
-		case globalFlags[arg]:
+		case globalFlags[arg] || isVerboseCluster(arg):
 			globalFlagArgs = append(globalFlagArgs, arg)
 		case len(arg) == 2 && sshFlagsWithValue[arg]:
 			sshPassthroughArgs = append(sshPassthroughArgs, arg)
@@ -183,9 +183,9 @@ Example: nssh connect host -p 2222`,
 				if err != nil {
 					return err
 				}
-				return connect.ConnectHost(context.Background(), hostname, nil)
+				return connect.ConnectHost(context.Background(), hostname, nil, connect.Options{SSHVerbosity: sshVerbosity()})
 			}
-			return connect.ConnectHost(context.Background(), args[0], args[1:])
+			return connect.ConnectHost(context.Background(), args[0], args[1:], connect.Options{SSHVerbosity: sshVerbosity()})
 		},
 	}
 
@@ -216,12 +216,35 @@ func newSmartConnectCmd() *cobra.Command {
 			if user != "" {
 				sshArgs = append([]string{"-l", user}, sshArgs...)
 			}
-			return connect.ConnectHost(context.Background(), hostname, sshArgs)
+			return connect.ConnectHost(context.Background(), hostname, sshArgs, connect.Options{SSHVerbosity: sshVerbosity()})
 		},
 	}
 
 	cmd.Flags().SetInterspersed(false)
 	return cmd
+}
+
+func isVerboseCluster(arg string) bool {
+	if len(arg) < 2 || arg[0] != '-' {
+		return false
+	}
+	for _, ch := range arg[1:] {
+		if ch != 'v' {
+			return false
+		}
+	}
+	return true
+}
+
+func sshVerbosity() int {
+	level := verboseCount - 1
+	if level < 0 {
+		return 0
+	}
+	if level > 3 {
+		return 3
+	}
+	return level
 }
 
 func parseUserHost(input string) (username, hostname string) {

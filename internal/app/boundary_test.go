@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"testing"
 )
@@ -31,6 +32,14 @@ func TestMainEntrypointStaysThin(t *testing.T) {
 		if forbidden[path] {
 			t.Fatalf("cmd/nssh/main.go imports forbidden runtime package %s", path)
 		}
+	}
+}
+
+func TestPreprocessVerbosityLadder(t *testing.T) {
+	got := PreprocessArgs([]string{"-vvv", "edge01"})
+	want := []string{"-vvv", "smart-connect", "edge01"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("PreprocessArgs = %#v, want %#v", got, want)
 	}
 }
 
