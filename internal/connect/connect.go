@@ -6,17 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/ntwrknrd/nssh/internal/audit"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
-	"github.com/ntwrknrd/nssh/internal/inventory"
 	"github.com/ntwrknrd/nssh/internal/secret"
-	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
-	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
-	"github.com/ntwrknrd/nssh/internal/ui"
 )
 
 // ConnectHost handles an interactive SSH connection.
@@ -63,10 +58,7 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ..
 
 	connErr := runResolvedConnection(ctx, resolved, sshArgs, cfg, audit, options)
 	if connErr != nil && isCompatibilityError(connErr) {
-		if handleCompatibilityFix(ctx, resolved.Hostname, resolved.IncludeFile) {
-			slog.Debug("retrying connection after compatibility fixes")
-			return retryResolvedConnection(ctx, resolved, sshArgs, cfg, options)
-		}
+		slog.Debug("connection failed with possible compatibility issue; configure inventory host ssh.compat in nssh YAML", "host", resolved.Hostname)
 	}
 
 	return connErr
@@ -149,132 +141,6 @@ func isCompatibilityError(err error) bool {
 	if errors.As(err, &exitErr) {
 		return exitErr.Code == exit.ExitConnectionFailed || exitErr.Code == 255
 	}
-	return false
-}
-
-func handleCompatibilityFix(ctx context.Context, hostname, includeFile string) bool {
-	const maxIterations = 5
-
-	parser := sshconfig.NewParser()
-	hostEntry, parsedCfg, err := parser.FindHostWithLocation(hostname)
-	if err != nil || hostEntry == nil {
-		slog.Debug("host not found in config, cannot apply compat fixes", "host", hostname)
-		return false
-	}
-
-	providerState, err := inventory.LoadProviderStateByIncludeFile(includeFile)
-	if err != nil {
-		slog.Debug("provider state lookup failed", "include_file", includeFile, "err", err)
-	}
-	isProviderManaged := providerState != nil && providerState.FindHost(hostname) != nil
-
-	var allFixesApplied []compat.CompatType
-	appliedSet := make(map[compat.CompatType]bool)
-
-	for iteration := 1; iteration <= maxIterations; iteration++ {
-		testCfg := connector.TestConfig{
-			Timeout: 10 * time.Second,
-			Port:    hostEntry.Port(),
-		}
-		if cfg, err := config.LoadDefault(); err == nil && cfg != nil {
-			testCfg.UseSystemKnownHosts = cfg.SSH.Security.CompatPersistProbes
-		}
-		resolved, err := ResolveHostForConnect(hostEntry.Host, "")
-		if err == nil && resolved.Credential != nil {
-			testCfg.Password = resolved.Credential.Password
-		}
-
-		testUser := ""
-		if resolved != nil {
-			testUser = resolved.Username
-		}
-		testResult, err := connector.TestConnection(ctx, hostEntry.Host, testUser, testCfg)
-		if err != nil {
-			slog.Debug("test connection failed", "err", err)
-			break
-		}
-
-		if testResult.Success || compat.IsAuthFailureAfterKex(testResult.Stderr) {
-			slog.Debug("KEX succeeded, not a compatibility issue")
-			break
-		}
-
-		compatTypes := compat.ParseCompatibilityError(testResult.Stderr)
-		if len(compatTypes) == 0 {
-			slog.Debug("no compatibility issues detected in iteration", "iteration", iteration)
-			break
-		}
-
-		var newFixes []compat.CompatType
-		for _, ct := range compatTypes {
-			if !appliedSet[ct] {
-				newFixes = append(newFixes, ct)
-			}
-		}
-
-		if len(newFixes) == 0 {
-			slog.Debug("no new fixes to apply", "iteration", iteration)
-			break
-		}
-
-		if iteration == 1 {
-			fmt.Println()
-			ui.Info("Detected legacy SSH compatibility issues:")
-			for _, ct := range newFixes {
-				compatCfg := compat.CompatConfigs[ct]
-				fmt.Printf("    - %s\n", compatCfg.Name)
-			}
-			fmt.Println()
-
-			confirmed, err := ui.Confirm("Apply compatibility fixes to SSH config?", true)
-			if err != nil || !confirmed {
-				return false
-			}
-		} else {
-			ui.Info("Applying additional fixes:")
-			for _, ct := range newFixes {
-				compatCfg := compat.CompatConfigs[ct]
-				fmt.Printf("    - %s\n", compatCfg.Name)
-			}
-		}
-
-		if isProviderManaged {
-			if err := inventory.PersistCompatFixes(providerState.IncludeFile, hostname, newFixes); err != nil {
-				ui.Error("Failed to persist provider compat fixes: %s", err)
-				return false
-			}
-
-			hostEntry, parsedCfg, err = parser.FindHostWithLocation(hostname)
-			if err != nil || hostEntry == nil {
-				ui.Error("Failed to reload provider-managed host after compat fix: %v", err)
-				return false
-			}
-		} else {
-			if err := sshconfig.ApplyCompatFixes(hostEntry, newFixes); err != nil {
-				ui.Error("Failed to apply fixes: %s", err)
-				return false
-			}
-
-			if err := parser.WriteFile(parsedCfg); err != nil {
-				ui.Error("Failed to write config: %s", err)
-				return false
-			}
-		}
-
-		for _, ct := range newFixes {
-			appliedSet[ct] = true
-			allFixesApplied = append(allFixesApplied, ct)
-		}
-
-		slog.Debug("applied compat fixes", "iteration", iteration, "fixes", len(newFixes))
-	}
-
-	if len(allFixesApplied) > 0 {
-		ui.Success("Compatibility fixes applied")
-		fmt.Println()
-		return true
-	}
-
 	return false
 }
 

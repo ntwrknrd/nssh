@@ -177,6 +177,37 @@ func SaveProviderState(state *ProviderState) error {
 	return atomicWriteFile(providerStatePath(state.Provider), data, 0600)
 }
 
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return fmt.Errorf("create dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		if tmpPath != "" {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename temp file: %w", err)
+	}
+	tmpPath = ""
+	return nil
+}
+
 // DeleteProviderState removes provider state.
 func DeleteProviderState(provider string) error {
 	path := providerStatePath(provider)

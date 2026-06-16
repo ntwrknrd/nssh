@@ -100,13 +100,12 @@ func statusProviderSnapshotForName(
 }
 
 func writeLocalFindings(b *strings.Builder, cfg *config.Config, paths *config.Paths) error {
-	localFile := localFilePath(paths, inventory.LocalProviderIncludeFile())
-	parsed, err := sshconfig.NewParser().ParseFile(localFile)
+	hosts, err := inventoryHosts(nil, cfg, paths)
 	if err != nil {
 		return err
 	}
 	var findings []localRefreshFinding
-	visitLocalRefreshFindings(parsed.Hosts, cfg, paths, nil, localRefreshSkipDNS, func(finding localRefreshFinding) {
+	visitLocalRefreshFindings(hosts, cfg, paths, nil, localRefreshSkipDNS, func(finding localRefreshFinding) {
 		findings = append(findings, finding)
 	})
 	if len(findings) > 0 {
@@ -280,16 +279,16 @@ type statusProviderSnapshot struct {
 }
 
 func localStatusSnapshot(cfg *config.Config, paths *config.Paths) (statusProviderSnapshot, bool, error) {
-	localFile := localFilePath(paths, inventory.LocalProviderIncludeFile())
-	parsed, err := sshconfig.NewParser().ParseFile(localFile)
-	if err != nil {
-		return statusProviderSnapshot{}, false, err
+	provider := cfg.Inventory.Providers[config.ProviderLocal]
+	localHosts := make([]*sshconfig.HostEntry, 0, len(provider.Hosts))
+	for name, hostCfg := range provider.Hosts {
+		localHosts = append(localHosts, hostEntryFromInventoryHost(cfg, paths, config.ProviderLocal, name, hostCfg))
 	}
-	if len(parsed.Hosts) == 0 && !hasConfiguredLocalGroups(cfg) {
+	if len(localHosts) == 0 && !hasConfiguredLocalGroups(cfg) {
 		return statusProviderSnapshot{}, false, nil
 	}
 	groupCounts := make(map[string]int)
-	for _, host := range parsed.Hosts {
+	for _, host := range localHosts {
 		group := normalizeStatusGroup(inventory.LocalHostGroup(host, "-"))
 		groupCounts[group]++
 	}
@@ -298,8 +297,8 @@ func localStatusSnapshot(cfg *config.Config, paths *config.Paths) (statusProvide
 		Type:       config.ProviderLocal,
 		Cache:      "-",
 		LastError:  "-",
-		OutputFile: localFile,
-		Hosts:      len(parsed.Hosts),
+		OutputFile: localProviderYAMLPath(cfg, paths),
+		Hosts:      len(localHosts),
 		Groups:     statusProviderGroups(cfg, paths, config.ProviderLocal, groupCounts),
 	}, true, nil
 }

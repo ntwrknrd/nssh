@@ -42,13 +42,12 @@ func runRemoveHost(host string) error {
 		return err
 	}
 	paths := config.DefaultPaths()
-	parser := sshconfig.NewParser()
-	removedSSHConfig, _ := localWrittenHostConfig(parser, cfg, paths, host)
+	removedSSHConfig, _ := localWrittenHostConfig(nil, cfg, paths, host)
 	removedHostConfig, err := config.InventoryHostAuthConfigText(paths.ConfigFile, cfg, host)
 	if err != nil {
 		return err
 	}
-	removed, err := removeLocalHost(parser, cfg, paths, host)
+	removed, err := removeLocalHost(nil, cfg, paths, host)
 	if err != nil {
 		return err
 	}
@@ -88,7 +87,7 @@ func runRemoveGroup(group string) error {
 		ui.Noop("Group %q not found", group)
 		return nil
 	}
-	hosts, err := inventoryHosts(sshconfig.NewParser(), cfg, config.DefaultPaths())
+	hosts, err := inventoryHosts(nil, cfg, config.DefaultPaths())
 	if err != nil {
 		return err
 	}

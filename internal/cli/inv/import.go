@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -29,7 +28,7 @@ func runImport(path, group string) error {
 	if err != nil {
 		return err
 	}
-	result, err := importLocalCSV(sshconfig.NewParser(), cfg, config.DefaultPaths(), path, group)
+	result, err := importLocalCSV(nil, cfg, config.DefaultPaths(), path, group)
 	if err != nil {
 		return err
 	}

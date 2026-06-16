@@ -48,7 +48,7 @@ func runList(selectPattern string) error {
 	if err != nil {
 		return err
 	}
-	hosts, err := inventoryHosts(sshconfig.NewParser(), cfg, config.DefaultPaths())
+	hosts, err := inventoryHosts(nil, cfg, config.DefaultPaths())
 	if err != nil {
 		return err
 	}

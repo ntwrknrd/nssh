@@ -22,24 +22,6 @@ func TestRenderStatusTreeShowsLocalProviderAndProviderGroups(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	paths := &config.Paths{SSHConfigDir: filepath.Join(home, ".ssh")}
-	localFile := filepath.Join(paths.SSHConfigDir, "nssh.d", "provider_local.conf")
-	if err := os.MkdirAll(filepath.Dir(localFile), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(localFile, []byte(""+
-		"Host local01\n"+
-		"  # Group: local/lab\n"+
-		"  HostName local01.example.com\n"+
-		"\n"+
-		"Host local02\n"+
-		"  # Group: local/lab\n"+
-		"  HostName local02.example.com\n"+
-		"\n"+
-		"Host local03\n"+
-		"  # Group: edge\n"+
-		"  HostName local03.example.com\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
 	configRoot := filepath.Join(home, ".config", "nssh")
 	if err := os.MkdirAll(configRoot, 0700); err != nil {
 		t.Fatal(err)
@@ -51,6 +33,7 @@ inventory:
     local:
       type: local
       groups:
+        edge: {}
         lab:
           match:
             domain_suffix: [.example.com]
@@ -58,6 +41,16 @@ inventory:
             credential_provider: pass-local
             password_ref: nssh/groups/lab
             username: local-admin
+      hosts:
+        local01:
+          group: lab
+          hostname: local01.example.com
+        local02:
+          group: lab
+          hostname: local02.example.com
+        local03:
+          group: edge
+          hostname: local03.example.com
     netbox-prod:
       type: netbox
       groups:
@@ -81,6 +74,14 @@ include: [inventory.yaml]
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
+	localProvider := cfg.Inventory.Providers[config.ProviderLocal]
+	localProvider.Hosts = map[string]config.InventoryHostConfig{
+		"local01": {Group: "lab", Hostname: "local01.example.com"},
+		"local02": {Group: "lab", Hostname: "local02.example.com"},
+		"local03": {Group: "edge", Hostname: "local03.example.com"},
+	}
+	cfg.Inventory.Providers[config.ProviderLocal] = localProvider
+	cfg.Inventory.Provider = cfg.Inventory.Providers
 	now := time.Date(2026, 5, 29, 2, 30, 0, 0, time.UTC)
 	state := &inventory.ProviderState{
 		Version:     inventory.StateVersion,
@@ -106,12 +107,12 @@ include: [inventory.yaml]
 
 	for _, want := range []string{
 		"local (local)",
-		"  output: ~/.ssh/nssh.d/provider_local.conf",
+		"  output: ~/.config/nssh/inventory.yaml",
 		"  hosts: 3 hosts",
 		"  groups:",
-		"    edge",
+		"    local/edge",
 		"      hosts: 1 host",
-		"      config: -",
+		"      config: ~/.config/nssh/inventory.yaml",
 		"      auth:",
 		"        username: -",
 		"        username ref: -",
@@ -411,26 +412,25 @@ func TestRenderStatusTreeReportsLocalFindingsReadOnly(t *testing.T) {
 	inventory.SetStateDir(t.TempDir())
 	t.Cleanup(func() { inventory.SetStateDir("") })
 
-	paths := &config.Paths{SSHConfigDir: filepath.Join(t.TempDir(), ".ssh")}
-	localFile := filepath.Join(paths.SSHConfigDir, "nssh.d", "provider_local.conf")
-	if err := os.MkdirAll(filepath.Dir(localFile), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(localFile, []byte(""+
-		"Host edge01\n"+
-		"  # Group: local/lab\n"+
-		"  HostName 192.0.2.1\n"+
-		"\n"+
-		"Host edge01\n"+
-		"  # Group: local/lab\n"+
-		"  HostName 192.0.2.2\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	tmp := t.TempDir()
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), SSHConfigDir: filepath.Join(tmp, ".ssh")}
 	cfg := &config.Config{Inventory: config.InventoryConfig{
-		Group: map[string]config.GroupConfig{
-			"lab": {},
+		Providers: map[string]config.InventoryProviderConfig{
+			config.ProviderLocal: {
+				Type:   config.ProviderLocal,
+				Groups: map[string]config.GroupConfig{"lab": {}},
+				Hosts: map[string]config.InventoryHostConfig{
+					"edge01-a": {Group: "lab", Hostname: "192.0.2.1", Aliases: []string{"edge01"}},
+					"edge01-b": {Group: "lab", Hostname: "192.0.2.2", Aliases: []string{"edge01"}},
+				},
+			},
 		},
 	}}
+	if err := saveLocalProviderInventory(cfg, paths); err != nil {
+		t.Fatal(err)
+	}
+	localFile := localProviderYAMLPath(cfg, paths)
+	before := readTestFile(t, localFile)
 
 	got, err := renderStatusTree(cfg, paths, "local", time.Date(2026, 5, 29, 2, 30, 0, 0, time.UTC))
 	if err != nil {
@@ -439,17 +439,14 @@ func TestRenderStatusTreeReportsLocalFindingsReadOnly(t *testing.T) {
 	text := ui.StripANSI(got)
 	for _, want := range []string{
 		"  findings",
-		"    edge01 [local/lab] duplicate: pattern \"edge01\" also appears in " + localFile,
+		"duplicate: pattern \"edge01\" also appears in " + localFile,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status tree missing %q:\n%s", want, text)
 		}
 	}
-	content, err := os.ReadFile(localFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Count(string(content), "Host edge01") != 2 {
-		t.Fatalf("status should not mutate local inventory:\n%s", content)
+	after := readTestFile(t, localFile)
+	if after != before {
+		t.Fatalf("status should not mutate local inventory:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }

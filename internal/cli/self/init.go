@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ui"
@@ -125,15 +124,6 @@ func runInit(opts InitOptions) error {
 		ui.Info("Credential provider authentication is owned by Pass, 1Password, or Bitwarden.")
 	}
 
-	// Ensure SSH config has Include directive for nssh.d (silent in quiet mode)
-	if !opts.DryRun {
-		if err := ensureSSHConfigInclude(paths); err != nil {
-			ui.Warning("SSH config setup: %v", err)
-		} else if !opts.Quiet {
-			ui.Success("SSH config ready")
-		}
-	}
-
 	// Check dependencies
 	deps := Dependencies()
 	hasMissing := false
@@ -211,42 +201,6 @@ func runInit(opts InitOptions) error {
 
 	// Footer (skip in quiet mode)
 	if !opts.Quiet {
-	}
-
-	return nil
-}
-
-// ensureSSHConfigInclude ensures ~/.ssh/config has an Include directive for nssh.d.
-// This is required for SSH to read host entries created by nssh.
-func ensureSSHConfigInclude(paths *config.Paths) error {
-	nsshD := filepath.Join(paths.SSHConfigDir, "nssh.d")
-	sshConfig := paths.SSHConfigFile
-
-	// Create nssh.d directory
-	if err := os.MkdirAll(nsshD, 0700); err != nil {
-		return fmt.Errorf("create nssh.d: %w", err)
-	}
-
-	// Check if Include directive already exists
-	includeDirective := fmt.Sprintf("Include %s/*", nsshD)
-
-	content, err := os.ReadFile(sshConfig)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read ssh config: %w", err)
-	}
-
-	// Check if Include directive is already present
-	if strings.Contains(string(content), includeDirective) ||
-		strings.Contains(string(content), "Include ~/.ssh/nssh.d/*") ||
-		strings.Contains(string(content), "Include nssh.d/*") {
-		return nil // Already configured
-	}
-
-	// Prepend Include directive (must come before other directives)
-	newContent := fmt.Sprintf("# nssh managed hosts\n%s\n\n%s", includeDirective, string(content))
-
-	if err := os.WriteFile(sshConfig, []byte(newContent), 0600); err != nil {
-		return fmt.Errorf("write ssh config: %w", err)
 	}
 
 	return nil

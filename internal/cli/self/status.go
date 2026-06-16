@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -92,35 +91,6 @@ func runStatus() error {
 		ui.StatusLineNeutral("Group auth mappings", fmt.Sprintf("%d", inventoryGroupAuthCount(cfg)))
 	} else {
 		ui.StatusLineNeutral("Credential providers", "config unavailable: "+err.Error())
-	}
-
-	// SSH Config (with inventory hosts count)
-	ui.SubSection("SSH Config")
-	printFileStatus(paths.SSHConfigFile, "SSH config")
-
-	// SSH nssh.d directory
-	nsshD := filepath.Join(paths.SSHConfigDir, "nssh.d")
-	if DirExists(nsshD) {
-		files, _ := filepath.Glob(filepath.Join(nsshD, "*"))
-		fileCount := 0
-		for _, f := range files {
-			if info, err := os.Stat(f); err == nil && !info.IsDir() {
-				fileCount++
-			}
-		}
-		// Count hosts across all include files
-		hostCount := 0
-		parser := sshconfig.NewParser()
-		if includeFiles, err := parser.FindIncludeFiles(); err == nil {
-			for _, includeFile := range includeFiles {
-				if parsed, err := parser.ParseFile(includeFile); err == nil {
-					hostCount += len(parsed.Hosts)
-				}
-			}
-		}
-		printStatus(true, "Include dir", fmt.Sprintf("%s (%d files, %d hosts)", AbbreviatePath(nsshD), fileCount, hostCount))
-	} else {
-		printStatus(false, "Include dir", AbbreviatePath(nsshD)+" (not found)")
 	}
 
 	// Logging

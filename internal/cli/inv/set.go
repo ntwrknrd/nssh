@@ -170,7 +170,7 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 	if err := authPatch.Validate(cfg); err != nil {
 		return err
 	}
-	parser := sshconfig.NewParser()
+	var parser *sshconfig.Parser
 	paths := config.DefaultPaths()
 	pendingCreatedGroup := ""
 	if group != "" || hostname != "" || user != "" || portSet || !authPatch.HasChange() {

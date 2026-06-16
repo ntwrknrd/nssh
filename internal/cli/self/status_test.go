@@ -18,7 +18,7 @@ func TestRunStatusDoesNotShowAgentRuntimeSession(t *testing.T) {
 		}
 	})
 
-	for _, want := range []string{"Version", "Dependencies", "Configuration", "SSH Config", "Logging"} {
+	for _, want := range []string{"Version", "Dependencies", "Configuration", "Logging"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status output missing %q:\n%s", want, got)
 		}

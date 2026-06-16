@@ -56,7 +56,7 @@ func runLocalRefresh() error {
 	if err != nil {
 		return err
 	}
-	hosts, err := inventoryHosts(sshconfig.NewParser(), cfg, config.DefaultPaths())
+	hosts, err := inventoryHosts(nil, cfg, config.DefaultPaths())
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func runLocalRefresh() error {
 	}
 
 	ui.SubSection("Applying")
-	applied, err := applyLocalRefreshFixes(sshconfig.NewParser(), config.DefaultPaths(), selected)
+	applied, err := applyLocalRefreshFixes(nil, config.DefaultPaths(), selected)
 	if err != nil {
 		return err
 	}

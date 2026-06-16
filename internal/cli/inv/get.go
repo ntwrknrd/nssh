@@ -5,7 +5,6 @@ import (
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/inventory"
-	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -39,7 +38,7 @@ func runGet(hostName string) error {
 	if err != nil {
 		return err
 	}
-	host, _, err := findInventoryHostWithLocation(sshconfig.NewParser(), cfg, config.DefaultPaths(), hostName)
+	host, _, err := findInventoryHostWithLocation(nil, cfg, config.DefaultPaths(), hostName)
 	if err != nil {
 		return err
 	}
