@@ -14,7 +14,7 @@ func TestDurationRoundTrip(t *testing.T) {
 	cfg.Agent.MaxLifetime = Duration(48 * time.Hour)
 
 	// Save to temp file
-	tmpFile := filepath.Join(t.TempDir(), "config.toml")
+	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
 	if err := Save(tmpFile, cfg); err != nil {
 		t.Fatalf("Save error: %v", err)
 	}

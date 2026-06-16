@@ -31,7 +31,7 @@ func TestRunCfgDefaultOmitsCommandBanners(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"[agent]",
+		"agent:",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("cfg output missing %q:\n%s", want, got)
@@ -49,7 +49,7 @@ func TestRunCfgPathsOnlyStaysRawPath(t *testing.T) {
 	if strings.Contains(got, "NSSH CONFIG") || strings.Contains(got, "OK") {
 		t.Fatalf("paths-only output should not include command UI:\n%s", got)
 	}
-	if !strings.HasSuffix(strings.TrimSpace(got), filepath.Join("nssh", "config.toml")) {
+	if !strings.HasSuffix(strings.TrimSpace(got), filepath.Join("nssh", "config.yaml")) {
 		t.Fatalf("paths-only output should include the config path, got %q", got)
 	}
 }
@@ -61,16 +61,16 @@ func TestConfigFilesIncludesResolvedIncludes(t *testing.T) {
 	if err := os.MkdirAll(includeDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	root := filepath.Join(configDir, "config.toml")
-	first := filepath.Join(includeDir, "01-base.toml")
-	second := filepath.Join(includeDir, "02-inventory.toml")
-	if err := os.WriteFile(first, []byte("[agent]\nidle_timeout = \"30m\"\n"), 0600); err != nil {
+	root := filepath.Join(configDir, "config.yaml")
+	first := filepath.Join(includeDir, "01-base.yaml")
+	second := filepath.Join(includeDir, "02-inventory.yaml")
+	if err := os.WriteFile(first, []byte("agent:\n  idle_timeout: 30m\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(second, []byte("[inventory.provider.local]\ntype = \"local\"\n"), 0600); err != nil {
+	if err := os.WriteFile(second, []byte("inventory:\n  providers:\n    local:\n      type: local\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(root, []byte("include = [\"conf.d/*.toml\"]\n"), 0600); err != nil {
+	if err := os.WriteFile(root, []byte("include: [conf.d/*.yaml]\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -86,7 +86,7 @@ func TestConfigFilesIncludesResolvedIncludes(t *testing.T) {
 }
 
 func TestRenderConfigTextLeavesNonTerminalOutputPlain(t *testing.T) {
-	input := "[agent]\nidle_timeout = \"4h\"\n"
+	input := "agent:\n  idle_timeout: 4h\n"
 
 	got := renderConfigText(input, false)
 
@@ -99,7 +99,7 @@ func TestRenderConfigTextLeavesNonTerminalOutputPlain(t *testing.T) {
 }
 
 func TestRenderConfigTextHighlightsTerminalOutput(t *testing.T) {
-	input := "[agent]\nidle_timeout = \"4h\"\n"
+	input := "agent:\n  idle_timeout: 4h\n"
 
 	got := renderConfigText(input, true)
 

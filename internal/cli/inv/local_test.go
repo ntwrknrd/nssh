@@ -751,13 +751,17 @@ func TestRemoveLocalHostRemovesOnlyLocalHosts(t *testing.T) {
 
 func TestRemoveInventoryHostConfigClearsAuthOverride(t *testing.T) {
 	tmp := t.TempDir()
-	configPath := filepath.Join(tmp, "config.toml")
+	configPath := filepath.Join(tmp, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(strings.TrimSpace(`
-[inventory.host.edge01]
-auth = { credential_provider = "pass-local", password_ref = "nssh/hosts/edge01" }
-
-[inventory.host.edge02]
-auth = { username = "netops" }
+inventory:
+  hosts:
+    edge01:
+      auth:
+        credential_provider: pass-local
+        password_ref: nssh/hosts/edge01
+    edge02:
+      auth:
+        username: netops
 `)+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -780,7 +784,7 @@ auth = { username = "netops" }
 	if strings.Contains(got, "edge01") || strings.Contains(got, "nssh/hosts/edge01") {
 		t.Fatalf("removed host auth still present:\n%s", got)
 	}
-	if !strings.Contains(got, "[inventory.host.edge02]") {
+	if !strings.Contains(got, "edge02:") {
 		t.Fatalf("unrelated host auth missing:\n%s", got)
 	}
 }
@@ -826,26 +830,28 @@ func TestEnsureInventoryGroupEmptyRefusesNonEmptyGroup(t *testing.T) {
 
 func TestRemoveInventoryGroupConfigDeletesProviderSourceGroup(t *testing.T) {
 	tmp := t.TempDir()
-	configPath := filepath.Join(tmp, "config.toml")
-	providerPath := filepath.Join(tmp, "inventory", "local.toml")
+	configPath := filepath.Join(tmp, "config.yaml")
+	providerPath := filepath.Join(tmp, "inventory", "local.yaml")
 	if err := os.MkdirAll(filepath.Dir(providerPath), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(providerPath, []byte(strings.TrimSpace(`
-[provider.local]
-type = "local"
-
-[provider.local.group.lab.match]
-domain_suffix = [".lab.local"]
-
-[provider.local.group.keep.match]
-domain_suffix = [".keep.local"]
+inventory:
+  providers:
+    local:
+      type: local
+      groups:
+        lab:
+          match:
+            domain_suffix: [.lab.local]
+        keep:
+          match:
+            domain_suffix: [.keep.local]
 `)+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(configPath, []byte(strings.TrimSpace(`
-[inventory]
-include = ["inventory/local.toml"]
+include: [inventory/local.yaml]
 `)+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -862,17 +868,17 @@ include = ["inventory/local.toml"]
 		t.Fatal(err)
 	}
 	got := string(providerData)
-	if strings.Contains(got, "group.lab") || strings.Contains(got, ".lab.local") {
+	if strings.Contains(got, "lab:") || strings.Contains(got, ".lab.local") {
 		t.Fatalf("removed group still present:\n%s", got)
 	}
-	if !strings.Contains(got, "[provider.local.group.keep.match]") {
+	if !strings.Contains(got, "keep:") {
 		t.Fatalf("unrelated group missing:\n%s", got)
 	}
 	rootData, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(rootData), "group.keep") {
+	if strings.Contains(string(rootData), "keep:") {
 		t.Fatalf("provider config was flattened into root:\n%s", rootData)
 	}
 }

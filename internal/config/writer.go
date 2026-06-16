@@ -9,10 +9,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
-// MarshalSparse renders a hand-editable TOML config with comments for emitted
-// options.
+// MarshalSparse renders a hand-editable YAML config.
 func MarshalSparse(cfg *Config) (string, error) {
 	if cfg == nil {
 		cfg = DefaultConfig()
@@ -109,7 +110,7 @@ func rootTableForPath(rootPath string, cfg *Config, targetPath string) (map[stri
 	if sameConfigPath(rootPath, targetPath) {
 		return rootTableForSave(cfg), nil
 	}
-	table, err := readTOMLMap(targetPath)
+	table, err := readYAMLMap(targetPath)
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +138,9 @@ func setInventoryGroupInRoot(root map[string]any, cfg *Config, groupID string) e
 }
 
 func inventoryProviderGroupPath(root map[string]any, providerName, groupName string) []string {
+	if tablePathDefined(root, "inventory", "providers", providerName) || tablePathDefined(root, "inventory", "providers") {
+		return []string{"inventory", "providers", providerName, "groups", groupName}
+	}
 	if tablePathDefined(root, "provider", providerName) && !tablePathDefined(root, "inventory", "provider", providerName) {
 		return []string{"provider", providerName, "group", groupName}
 	}
@@ -144,6 +148,9 @@ func inventoryProviderGroupPath(root map[string]any, providerName, groupName str
 }
 
 func inventoryHostPath(root map[string]any, host string) []string {
+	if tablePathDefined(root, "inventory", "hosts", host) || tablePathDefined(root, "inventory", "hosts") {
+		return []string{"inventory", "hosts", host}
+	}
 	if tablePathDefined(root, "host", host) && !tablePathDefined(root, "inventory", "host", host) {
 		return []string{"host", host}
 	}
@@ -259,10 +266,10 @@ func setInventoryHostAuthInRoot(root map[string]any, path string, cfg *Config, h
 		if isImportedOnlySource(path, cfg.InventoryHostSource(host)) {
 			return fmt.Errorf("inventory host %q auth is imported from %s", host, cfg.InventoryHostSource(host))
 		}
-		deleteMapPath(root, []string{"inventory", "host", host})
+		deleteMapPath(root, inventoryHostPath(root, host))
 		return nil
 	}
-	setMapPath(root, []string{"inventory", "host", host}, inventoryHostTable(hostCfg))
+	setMapPath(root, inventoryHostPath(root, host), inventoryHostTable(hostCfg))
 	return nil
 }
 
@@ -410,7 +417,11 @@ func deleteMapPath(root map[string]any, parts []string) {
 }
 
 func sparseConfigTable(cfg *Config) map[string]any {
+	cfg.syncSchemaAliases()
 	table := make(map[string]any)
+	if len(cfg.Include) > 0 {
+		table["include"] = cfg.Include
+	}
 
 	agent := make(map[string]any)
 	if cfg.Agent.AutoStart {
@@ -429,16 +440,12 @@ func sparseConfigTable(cfg *Config) map[string]any {
 		table["agent"] = agent
 	}
 
-	credential := make(map[string]any)
-	if len(cfg.Credential.Provider) > 0 {
-		providers := make(map[string]any)
-		for _, name := range sortedCredentialProviders(cfg.Credential.Provider) {
-			providers[name] = credentialProviderTable(cfg.Credential.Provider[name])
+	if len(cfg.Credentials) > 0 {
+		credentials := make(map[string]any)
+		for _, name := range sortedCredentialProviders(cfg.Credentials) {
+			credentials[name] = credentialProviderTable(cfg.Credentials[name])
 		}
-		credential["provider"] = providers
-	}
-	if len(credential) > 0 {
-		table["credential"] = credential
+		table["credentials"] = credentials
 	}
 
 	inventory := make(map[string]any)
@@ -446,19 +453,12 @@ func sparseConfigTable(cfg *Config) map[string]any {
 	if len(auth) > 0 {
 		inventory["auth"] = auth
 	}
-	if len(cfg.Inventory.Host) > 0 {
-		hosts := make(map[string]any)
-		for _, name := range sortedInventoryHosts(cfg.Inventory.Host) {
-			hosts[name] = inventoryHostTable(cfg.Inventory.Host[name])
-		}
-		inventory["host"] = hosts
-	}
-	if len(cfg.Inventory.Provider) > 0 {
+	if len(cfg.Inventory.Providers) > 0 {
 		providers := make(map[string]any)
-		for _, name := range sortedInventoryProviders(cfg.Inventory.Provider) {
-			providers[name] = inventoryProviderTable(cfg.Inventory.Provider[name])
+		for _, name := range sortedInventoryProviders(cfg.Inventory.Providers) {
+			providers[name] = inventoryProviderTable(cfg.Inventory.Providers[name])
 		}
-		inventory["provider"] = providers
+		inventory["providers"] = providers
 	}
 	if len(inventory) > 0 {
 		table["inventory"] = inventory
@@ -478,14 +478,16 @@ func sparseConfigTable(cfg *Config) map[string]any {
 }
 
 func credentialProviderTable(cfg CredentialProviderConfig) map[string]any {
+	cfg.syncDetailFields()
 	table := make(map[string]any)
 	if cfg.Type != "" {
 		table["type"] = cfg.Type
 	}
-	detail := providerDetailTable(cfg.Config)
-	if len(detail) > 0 {
-		table["config"] = detail
-	}
+	addString(table, "session", cfg.Session)
+	addString(table, "account", cfg.Account)
+	addString(table, "vault", cfg.Vault)
+	addString(table, "command", cfg.Command)
+	addString(table, "prefix", cfg.Prefix)
 	return table
 }
 
@@ -516,12 +518,24 @@ func groupTable(cfg GroupConfig) map[string]any {
 
 func inventoryHostTable(cfg InventoryHostConfig) map[string]any {
 	table := make(map[string]any)
+	addString(table, "group", cfg.Group)
+	addString(table, "hostname", cfg.Hostname)
+	if len(cfg.Aliases) > 0 {
+		table["aliases"] = cfg.Aliases
+	}
+	if cfg.Port > 0 {
+		table["port"] = cfg.Port
+	}
 	if cfg.AuthDisabled {
 		table["auth_disabled"] = cfg.AuthDisabled
 	}
 	auth := authTable(cfg.Auth)
 	if len(auth) > 0 {
 		table["auth"] = auth
+	}
+	ssh := sshHostTable(cfg.SSH)
+	if len(ssh) > 0 {
+		table["ssh"] = ssh
 	}
 	return table
 }
@@ -533,11 +547,12 @@ func authTable(cfg InventoryAuthConfig) map[string]any {
 	addString(table, "password_ref", cfg.PasswordRef)
 	addString(table, "username", cfg.Username)
 	addString(table, "username_ref", cfg.UsernameRef)
-	addString(table, "auth_mode", cfg.AuthMode)
+	addString(table, "mode", cfg.AuthMode)
 	return table
 }
 
 func inventoryProviderTable(cfg InventoryProviderConfig) map[string]any {
+	cfg.syncAliasFields()
 	table := make(map[string]any)
 	addString(table, "type", cfg.Type)
 	auth := authTable(cfg.Auth)
@@ -548,12 +563,19 @@ func inventoryProviderTable(cfg InventoryProviderConfig) map[string]any {
 	if len(detail) > 0 {
 		table["config"] = detail
 	}
-	if len(cfg.Group) > 0 {
+	if len(cfg.Groups) > 0 {
 		groups := make(map[string]any)
-		for _, name := range sortedGroups(cfg.Group) {
-			groups[name] = groupTable(cfg.Group[name])
+		for _, name := range sortedGroups(cfg.Groups) {
+			groups[name] = groupTable(cfg.Groups[name])
 		}
-		table["group"] = groups
+		table["groups"] = groups
+	}
+	if len(cfg.Hosts) > 0 {
+		hosts := make(map[string]any)
+		for _, name := range sortedInventoryHosts(cfg.Hosts) {
+			hosts[name] = inventoryHostTable(cfg.Hosts[name])
+		}
+		table["hosts"] = hosts
 	}
 	return table
 }
@@ -680,6 +702,77 @@ func sshTable(cfg SSHConfig) map[string]any {
 	if len(security) > 0 {
 		table["security"] = security
 	}
+	defaults := sshHostTable(cfg.Defaults)
+	if len(defaults) > 0 {
+		table["defaults"] = defaults
+	}
+	return table
+}
+
+func sshHostTable(cfg SSHHostConfig) map[string]any {
+	table := make(map[string]any)
+	addString(table, "proxy_jump", cfg.ProxyJump)
+	addString(table, "proxy_command", cfg.ProxyCommand)
+	if cfg.IdentitiesOnly != nil {
+		table["identities_only"] = *cfg.IdentitiesOnly
+	}
+	if cfg.IdentityAgent.Path != "" {
+		table["identity_agent"] = map[string]any{"path": cfg.IdentityAgent.Path}
+	}
+	if len(cfg.IdentityFiles) > 0 {
+		table["identity_files"] = cfg.IdentityFiles
+	}
+	if len(cfg.CertificateFiles) > 0 {
+		table["certificate_files"] = cfg.CertificateFiles
+	}
+	if cfg.ForwardAgent != nil {
+		table["forward_agent"] = *cfg.ForwardAgent
+	}
+	if len(cfg.LocalForwards) > 0 {
+		table["local_forwards"] = cfg.LocalForwards
+	}
+	if len(cfg.RemoteForwards) > 0 {
+		table["remote_forwards"] = cfg.RemoteForwards
+	}
+	if len(cfg.SetEnv) > 0 {
+		table["set_env"] = cfg.SetEnv
+	}
+	addString(table, "remote_command", cfg.RemoteCommand)
+	if cfg.ServerAliveInterval.Duration() > 0 {
+		table["server_alive_interval"] = cfg.ServerAliveInterval.Duration().String()
+	}
+	if cfg.ServerAliveCountMax > 0 {
+		table["server_alive_count_max"] = cfg.ServerAliveCountMax
+	}
+	if cfg.ConnectionTimeout.Duration() > 0 {
+		table["connection_timeout"] = cfg.ConnectionTimeout.Duration().String()
+	}
+	addString(table, "control_master", cfg.ControlMaster)
+	if cfg.ControlPersist.Duration() > 0 {
+		table["control_persist"] = cfg.ControlPersist.Duration().String()
+	}
+	addString(table, "control_path", cfg.ControlPath)
+	if len(cfg.Ciphers) > 0 {
+		table["ciphers"] = cfg.Ciphers
+	}
+	if len(cfg.MACs) > 0 {
+		table["macs"] = cfg.MACs
+	}
+	if len(cfg.KexAlgorithms) > 0 {
+		table["kex_algorithms"] = cfg.KexAlgorithms
+	}
+	if len(cfg.HostKeyAlgorithms) > 0 {
+		table["host_key_algorithms"] = cfg.HostKeyAlgorithms
+	}
+	if len(cfg.PubkeyAcceptedAlgorithms) > 0 {
+		table["pubkey_accepted_algorithms"] = cfg.PubkeyAcceptedAlgorithms
+	}
+	if len(cfg.Compat) > 0 {
+		table["compat"] = cfg.Compat
+	}
+	if len(cfg.Options) > 0 {
+		table["options"] = cfg.Options
+	}
 	return table
 }
 
@@ -691,8 +784,14 @@ func addString(table map[string]any, key, value string) {
 
 func marshalConfigTable(table map[string]any) (string, error) {
 	var b bytes.Buffer
-	writeRootScalars(&b, table)
-	writeKnownSections(&b, table)
+	enc := yaml.NewEncoder(&b)
+	enc.SetIndent(2)
+	if err := enc.Encode(table); err != nil {
+		return "", err
+	}
+	if err := enc.Close(); err != nil {
+		return "", err
+	}
 	return strings.TrimRight(b.String(), "\n") + "\n", nil
 }
 

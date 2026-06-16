@@ -39,31 +39,37 @@ var supportedProviders = map[string]bool{
 
 // CredentialConfig defines named credential provider instances.
 type CredentialConfig struct {
-	Provider map[string]CredentialProviderConfig `toml:"provider"`
+	Provider map[string]CredentialProviderConfig `toml:"provider" yaml:"provider,omitempty"`
 
 	// Host and Group are legacy credential binding tables. Auth mappings now
 	// live under inventory.host and inventory.provider.<provider>.group.
-	Host  map[string]CredentialRefConfig `toml:"host"`
-	Group map[string]CredentialRefConfig `toml:"group"`
+	Host  map[string]CredentialRefConfig `toml:"host" yaml:"host,omitempty"`
+	Group map[string]CredentialRefConfig `toml:"group" yaml:"group,omitempty"`
 
-	Type   string                         `toml:"type"`
-	Config CredentialProviderDetailConfig `toml:"config"`
+	Type   string                         `toml:"type" yaml:"type,omitempty"`
+	Config CredentialProviderDetailConfig `toml:"config" yaml:"config,omitempty"`
 }
 
 // CredentialProviderConfig configures one named credential provider instance.
 type CredentialProviderConfig struct {
-	Type   string                         `toml:"type"`
-	Config CredentialProviderDetailConfig `toml:"config"`
+	Type    string `toml:"type" yaml:"type"`
+	Session string `yaml:"session,omitempty"`
+	Account string `yaml:"account,omitempty"`
+	Vault   string `yaml:"vault,omitempty"`
+	Command string `yaml:"command,omitempty"`
+	Prefix  string `yaml:"prefix,omitempty"`
+
+	Config CredentialProviderDetailConfig `toml:"config" yaml:"config,omitempty"`
 }
 
 // CredentialProviderDetailConfig holds backend-specific credential provider
 // settings. Only the fields for the selected provider are used.
 type CredentialProviderDetailConfig struct {
-	Account string `toml:"account"`
-	Vault   string `toml:"vault"`
-	Command string `toml:"command"`
-	Prefix  string `toml:"prefix"`
-	Session string `toml:"session"`
+	Account string `toml:"account" yaml:"account,omitempty"`
+	Vault   string `toml:"vault" yaml:"vault,omitempty"`
+	Command string `toml:"command" yaml:"command,omitempty"`
+	Prefix  string `toml:"prefix" yaml:"prefix,omitempty"`
+	Session string `toml:"session" yaml:"session,omitempty"`
 }
 
 // CredentialRefConfig maps a host or group credential scope to an existing
@@ -71,61 +77,73 @@ type CredentialProviderDetailConfig struct {
 // ID/name or a provider URI. Username can be literal or resolved from
 // UsernameRef.
 type CredentialRefConfig struct {
-	Provider    string `toml:"provider"`
-	Ref         string `toml:"ref"`
-	Username    string `toml:"username"`
-	UsernameRef string `toml:"username_ref"`
+	Provider    string `toml:"provider" yaml:"provider,omitempty"`
+	Ref         string `toml:"ref" yaml:"ref,omitempty"`
+	Username    string `toml:"username" yaml:"username,omitempty"`
+	UsernameRef string `toml:"username_ref" yaml:"username_ref,omitempty"`
 }
 
 // InventoryConfig holds inventory defaults, host overrides, and provider config.
 type InventoryConfig struct {
-	Auth     InventoryAuthConfig                `toml:"auth"`
-	Group    map[string]GroupConfig             `toml:"-"`
-	Host     map[string]InventoryHostConfig     `toml:"host"`
-	Provider map[string]InventoryProviderConfig `toml:"provider"`
+	Auth      InventoryAuthConfig                `toml:"auth" yaml:"auth,omitempty"`
+	Groups    map[string]GroupConfig             `toml:"-" yaml:"groups,omitempty"`
+	Hosts     map[string]InventoryHostConfig     `yaml:"hosts,omitempty"`
+	Providers map[string]InventoryProviderConfig `yaml:"providers,omitempty"`
+
+	Group    map[string]GroupConfig             `toml:"-" yaml:"group,omitempty"`
+	Host     map[string]InventoryHostConfig     `toml:"host" yaml:"host,omitempty"`
+	Provider map[string]InventoryProviderConfig `toml:"provider" yaml:"provider,omitempty"`
 }
 
 // InventoryHostConfig stores host-level inventory metadata outside provider
 // generated SSH config.
 type InventoryHostConfig struct {
-	AuthDisabled bool                `toml:"auth_disabled"`
-	Auth         InventoryAuthConfig `toml:"auth"`
+	Group        string              `yaml:"group,omitempty"`
+	Hostname     string              `yaml:"hostname,omitempty"`
+	Aliases      []string            `yaml:"aliases,omitempty"`
+	Port         int                 `yaml:"port,omitempty"`
+	Auth         InventoryAuthConfig `toml:"auth" yaml:"auth,omitempty"`
+	SSH          SSHHostConfig       `yaml:"ssh,omitempty"`
+	AuthDisabled bool                `toml:"auth_disabled" yaml:"auth_disabled,omitempty"`
 }
 
 // InventoryAuthConfig maps an inventory host or group to a credential item.
 type InventoryAuthConfig struct {
-	CredentialProvider string `toml:"credential_provider"`
-	PasswordRef        string `toml:"password_ref"`
-	Username           string `toml:"username"`
-	UsernameRef        string `toml:"username_ref"`
-	AuthMode           string `toml:"auth_mode"`
+	Mode               string `yaml:"mode,omitempty"`
+	CredentialProvider string `toml:"credential_provider" yaml:"credential_provider,omitempty"`
+	PasswordRef        string `toml:"password_ref" yaml:"password_ref,omitempty"`
+	Username           string `toml:"username" yaml:"username,omitempty"`
+	UsernameRef        string `toml:"username_ref" yaml:"username_ref,omitempty"`
+	AuthMode           string `toml:"auth_mode" yaml:"auth_mode,omitempty"`
 }
 
 // InventoryProviderConfig configures one named external inventory provider.
 type InventoryProviderConfig struct {
-	Type      string                        `toml:"type"`
-	Auth      InventoryAuthConfig           `toml:"auth"`
-	Config    InventoryProviderDetailConfig `toml:"config"`
-	Group     map[string]GroupConfig        `toml:"group"`
-	Selectors []InventoryGroupSelector      `toml:"-"`
+	Type      string                         `toml:"type" yaml:"type"`
+	Auth      InventoryAuthConfig            `toml:"auth" yaml:"auth,omitempty"`
+	Config    InventoryProviderDetailConfig  `toml:"config" yaml:"config,omitempty"`
+	Groups    map[string]GroupConfig         `yaml:"groups,omitempty"`
+	Hosts     map[string]InventoryHostConfig `yaml:"hosts,omitempty"`
+	Group     map[string]GroupConfig         `toml:"group" yaml:"group,omitempty"`
+	Selectors []InventoryGroupSelector       `toml:"-"`
 }
 
 // GroupConfig describes one provider-owned inventory group.
 type GroupConfig struct {
-	DomainSuffix []string            `toml:"domain_suffix"`
-	Auth         InventoryAuthConfig `toml:"auth"`
-	Match        InventoryMatch      `toml:"match"`
+	DomainSuffix []string            `toml:"domain_suffix" yaml:"domain_suffix,omitempty"`
+	Auth         InventoryAuthConfig `toml:"auth" yaml:"auth,omitempty"`
+	Match        InventoryMatch      `toml:"match" yaml:"match,omitempty"`
 }
 
 // InventoryProviderDetailConfig holds implementation-specific provider config.
 type InventoryProviderDetailConfig struct {
-	BaseURL               string `toml:"base_url"`
-	URLEnv                string `toml:"url_env"`
-	TokenEnv              string `toml:"token_env"`
-	EnvFile               string `toml:"env_file"`
-	JumpHost              string `toml:"jump_host"`
-	Sudo                  bool   `toml:"sudo"`
-	StrictHostKeyChecking bool   `toml:"strict_host_key_checking"`
+	BaseURL               string `toml:"base_url" yaml:"base_url,omitempty"`
+	URLEnv                string `toml:"url_env" yaml:"url_env,omitempty"`
+	TokenEnv              string `toml:"token_env" yaml:"token_env,omitempty"`
+	EnvFile               string `toml:"env_file" yaml:"env_file,omitempty"`
+	JumpHost              string `toml:"jump_host" yaml:"jump_host,omitempty"`
+	Sudo                  bool   `toml:"sudo" yaml:"sudo,omitempty"`
+	StrictHostKeyChecking bool   `toml:"strict_host_key_checking" yaml:"strict_host_key_checking,omitempty"`
 }
 
 type InventoryAuthContext struct {
@@ -199,36 +217,64 @@ func (c *CredentialConfig) Validate() error {
 
 // Validate checks one credential provider instance.
 func (c *CredentialProviderConfig) Validate(name string) error {
+	c.syncDetailFields()
 	c.Type = strings.ToLower(strings.TrimSpace(c.Type))
 	switch c.Type {
 	case CredentialProviderPass:
-		if strings.TrimSpace(c.Config.Command) == "" {
-			c.Config.Command = "pass"
+		if strings.TrimSpace(c.Command) == "" {
+			c.Command = "pass"
 		}
-		if strings.TrimSpace(c.Config.Prefix) == "" {
-			c.Config.Prefix = "nssh"
+		if strings.TrimSpace(c.Prefix) == "" {
+			c.Prefix = "nssh"
 		}
-		if strings.TrimSpace(c.Config.Session) == "" {
-			c.Config.Session = ProviderSessionExternal
+		if strings.TrimSpace(c.Session) == "" {
+			c.Session = ProviderSessionExternal
 		}
 	case CredentialProvider1Password:
-		if strings.TrimSpace(c.Config.Vault) == "" {
+		if strings.TrimSpace(c.Vault) == "" {
 			return fmt.Errorf("credential.provider.%s.config.vault is required for %q", name, CredentialProvider1Password)
 		}
-		if strings.TrimSpace(c.Config.Session) == "" {
-			c.Config.Session = ProviderSessionAgentOwned
+		if strings.TrimSpace(c.Session) == "" {
+			c.Session = ProviderSessionAgentOwned
 		}
 	case CredentialProviderBitwarden:
-		if strings.TrimSpace(c.Config.Session) == "" {
-			c.Config.Session = ProviderSessionExternal
+		if strings.TrimSpace(c.Session) == "" {
+			c.Session = ProviderSessionExternal
 		}
 	default:
 		return fmt.Errorf("unsupported credential provider %q", c.Type)
 	}
-	if err := validateProviderSessionPolicy("credential.provider."+name+".config.session", c.Config.Session); err != nil {
+	c.syncConfigFields()
+	if err := validateProviderSessionPolicy("credential.provider."+name+".config.session", c.Session); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (c *CredentialProviderConfig) syncDetailFields() {
+	if c.Account == "" {
+		c.Account = c.Config.Account
+	}
+	if c.Vault == "" {
+		c.Vault = c.Config.Vault
+	}
+	if c.Command == "" {
+		c.Command = c.Config.Command
+	}
+	if c.Prefix == "" {
+		c.Prefix = c.Config.Prefix
+	}
+	if c.Session == "" {
+		c.Session = c.Config.Session
+	}
+}
+
+func (c *CredentialProviderConfig) syncConfigFields() {
+	c.Config.Account = c.Account
+	c.Config.Vault = c.Vault
+	c.Config.Command = c.Command
+	c.Config.Prefix = c.Prefix
+	c.Config.Session = c.Session
 }
 
 // Validate checks a credential reference mapping.
@@ -295,6 +341,7 @@ func ParseInventoryGroupID(id string) (string, string, error) {
 
 // Validate checks inventory group and provider configuration.
 func (c *InventoryConfig) Validate() error {
+	c.syncAliasFields()
 	c.Auth.Normalize()
 	if err := c.Auth.Validate("inventory.auth"); err != nil {
 		return err
@@ -331,6 +378,7 @@ func (c *InventoryConfig) Validate() error {
 
 	for name := range c.Provider {
 		provider := c.Provider[name]
+		provider.syncAliasFields()
 		provider.Auth.Normalize()
 		if err := validateBareKeySafe("inventory.provider", name); err != nil {
 			return err
@@ -354,7 +402,21 @@ func (c *InventoryConfig) Validate() error {
 			}
 			provider.Group[groupName] = group
 		}
+		for hostName, host := range provider.Hosts {
+			if strings.TrimSpace(hostName) == "" {
+				return fmt.Errorf("inventory.provider.%s.hosts has empty host", name)
+			}
+			if host.AuthDisabled && host.Auth.IsSet() {
+				return fmt.Errorf("inventory.provider.%s.hosts.%s cannot set auth and auth_disabled", name, hostName)
+			}
+			if err := host.Auth.Validate("inventory.provider." + name + ".hosts." + hostName + ".auth"); err != nil {
+				return err
+			}
+			provider.Hosts[hostName] = host
+		}
+		provider.Groups = provider.Group
 		c.Provider[name] = provider
+		c.Providers[name] = provider
 	}
 
 	return nil
@@ -384,11 +446,19 @@ func (c *InventoryAuthConfig) Validate(scope string) error {
 }
 
 func (c *InventoryAuthConfig) Normalize() {
+	c.Mode = strings.ToLower(strings.TrimSpace(c.Mode))
+	if c.AuthMode == "" {
+		c.AuthMode = c.Mode
+	}
+	if c.Mode == "" {
+		c.Mode = c.AuthMode
+	}
 	c.CredentialProvider = strings.TrimSpace(c.CredentialProvider)
 	c.PasswordRef = strings.TrimSpace(c.PasswordRef)
 	c.Username = strings.TrimSpace(c.Username)
 	c.UsernameRef = strings.TrimSpace(c.UsernameRef)
 	c.AuthMode = strings.ToLower(strings.TrimSpace(c.AuthMode))
+	c.Mode = c.AuthMode
 }
 
 // IsSet reports whether the auth mapping contains any configured value.
@@ -397,6 +467,7 @@ func (c InventoryAuthConfig) IsSet() bool {
 		strings.TrimSpace(c.PasswordRef) != "" ||
 		strings.TrimSpace(c.Username) != "" ||
 		strings.TrimSpace(c.UsernameRef) != "" ||
+		strings.TrimSpace(c.Mode) != "" ||
 		strings.TrimSpace(c.AuthMode) != ""
 }
 
@@ -413,6 +484,7 @@ func (c InventoryAuthConfig) CredentialRef() CredentialRefConfig {
 
 // Validate checks a single inventory provider.
 func (c *InventoryProviderConfig) Validate() error {
+	c.syncAliasFields()
 	c.Type = strings.ToLower(strings.TrimSpace(c.Type))
 	if c.Type == "" {
 		return fmt.Errorf("type is required")
@@ -433,6 +505,61 @@ func (c *InventoryProviderConfig) Validate() error {
 	}
 
 	return nil
+}
+
+func (c *InventoryConfig) syncAliasFields() {
+	if c.Providers == nil && c.Provider != nil {
+		c.Providers = c.Provider
+	}
+	if c.Provider == nil && c.Providers != nil {
+		c.Provider = c.Providers
+	}
+	if c.Providers == nil {
+		c.Providers = make(map[string]InventoryProviderConfig)
+	}
+	if c.Provider == nil {
+		c.Provider = c.Providers
+	}
+	if c.Groups == nil && c.Group != nil {
+		c.Groups = c.Group
+	}
+	if c.Group == nil && c.Groups != nil {
+		c.Group = c.Groups
+	}
+	if c.Hosts == nil && c.Host != nil {
+		c.Hosts = c.Host
+	}
+	if c.Host == nil && c.Hosts != nil {
+		c.Host = c.Hosts
+	}
+	for name, provider := range c.Provider {
+		provider.syncAliasFields()
+		c.Provider[name] = provider
+		c.Providers[name] = provider
+	}
+	for name, provider := range c.Providers {
+		provider.syncAliasFields()
+		c.Providers[name] = provider
+		c.Provider[name] = provider
+	}
+}
+
+func (c *InventoryProviderConfig) syncAliasFields() {
+	if c.Groups == nil && c.Group != nil {
+		c.Groups = c.Group
+	}
+	if c.Group == nil && c.Groups != nil {
+		c.Group = c.Groups
+	}
+	if c.Groups == nil {
+		c.Groups = make(map[string]GroupConfig)
+	}
+	if c.Group == nil {
+		c.Group = c.Groups
+	}
+	if c.Hosts == nil {
+		c.Hosts = make(map[string]InventoryHostConfig)
+	}
 }
 
 // ProviderSelectors returns group selectors that target provider.
@@ -478,6 +605,7 @@ func (c *Config) ResolveInventoryAuth(ctx InventoryAuthContext) InventoryAuthRes
 	if c == nil {
 		c = DefaultConfig()
 	}
+	c.syncSchemaAliases()
 	var res InventoryAuthResolution
 	applyAuth(&res, c.Inventory.Auth, "inventory default")
 	providerName := ctx.Provider
@@ -501,6 +629,19 @@ func (c *Config) ResolveInventoryAuth(ctx InventoryAuthContext) InventoryAuthRes
 			res.PasswordSource = "disabled"
 		} else {
 			applyAuth(&res, host.Auth, "host "+ctx.Host)
+		}
+	}
+	if provider, ok := c.Inventory.Provider[providerName]; ok {
+		if host, ok := provider.Hosts[ctx.Host]; ok {
+			if host.AuthDisabled {
+				res.Disabled = true
+				res.Source = "disabled"
+				res.CredentialProvider = ""
+				res.PasswordRef = ""
+				res.PasswordSource = "disabled"
+			} else {
+				applyAuth(&res, host.Auth, "host "+ctx.Host)
+			}
 		}
 	}
 	return res

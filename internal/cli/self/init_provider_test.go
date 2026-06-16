@@ -1,13 +1,11 @@
 package self
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/BurntSushi/toml"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
@@ -82,9 +80,9 @@ func TestInitPlanWritesMultipleInventorySourcesWithoutSecrets(t *testing.T) {
 		t.Fatalf("containerlab jump_host = %q", cfg.Inventory.Provider["lab01"].Config.JumpHost)
 	}
 
-	tomlText := encodeInitPlanConfig(t, cfg)
-	if strings.Contains(tomlText, "should-not-be-stored") {
-		t.Fatalf("config stored NetBox token value:\n%s", tomlText)
+	yamlText := encodeInitPlanConfig(t, cfg)
+	if strings.Contains(yamlText, "should-not-be-stored") {
+		t.Fatalf("config stored NetBox token value:\n%s", yamlText)
 	}
 }
 
@@ -133,10 +131,10 @@ func TestInitPlanSupportsOnePasswordAndBitwardenWithoutAuthMaterial(t *testing.T
 		t.Fatalf("group assignments = %+v", cfg.Inventory.Provider["local"].Group)
 	}
 
-	tomlText := encodeInitPlanConfig(t, cfg)
+	yamlText := encodeInitPlanConfig(t, cfg)
 	for _, reject := range []string{"should-not-be-stored", "BW_SESSION", "auth_token"} {
-		if strings.Contains(tomlText, reject) {
-			t.Fatalf("config stored auth material %q:\n%s", reject, tomlText)
+		if strings.Contains(yamlText, reject) {
+			t.Fatalf("config stored auth material %q:\n%s", reject, yamlText)
 		}
 	}
 }
@@ -145,12 +143,12 @@ func TestApplyInitPlanBacksUpExistingConfig(t *testing.T) {
 	tmp := t.TempDir()
 	paths := &config.Paths{
 		ConfigDir:  filepath.Join(tmp, "config", "nssh"),
-		ConfigFile: filepath.Join(tmp, "config", "nssh", "config.toml"),
+		ConfigFile: filepath.Join(tmp, "config", "nssh", "config.yaml"),
 	}
 	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(paths.ConfigFile, []byte("old = true\n"), 0600); err != nil {
+	if err := os.WriteFile(paths.ConfigFile, []byte("old: true\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -167,7 +165,7 @@ func TestApplyInitPlanBacksUpExistingConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read backup: %v", err)
 	}
-	if string(data) != "old = true\n" {
+	if string(data) != "old: true\n" {
 		t.Fatalf("backup content = %q", data)
 	}
 }
@@ -216,11 +214,11 @@ func TestPromptInitPlanRequestShowsSourcesProvidersAndAssignments(t *testing.T) 
 func encodeInitPlanConfig(t *testing.T, cfg *config.Config) string {
 	t.Helper()
 
-	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
-		t.Fatalf("encode toml: %v", err)
+	text, err := config.MarshalSparse(cfg)
+	if err != nil {
+		t.Fatalf("encode yaml: %v", err)
 	}
-	return buf.String()
+	return text
 }
 
 type fakeInitPrompter struct {

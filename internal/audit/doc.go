@@ -22,7 +22,7 @@
 //
 // # Configuration
 //
-// Audit logging is configured in config.toml:
+// Audit logging is configured in config.yaml:
 //
 //	[logging.audit]
 //	enabled = true

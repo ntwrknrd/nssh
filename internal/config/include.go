@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/BurntSushi/toml"
+	"gopkg.in/yaml.v3"
 )
 
 type configDocument struct {
@@ -30,7 +30,7 @@ func loadConfigDocument(path string) (*configDocument, error) {
 	if err != nil {
 		return nil, err
 	}
-	root, err := readTOMLMap(abs)
+	root, err := readYAMLMap(abs)
 	if err != nil {
 		return nil, err
 	}
@@ -47,13 +47,13 @@ func loadConfigDocument(path string) (*configDocument, error) {
 	}, nil
 }
 
-func readTOMLMap(path string) (map[string]any, error) {
+func readYAMLMap(path string) (map[string]any, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 	var table map[string]any
-	if _, err := toml.Decode(string(data), &table); err != nil {
+	if err := yaml.Unmarshal(data, &table); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 	if table == nil {
@@ -83,7 +83,7 @@ func resolveConfigTable(path string, table map[string]any, scope string, stack m
 			}
 			nextStack := cloneBoolMap(stack)
 			nextStack[match] = true
-			imported, err := readTOMLMap(match)
+			imported, err := readYAMLMap(match)
 			if err != nil {
 				return result, err
 			}
@@ -248,26 +248,26 @@ func mergeConfigMaps(base, override map[string]any) map[string]any {
 
 func decodeConfigDocument(path string, doc *configDocument, cfg *Config) error {
 	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(doc.effective); err != nil {
+	enc := yaml.NewEncoder(&buf)
+	if err := enc.Encode(doc.effective); err != nil {
 		return fmt.Errorf("encode merged config %s: %w", path, err)
 	}
-	md, err := toml.Decode(buf.String(), cfg)
-	if err != nil {
-		return fmt.Errorf("parse config %s: %w", path, err)
+	if err := enc.Close(); err != nil {
+		return fmt.Errorf("encode merged config %s: %w", path, err)
 	}
-	if undecoded := md.Undecoded(); len(undecoded) > 0 {
-		keys := make([]string, 0, len(undecoded))
-		for _, key := range undecoded {
-			keys = append(keys, strings.Join(key, "."))
-		}
-		sort.Strings(keys)
-		return fmt.Errorf("validate config %s: unknown config key %s", path, strings.Join(keys, ", "))
+	dec := yaml.NewDecoder(&buf)
+	dec.KnownFields(true)
+	if err := dec.Decode(cfg); err != nil {
+		return fmt.Errorf("decode config %s: %w", path, err)
 	}
 	return nil
 }
 
 func (c *Config) InventoryGroupSource(provider, group string) string {
-	source := c.sourceFor("inventory", "provider", provider, "group", group)
+	source := c.sourceFor("inventory", "providers", provider, "groups", group)
+	if source == "" {
+		source = c.sourceFor("inventory", "provider", provider, "group", group)
+	}
 	if source == "" && provider == ProviderLocal {
 		source = c.sourceFor("inventory", "group", group)
 	}
@@ -275,11 +275,19 @@ func (c *Config) InventoryGroupSource(provider, group string) string {
 }
 
 func (c *Config) InventoryProviderSource(provider string) string {
-	return c.sourceFor("inventory", "provider", provider)
+	source := c.sourceFor("inventory", "providers", provider)
+	if source == "" {
+		source = c.sourceFor("inventory", "provider", provider)
+	}
+	return source
 }
 
 func (c *Config) InventoryHostSource(name string) string {
-	return c.sourceFor("inventory", "host", name)
+	source := c.sourceFor("inventory", "hosts", name)
+	if source == "" {
+		source = c.sourceFor("inventory", "host", name)
+	}
+	return source
 }
 
 func (c *Config) ConfigFiles() []string {

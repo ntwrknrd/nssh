@@ -24,7 +24,7 @@ func NewCfgCmd() *cobra.Command {
 		Long: `View or edit the nssh configuration file.
 
 By default, prints the effective configuration (merged from file,
-environment variables, and defaults) in TOML format.
+environment variables, and defaults) in YAML format.
 
 Use --edit to open the config file in your editor ($VISUAL or $EDITOR).
 Use --paths to print config file paths, including resolved includes.`,
@@ -116,5 +116,5 @@ func renderConfigText(text string, color bool) string {
 	if !color {
 		return text
 	}
-	return ui.HighlightTOML(text)
+	return ui.HighlightYAML(text)
 }

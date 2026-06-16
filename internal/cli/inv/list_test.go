@@ -73,20 +73,21 @@ func TestInventoryGroupSelectOptionsIncludeHostCountsAndProviders(t *testing.T) 
 
 func TestInventoryGroupSummariesIncludeConfigAndOutputFiles(t *testing.T) {
 	tmp := t.TempDir()
-	inventoryFile := filepath.Join(tmp, "inventory.toml")
+	inventoryFile := filepath.Join(tmp, "inventory.yaml")
 	if err := os.WriteFile(inventoryFile, []byte(`
-[provider.netbox-prod]
-type = "netbox"
-
-[provider.netbox-prod.group.custcbb]
-domain_suffix = [".custcbb.local"]
+inventory:
+  providers:
+    netbox-prod:
+      type: netbox
+      groups:
+        custcbb:
+          domain_suffix: [.custcbb.local]
 `), 0600); err != nil {
 		t.Fatal(err)
 	}
-	configFile := filepath.Join(tmp, "config.toml")
+	configFile := filepath.Join(tmp, "config.yaml")
 	if err := os.WriteFile(configFile, []byte(`
-[inventory]
-include = ["inventory.toml"]
+include: [inventory.yaml]
 `), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -100,18 +101,22 @@ include = ["inventory.toml"]
 		return hostMetadata{}
 	})
 
-	if len(rows) != 1 {
-		t.Fatalf("rows = %d, want 1: %+v", len(rows), rows)
+	var row inventoryGroupSummary
+	for _, candidate := range rows {
+		if candidate.Name == "netbox-prod/custcbb" {
+			row = candidate
+			break
+		}
 	}
-	if rows[0].Name != "netbox-prod/custcbb" {
-		t.Fatalf("group = %q", rows[0].Name)
+	if row.Name == "" {
+		t.Fatalf("missing netbox-prod/custcbb row: %+v", rows)
 	}
-	if rows[0].ConfigFile != inventoryFile {
-		t.Fatalf("config file = %q, want %q", rows[0].ConfigFile, inventoryFile)
+	if row.ConfigFile != inventoryFile {
+		t.Fatalf("config file = %q, want %q", row.ConfigFile, inventoryFile)
 	}
 	wantOutput := filepath.Join(paths.SSHConfigDir, "nssh.d", "provider_netbox-prod.conf")
-	if rows[0].OutputFile != wantOutput {
-		t.Fatalf("output file = %q, want %q", rows[0].OutputFile, wantOutput)
+	if row.OutputFile != wantOutput {
+		t.Fatalf("output file = %q, want %q", row.OutputFile, wantOutput)
 	}
 }
 

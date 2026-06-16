@@ -44,36 +44,36 @@ func TestRenderStatusTreeShowsLocalProviderAndProviderGroups(t *testing.T) {
 	if err := os.MkdirAll(configRoot, 0700); err != nil {
 		t.Fatal(err)
 	}
-	inventoryFile := filepath.Join(configRoot, "inventory.toml")
+	inventoryFile := filepath.Join(configRoot, "inventory.yaml")
 	if err := os.WriteFile(inventoryFile, []byte(`
-[provider.local]
-type = "local"
-
-[provider.local.group.lab.match]
-domain_suffix = [".example.com"]
-
-[provider.local.group.lab.auth]
-credential_provider = "pass-local"
-password_ref = "nssh/groups/lab"
-username = "local-admin"
-
-[provider.netbox-prod]
-type = "netbox"
-
-[provider.netbox-prod.group.customer.match]
-provider = ["customer"]
-
-[provider.netbox-prod.group.customer.auth]
-credential_provider = "pass-local"
-password_ref = "nssh/groups/customer"
-username = "netbox-admin"
+inventory:
+  providers:
+    local:
+      type: local
+      groups:
+        lab:
+          match:
+            domain_suffix: [.example.com]
+          auth:
+            credential_provider: pass-local
+            password_ref: nssh/groups/lab
+            username: local-admin
+    netbox-prod:
+      type: netbox
+      groups:
+        customer:
+          match:
+            provider: [customer]
+          auth:
+            credential_provider: pass-local
+            password_ref: nssh/groups/customer
+            username: netbox-admin
 `), 0600); err != nil {
 		t.Fatal(err)
 	}
-	configFile := filepath.Join(configRoot, "config.toml")
+	configFile := filepath.Join(configRoot, "config.yaml")
 	if err := os.WriteFile(configFile, []byte(`
-[inventory]
-include = ["inventory.toml"]
+include: [inventory.yaml]
 `), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ include = ["inventory.toml"]
 		"        password ref: -",
 		"    local/lab",
 		"      hosts: 2 hosts",
-		"      config: ~/.config/nssh/inventory.toml",
+		"      config: ~/.config/nssh/inventory.yaml",
 		"        username: local-admin",
 		"        username ref: -",
 		"        password ref: nssh/groups/lab",
@@ -128,7 +128,7 @@ include = ["inventory.toml"]
 		"  hosts: 2 hosts",
 		"    netbox-prod/customer",
 		"      hosts: 2 hosts",
-		"      config: ~/.config/nssh/inventory.toml",
+		"      config: ~/.config/nssh/inventory.yaml",
 		"        username: netbox-admin",
 		"        username ref: -",
 		"        password ref: nssh/groups/customer",
@@ -169,25 +169,26 @@ func TestRenderStatusTreeShowsProviderDetailForNamedProvider(t *testing.T) {
 	if err := os.MkdirAll(configRoot, 0700); err != nil {
 		t.Fatal(err)
 	}
-	inventoryFile := filepath.Join(configRoot, "inventory.toml")
+	inventoryFile := filepath.Join(configRoot, "inventory.yaml")
 	if err := os.WriteFile(inventoryFile, []byte(`
-[provider.netbox-prod]
-type = "netbox"
-
-[provider.netbox-prod.group.customer.match]
-provider = ["customer"]
-
-[provider.netbox-prod.group.customer.auth]
-credential_provider = "pass-local"
-password_ref = "nssh/groups/customer"
-username = "netbox-admin"
+inventory:
+  providers:
+    netbox-prod:
+      type: netbox
+      groups:
+        customer:
+          match:
+            provider: [customer]
+          auth:
+            credential_provider: pass-local
+            password_ref: nssh/groups/customer
+            username: netbox-admin
 `), 0600); err != nil {
 		t.Fatal(err)
 	}
-	configFile := filepath.Join(configRoot, "config.toml")
+	configFile := filepath.Join(configRoot, "config.yaml")
 	if err := os.WriteFile(configFile, []byte(`
-[inventory]
-include = ["inventory.toml"]
+include: [inventory.yaml]
 `), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +226,7 @@ include = ["inventory.toml"]
 		"  groups:",
 		"    netbox-prod/customer",
 		"      hosts: 1 host",
-		"      config: ~/.config/nssh/inventory.toml",
+		"      config: ~/.config/nssh/inventory.yaml",
 		"      output: ~/.ssh/nssh.d/provider_netbox-prod.conf",
 		"      match:",
 		"        provider: customer",
@@ -268,7 +269,7 @@ func TestRenderStatusTreeAddsSubtleANSIStylesWithoutChangingText(t *testing.T) {
 		Hosts:      1,
 		Groups: []statusProviderGroup{{
 			Name:       "netbox-prod/customer",
-			ConfigFile: "/tmp/netbox-prod.toml",
+			ConfigFile: "/tmp/netbox-prod.yaml",
 			OutputFile: "/tmp/provider_netbox-prod.conf",
 			Hosts:      1,
 			Match:      config.InventoryMatch{"provider": []string{"customer"}},
