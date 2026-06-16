@@ -31,3 +31,10 @@ func TestRenderSSHOptionsAddsVerbosity(t *testing.T) {
 		t.Fatalf("args = %#v, want -vvv", args)
 	}
 }
+
+func TestRenderSSHOptionsIncludesCompatFixes(t *testing.T) {
+	args := RenderSSHOptions(config.SSHHostConfig{Compat: []string{"legacy-hostkey"}}, 0)
+	if !slices.Contains(args, "HostKeyAlgorithms=+ssh-rsa") {
+		t.Fatalf("args = %#v, want legacy hostkey option", args)
+	}
+}

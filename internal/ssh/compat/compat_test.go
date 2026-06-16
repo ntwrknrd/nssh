@@ -16,11 +16,6 @@ func TestParseCompatibilityError(t *testing.T) {
 			expected: []CompatType{CompatKex},
 		},
 		{
-			name:     "no matching cipher",
-			stderr:   "Unable to negotiate with 10.0.0.1 port 22: no matching cipher found.",
-			expected: []CompatType{CompatCiphers},
-		},
-		{
 			name:     "no matching mac",
 			stderr:   "Unable to negotiate with host: no matching mac found.",
 			expected: []CompatType{CompatMACs},
@@ -32,8 +27,8 @@ func TestParseCompatibilityError(t *testing.T) {
 		},
 		{
 			name:     "multiple issues",
-			stderr:   "no matching key exchange method found. Also no matching cipher found.",
-			expected: []CompatType{CompatKex, CompatCiphers},
+			stderr:   "no matching key exchange method found. Also no matching mac found.",
+			expected: []CompatType{CompatKex, CompatMACs},
 		},
 		{
 			name:     "no compat issues",
@@ -52,8 +47,8 @@ func TestParseCompatibilityError(t *testing.T) {
 		},
 		{
 			name:     "unable to negotiate format",
-			stderr:   "unable to negotiate encryption: no matching cipher",
-			expected: []CompatType{CompatCiphers},
+			stderr:   "unable to negotiate encryption: no matching mac",
+			expected: []CompatType{CompatMACs},
 		},
 	}
 
@@ -70,6 +65,27 @@ func TestParseCompatibilityError(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestApprovedCompatCatalog(t *testing.T) {
+	want := map[CompatType]string{
+		"legacy-kex":     "KexAlgorithms=+diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1",
+		"legacy-macs":    "MACs=+hmac-sha1,+hmac-sha1-96",
+		"legacy-hostkey": "HostKeyAlgorithms=+ssh-rsa",
+		"legacy-pubkey":  "PubkeyAcceptedAlgorithms=+ssh-rsa",
+	}
+	for ct, option := range want {
+		cfg, ok := CompatConfigs[ct]
+		if !ok {
+			t.Fatalf("missing compat %s", ct)
+		}
+		if got := cfg.Option; got != option {
+			t.Fatalf("%s option = %q, want %q", ct, got, option)
+		}
+	}
+	if _, ok := CompatConfigs["legacy"]; ok {
+		t.Fatalf("broad legacy preset must not exist")
 	}
 }
 
@@ -218,7 +234,7 @@ func TestAllCompatTypes(t *testing.T) {
 		t.Errorf("AllCompatTypes() returned %d types, want 4", len(types))
 	}
 
-	expected := []CompatType{CompatKex, CompatMACs, CompatCiphers, CompatHostKey}
+	expected := []CompatType{CompatLegacyKex, CompatLegacyMACs, CompatLegacyHostKey, CompatLegacyPubkey}
 	for i, ct := range types {
 		if ct != expected[i] {
 			t.Errorf("AllCompatTypes()[%d] = %v, want %v", i, ct, expected[i])

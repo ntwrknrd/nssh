@@ -10,16 +10,21 @@ type CompatType string
 
 // Compatibility fix types for SSH negotiation issues.
 const (
-	CompatKex     CompatType = "kex"     // Legacy key exchange algorithms
-	CompatMACs    CompatType = "macs"    // Legacy MAC algorithms
-	CompatCiphers CompatType = "ciphers" // Legacy cipher algorithms
-	CompatHostKey CompatType = "hostkey" // Legacy host key algorithms
+	CompatLegacyKex     CompatType = "legacy-kex"
+	CompatLegacyMACs    CompatType = "legacy-macs"
+	CompatLegacyHostKey CompatType = "legacy-hostkey"
+	CompatLegacyPubkey  CompatType = "legacy-pubkey"
+
+	CompatKex     CompatType = CompatLegacyKex
+	CompatMACs    CompatType = CompatLegacyMACs
+	CompatHostKey CompatType = CompatLegacyHostKey
 )
 
 // CompatConfig defines a compatibility fix with its config lines and error patterns.
 type CompatConfig struct {
 	Name          string           // Human-readable name
 	Description   string           // What this fix does
+	Option        string           // OpenSSH -o option rendering
 	ConfigLines   []string         // SSH config lines to add (with leading spaces)
 	Directive     string           // SSH directive name (for removal detection)
 	ErrorPatterns []*regexp.Regexp // Patterns that match SSH stderr errors
@@ -28,59 +33,55 @@ type CompatConfig struct {
 // CompatConfigs maps compat types to their configurations.
 // Based on Python's COMPAT_CONFIGS in fixer.py.
 var CompatConfigs = map[CompatType]CompatConfig{
-	CompatKex: {
+	CompatLegacyKex: {
 		Name:        "Legacy Key Exchange",
 		Description: "Add legacy KexAlgorithms for older SSH servers",
-		ConfigLines: []string{
-			"  KexAlgorithms +diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1,diffie-hellman-group-exchange-sha256\n",
-		},
-		Directive: "KexAlgorithms",
+		Option:      "KexAlgorithms=+diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1",
+		ConfigLines: []string{"  KexAlgorithms +diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1\n"},
+		Directive:   "KexAlgorithms",
 		ErrorPatterns: []*regexp.Regexp{
 			regexp.MustCompile(`(?i)no matching key exchange method found`),
 			regexp.MustCompile(`(?i)unable to negotiate [^:]+: no matching key exchange`),
 		},
 	},
-	CompatMACs: {
+	CompatLegacyMACs: {
 		Name:        "Legacy MACs",
 		Description: "Add legacy MAC algorithms for older SSH servers",
-		ConfigLines: []string{
-			"  MACs +hmac-sha1,hmac-sha1-96,hmac-md5,hmac-md5-96\n",
-		},
-		Directive: "MACs",
+		Option:      "MACs=+hmac-sha1,+hmac-sha1-96",
+		ConfigLines: []string{"  MACs +hmac-sha1,+hmac-sha1-96\n"},
+		Directive:   "MACs",
 		ErrorPatterns: []*regexp.Regexp{
 			regexp.MustCompile(`(?i)no matching macs? found`),
 			regexp.MustCompile(`(?i)unable to negotiate [^:]+: no matching mac`),
 		},
 	},
-	CompatCiphers: {
-		Name:        "Legacy Ciphers",
-		Description: "Add legacy cipher algorithms for older SSH servers",
-		ConfigLines: []string{
-			"  Ciphers +aes128-cbc,3des-cbc,aes192-cbc,aes256-cbc\n",
-		},
-		Directive: "Ciphers",
-		ErrorPatterns: []*regexp.Regexp{
-			regexp.MustCompile(`(?i)no matching ciphers? found`),
-			regexp.MustCompile(`(?i)unable to negotiate [^:]+: no matching cipher`),
-		},
-	},
-	CompatHostKey: {
+	CompatLegacyHostKey: {
 		Name:        "Legacy Host Key Algorithms",
 		Description: "Add legacy host key algorithms for older SSH servers",
-		ConfigLines: []string{
-			"  HostKeyAlgorithms +ssh-rsa,ssh-dss\n",
-		},
-		Directive: "HostKeyAlgorithms",
+		Option:      "HostKeyAlgorithms=+ssh-rsa",
+		ConfigLines: []string{"  HostKeyAlgorithms +ssh-rsa\n"},
+		Directive:   "HostKeyAlgorithms",
 		ErrorPatterns: []*regexp.Regexp{
 			regexp.MustCompile(`(?i)no matching host key type found`),
 			regexp.MustCompile(`(?i)unable to negotiate [^:]+: no matching host key`),
+		},
+	},
+	CompatLegacyPubkey: {
+		Name:        "Legacy Public Key Algorithms",
+		Description: "Add legacy accepted public key algorithms for older SSH servers",
+		Option:      "PubkeyAcceptedAlgorithms=+ssh-rsa",
+		ConfigLines: []string{"  PubkeyAcceptedAlgorithms +ssh-rsa\n"},
+		Directive:   "PubkeyAcceptedAlgorithms",
+		ErrorPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)no mutual signature algorithm`),
+			regexp.MustCompile(`(?i)signature algorithm ssh-rsa not in PubkeyAcceptedAlgorithms`),
 		},
 	},
 }
 
 // AllCompatTypes returns all compatibility types in application order.
 func AllCompatTypes() []CompatType {
-	return []CompatType{CompatKex, CompatMACs, CompatCiphers, CompatHostKey}
+	return []CompatType{CompatLegacyKex, CompatLegacyMACs, CompatLegacyHostKey, CompatLegacyPubkey}
 }
 
 // ParseCompatibilityError scans SSH stderr output for known compatibility errors.

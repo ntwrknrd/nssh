@@ -289,7 +289,7 @@ func BuildProviderIndex() (map[string]*HostInfo, error) {
 	return index, nil
 }
 
-// PersistCompatFixes updates provider state and rewrites provider-owned output.
+// PersistCompatFixes updates provider state.
 func PersistCompatFixes(includeFile, hostPattern string, fixes []compat.CompatType) error {
 	if len(fixes) == 0 {
 		return nil
@@ -313,12 +313,6 @@ func PersistCompatFixes(includeFile, hostPattern string, fixes []compat.CompatTy
 	host.CompatFixes = merged
 	if err := SaveProviderState(next); err != nil {
 		return err
-	}
-	if err := WriteProviderSSHConfig(next.IncludeFile, next.Hosts(), next.Provider, next.Type, next.StrictHostKeyChecking); err != nil {
-		if rollbackErr := SaveProviderState(current); rollbackErr != nil {
-			return fmt.Errorf("write provider config: %w (rollback state: %v)", err, rollbackErr)
-		}
-		return fmt.Errorf("write provider config: %w", err)
 	}
 	return nil
 }

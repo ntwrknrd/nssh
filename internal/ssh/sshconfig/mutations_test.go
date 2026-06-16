@@ -27,12 +27,12 @@ func TestApplyCompatFixes(t *testing.T) {
 			wantLines: []string{
 				"Host testhost\n",
 				"  HostName test.example.com\n",
-				"  KexAlgorithms +diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1,diffie-hellman-group-exchange-sha256\n",
+				"  KexAlgorithms +diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1\n",
 				"  User admin\n",
 				"\n",
 			},
 			wantProps: map[string]string{
-				"kexalgorithms": "+diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1,diffie-hellman-group-exchange-sha256",
+				"kexalgorithms": "+diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1",
 			},
 		},
 		{
@@ -43,18 +43,18 @@ func TestApplyCompatFixes(t *testing.T) {
 				"  Port 22\n",
 				"\n",
 			},
-			compatTypes: []compat.CompatType{compat.CompatKex, compat.CompatCiphers},
+			compatTypes: []compat.CompatType{compat.CompatKex, compat.CompatMACs},
 			wantLines: []string{
 				"Host testhost\n",
 				"  HostName test.example.com\n",
 				"  Port 22\n",
-				"  KexAlgorithms +diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1,diffie-hellman-group-exchange-sha256\n",
-				"  Ciphers +aes128-cbc,3des-cbc,aes192-cbc,aes256-cbc\n",
+				"  KexAlgorithms +diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1\n",
+				"  MACs +hmac-sha1,+hmac-sha1-96\n",
 				"\n",
 			},
 			wantProps: map[string]string{
-				"kexalgorithms": "+diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1,diffie-hellman-group-exchange-sha256",
-				"ciphers":       "+aes128-cbc,3des-cbc,aes192-cbc,aes256-cbc",
+				"kexalgorithms": "+diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1",
+				"macs":          "+hmac-sha1,+hmac-sha1-96",
 			},
 		},
 		{
@@ -70,12 +70,12 @@ func TestApplyCompatFixes(t *testing.T) {
 			wantLines: []string{
 				"Host testhost\n",
 				"  HostName test.example.com\n",
-				"  KexAlgorithms +diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1,diffie-hellman-group-exchange-sha256\n",
+				"  KexAlgorithms +diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1\n",
 				"  User admin\n",
 				"\n",
 			},
 			wantProps: map[string]string{
-				"kexalgorithms": "+diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1,diffie-hellman-group-exchange-sha256",
+				"kexalgorithms": "+diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1",
 			},
 		},
 		{

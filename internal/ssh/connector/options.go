@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 )
 
 func RenderSSHOptions(opts config.SSHHostConfig, sshVerbose int) []string {
@@ -21,6 +22,12 @@ func RenderSSHOptions(opts config.SSHHostConfig, sshVerbose int) []string {
 	appendO := func(key, value string) {
 		if strings.TrimSpace(value) != "" {
 			args = append(args, "-o", key+"="+value)
+		}
+	}
+	appendOPair := func(pair string) {
+		key, value, ok := strings.Cut(pair, "=")
+		if ok {
+			appendO(key, value)
 		}
 	}
 	if opts.IdentitiesOnly != nil {
@@ -82,6 +89,12 @@ func RenderSSHOptions(opts config.SSHHostConfig, sshVerbose int) []string {
 	appendList("KexAlgorithms", opts.KexAlgorithms)
 	appendList("HostKeyAlgorithms", opts.HostKeyAlgorithms)
 	appendList("PubkeyAcceptedAlgorithms", opts.PubkeyAcceptedAlgorithms)
+	for _, name := range opts.Compat {
+		cfg, ok := compat.CompatConfigs[compat.CompatType(name)]
+		if ok {
+			appendOPair(cfg.Option)
+		}
+	}
 	if len(opts.Options) > 0 {
 		keys := make([]string, 0, len(opts.Options))
 		for key := range opts.Options {
