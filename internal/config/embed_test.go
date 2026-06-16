@@ -15,13 +15,13 @@ func TestExampleConfigUsesDocsSource(t *testing.T) {
 	}
 	projectRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 
-	docsPath := filepath.Join(projectRoot, "docs", "examples", "config", "config.example.toml")
+	docsPath := filepath.Join(projectRoot, "docs", "examples", "config", "config.example.yaml")
 	docsContent, err := os.ReadFile(docsPath)
 	if err != nil {
 		t.Fatalf("read docs config: %v", err)
 	}
 
-	packageCopy := filepath.Join(projectRoot, "internal", "config", "example_config.toml")
+	packageCopy := filepath.Join(projectRoot, "internal", "config", "example_config.yaml")
 	if _, err := os.Stat(packageCopy); err == nil {
 		t.Fatalf("internal package config copy exists: %s", packageCopy)
 	} else if !os.IsNotExist(err) {
@@ -29,6 +29,6 @@ func TestExampleConfigUsesDocsSource(t *testing.T) {
 	}
 
 	if ExampleConfig != string(docsContent) {
-		t.Errorf("embedded config does not match docs/examples/config/config.example.toml")
+		t.Errorf("embedded config does not match docs/examples/config/config.example.yaml")
 	}
 }

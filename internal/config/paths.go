@@ -76,7 +76,7 @@ func resolvePaths() *Paths {
 		ConfigDir:     configDir,
 		DataDir:       dataDir,
 		StateDir:      stateDir,
-		ConfigFile:    filepath.Join(configDir, "config.toml"),
+		ConfigFile:    filepath.Join(configDir, "config.yaml"),
 		RecordingsDir: filepath.Join(stateDir, "casts"), // State, matches Python
 		BackupDir:     filepath.Join(dataDir, "backups"),
 		SSHConfigDir:  sshDir,
