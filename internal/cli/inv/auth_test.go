@@ -1,7 +1,6 @@
 package inv
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,22 +11,10 @@ import (
 
 func TestApplyHostAuthPatchWritesInventoryHostAuth(t *testing.T) {
 	tmp := t.TempDir()
-	sshDir := filepath.Join(tmp, ".ssh")
-	if err := os.MkdirAll(filepath.Join(sshDir, "nssh.d"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	mainConfig := filepath.Join(sshDir, "config")
-	if err := os.WriteFile(mainConfig, []byte("Include nssh.d/*\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	localFile := filepath.Join(sshDir, "nssh.d", "provider_local.conf")
-	if err := os.WriteFile(localFile, []byte("Host edge01\n  HostName edge01.lab.local\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
+	mainConfig := filepath.Join(tmp, ".ssh", "config")
 	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
-	cfg := config.DefaultConfig()
-	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
+	cfg := testAuthPatchConfig("local", config.ProviderLocal, "lab", "edge01", "edge01.lab.local")
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
 	err := applyHostAuthPatch(parser, cfg, paths, "edge01", hostAuthPatch{
 		Auth: config.InventoryAuthConfig{
@@ -47,25 +34,13 @@ func TestApplyHostAuthPatchWritesInventoryHostAuth(t *testing.T) {
 
 func TestApplyHostAuthPatchClearsOnlyHostAuth(t *testing.T) {
 	tmp := t.TempDir()
-	sshDir := filepath.Join(tmp, ".ssh")
-	if err := os.MkdirAll(filepath.Join(sshDir, "nssh.d"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	mainConfig := filepath.Join(sshDir, "config")
-	if err := os.WriteFile(mainConfig, []byte("Include nssh.d/*\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	localFile := filepath.Join(sshDir, "nssh.d", "provider_local.conf")
-	if err := os.WriteFile(localFile, []byte("Host edge01\n  HostName edge01.lab.local\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
+	mainConfig := filepath.Join(tmp, ".ssh", "config")
 	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
-	cfg := config.DefaultConfig()
+	cfg := testAuthPatchConfig("local", config.ProviderLocal, "lab", "edge01", "edge01.lab.local")
 	cfg.Inventory.Host = map[string]config.InventoryHostConfig{
 		"edge01": {Auth: config.InventoryAuthConfig{CredentialProvider: "pass-local", PasswordRef: "nssh/hosts/edge01"}},
 	}
-	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
 	err := applyHostAuthPatch(parser, cfg, paths, "edge01", hostAuthPatch{Clear: true})
 	if err != nil {
@@ -78,25 +53,10 @@ func TestApplyHostAuthPatchClearsOnlyHostAuth(t *testing.T) {
 
 func TestApplyHostAuthPatchAllowsProviderOwnedHost(t *testing.T) {
 	tmp := t.TempDir()
-	sshDir := filepath.Join(tmp, ".ssh")
-	if err := os.MkdirAll(filepath.Join(sshDir, "nssh.d"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	mainConfig := filepath.Join(sshDir, "config")
-	if err := os.WriteFile(mainConfig, []byte("Include nssh.d/*\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	providerFile := filepath.Join(sshDir, "nssh.d", "provider_netbox-prod.conf")
-	if err := os.WriteFile(providerFile, []byte("Host edge01\n  HostName edge01.example.com\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
+	mainConfig := filepath.Join(tmp, ".ssh", "config")
 	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
-	cfg := config.DefaultConfig()
-	cfg.Inventory.Provider = map[string]config.InventoryProviderConfig{
-		"netbox-prod": {Type: config.ProviderNetBox},
-	}
-	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
+	cfg := testAuthPatchConfig("netbox-prod", config.ProviderNetBox, "cbb", "edge01", "edge01.example.com")
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
 	err := applyHostAuthPatch(parser, cfg, paths, "edge01", hostAuthPatch{
 		Auth: config.InventoryAuthConfig{CredentialProvider: "pass-local", PasswordRef: "nssh/hosts/edge01"},
@@ -107,6 +67,21 @@ func TestApplyHostAuthPatchAllowsProviderOwnedHost(t *testing.T) {
 	if got := cfg.Inventory.Host["edge01"].Auth.PasswordRef; got != "nssh/hosts/edge01" {
 		t.Fatalf("password_ref = %q", got)
 	}
+}
+
+func testAuthPatchConfig(providerName, providerType, group, host, hostname string) *config.Config {
+	cfg := config.DefaultConfig()
+	providers := map[string]config.InventoryProviderConfig{
+		providerName: {
+			Type:   providerType,
+			Groups: map[string]config.GroupConfig{group: {}},
+			Group:  map[string]config.GroupConfig{group: {}},
+			Hosts:  map[string]config.InventoryHostConfig{host: {Group: group, Hostname: hostname}},
+		},
+	}
+	cfg.Inventory.Providers = providers
+	cfg.Inventory.Provider = providers
+	return cfg
 }
 
 func TestHostAuthPatchRejectsConflicts(t *testing.T) {

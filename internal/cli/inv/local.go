@@ -24,6 +24,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v3"
 )
 
 type hostPatch struct {
@@ -106,6 +107,10 @@ var newCredentialRegistry = func(cfg *config.Config) (credentialRegistry, error)
 }
 
 func upsertLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, patch hostPatch) error {
+	return upsertLocalHostYAML(cfg, paths, patch)
+}
+
+func upsertLocalHostYAML(cfg *config.Config, paths *config.Paths, patch hostPatch) error {
 	if patch.Host == "" {
 		return fmt.Errorf("host is required")
 	}
@@ -118,9 +123,8 @@ func upsertLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config
 	if err := cfg.Inventory.Validate(); err != nil {
 		return err
 	}
-	targetFile := localFilePath(paths, inventory.LocalProviderIncludeFile())
 
-	existing, existingCfg, err := findInventoryHostWithLocation(parser, cfg, paths, patch.Host)
+	existing, _, err := findInventoryHostWithLocation(nil, cfg, paths, patch.Host)
 	if err != nil {
 		return err
 	}
@@ -141,42 +145,41 @@ func upsertLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config
 		return fmt.Errorf("group %q not found", groupName)
 	}
 
-	var host *sshconfig.HostEntry
-	if existing != nil {
-		host = cloneHostEntry(existing)
-		applyHostPatch(host, patch)
-	} else {
-		port := patch.Port
-		if !patch.PortSet {
-			port = 22
+	provider := cfg.Inventory.Providers[config.ProviderLocal]
+	provider.Type = config.ProviderLocal
+	if provider.Hosts == nil {
+		provider.Hosts = make(map[string]config.InventoryHostConfig)
+	}
+	host := provider.Hosts[patch.Host]
+	host.Group = shortInventoryGroup(groupName)
+	if patch.HostName != "" || host.Hostname == "" {
+		host.Hostname = patch.HostName
+	}
+	if host.Hostname == "" {
+		host.Hostname = patch.Host
+	}
+	if patch.PortSet {
+		host.Port = patch.Port
+	} else if host.Port == 0 {
+		host.Port = 22
+	}
+	if patch.Auth.IsSet() || patch.AuthDisabled || patch.AuthMode != "" || patch.User != "" {
+		host.Auth = patch.Auth
+		host.AuthDisabled = patch.AuthDisabled
+		if patch.User != "" {
+			host.Auth.Username = patch.User
 		}
-		host = sshconfig.CreateHostEntry(patch.Host, patch.HostName, "", port, patch.AuthMode == config.AuthModePassword, targetFile)
-		if len(patch.CompatFixes) > 0 {
-			if err := sshconfig.ApplyCompatFixes(host, patch.CompatFixes); err != nil {
-				return err
-			}
+		if patch.AuthMode != "" {
+			host.Auth.AuthMode = patch.AuthMode
 		}
 	}
-	host.SourceFile = targetFile
-	inventory.SetLocalHostGroup(host, groupName)
-
-	if existingCfg != nil && existingCfg.Path != targetFile {
-		existingCfg.Hosts = sshconfig.RemoveHost(existingCfg.Hosts, patch.Host)
-		sshconfig.SortHosts(existingCfg.Hosts)
-		if err := writeParsedConfig(parser, existingCfg, paths); err != nil {
-			return err
-		}
+	if len(patch.CompatFixes) > 0 {
+		host.SSH.Compat = compatTypesToNames(patch.CompatFixes)
 	}
-
-	targetCfg, err := parser.ParseFile(targetFile)
-	if err != nil {
-		return err
-	}
-	targetCfg.Hosts = sshconfig.RemoveHost(targetCfg.Hosts, patch.Host)
-	idx := sshconfig.FindInsertionIndex(targetCfg.Hosts, host.Host)
-	targetCfg.Hosts = append(targetCfg.Hosts[:idx], append([]*sshconfig.HostEntry{host}, targetCfg.Hosts[idx:]...)...)
-	sshconfig.SortHosts(targetCfg.Hosts)
-	return writeParsedConfig(parser, targetCfg, paths)
+	provider.Hosts[patch.Host] = host
+	cfg.Inventory.Providers[config.ProviderLocal] = provider
+	cfg.Inventory.Provider = cfg.Inventory.Providers
+	return saveLocalProviderInventory(cfg, paths)
 }
 
 func resolveLocalHostGroup(cfg *config.Config, patch hostPatch, existing *sshconfig.HostEntry, prompt groupPromptFunc) (string, error) {
@@ -844,19 +847,21 @@ func removeLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config
 	if err := cfg.Inventory.Validate(); err != nil {
 		return false, err
 	}
-	host, parsed, err := findInventoryHostWithLocation(parser, cfg, paths, hostName)
+	host, _, err := findInventoryHostWithLocation(nil, cfg, paths, hostName)
 	if err != nil {
 		return false, err
 	}
-	if host == nil || parsed == nil {
+	if host == nil {
 		return false, nil
 	}
 	if metadataForHost(host, cfg, paths, nil).Owner != "local" {
 		return false, fmt.Errorf("host %q is provider-owned; change provider group selector config instead", hostName)
 	}
-	parsed.Hosts = sshconfig.RemoveHost(parsed.Hosts, hostName)
-	sshconfig.SortHosts(parsed.Hosts)
-	return true, writeParsedConfig(parser, parsed, paths)
+	provider := cfg.Inventory.Providers[config.ProviderLocal]
+	delete(provider.Hosts, host.Host)
+	cfg.Inventory.Providers[config.ProviderLocal] = provider
+	cfg.Inventory.Provider = cfg.Inventory.Providers
+	return true, saveLocalProviderInventory(cfg, paths)
 }
 
 func importLocalCSV(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, csvPath, group string) (*importResult, error) {
@@ -957,18 +962,37 @@ func localFilePath(paths *config.Paths, localFile string) string {
 }
 
 func localProviderOwnerLabel(paths *config.Paths) string {
-	return "Inventory Filepath: " + localFilePath(paths, inventory.LocalProviderIncludeFile())
+	return "Inventory Filepath: " + localProviderYAMLPath(config.DefaultConfig(), paths)
 }
 
 func localWrittenHostConfig(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, host string) (string, error) {
-	entry, _, err := findInventoryHostWithLocation(parser, cfg, paths, host)
+	entry, _, err := findInventoryHostWithLocation(nil, cfg, paths, host)
 	if err != nil {
 		return "", err
 	}
 	if entry == nil {
 		return "", fmt.Errorf("host %q not found", host)
 	}
-	return strings.Join(entry.Lines, ""), nil
+	provider := cfg.Inventory.Providers[config.ProviderLocal]
+	hostCfg, ok := provider.Hosts[entry.Host]
+	if !ok {
+		return "", fmt.Errorf("host %q not found", host)
+	}
+	partialProvider := config.InventoryProviderConfig{
+		Type:   config.ProviderLocal,
+		Hosts:  map[string]config.InventoryHostConfig{entry.Host: hostCfg},
+		Groups: map[string]config.GroupConfig{},
+	}
+	if group := strings.TrimSpace(hostCfg.Group); group != "" {
+		if groupCfg, ok := provider.Groups[group]; ok {
+			partialProvider.Groups[group] = groupCfg
+		}
+	}
+	text, err := marshalInventoryProviderYAML(config.ProviderLocal, partialProvider)
+	if err != nil {
+		return "", err
+	}
+	return text, nil
 }
 
 func printLocalWrittenHostConfig(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, host string) {
@@ -1076,42 +1100,182 @@ func testLocalHostCompatibility(
 }
 
 func inventoryHosts(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths) ([]*sshconfig.HostEntry, error) {
-	if parser == nil {
-		parser = sshconfig.NewParser()
+	hosts := make([]*sshconfig.HostEntry, 0)
+	if cfg == nil {
+		cfg = config.DefaultConfig()
 	}
-	files, err := inventoryFiles(cfg, paths)
-	if err != nil {
+	if paths == nil {
+		paths = config.DefaultPaths()
+	}
+	if err := cfg.Inventory.Validate(); err != nil {
 		return nil, err
 	}
-	hosts := make([]*sshconfig.HostEntry, 0)
-	for _, file := range files {
-		parsed, err := parser.ParseFile(file)
+	for providerName, provider := range cfg.Inventory.Providers {
+		for name, hostCfg := range provider.Hosts {
+			hosts = append(hosts, hostEntryFromInventoryHost(cfg, paths, providerName, name, hostCfg))
+		}
+	}
+	if paths.StateDir != "" && samePath(paths.StateDir, config.DefaultPaths().StateDir) {
+		stateNames, err := inventory.ListProviderStates()
 		if err != nil {
 			return nil, err
 		}
-		hosts = append(hosts, parsed.Hosts...)
+		for _, providerName := range stateNames {
+			state, err := inventory.LoadProviderState(providerName)
+			if err != nil {
+				return nil, err
+			}
+			if state == nil {
+				continue
+			}
+			for _, host := range state.Objects {
+				entry := hostEntryFromProviderState(paths, state.Provider, host)
+				if entry != nil {
+					hosts = append(hosts, entry)
+				}
+			}
+		}
 	}
+	sort.Slice(hosts, func(i, j int) bool { return hosts[i].Host < hosts[j].Host })
 	return hosts, nil
 }
 
 func findInventoryHostWithLocation(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, pattern string) (*sshconfig.HostEntry, *sshconfig.ParsedConfig, error) {
-	if parser == nil {
-		parser = sshconfig.NewParser()
-	}
-	files, err := inventoryFiles(cfg, paths)
+	hosts, err := inventoryHosts(nil, cfg, paths)
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, file := range files {
-		parsed, err := parser.ParseFile(file)
-		if err != nil {
-			return nil, nil, err
-		}
-		if host := sshconfig.FindHostByPattern(parsed.Hosts, pattern); host != nil {
-			return host, parsed, nil
-		}
+	if host := sshconfig.FindHostByPattern(hosts, pattern); host != nil {
+		return host, &sshconfig.ParsedConfig{Path: host.SourceFile, Hosts: hosts}, nil
 	}
 	return nil, nil, nil
+}
+
+func hostEntryFromInventoryHost(cfg *config.Config, paths *config.Paths, providerName, name string, hostCfg config.InventoryHostConfig) *sshconfig.HostEntry {
+	hostname := strings.TrimSpace(hostCfg.Hostname)
+	if hostname == "" {
+		hostname = name
+	}
+	port := hostCfg.Port
+	if port == 0 {
+		port = 22
+	}
+	groupID := config.FormatInventoryGroupID(providerName, hostCfg.Group)
+	auth := cfg.ResolveInventoryAuth(config.InventoryAuthContext{Host: name, Provider: providerName, Group: groupID})
+	host := sshconfig.CreateHostEntry(name, hostname, auth.Username, port, auth.AuthMode == config.AuthModePassword, providerYAMLPath(cfg, paths, providerName))
+	host.Patterns = append(host.Patterns, hostCfg.Aliases...)
+	inventory.SetLocalHostGroup(host, groupID)
+	return host
+}
+
+func hostEntryFromProviderState(paths *config.Paths, providerName string, host *inventory.ProviderHost) *sshconfig.HostEntry {
+	if host == nil {
+		return nil
+	}
+	name := host.HostName
+	if name == "" {
+		name = host.Host
+	}
+	port := host.Port
+	if port == 0 {
+		port = 22
+	}
+	entry := sshconfig.CreateHostEntry(name, host.HostName, host.Username, port, host.AuthMode == config.AuthModePassword, localFilePath(paths, inventory.ProviderIncludeFile(providerName)))
+	if len(host.Patterns) > 0 {
+		entry.Patterns = slices.Clone(host.Patterns)
+		entry.Host = entry.Patterns[0]
+	}
+	inventory.SetLocalHostGroup(entry, host.Group)
+	return entry
+}
+
+func providerYAMLPath(cfg *config.Config, paths *config.Paths, providerName string) string {
+	if cfg != nil {
+		if source := cfg.InventoryProviderSource(providerName); source != "" {
+			return source
+		}
+	}
+	if providerName == config.ProviderLocal {
+		return localProviderYAMLPath(cfg, paths)
+	}
+	if paths == nil {
+		paths = config.DefaultPaths()
+	}
+	return filepath.Join(paths.ConfigDir, "inventory", providerName+".yaml")
+}
+
+func localProviderYAMLPath(cfg *config.Config, paths *config.Paths) string {
+	if paths == nil {
+		paths = config.DefaultPaths()
+	}
+	if cfg != nil {
+		if source := cfg.InventoryProviderSource(config.ProviderLocal); source != "" {
+			return source
+		}
+	}
+	return filepath.Join(paths.ConfigDir, "inventory", "local.yaml")
+}
+
+func saveLocalProviderInventory(cfg *config.Config, paths *config.Paths) error {
+	if cfg == nil {
+		return fmt.Errorf("config is required")
+	}
+	target := localProviderYAMLPath(cfg, paths)
+	provider := cfg.Inventory.Providers[config.ProviderLocal]
+	text, err := marshalInventoryProviderYAML(config.ProviderLocal, provider)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+		return fmt.Errorf("create inventory dir: %w", err)
+	}
+	return os.WriteFile(target, []byte(text), 0600)
+}
+
+func marshalInventoryProviderYAML(name string, provider config.InventoryProviderConfig) (string, error) {
+	provider.Group = nil
+	providerMap := map[string]any{"type": provider.Type}
+	if len(provider.Groups) > 0 {
+		providerMap["groups"] = provider.Groups
+	}
+	if len(provider.Hosts) > 0 {
+		providerMap["hosts"] = provider.Hosts
+	}
+	root := map[string]any{
+		"inventory": map[string]any{
+			"providers": map[string]any{
+				name: providerMap,
+			},
+		},
+	}
+	var b strings.Builder
+	enc := yaml.NewEncoder(&b)
+	enc.SetIndent(2)
+	if err := enc.Encode(root); err != nil {
+		return "", err
+	}
+	if err := enc.Close(); err != nil {
+		return "", err
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n", nil
+}
+
+func shortInventoryGroup(group string) string {
+	_, short, err := config.ParseInventoryGroupID(group)
+	if err != nil {
+		return group
+	}
+	return short
+}
+
+func compatTypesToNames(types []compat.CompatType) []string {
+	names := make([]string, 0, len(types))
+	for _, ct := range types {
+		if _, ok := compat.CompatConfigs[ct]; ok {
+			names = append(names, string(ct))
+		}
+	}
+	return names
 }
 
 func inventoryFiles(cfg *config.Config, paths *config.Paths) ([]string, error) {
@@ -1169,6 +1333,12 @@ func metadataForHost(host *sshconfig.HostEntry, cfg *config.Config, paths *confi
 		if samePath(host.SourceFile, localFilePath(paths, inventory.ProviderIncludeFile(name))) {
 			return hostMetadata{Owner: name, Group: "-"}
 		}
+		if samePath(host.SourceFile, providerYAMLPath(cfg, paths, name)) {
+			return hostMetadata{Owner: name, Group: inventory.LocalHostGroup(host, "-")}
+		}
+	}
+	if samePath(host.SourceFile, localProviderYAMLPath(cfg, paths)) {
+		return hostMetadata{Owner: inventory.LocalProviderName, Group: inventory.LocalHostGroup(host, "-")}
 	}
 	if samePath(host.SourceFile, localFilePath(paths, inventory.LocalProviderIncludeFile())) {
 		return hostMetadata{Owner: inventory.LocalProviderName, Group: inventory.LocalHostGroup(host, "-")}

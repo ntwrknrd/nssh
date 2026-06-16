@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"sort"
 	"strings"
 	"time"
 
@@ -241,32 +240,16 @@ func selectLocalRefreshFixes(findings []localRefreshFinding) ([]localRefreshFind
 }
 
 func applyLocalRefreshFixes(parser *sshconfig.Parser, paths *config.Paths, findings []localRefreshFinding) (int, error) {
-	if parser == nil {
-		parser = sshconfig.NewParser()
-	}
 	if paths == nil {
 		paths = config.DefaultPaths()
 	}
-	parsedByPath := make(map[string]*sshconfig.ParsedConfig)
-	dirty := make(map[string]bool)
-	getParsed := func(path string) (*sshconfig.ParsedConfig, error) {
-		if path == "" {
-			return nil, fmt.Errorf("host source file is unknown")
-		}
-		if parsed := parsedByPath[path]; parsed != nil {
-			return parsed, nil
-		}
-		parsed, err := parser.ParseFile(path)
-		if err != nil {
-			return nil, err
-		}
-		parsedByPath[path] = parsed
-		return parsed, nil
+	cfg, err := config.Load(paths.ConfigFile)
+	if err != nil {
+		return 0, err
 	}
-	markDirty := func(parsed *sshconfig.ParsedConfig) {
-		if parsed != nil {
-			dirty[parsed.Path] = true
-		}
+	provider := cfg.Inventory.Providers[config.ProviderLocal]
+	if provider.Hosts == nil {
+		provider.Hosts = make(map[string]config.InventoryHostConfig)
 	}
 
 	applied := 0
@@ -276,63 +259,41 @@ func applyLocalRefreshFixes(parser *sshconfig.Parser, paths *config.Paths, findi
 		case localRefreshFixNone:
 			continue
 		case localRefreshFixRemoveHost:
-			parsed, err := getParsed(finding.fix.host.SourceFile)
-			if err != nil {
-				return applied, err
-			}
-			parsed.Hosts = sshconfig.RemoveHost(parsed.Hosts, finding.fix.host.Host)
-			markDirty(parsed)
+			delete(provider.Hosts, finding.fix.host.Host)
 			applied++
 		case localRefreshFixRemoveDuplicate:
-			parsed, err := getParsed(finding.fix.host.SourceFile)
-			if err != nil {
-				return applied, err
-			}
-			parsed.Hosts = removeHostEntryByLines(parsed.Hosts, finding.fix.host.Lines)
-			markDirty(parsed)
+			delete(provider.Hosts, finding.fix.host.Host)
 			applied++
 		case localRefreshFixRenameHost:
-			parsed, err := getParsed(finding.fix.host.SourceFile)
-			if err != nil {
-				return applied, err
+			host, ok := provider.Hosts[finding.fix.host.Host]
+			if !ok {
+				return applied, fmt.Errorf("host %q not found in local inventory", finding.fix.host.Host)
 			}
-			host := sshconfig.FindHostByPattern(parsed.Hosts, finding.fix.host.Host)
-			if host == nil {
-				return applied, fmt.Errorf("host %q not found in %s", finding.fix.host.Host, parsed.Path)
+			newID := finding.fix.newID
+			if strings.TrimSpace(newID) == "" {
+				newID = finding.fix.host.Host
 			}
-			renameLocalRefreshHost(host, finding.fix.newID, finding.fix.cnameTarget)
-			markDirty(parsed)
+			delete(provider.Hosts, finding.fix.host.Host)
+			host.Hostname = finding.fix.cnameTarget
+			host.Aliases = uniqueHostPatterns(append(host.Aliases, finding.fix.host.Host))
+			provider.Hosts[newID] = host
 			applied++
 		case localRefreshFixMergeHost:
-			oldParsed, err := getParsed(finding.fix.host.SourceFile)
-			if err != nil {
-				return applied, err
+			delete(provider.Hosts, finding.fix.host.Host)
+			target, ok := provider.Hosts[finding.fix.target.Host]
+			if !ok {
+				return applied, fmt.Errorf("merge target %q not found in local inventory", finding.fix.target.Host)
 			}
-			targetParsed, err := getParsed(finding.fix.target.SourceFile)
-			if err != nil {
-				return applied, err
-			}
-			oldParsed.Hosts = removeHostEntryByLines(oldParsed.Hosts, finding.fix.host.Lines)
-			target := sshconfig.FindHostByPattern(targetParsed.Hosts, finding.fix.target.Host)
-			if target == nil {
-				return applied, fmt.Errorf("merge target %q not found in %s", finding.fix.target.Host, targetParsed.Path)
-			}
-			addLocalRefreshHostAlias(target, finding.fix.alias)
-			markDirty(oldParsed)
-			markDirty(targetParsed)
+			target.Aliases = uniqueHostPatterns(append(target.Aliases, finding.fix.alias))
+			provider.Hosts[finding.fix.target.Host] = target
 			applied++
 		}
 	}
 
-	pathsToWrite := make([]string, 0, len(dirty))
-	for path := range dirty {
-		pathsToWrite = append(pathsToWrite, path)
-	}
-	sort.Strings(pathsToWrite)
-	for _, path := range pathsToWrite {
-		parsed := parsedByPath[path]
-		sshconfig.SortHosts(parsed.Hosts)
-		if err := writeParsedConfig(parser, parsed, paths); err != nil {
+	if applied > 0 {
+		cfg.Inventory.Providers[config.ProviderLocal] = provider
+		cfg.Inventory.Provider = cfg.Inventory.Providers
+		if err := saveLocalProviderInventory(cfg, paths); err != nil {
 			return applied, err
 		}
 	}

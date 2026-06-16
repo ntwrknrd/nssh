@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/inventory"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 )
 
@@ -86,10 +85,10 @@ func TestApplyLocalRefreshFixesRemovesSelectedLocalStaleHost(t *testing.T) {
 	}
 
 	content := readTestFile(t, localFile)
-	if strings.Contains(content, "Host stale01") {
+	if strings.Contains(content, "stale01:") {
 		t.Fatalf("stale host still present:\n%s", content)
 	}
-	if !strings.Contains(content, "Host keep01") {
+	if !strings.Contains(content, "keep01:") {
 		t.Fatalf("unselected host removed:\n%s", content)
 	}
 }
@@ -166,7 +165,7 @@ func TestApplyLocalRefreshFixesRenamesCNAMEAndPreservesAlias(t *testing.T) {
 	}
 
 	content := readTestFile(t, localFile)
-	for _, want := range []string{"Host new01 old01", "HostName new01.example.com", "User admin"} {
+	for _, want := range []string{"new01:", "hostname: new01.example.com", "- old01"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("missing %q in:\n%s", want, content)
 		}
@@ -208,10 +207,10 @@ func TestApplyLocalRefreshFixesMergesCNAMEIntoExistingLocalHost(t *testing.T) {
 	}
 
 	content := readTestFile(t, localFile)
-	if strings.Contains(content, "HostName old01.example.com") {
+	if strings.Contains(content, "hostname: old01.example.com") {
 		t.Fatalf("old CNAME block still present:\n%s", content)
 	}
-	if !strings.Contains(content, "Host new01 old01") {
+	if !strings.Contains(content, "- old01") {
 		t.Fatalf("old alias not merged into target:\n%s", content)
 	}
 }
@@ -257,25 +256,65 @@ func newLocalRefreshFixture(t *testing.T, localContent string) (*sshconfig.Parse
 	t.Helper()
 	tmp := t.TempDir()
 	sshDir := filepath.Join(tmp, ".ssh")
-	nsshDir := filepath.Join(sshDir, "nssh.d")
-	if err := os.MkdirAll(nsshDir, 0700); err != nil {
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	mainConfig := filepath.Join(sshDir, "config")
-	if err := os.WriteFile(mainConfig, []byte("Include nssh.d/*\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	localFile := filepath.Join(nsshDir, filepath.Base(inventory.LocalProviderIncludeFile()))
-	if err := os.WriteFile(localFile, []byte(localContent), 0600); err != nil {
+	sourceFile := filepath.Join(tmp, "source.conf")
+	if err := os.WriteFile(sourceFile, []byte(localContent), 0600); err != nil {
 		t.Fatal(err)
 	}
 	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
-	cfg := &config.Config{Inventory: config.InventoryConfig{
-		Group: map[string]config.GroupConfig{
-			"lab": {},
+	parsed, err := parser.ParseFile(sourceFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosts := make(map[string]config.InventoryHostConfig)
+	seen := make(map[string]int)
+	for _, host := range parsed.Hosts {
+		name := host.Host
+		if seen[name] > 0 {
+			name = name + "-duplicate"
+		}
+		seen[host.Host]++
+		hostCfg := config.InventoryHostConfig{Group: "lab", Hostname: host.HostName}
+		if user := host.User(); user != "" {
+			hostCfg.Auth = config.InventoryAuthConfig{Username: user, AuthMode: config.AuthModeKey}
+		}
+		if len(host.Patterns) > 1 {
+			hostCfg.Aliases = append(hostCfg.Aliases, host.Patterns[1:]...)
+		}
+		if name != host.Host {
+			hostCfg.Aliases = append(hostCfg.Aliases, host.Host)
+		}
+		hosts[name] = hostCfg
+	}
+	cfg := &config.Config{Include: []string{"inventory/*.yaml"}, Inventory: config.InventoryConfig{
+		Providers: map[string]config.InventoryProviderConfig{
+			config.ProviderLocal: {
+				Type:   config.ProviderLocal,
+				Groups: map[string]config.GroupConfig{"lab": {}},
+				Hosts:  hosts,
+			},
 		},
 	}}
-	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
+	paths := &config.Paths{
+		ConfigDir:     filepath.Join(tmp, "nssh"),
+		ConfigFile:    filepath.Join(tmp, "nssh", "config.yaml"),
+		SSHConfigDir:  sshDir,
+		SSHConfigFile: mainConfig,
+		BackupDir:     filepath.Join(tmp, "backups"),
+	}
+	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.ConfigFile, []byte("include: [inventory/*.yaml]\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveLocalProviderInventory(cfg, paths); err != nil {
+		t.Fatal(err)
+	}
+	localFile := localProviderYAMLPath(cfg, paths)
 	return parser, cfg, paths, localFile
 }
 
