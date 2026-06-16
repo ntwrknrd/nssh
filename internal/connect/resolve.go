@@ -6,12 +6,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/credential"
-	"github.com/ntwrknrd/nssh/internal/inventory"
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 )
@@ -35,8 +33,13 @@ type ResolvedCredential struct {
 type ResolvedHost struct {
 	Query       string
 	Hostname    string
+	Port        int
 	Username    string
 	AuthMode    string
+	Provider    string
+	Group       string
+	Aliases     []string
+	SSH         config.SSHHostConfig
 	IncludeFile string
 	HostEntry   *sshconfig.HostEntry
 	Credential  *ResolvedCredential
@@ -102,23 +105,21 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 		hostname = hostname[idx+1:]
 	}
 
-	// Look up host in SSH config
-	var includeFile string
-	var hostEntry *sshconfig.HostEntry
-	parser := sshconfig.NewParser()
-	if host, err := parser.FindHost(hostname); err == nil && host != nil {
-		hostEntry = host
-		includeFile = filepath.Base(host.SourceFile)
+	catalog, err := BuildHostCatalog(c)
+	if err != nil {
+		return nil, err
+	}
+	hostData, managed := catalog.Find(hostname)
+	if !managed {
+		return nil, &HostNotFoundError{Hostname: hostname}
 	}
 
-	group := resolveGroup(hostEntry, c)
-	authCtx, managed := resolveInventoryAuthContext(hostEntry, hostname, group, c)
+	authCtx := config.InventoryAuthContext{
+		Host:     hostData.Canonical,
+		Provider: hostData.Provider,
+		Group:    config.FormatInventoryGroupID(hostData.Provider, hostData.Group),
+	}
 	auth := c.ResolveInventoryAuth(authCtx)
-
-	hostUser := ""
-	if hostEntry != nil && !managed {
-		hostUser = hostEntry.User()
-	}
 
 	// Resolve credentials
 	var cred *ResolvedCredential
@@ -135,43 +136,21 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 		}
 	}
 
-	username := selectConnectionUsername(managed, explicitUser, hostUser, "", credentialUser, "")
+	username := selectConnectionUsername(managed, explicitUser, "", "", credentialUser, "")
 
 	return &ResolvedHost{
-		Query:       query,
-		Hostname:    hostname,
-		Username:    username,
-		AuthMode:    auth.AuthMode,
-		IncludeFile: includeFile,
-		HostEntry:   hostEntry,
-		Credential:  cred,
-		Config:      c,
+		Query:      query,
+		Hostname:   hostData.Hostname,
+		Port:       hostData.Port,
+		Username:   username,
+		AuthMode:   auth.AuthMode,
+		Provider:   hostData.Provider,
+		Group:      hostData.Group,
+		Aliases:    hostData.Aliases,
+		SSH:        hostData.SSH,
+		Credential: cred,
+		Config:     c,
 	}, nil
-}
-
-func resolveInventoryAuthContext(hostEntry *sshconfig.HostEntry, hostname, group string, cfg *config.Config) (config.InventoryAuthContext, bool) {
-	ctx := config.InventoryAuthContext{Host: hostname, Group: group}
-	if hostEntry == nil {
-		return ctx, false
-	}
-	if idx, err := inventory.BuildProviderIndex(); err == nil {
-		if info := idx[hostEntry.Host]; info != nil {
-			ctx.Provider = info.Provider
-			ctx.Group = info.Group
-			return ctx, true
-		}
-		for _, pattern := range hostEntry.Patterns {
-			if info := idx[pattern]; info != nil {
-				ctx.Provider = info.Provider
-				ctx.Group = info.Group
-				return ctx, true
-			}
-		}
-	}
-	if group != "" && inventory.LocalHostGroup(hostEntry, "") != "" {
-		return ctx, true
-	}
-	return ctx, false
 }
 
 type providerRegistry interface {
@@ -367,21 +346,4 @@ func canDeferCredentialLookup(ref config.CredentialRefConfig, explicitUser strin
 func isDirectSecretRef(ref string) bool {
 	ref = strings.TrimSpace(ref)
 	return strings.HasPrefix(ref, "op://") && !strings.HasSuffix(ref, "/")
-}
-
-func resolveGroup(hostEntry *sshconfig.HostEntry, cfg *config.Config) string {
-	if hostEntry == nil {
-		return ""
-	}
-	if idx, err := inventory.BuildProviderIndex(); err == nil {
-		if info := idx[hostEntry.Host]; info != nil {
-			return info.Group
-		}
-		for _, pattern := range hostEntry.Patterns {
-			if info := idx[pattern]; info != nil {
-				return info.Group
-			}
-		}
-	}
-	return inventory.LocalHostGroup(hostEntry, "")
 }

@@ -247,13 +247,24 @@ func TestResolveInventoryCredentialDefersDirectPasswordRefWithLiteralUsername(t 
 func TestResolveHostForConnectCarriesResolvedAuthMode(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{
-		"op-network": {Type: config.CredentialProvider1Password},
+		"pass-local": {Type: config.CredentialProviderPass},
 	}
-	cfg.Inventory.Auth = config.InventoryAuthConfig{
-		CredentialProvider: "op-network",
-		PasswordRef:        "op://Network/Edge/password",
-		Username:           "netops",
-		AuthMode:           config.AuthModePassword,
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type: config.ProviderLocal,
+			Groups: map[string]config.GroupConfig{
+				"customer": {Auth: config.InventoryAuthConfig{
+					CredentialProvider: "pass-local",
+					PasswordRef:        "nssh/groups/customer",
+					Username:           "netops",
+					Mode:               config.AuthModePassword,
+				}},
+			},
+			Hosts: map[string]config.InventoryHostConfig{
+				"edge01": {Group: "customer", Hostname: "edge01.example.com"},
+			},
+		},
 	}
 
 	resolved, err := ResolveHostForConnect("edge01", "", cfg)

@@ -3,9 +3,8 @@ package connect
 import (
 	"fmt"
 	"log/slog"
-	"sort"
 
-	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
+	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
 
@@ -15,24 +14,23 @@ import (
 // - Multiple partial matches: opens fuzzy finder with query pre-filled
 // - No matches: returns HostNotFoundError to trigger local inventory creation
 func ResolveHostname(hostname string) (string, error) {
-	parser := sshconfig.NewParser()
-
-	result, err := parser.MatchHost(hostname)
+	cfg, err := config.LoadDefault()
 	if err != nil {
-		slog.Debug("failed to match host", "err", err)
-		return hostname, nil
+		return "", err
 	}
-
-	if result.Host != nil {
-		if result.Host.Host != hostname {
-			slog.Debug("auto-resolved hostname", "input", hostname, "resolved", result.Host.Host)
+	catalog, err := BuildHostCatalog(cfg)
+	if err != nil {
+		return "", err
+	}
+	if host, ok := catalog.Find(hostname); ok {
+		if host.Canonical != hostname {
+			slog.Debug("auto-resolved hostname", "input", hostname, "resolved", host.Canonical)
 		}
-		return result.Host.Host, nil
+		return host.Canonical, nil
 	}
-
-	if len(result.Suggestions) > 0 {
-		sort.Strings(result.Suggestions)
-		selected, err := ui.FuzzySelectString("Select host", result.Suggestions, hostname)
+	suggestions := catalog.Suggestions(hostname)
+	if len(suggestions) > 0 {
+		selected, err := ui.FuzzySelectString("Select host", suggestions, hostname)
 		if err != nil {
 			return "", fmt.Errorf("fuzzy select: %w", err)
 		}
@@ -43,7 +41,7 @@ func ResolveHostname(hostname string) (string, error) {
 	}
 
 	if hostname == "" {
-		return "", fmt.Errorf("no hosts found in SSH config")
+		return "", fmt.Errorf("no hosts found in nssh inventory")
 	}
 	return "", &HostNotFoundError{Hostname: hostname}
 }
