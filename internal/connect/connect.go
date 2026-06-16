@@ -111,9 +111,11 @@ func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArg
 		conn.SetPasswordResolver(retryResolved.Credential.PasswordResolver)
 	}
 	conn.SetHostKeyPromptFunc(newHostKeyPromptFunc())
+	conn.SetSSHOptions(resolved.SSH)
 	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 	conn.SetTimeouts(&cfg.SSH.Connection)
 	conn.SetSSHVerbosity(opts.SSHVerbosity)
+	conn.SetResolvedEndpoint(resolved.Hostname, fmt.Sprintf("%d", resolved.Port))
 	return conn.Run(ctx)
 }
 

@@ -104,7 +104,7 @@ inventory:
 	}
 }
 
-func TestInventoryProviderGroupValidatesBareGroupName(t *testing.T) {
+func TestInventoryProviderGroupValidatesConfigKeySafeGroupName(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Inventory.Providers = map[string]InventoryProviderConfig{
 		"netbox-prod": {Type: ProviderNetBox, Groups: map[string]GroupConfig{
@@ -116,7 +116,7 @@ func TestInventoryProviderGroupValidatesBareGroupName(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected invalid group name error")
 	}
-	if !strings.Contains(err.Error(), "bare-key safe") {
+	if !strings.Contains(err.Error(), "must use only") {
 		t.Fatalf("error %q does not identify invalid group name", err)
 	}
 }
@@ -212,13 +212,13 @@ func TestCredentialConfigValidation(t *testing.T) {
 			},
 		},
 		{
-			name: "provider name must be bare-key safe",
+			name: "provider name must be config-key safe",
 			cfg: CredentialConfig{
 				Provider: map[string]CredentialProviderConfig{
 					"bad.name": {Type: CredentialProviderPass},
 				},
 			},
-			wantErr: "bare-key safe",
+			wantErr: "must use only",
 		},
 		{
 			name: "invalid provider-session policy",
@@ -271,7 +271,7 @@ func TestInventoryConfigValidation(t *testing.T) {
 					"local": {Type: ProviderLocal, Groups: map[string]GroupConfig{"bad.name": {}}},
 				},
 			},
-			wantErr: "bare-key safe",
+			wantErr: "must use only",
 		},
 		{
 			name: "provider group selector is valid",

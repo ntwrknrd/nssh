@@ -9,7 +9,6 @@ import (
 	"github.com/ntwrknrd/nssh/internal/config"
 	clireconnect "github.com/ntwrknrd/nssh/internal/connect"
 	"github.com/ntwrknrd/nssh/internal/secret"
-	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 )
 
 func TestBareCpPrintsHelp(t *testing.T) {
@@ -48,9 +47,10 @@ func TestRunCpUsesSharedResolvePath(t *testing.T) {
 		gotQuery = query
 		gotUser = explicitUser
 		return &clireconnect.ResolvedHost{
-			Hostname:  query,
-			Username:  "resolved-user",
-			HostEntry: &sshconfig.HostEntry{Host: query},
+			Hostname: "edge01.example.com",
+			Port:     2200,
+			Username: "resolved-user",
+			SSH:      config.SSHHostConfig{Options: map[string]string{"Compression": "yes"}},
 			Credential: &clireconnect.ResolvedCredential{
 				Username: "resolved-user",
 				Password: resolvedPassword,
@@ -76,7 +76,7 @@ func TestRunCpUsesSharedResolvePath(t *testing.T) {
 	if gotQuery != "edge01" || gotUser != "" {
 		t.Fatalf("resolve query=%q user=%q", gotQuery, gotUser)
 	}
-	if strings.Join(scpArgs, " ") != "resolved-user@edge01:/tmp/file ./file" {
+	if strings.Join(scpArgs, " ") != "-F none -o Compression=yes -P 2200 resolved-user@edge01.example.com:/tmp/file ./file" {
 		t.Fatalf("scp args = %#v", scpArgs)
 	}
 	if gotPassword != "secret" {

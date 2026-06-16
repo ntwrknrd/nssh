@@ -22,7 +22,7 @@ type RefreshResult struct {
 }
 
 // RefreshProvider discovers, reconciles, and saves provider state. It never
-// touches credentials or generated SSH config.
+// touches credentials or operator-owned YAML config.
 func RefreshProvider(
 	ctx context.Context,
 	name string,

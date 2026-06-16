@@ -151,7 +151,7 @@ type SSHSecurityConfig struct {
 // Duration Type
 // ============================================================================
 
-// Duration wraps time.Duration for TOML string parsing.
+// Duration wraps time.Duration for config string parsing.
 // Supports formats like "30s", "5m", "1h".
 type Duration time.Duration
 

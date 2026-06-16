@@ -21,7 +21,7 @@ treats the host as the SSH destination.
 
 Smart lookup behavior:
 
-1. Check SSH config for an exact host.
+1. Check the nssh host catalog for an exact host.
 2. If one partial match exists, use it.
 3. If multiple partial matches exist, open `fzf` selection.
 4. If lookup misses, offer local inventory creation with `nssh inv set`.
@@ -32,7 +32,7 @@ miss; use `nssh inv refresh` when provider caches need to be updated.
 Username precedence in `internal/connect.ResolveHostForConnect`:
 
 1. Explicit `user@host` or `-l user`.
-2. SSH config `User`.
+2. Inventory host auth `username`.
 3. Inventory provider group auth `username`.
 4. Credential item username.
 
@@ -56,12 +56,12 @@ unlock external password managers.
 
 Relevant config:
 
-```toml
-[agent]
-auto_start = true
-idle_timeout = "1h"
-activity_increment = "15m"
-max_lifetime = "24h"
+```yaml
+agent:
+  auto_start: true
+  idle_timeout: 1h
+  activity_increment: 15m
+  max_lifetime: 24h
 ```
 
 If a `session = "agent"` provider cannot connect to the agent and
@@ -69,20 +69,22 @@ If a `session = "agent"` provider cannot connect to the agent and
 
 ## Host Keys And Legacy SSH
 
-Host-key behavior is configured under `[ssh.security]`:
+Host-key behavior is configured under `ssh.security`:
 
-```toml
-accept_once_mode = "pin"
-host_key_policy = "pin"
-compat_persist_probes = false
+```yaml
+ssh:
+  security:
+    accept_once_mode: pin
+    host_key_policy: pin
+    compat_persist_probes: false
 ```
 
 `accept_once_mode = "pin"` uses a stricter accept-once flow. `accept-new` uses
 OpenSSH trust-on-first-use behavior.
 
 On legacy SSH algorithm failures, `internal/connect.handleCompatibilityFix`
-probes the target, maps stderr through `internal/ssh/compat`, asks before
-persisting fixes, writes them to the owning SSH include file, and retries.
+maps stderr through `internal/ssh/compat` and reports the matching named fix.
+Persist compatibility fixes under the owning YAML host `ssh.compat` field.
 
 ## Recordings And Logs
 
@@ -98,7 +100,7 @@ nssh log delete <id>
 nssh log auth
 ```
 
-Recording config lives under `[logging.session]`. Recording is disabled by
+Recording config lives under `logging.session`. Recording is disabled by
 default. When enabled, nssh wraps the outer command with asciinema and guards the
 inner connection with `NSSH_RECORDING_INNER=1`.
 
@@ -106,7 +108,7 @@ Recording files default to `~/.local/state/nssh/casts`. Archive maintenance is
 configured under `[logging.session.archive]` and executed by the agent runtime.
 
 Audit logging is separate from session recording and lives under
-`[logging.audit]`.
+`logging.audit`.
 
 ## Diagnostics
 

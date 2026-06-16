@@ -11,17 +11,17 @@ Source paths:
 - `internal/config/settings.go`
 - `internal/config/include.go`
 - `internal/config/inventory.go`
-- `docs/examples/config/config.example.toml`
+- `docs/examples/config/config.example.yaml`
 
 Default paths:
 
-- Main config: `~/.config/nssh/config.toml`
-- Managed SSH includes: `~/.ssh/nssh.d/`
+- Main config: `~/.config/nssh/config.yaml`
+- Inventory includes: `~/.config/nssh/inventory/*.yaml`
 - Runtime state: `~/.local/state/nssh/`
 - Recordings: `~/.local/state/nssh/casts`
-- Data/benchmarks/local inventory backups: `~/.local/share/nssh/`
+- Data/benchmarks: `~/.local/share/nssh/`
 
-Config is TOML. `include = [...]` can appear at the root or under tables.
+Config is YAML. `include: [...]` can appear at the root or under sections.
 Included files are merged first; the importing file wins.
 
 Use `nssh self cfg` or the example config for field-level details instead of
@@ -44,23 +44,21 @@ nssh inv refresh
 nssh inv refresh local
 ```
 
-Local inventory is the implicit `local` provider and writes
-`~/.ssh/nssh.d/provider_local.conf`. Local host groups are stored in SSH config
-comments as canonical IDs such as `local/custcbb`.
-Each local inventory write creates a timestamped backup of
-`provider_local.conf` under `~/.local/share/nssh/backups`. Retention is fixed:
-keep 10 from the last hour, 5 more from the last day, and 1 per day for the
-previous 7 days.
+Local inventory is the implicit `local` provider and writes YAML, usually
+`~/.config/nssh/inventory/local.yaml`. Local host groups are stored under each
+host as a singular group key such as `custcbb`, with the canonical group ID
+remaining `local/custcbb`.
 
-External inventory providers write provider-owned include files named
-`~/.ssh/nssh.d/provider_<name>.conf` and non-secret state under
-`~/.local/state/nssh/inventory/providers/<name>.json`.
+External inventory providers write non-secret state under
+`~/.local/state/nssh/inventory/providers/<name>.json`. Provider groups,
+auth mappings, SSH options, and host overrides live in provider-scoped YAML
+inventory config.
 
 Current external providers:
 
-- NetBox: configured with `type = "netbox"`, URL/token settings, and
+- NetBox: configured with `type: netbox`, URL/token settings, and
   provider-owned group match rules.
-- Containerlab: configured with `type = "containerlab"` and a required
+- Containerlab: configured with `type: containerlab` and a required
   `jump_host`.
 
 Provider-owned group selectors assign discovered objects to canonical groups.
@@ -89,15 +87,23 @@ Supported providers:
 
 Auth mappings belong to inventory:
 
-```toml
-[inventory.provider.local]
-type = "local"
-
-[inventory.provider.local.group.default]
-auth = { credential_provider = "pass-local", password_ref = "nssh/groups/default" }
-
-[inventory.host.edge01]
-auth = { credential_provider = "op-network", password_ref = "nssh host edge01", username = "netops" }
+```yaml
+inventory:
+  providers:
+    local:
+      type: local
+      groups:
+        default:
+          auth:
+            credential_provider: pass-local
+            password_ref: nssh/groups/default
+      hosts:
+        edge01:
+          group: default
+          auth:
+            credential_provider: op-network
+            password_ref: nssh host edge01
+            username: netops
 ```
 
 Every set auth mapping needs `credential_provider` and either `password_ref` or
@@ -115,7 +121,7 @@ Resolution order:
 
 1. Host auth override.
 2. Inventory provider group auth mapping.
-3. SSH config and key auth without an nssh credential.
+3. Key auth or SSH agent auth without an nssh credential.
 
 If a provider record returns a username that conflicts with the selected SSH
 username, nssh skips that credential. This prevents injecting the wrong password

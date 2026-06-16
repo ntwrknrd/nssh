@@ -95,8 +95,7 @@ type InventoryConfig struct {
 	Provider map[string]InventoryProviderConfig `toml:"provider" yaml:"provider,omitempty"`
 }
 
-// InventoryHostConfig stores host-level inventory metadata outside provider
-// generated SSH config.
+// InventoryHostConfig stores host-level inventory metadata and overrides.
 type InventoryHostConfig struct {
 	Group        string              `yaml:"group,omitempty"`
 	Hostname     string              `yaml:"hostname,omitempty"`
@@ -685,7 +684,7 @@ func applyAuth(res *InventoryAuthResolution, auth InventoryAuthConfig, source st
 
 func validateBareKeySafe(scope, name string) error {
 	if !bareKeySafeName.MatchString(name) {
-		return fmt.Errorf("%s name %q must be TOML bare-key safe: letters, numbers, underscores, and dashes", scope, name)
+		return fmt.Errorf("%s name %q must use only letters, numbers, underscores, and dashes", scope, name)
 	}
 	return nil
 }

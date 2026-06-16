@@ -86,12 +86,12 @@ func providerStatePath(provider string) string {
 	return filepath.Join(providerStateDir(), provider+".json")
 }
 
-// ProviderIncludeFile returns the deterministic provider-owned SSH config file.
+// ProviderIncludeFile returns the legacy provider include path retained in state.
 func ProviderIncludeFile(provider string) string {
 	return filepath.Join("nssh.d", "provider_"+provider+".conf")
 }
 
-// LocalProviderIncludeFile returns the implicit local provider SSH config file.
+// LocalProviderIncludeFile returns the legacy local include path retained in state.
 func LocalProviderIncludeFile() string {
 	return ProviderIncludeFile(LocalProviderName)
 }

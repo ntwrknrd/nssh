@@ -7,10 +7,10 @@
 [![Homebrew](https://img.shields.io/badge/homebrew-available-orange)](https://github.com/ntwrknrd/homebrew-nssh)
 ![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue)
 
-`nssh` is an SSH wrapper for operators who manage many hosts. It keeps SSH
-config as the connection surface, adds local and provider-backed inventory,
-resolves credentials from external password managers, injects passwords through
-OpenSSH prompts, and can record sessions.
+`nssh` is an SSH wrapper for operators who manage many hosts. It keeps host
+inventory, auth policy, routing, and SSH options in nssh YAML config, resolves
+credentials from external password managers, injects passwords through OpenSSH
+prompts, and can record sessions.
 
 ## Demo
 
@@ -19,7 +19,7 @@ OpenSSH prompts, and can record sessions.
 ## Features
 
 - Smart connect: `nssh HOST`, `nssh user@HOST`, and `nssh connect` route through
-  SSH config lookup, partial host matching, and optional `fzf` selection.
+  nssh inventory lookup, partial host matching, and optional `fzf` selection.
 - Inventory: `nssh inv` manages local hosts and external providers; current
   providers are NetBox and containerlab.
 - Credentials: Pass, 1Password, and Bitwarden providers are selected by
@@ -28,13 +28,13 @@ OpenSSH prompts, and can record sessions.
   background recording archive maintenance.
 - Connection behavior: OpenSSH still owns transport; nssh wraps it with a PTY
   connector for prompt detection, password injection, host-key handling, timing,
-  and legacy SSH compatibility fixes.
+  and typed SSH option rendering.
 - Recordings: optional asciinema session capture is managed with `nssh log`.
 - SCP: `nssh cp` uses the same host and credential resolution path as connect.
 
 Run `nssh --help` or read the generated help snapshots under
 [docs/examples/help](docs/examples/help). The full example config is
-[docs/examples/config/config.example.toml](docs/examples/config/config.example.toml).
+[docs/examples/config/config.example.yaml](docs/examples/config/config.example.yaml).
 
 ## Installation
 
@@ -48,8 +48,8 @@ nssh self init
 nssh self status
 ```
 
-`nssh self init` creates the config file, SSH include directory, credential
-provider defaults, and inventory group bindings. To remove local nssh state:
+`nssh self init` creates the config file, credential provider defaults, and
+inventory group bindings. To remove local nssh state:
 
 ```bash
 nssh self uninstall

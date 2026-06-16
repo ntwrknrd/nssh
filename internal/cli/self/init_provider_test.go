@@ -16,7 +16,7 @@ func TestInitYesDefaultsToLocalInventoryAndPassCredentialProvider(t *testing.T) 
 		t.Fatalf("buildInitPlan: %v", err)
 	}
 
-	if !strings.Contains(plan.Summary(), "Inventory sources: Local SSH config") {
+	if !strings.Contains(plan.Summary(), "Inventory sources: Local YAML inventory") {
 		t.Fatalf("summary missing local inventory:\n%s", plan.Summary())
 	}
 	if !strings.Contains(plan.Summary(), "Credential providers: Pass") {

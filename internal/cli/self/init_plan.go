@@ -462,7 +462,7 @@ func credentialRefForHost(provider, host string) string {
 }
 
 func initInventorySummary(cfg *config.Config) []string {
-	out := []string{"Local SSH config"}
+	out := []string{"Local YAML inventory"}
 	names := make([]string, 0, len(cfg.Inventory.Provider))
 	for name := range cfg.Inventory.Provider {
 		names = append(names, name)

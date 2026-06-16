@@ -10,11 +10,11 @@ nssh wraps OpenSSH for operators with many SSH targets. It must preserve normal
 OpenSSH behavior while adding:
 
 - smart host lookup and fuzzy selection
-- local and external inventory rendered as SSH config include files
+- local and external inventory resolved from nssh YAML config and provider state
 - provider-backed SSH credentials from Pass, 1Password, or Bitwarden
 - request-scoped password injection through a PTY
 - optional asciinema session recording and log management
-- legacy SSH compatibility detection and persisted remediation
+- typed legacy SSH compatibility fixes under nssh host SSH config
 - status, diagnostics, benchmarking, install, reset, and uninstall commands
 
 nssh must not own external password-manager authentication, store long-lived
@@ -45,19 +45,17 @@ flag tables into docs.
 
 Path resolution lives in `internal/config/paths.go`.
 
-- Config: `$XDG_CONFIG_HOME/nssh/config.toml`, defaulting to
-  `~/.config/nssh/config.toml`.
+- Config: `$XDG_CONFIG_HOME/nssh/config.yaml`, defaulting to
+  `~/.config/nssh/config.yaml`.
 - Data: `$XDG_DATA_HOME/nssh`, defaulting to `~/.local/share/nssh`.
 - State: `$XDG_STATE_HOME/nssh`, defaulting to `~/.local/state/nssh`.
 - Recordings: `config.Paths.RecordingsDir`, defaulting to
   `~/.local/state/nssh/casts`.
 - Backups: `config.Paths.BackupDir`, defaulting to
-  `~/.local/share/nssh/backups`. This is used for local inventory SSH config
-  writes, currently `provider_local.conf`, with fixed tiered retention.
-- SSH config: `~/.ssh/config` plus managed include files under `~/.ssh/nssh.d/`.
+  `~/.local/share/nssh/backups`. This remains for legacy local inventory helper
+  paths, not for current config writes.
 
-`nssh self init` should ensure the SSH config includes the managed directory and
-uses `docs/examples/config/config.example.toml` through
+`nssh self init` uses `docs/examples/config/config.example.yaml` through
 `internal/config/embed.go` when creating a fresh config.
 
 ## Configuration
@@ -74,39 +72,35 @@ Key structures:
 - `config.LoggingConfig`
 - `config.SSHConfig`
 
-TOML include handling is implemented by `internal/config/include.go`. Included
+YAML include handling is implemented by `internal/config/include.go`. Included
 files merge before the importing file overrides them. Use this for modular
 credential and inventory config instead of adding new root config files.
 
 The public example config is
-`docs/examples/config/config.example.toml`. Keep field-level examples there, not
+`docs/examples/config/config.example.yaml`. Keep field-level examples there, not
 in narrative docs.
 
 ## Inventory
 
-Inventory is the source of host placement and generated SSH config.
+Inventory is the source of host placement and OpenSSH argv inputs.
 
 Primary packages:
 
 - `internal/cli/inv`: command implementation.
-- `internal/inventory`: provider state, group matching, reconciliation, local
-  host metadata, and SSH config rendering.
+- `internal/inventory`: provider state, group matching, reconciliation, and
+  local host metadata.
 - `internal/inventory/providers`: provider implementations.
 
-There is an implicit local provider named `local`. Its include file is
-`inventory.LocalProviderIncludeFile()`, currently `nssh.d/provider_local.conf`.
-Writes to that file create timestamped backups under
-`~/.local/share/nssh/backups` and prune them with fixed tiered retention:
-10 from the last hour, 5 more from the last day, and 1 per day for the previous
-7 days.
-External providers write deterministic include files through
-`inventory.ProviderIncludeFile(provider)`, currently
-`nssh.d/provider_<provider>.conf`.
+There is an implicit local provider named `local`. Local hosts live under
+`inventory.providers.local.hosts`, usually in
+`~/.config/nssh/inventory/local.yaml`.
+External provider discovered state is non-secret JSON; operator-owned groups,
+auth mappings, SSH options, and host overrides live in provider-scoped YAML
+config.
 
 Provider state is non-secret JSON under
 `$XDG_STATE_HOME/nssh/inventory/providers/`. It records provider objects, group
-membership, last refresh time, include file, auth mode, and persisted compatibility
-fixes.
+membership, and last refresh time.
 
 Current external providers:
 
@@ -121,8 +115,8 @@ Providers own groups and group selectors. The canonical group ID is
 `<provider>/<group>`, for example `local/custcbb` or `netbox-prod/custcbb`.
 Selectors are matched by `inventory.MatchGroupSelectors`.
 `inventory.Reconcile` owns add/update/remove planning.
-`inventory.WriteProviderSSHConfig` renders provider-owned SSH config. Auth mode
-defaults to password when the target group has password auth, otherwise key.
+Auth mode defaults to password when the target group has password auth,
+otherwise key.
 
 ## Credentials
 
@@ -158,7 +152,7 @@ Credential selection order in `internal/connect.resolveBoundCredential`:
 
 1. Host auth override.
 2. Inventory provider group auth mapping.
-3. No nssh credential; OpenSSH config and keys handle auth.
+3. No nssh credential; key auth or the SSH agent handles auth.
 
 `internal/connect.ResolveHostForConnect` is shared by connect and SCP. Keep it
 that way so provider selection cannot drift between workflows.
@@ -198,8 +192,9 @@ packages.
 Interactive connection starts in `internal/connect.ConnectHost`.
 
 1. `internal/app.PreprocessArgs` maps `nssh HOST` to hidden `smart-connect`.
-2. `connect.ResolveHostname` checks SSH config, exact matches, suggestions, and
-   fuzzy selection. On misses, it returns host-not-found immediately.
+2. `connect.ResolveHostname` checks the nssh host catalog, exact matches,
+   suggestions, and fuzzy selection. On misses, it returns host-not-found
+   immediately.
 3. On host-not-found, `internal/app.Run` spawns `nssh inv set <host>` for local
    inventory creation.
 4. `connect.ResolveHostForConnect` loads config, finds the SSH host entry,
@@ -211,9 +206,8 @@ Interactive connection starts in `internal/connect.ConnectHost`.
 6. The connector runs OpenSSH in a PTY, detects prompts, injects credentials only
    when prompted, handles host-key prompts, relays stdio and signals, and emits
    timing markers when enabled.
-7. On legacy SSH negotiation failure, `connect.handleCompatibilityFix` probes
-   the target with `internal/ssh/connector.TestConnection`, parses fixes from
-   `internal/ssh/compat`, persists them to the right include file, and retries.
+7. On legacy SSH negotiation failure, nssh reports that compatibility should be
+   configured under the owning YAML host `ssh.compat` field.
 8. Optional recording wraps the outer connection before connector execution.
 
 SCP uses the same host and credential resolver through `internal/cli/cp`.
@@ -234,9 +228,8 @@ Key files:
 - `accept_once_unix.go` and `hostkey.go`: host-key prompt behavior.
 - `tester.go`: compatibility probe helper.
 
-`internal/ssh/sshconfig` parses and mutates SSH config, including include
-discovery and compatibility fix persistence. It may depend on `internal/ssh/compat`
-but not on the connector.
+`internal/ssh/sshconfig` parses OpenSSH config for import and tests. Runtime
+connections should not depend on it.
 
 ## Recording And Logs
 

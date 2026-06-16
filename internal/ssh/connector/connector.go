@@ -62,9 +62,9 @@ type Connector struct {
 	// Timing instrumentation
 	sessionStart time.Time // When relay() started (for relative timing)
 
-	// Resolved endpoint from SSH config (HostName/Port). Used for keyscan in AcceptOnce
-	// host-key pinning. NOT used as SSH target - we use hostname (alias) for that so
-	// SSH config Host pattern matching works correctly.
+	// Resolved endpoint from nssh config. The port is rendered into argv unless
+	// the caller supplied an explicit SSH port, and both values are used for
+	// AcceptOnce host-key pinning.
 	resolvedHost string
 	resolvedPort string
 }
@@ -81,9 +81,7 @@ func NewConnector(host, user string, pass *secret.Secret, sshArgs []string) *Con
 	}
 }
 
-// SetResolvedEndpoint sets the concrete hostname and port derived from SSH config.
-// Used for host-key pinning (keyscan) when the user connects via an alias.
-// NOT used as the SSH command target - we use the alias for proper config matching.
+// SetResolvedEndpoint sets the concrete hostname and port derived from nssh config.
 func (c *Connector) SetResolvedEndpoint(host, port string) {
 	c.resolvedHost = strings.TrimSpace(host)
 	c.resolvedPort = strings.TrimSpace(port)

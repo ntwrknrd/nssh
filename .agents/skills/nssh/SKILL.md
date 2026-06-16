@@ -17,7 +17,7 @@ source.
    - `nssh --help`
    - `nssh <command> --help`
    - `docs/examples/help/`
-   - `docs/examples/config/config.example.toml`
+   - `docs/examples/config/config.example.yaml`
    - `references/architecture.md`
 3. Do not describe removed command surfaces as current. In release/0.3, the old
    local vault plus `host`, `ctx`, `sync`, `lock`, and `unlock` workflows are

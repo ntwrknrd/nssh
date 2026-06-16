@@ -990,19 +990,19 @@ func writeOption(b *bytes.Buffer, path, key string, value any) {
 
 func optionComment(path, key string) []string {
 	comments := map[string][]string{
-		"include":                                {"Import shared or modular config before applying this file's local overrides.", `Common value: ["conf.d/base.toml"] or ["inventory/*.toml"].`},
+		"include":                                {"Import shared or modular config before applying this file's local overrides.", `Common value: ["conf.d/base.yaml"] or ["inventory/*.yaml"].`},
 		"agent.auto_start":                       {"Start the nssh runtime agent on first provider-session request.", "Common value: true."},
 		"agent.idle_timeout":                     {"How long the nssh runtime agent can sit idle before exiting.", `Common value: "1h" for default use, "4h" for a longer work session.`},
 		"agent.activity_increment":               {"How much activity extends the idle deadline, capped by idle_timeout.", `Common value: "15m" or "30m".`},
 		"agent.max_lifetime":                     {"Hard maximum runtime for the agent even if it remains active.", `Common value: "8h" for a workday, "24h" for default behavior.`},
-		"credential.include":                     {"Import credential provider definitions under [credential].", `Common value: ["credentials/*.toml"].`},
+		"credential.include":                     {"Import credential provider definitions under [credential].", `Common value: ["credentials/*.yaml"].`},
 		"credential.provider.type":               {"Credential backend type.", `Acceptable values: "pass", "1password", "bitwarden".`},
 		"credential.provider.config.account":     {"1Password account shorthand passed to op when needed.", `Common value: "" or your 1Password account name.`},
 		"credential.provider.config.vault":       {"1Password vault containing SSH credential items.", `Common value: "Network" or "TeamVault".`},
 		"credential.provider.config.command":     {"Credential CLI command for pass-compatible providers.", `Common value: "pass".`},
 		"credential.provider.config.prefix":      {"Password-store path prefix for nssh-managed entries.", `Common value: "nssh".`},
 		"credential.provider.config.session":     {"Provider session handling mode.", `Acceptable values: "external", "agent", "none".`},
-		"inventory.include":                      {"Import inventory providers and provider-owned groups under [inventory].", `Common value: ["inventory/*.toml"].`},
+		"inventory.include":                      {"Import inventory providers and provider-owned groups under [inventory].", `Common value: ["inventory/*.yaml"].`},
 		"inventory.provider.group.domain_suffix": {"Legacy group domain suffix metadata.", `Prefer inventory.provider.<provider>.group.<group>.match.domain_suffix for group selection.`},
 		"inventory.auth":                         {"Default nssh-owned SSH identity and auth routing.", `Common keys: username, username_ref, credential_provider, password_ref, auth_mode.`, "Use username_ref when treating the SSH username as sensitive; it costs an extra provider call, so time to first prompt is slower."},
 		"inventory.provider.group.auth":          {"Provider group nssh-owned SSH identity and auth routing.", `Common keys: username, username_ref, credential_provider, password_ref, auth_mode.`, "Use username_ref when treating the SSH username as sensitive; it costs an extra provider call, so time to first prompt is slower."},

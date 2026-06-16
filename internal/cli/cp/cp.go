@@ -10,6 +10,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/ntwrknrd/nssh/internal/connect"
 	"github.com/ntwrknrd/nssh/internal/secret"
+	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -177,10 +178,6 @@ func runCp(source, dest string, recursive, preserve, quiet, verbose bool) error 
 		ui.Error("Failed to resolve host: %s", err)
 		return err
 	}
-	if resolved.HostEntry == nil {
-		ui.Error("Host not found: %s", hostSearch)
-		return fmt.Errorf("host not found: %s", hostSearch)
-	}
 
 	var password *secret.Secret
 	if resolved.Credential != nil {
@@ -191,17 +188,20 @@ func runCp(source, dest string, recursive, preserve, quiet, verbose bool) error 
 	}
 	scpUser := resolved.Username
 
-	// Build remote spec using the Host identifier (hostSearch) so SSH config applies
-	// SSH config directives (ProxyJump, Port, IdentityFile, etc.) match on Host
+	// Build remote spec using the resolved endpoint; nssh renders SSH options
+	// directly because OpenSSH config is disabled.
 	var remoteSpec string
 	if scpUser != "" {
-		remoteSpec = fmt.Sprintf("%s@%s:%s", scpUser, hostSearch, remotePath)
+		remoteSpec = fmt.Sprintf("%s@%s:%s", scpUser, resolved.Hostname, remotePath)
 	} else {
-		remoteSpec = fmt.Sprintf("%s:%s", hostSearch, remotePath)
+		remoteSpec = fmt.Sprintf("%s:%s", resolved.Hostname, remotePath)
 	}
 
 	// Build SCP command
-	args := []string{}
+	args := connector.RenderSSHOptions(resolved.SSH, 0)
+	if resolved.Port != 0 && resolved.Port != 22 {
+		args = append(args, "-P", fmt.Sprintf("%d", resolved.Port))
+	}
 	if recursive {
 		args = append(args, "-r")
 	}

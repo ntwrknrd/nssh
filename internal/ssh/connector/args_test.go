@@ -12,6 +12,7 @@ import (
 
 func TestBuildSSHArgsPreservesOptionsTargetAndCommand(t *testing.T) {
 	conn := NewConnector("edge01", "netops", nil, []string{"-p", "2222", "-o", "LogLevel=ERROR", "--", "show version"})
+	conn.SetResolvedEndpoint("edge01", "2200")
 	conn.SetTimeouts(&config.SSHConnectionConfig{Timeout: config.Duration(7 * time.Second)})
 
 	got, err := conn.buildSSHArgs()
@@ -20,6 +21,21 @@ func TestBuildSSHArgsPreservesOptionsTargetAndCommand(t *testing.T) {
 	}
 
 	want := []string{"-tt", "-F", "none", "-o", "ConnectTimeout=7", "-p", "2222", "-o", "LogLevel=ERROR", "netops@edge01", "--", "show version"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildSSHArgsUsesResolvedPortWhenNoExplicitPort(t *testing.T) {
+	conn := NewConnector("edge01", "netops", nil, []string{"-o", "LogLevel=ERROR"})
+	conn.SetResolvedEndpoint("edge01", "2200")
+
+	got, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatalf("buildSSHArgs() error = %v", err)
+	}
+
+	want := []string{"-tt", "-F", "none", "-p", "2200", "-o", "LogLevel=ERROR", "netops@edge01"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
 	}

@@ -15,10 +15,8 @@ func (c *Connector) buildSSHArgs() ([]string, error) {
 	args := []string{"-tt"} // Force PTY allocation
 	args = append(args, RenderSSHOptions(c.sshOptions, c.sshVerbosity)...)
 
-	// Build target (user@host or just host)
-	// Use the Host identifier/alias so SSH config Host pattern matching works correctly.
-	// This ensures host-specific settings (KexAlgorithms, Ciphers, etc.) are applied.
-	// Users who want consistent ControlMaster sockets can enable CanonicalizeHostname.
+	// Build target (user@host or just host). OpenSSH config is disabled with
+	// -F none; host-specific settings are already rendered into argv.
 	target := c.hostname
 	if c.username != "" {
 		target = fmt.Sprintf("%s@%s", c.username, target)
@@ -49,8 +47,9 @@ func (c *Connector) buildSSHArgs() ([]string, error) {
 		)
 	}
 
-	// Port is handled by SSH config Host matching or user's -p flag in sshArgs.
-	// No need to add it explicitly when using the Host identifier as target.
+	if c.resolvedPort != "" && c.resolvedPort != "22" && c.parsePortFromSSHArgs() == "" {
+		args = append(args, "-p", c.resolvedPort)
+	}
 
 	// Add SSH options
 	args = append(args, options...)

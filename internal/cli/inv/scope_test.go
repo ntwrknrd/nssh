@@ -30,7 +30,7 @@ func TestInventoryTargetArgRequiresModeSpecificName(t *testing.T) {
 func TestValidateGroupNameRejectsFlagLikeNames(t *testing.T) {
 	for _, name := range []string{"-h", "--help"} {
 		err := validateLocalGroupID(name)
-		if err == nil || (!strings.Contains(err.Error(), "provider-qualified") && !strings.Contains(err.Error(), "bare-key safe")) {
+		if err == nil || (!strings.Contains(err.Error(), "provider-qualified") && !strings.Contains(err.Error(), "must use only")) {
 			t.Fatalf("validateGroupName(%q) = %v, want leading dash rejection", name, err)
 		}
 	}
@@ -39,7 +39,7 @@ func TestValidateGroupNameRejectsFlagLikeNames(t *testing.T) {
 func TestValidateGroupNameRejectsWhitespace(t *testing.T) {
 	for _, name := range []string{"local/ lab", "local/lab ", "local/lab prod"} {
 		err := validateLocalGroupID(name)
-		if err == nil || (!strings.Contains(err.Error(), "provider-qualified") && !strings.Contains(err.Error(), "bare-key safe")) {
+		if err == nil || (!strings.Contains(err.Error(), "provider-qualified") && !strings.Contains(err.Error(), "must use only")) {
 			t.Fatalf("validateGroupName(%q) = %v, want character set rejection", name, err)
 		}
 	}
