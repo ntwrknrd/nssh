@@ -5,6 +5,7 @@ $ nssh self cfg --help
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
 │   --edit                            open config in editor                    │
 │   --paths                           print config file paths only             │
+│   --source                          print source config files with comm...   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Options ─────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

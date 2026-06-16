@@ -16,6 +16,7 @@ func NewCfgCmd() *cobra.Command {
 	var (
 		edit      bool
 		pathsOnly bool
+		source    bool
 	)
 
 	cmd := &cobra.Command{
@@ -26,24 +27,29 @@ func NewCfgCmd() *cobra.Command {
 By default, prints the effective configuration (merged from file,
 environment variables, and defaults) in YAML format.
 
+Use --source to print the resolved source files with comments preserved.
 Use --edit to open the config file in your editor ($VISUAL or $EDITOR).
 Use --paths to print config file paths, including resolved includes.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCfg(edit, pathsOnly)
+			return runCfg(edit, pathsOnly, source)
 		},
 	}
 
 	cmd.Flags().BoolVar(&edit, "edit", false, "open config in editor")
 	cmd.Flags().BoolVar(&pathsOnly, "paths", false, "print config file paths only")
+	cmd.Flags().BoolVar(&source, "source", false, "print source config files with comments")
 
 	return cmd
 }
 
-func runCfg(edit, pathsOnly bool) error {
+func runCfg(edit, pathsOnly, source bool) error {
 	paths := config.DefaultPaths()
 
 	if pathsOnly {
 		return printConfigPaths(paths)
+	}
+	if source {
+		return printSourceConfig(paths)
 	}
 
 	// --edit: open in editor
@@ -53,6 +59,33 @@ func runCfg(edit, pathsOnly bool) error {
 
 	// Default: print effective config
 	return printEffectiveConfig(paths)
+}
+
+func printSourceConfig(paths *config.Paths) error {
+	files, err := configFiles(paths)
+	if err != nil {
+		return err
+	}
+	color := term.IsTerminal(int(os.Stdout.Fd()))
+	for i, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return fmt.Errorf("read config %s: %w", file, err)
+		}
+		if len(files) > 1 {
+			if i > 0 {
+				fmt.Println()
+			}
+			header := "# " + file + "\n"
+			fmt.Print(renderConfigText(header, color))
+		}
+		text := string(data)
+		fmt.Print(renderConfigText(text, color))
+		if text == "" || text[len(text)-1] != '\n' {
+			fmt.Println()
+		}
+	}
+	return nil
 }
 
 func printConfigPaths(paths *config.Paths) error {

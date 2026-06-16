@@ -17,7 +17,7 @@ func TestRunCfgDefaultOmitsCommandBanners(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	got := captureStdout(t, func() {
-		if err := runCfg(false, false); err != nil {
+		if err := runCfg(false, false, false); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -41,7 +41,7 @@ func TestRunCfgDefaultOmitsCommandBanners(t *testing.T) {
 
 func TestRunCfgPathsOnlyStaysRawPath(t *testing.T) {
 	got := captureStdout(t, func() {
-		if err := runCfg(false, true); err != nil {
+		if err := runCfg(false, true, false); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -51,6 +51,35 @@ func TestRunCfgPathsOnlyStaysRawPath(t *testing.T) {
 	}
 	if !strings.HasSuffix(strings.TrimSpace(got), filepath.Join("nssh", "config.yaml")) {
 		t.Fatalf("paths-only output should include the config path, got %q", got)
+	}
+}
+
+func TestPrintSourceConfigPreservesComments(t *testing.T) {
+	tmp := t.TempDir()
+	configDir := filepath.Join(tmp, "config", "nssh")
+	includeDir := filepath.Join(configDir, "inventory")
+	if err := os.MkdirAll(includeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(configDir, "config.yaml")
+	inventory := filepath.Join(includeDir, "local.yaml")
+	if err := os.WriteFile(root, []byte("# root comment\ninclude: [inventory/*.yaml]\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inventory, []byte("# inventory comment\ninventory:\n  providers:\n    local:\n      type: local\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := captureStdout(t, func() {
+		if err := printSourceConfig(&config.Paths{ConfigFile: root}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	for _, want := range []string{"# root comment", "# inventory comment", root, inventory} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("source config output missing %q:\n%s", want, got)
+		}
 	}
 }
 
