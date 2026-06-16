@@ -13,6 +13,7 @@ import (
 // The -- separator marks the start of the remote command, which must come AFTER hostname.
 func (c *Connector) buildSSHArgs() ([]string, error) {
 	args := []string{"-tt"} // Force PTY allocation
+	args = append(args, RenderSSHOptions(c.sshOptions, c.sshVerbosity)...)
 
 	// Build target (user@host or just host)
 	// Use the Host identifier/alias so SSH config Host pattern matching works correctly.

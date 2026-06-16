@@ -28,6 +28,8 @@ type Connector struct {
 	password         *secret.Secret
 	passwordResolver func(context.Context) (*secret.Secret, error)
 	sshArgs          []string
+	sshOptions       config.SSHHostConfig
+	sshVerbosity     int
 	acceptOnceMode   string
 
 	passwordMu sync.Mutex
@@ -85,6 +87,14 @@ func NewConnector(host, user string, pass *secret.Secret, sshArgs []string) *Con
 func (c *Connector) SetResolvedEndpoint(host, port string) {
 	c.resolvedHost = strings.TrimSpace(host)
 	c.resolvedPort = strings.TrimSpace(port)
+}
+
+func (c *Connector) SetSSHOptions(opts config.SSHHostConfig) {
+	c.sshOptions = opts
+}
+
+func (c *Connector) SetSSHVerbosity(level int) {
+	c.sshVerbosity = level
 }
 
 // SetAcceptOnceMode configures how AcceptOnce handles host keys: "pin" (default)

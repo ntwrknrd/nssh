@@ -127,9 +127,8 @@ func newConnector(resolved *ResolvedHost, sshArgs []string, cfg *config.Config) 
 		conn.SetPasswordResolver(resolved.Credential.PasswordResolver)
 	}
 	conn.SetHostKeyPromptFunc(newHostKeyPromptFunc())
-	if resolved.HostEntry != nil {
-		conn.SetResolvedEndpoint(resolved.HostEntry.HostName, resolved.HostEntry.Port())
-	}
+	conn.SetSSHOptions(resolved.SSH)
+	conn.SetResolvedEndpoint(resolved.Hostname, fmt.Sprintf("%d", resolved.Port))
 	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 	conn.SetTimeouts(&cfg.SSH.Connection)
 	return conn

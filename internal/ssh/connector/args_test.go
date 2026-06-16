@@ -19,7 +19,7 @@ func TestBuildSSHArgsPreservesOptionsTargetAndCommand(t *testing.T) {
 		t.Fatalf("buildSSHArgs() error = %v", err)
 	}
 
-	want := []string{"-tt", "-o", "ConnectTimeout=7", "-p", "2222", "-o", "LogLevel=ERROR", "netops@edge01", "--", "show version"}
+	want := []string{"-tt", "-F", "none", "-o", "ConnectTimeout=7", "-p", "2222", "-o", "LogLevel=ERROR", "netops@edge01", "--", "show version"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
 	}
