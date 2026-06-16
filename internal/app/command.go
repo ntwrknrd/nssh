@@ -313,6 +313,7 @@ func newSelfCmd() *cobra.Command {
 	}
 	cmd.AddCommand(self.NewInitCmd())
 	cmd.AddCommand(self.NewStatusCmd())
+	cmd.AddCommand(self.NewImportCmd())
 	cmd.AddCommand(self.NewReinstallCmd())
 	cmd.AddCommand(self.NewUninstallCmd())
 	cmd.AddCommand(self.NewResetCmd())
