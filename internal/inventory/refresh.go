@@ -11,8 +11,7 @@ import (
 
 // RefreshOptions controls provider refresh side effects.
 type RefreshOptions struct {
-	Now            time.Time
-	WriteSSHConfig bool
+	Now time.Time
 }
 
 // RefreshResult reports one provider refresh outcome.
@@ -22,8 +21,8 @@ type RefreshResult struct {
 	Err      error
 }
 
-// RefreshProvider discovers, reconciles, saves provider state, and optionally
-// rewrites provider-owned SSH config. It never touches credentials.
+// RefreshProvider discovers, reconciles, and saves provider state. It never
+// touches credentials or generated SSH config.
 func RefreshProvider(
 	ctx context.Context,
 	name string,
@@ -89,20 +88,6 @@ func RefreshProvider(
 	}
 	if err := SaveProviderState(state); err != nil {
 		return RefreshResult{Provider: name, Plan: plan, Err: err}
-	}
-	if opts.WriteSSHConfig {
-		if len(allHosts) == 0 {
-			if err := RemoveProviderSSHConfig(state.IncludeFile); err != nil {
-				return RefreshResult{Provider: name, Plan: plan, Err: err}
-			}
-		} else if err := WriteProviderSSHConfig(state.IncludeFile, state.Hosts(), name, cfg.Type, state.StrictHostKeyChecking); err != nil {
-			if current != nil {
-				_ = SaveProviderState(current)
-			} else {
-				_ = DeleteProviderState(name)
-			}
-			return RefreshResult{Provider: name, Plan: plan, Err: err}
-		}
 	}
 	return RefreshResult{Provider: name, Plan: plan}
 }

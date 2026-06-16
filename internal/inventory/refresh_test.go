@@ -37,8 +37,7 @@ func TestRefreshProviderWritesStateWithoutCredentials(t *testing.T) {
 		Name:     "edge01",
 		HostName: "edge01.customer.local",
 	}}}, nil, RefreshOptions{
-		Now:            now,
-		WriteSSHConfig: false,
+		Now: now,
 	})
 	if result.Err != nil {
 		t.Fatalf("refresh: %v", result.Err)
@@ -80,9 +79,7 @@ func TestRefreshProviderSelectorConflictDoesNotWriteState(t *testing.T) {
 		Name:       "edge01",
 		HostName:   "edge01.example.com",
 		Attributes: map[string][]string{"role": {"router"}},
-	}}}, nil, RefreshOptions{
-		WriteSSHConfig: false,
-	})
+	}}}, nil, RefreshOptions{})
 	if result.Err == nil {
 		t.Fatal("expected selector conflict error")
 	}
@@ -111,9 +108,7 @@ func TestRefreshProviderTreatsUnsupportedStateVersionAsMissing(t *testing.T) {
 		ObjectID: "device:1",
 		Name:     "edge01",
 		HostName: "edge01.example.com",
-	}}}, nil, RefreshOptions{
-		WriteSSHConfig: false,
-	})
+	}}}, nil, RefreshOptions{})
 	if result.Err != nil {
 		t.Fatalf("refresh: %v", result.Err)
 	}
@@ -147,7 +142,7 @@ func TestRefreshProviderFailurePreservesLastKnownGoodState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := RefreshProvider(context.Background(), "netbox-prod", config.InventoryProviderConfig{Type: config.ProviderNetBox}, fakeProvider{err: errors.New("api down")}, nil, RefreshOptions{WriteSSHConfig: false})
+	result := RefreshProvider(context.Background(), "netbox-prod", config.InventoryProviderConfig{Type: config.ProviderNetBox}, fakeProvider{err: errors.New("api down")}, nil, RefreshOptions{})
 	if result.Err == nil {
 		t.Fatal("expected refresh error")
 	}

@@ -11,7 +11,6 @@ import (
 	"github.com/ntwrknrd/nssh/internal/inventory"
 	invproviders "github.com/ntwrknrd/nssh/internal/inventory/providers"
 	"github.com/ntwrknrd/nssh/internal/ssh/remoteexec"
-	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -78,8 +77,6 @@ func validateRefreshTarget(cfg *config.Config, target string) error {
 
 func refreshProviderCaches(cfg *config.Config, providerName string) map[string]string {
 	results := make(map[string]string)
-	parser := sshconfig.NewParser()
-	runner := newConfigOnlyRunner(parser)
 	now := time.Now().UTC()
 
 	for name := range cfg.Inventory.Provider {
@@ -95,10 +92,13 @@ func refreshProviderCaches(cfg *config.Config, providerName string) map[string]s
 			results[name] = "error: " + err.Error()
 			continue
 		}
+		var runner inventory.RemoteRunner
+		if providerCfg.Type == config.ProviderContainerlab {
+			runner = newDirectRunner()
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), providerRefreshTimeout)
 		result := inventory.RefreshProvider(ctx, name, providerCfg, provider, runner, inventory.RefreshOptions{
-			Now:            now,
-			WriteSSHConfig: true,
+			Now: now,
 		})
 		cancel()
 		if result.Err != nil {
@@ -119,12 +119,8 @@ func refreshProviderCaches(cfg *config.Config, providerName string) map[string]s
 	return results
 }
 
-func newConfigOnlyRunner(parser *sshconfig.Parser) inventory.RemoteRunner {
+func newDirectRunner() inventory.RemoteRunner {
 	return remoteexec.NewSSHRunner(func(host string) (*remoteexec.HostInfo, error) {
-		entry, err := parser.FindHost(host)
-		if err != nil || entry == nil {
-			return &remoteexec.HostInfo{Target: host, Hostname: host}, err
-		}
-		return &remoteexec.HostInfo{Target: host, Hostname: entry.HostName, Username: entry.User()}, nil
+		return &remoteexec.HostInfo{Target: host, Hostname: host}, nil
 	})
 }
