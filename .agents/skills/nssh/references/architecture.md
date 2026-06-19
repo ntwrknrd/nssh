@@ -140,18 +140,20 @@ Supported credential providers:
 - `bitwarden`: `credential.bitwardenProvider`, using `bw`; default session mode
   is external.
 
-Auth mappings live under:
+Auth mappings live under provider-scoped YAML:
 
-- `inventory.host.<host>.auth`
-- `inventory.provider.<provider>.group.<group>.auth`
+- `inventory.providers.<provider>.hosts.<host>.auth`
+- `inventory.providers.<provider>.groups.<group>.auth`
 
-Every set auth mapping must include `credential_provider` and either
+Password-backed auth mappings must include `credential_provider` plus
 `password_ref` or `username_ref`. `username` and `username_ref` are optional and
-mutually exclusive. Do not use legacy
+mutually exclusive; key-mode mappings may set only `mode` and `username`. Do not
+use legacy
 `credential.host`, `credential.group`, or root `credential.type`; validation
 rejects those forms.
 
-Credential selection order in `internal/connect.resolveBoundCredential`:
+Credential selection order in `internal/config.ResolveInventoryAuth` and
+`internal/connect.resolveInventoryCredential`:
 
 1. Host auth override.
 2. Inventory provider group auth mapping.
@@ -201,17 +203,17 @@ Interactive connection starts in `internal/connect.ConnectHost`.
    immediately.
 3. On host-not-found, `internal/app.Run` spawns `nssh inv set <host>` for local
    inventory creation.
-4. `connect.ResolveHostForConnect` loads config, finds the SSH host entry,
-   resolves inventory group metadata, selects a username, and resolves any
-   provider-backed credential.
+4. `connect.ResolveHostForConnect` loads config, finds the nssh host catalog
+   entry from YAML config and provider state, resolves inventory group metadata,
+   selects a username, and resolves any provider-backed credential.
 5. `connect.newConnector` builds an `internal/ssh/connector.Connector` with the
    host alias, optional username, optional secret, host-key policy, and timeout
    config.
 6. The connector runs OpenSSH in a PTY, detects prompts, injects credentials only
    when prompted, handles host-key prompts, relays stdio and signals, and emits
    timing markers when enabled.
-7. On legacy SSH negotiation failure, nssh reports that compatibility should be
-   configured under the owning YAML host `ssh.compat` field.
+7. On legacy SSH negotiation failure, nssh can persist compatibility floors
+   under the owning provider YAML host `ssh.compatibility` field.
 8. Optional recording wraps the outer connection before connector execution.
 
 SCP uses the same host and credential resolver through `internal/cli/cp`.

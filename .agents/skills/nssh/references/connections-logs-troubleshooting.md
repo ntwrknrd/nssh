@@ -83,9 +83,10 @@ ssh:
 `accept_once_mode = "pin"` uses a stricter accept-once flow. `accept-new` uses
 OpenSSH trust-on-first-use behavior.
 
-On legacy SSH algorithm failures, `internal/connect.handleCompatibilityFix`
-maps stderr through `internal/ssh/compat` and reports the matching named fix.
-Persist compatibility fixes under the owning YAML host `ssh.compat` field.
+On legacy SSH algorithm failures, `internal/connect.handleCompatibilityFixes`
+maps stderr through `internal/ssh/compat`, selects supported algorithm floors,
+and can persist them under the owning provider YAML host `ssh.compatibility`
+field.
 
 ## Recordings And Logs
 
@@ -106,7 +107,7 @@ default. When enabled, nssh wraps the outer command with asciinema and guards th
 inner connection with `NSSH_RECORDING_INNER=1`.
 
 Recording files default to `~/.local/state/nssh/casts`. Archive maintenance is
-configured under `[logging.session.archive]` and executed by the agent runtime.
+configured under `logging.session.archive` and executed by the agent runtime.
 
 Audit logging is separate from session recording and lives under
 `logging.audit`.

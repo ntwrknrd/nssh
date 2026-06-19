@@ -64,8 +64,8 @@ Current external providers:
 Provider-owned group selectors assign discovered objects to canonical groups.
 nssh defaults to password SSH preferences when the provider group has password
 auth, otherwise key.
-For containerlab, use `state = ["running"]` to select any running node; add
-`kind = ["ceos", "vjunos"]` only when a group should be limited to specific
+For containerlab, use `state: [running]` to select any running node; add
+`kind: [ceos, vjunos]` only when a group should be limited to specific
 node kinds.
 
 ## Credential Providers
@@ -106,9 +106,9 @@ inventory:
             username: netops
 ```
 
-Every set auth mapping needs `credential_provider` and either `password_ref` or
+Password-backed auth mappings need `credential_provider` plus `password_ref` or
 `username_ref`. `username` and `username_ref` are optional and mutually
-exclusive.
+exclusive; key-mode mappings may set only `mode` and `username`.
 
 For faster password-auth connections, prefer a literal `username` plus a direct
 password field reference such as `op://Network/edge01/password`. Use
