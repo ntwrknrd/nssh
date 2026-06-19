@@ -610,6 +610,11 @@ func loggingTable(cfg LoggingConfig) map[string]any {
 		table["audit"] = audit
 	}
 
+	export := loggingExportTable(cfg.Export)
+	if len(export) > 0 {
+		table["export"] = export
+	}
+
 	session := make(map[string]any)
 	if cfg.Session.Enabled != nil {
 		session["enabled"] = *cfg.Session.Enabled
@@ -630,7 +635,6 @@ func loggingTable(cfg LoggingConfig) map[string]any {
 		session["include_hosts"] = cfg.Session.IncludeHosts
 	}
 	addString(session, "title_format", cfg.Session.TitleFormat)
-	addString(session, "window_size", cfg.Session.WindowSize)
 	if cfg.Session.AutoExportTxt {
 		session["auto_export_txt"] = cfg.Session.AutoExportTxt
 	}
@@ -640,6 +644,19 @@ func loggingTable(cfg LoggingConfig) map[string]any {
 	}
 	if len(session) > 0 {
 		table["session"] = session
+	}
+	return table
+}
+
+func loggingExportTable(cfg LoggingExportConfig) map[string]any {
+	table := make(map[string]any)
+	gif := make(map[string]any)
+	addString(gif, "window_size", cfg.GIF.WindowSize)
+	if cfg.GIF.FontSize > 0 {
+		gif["font_size"] = cfg.GIF.FontSize
+	}
+	if len(gif) > 0 {
+		table["gif"] = gif
 	}
 	return table
 }

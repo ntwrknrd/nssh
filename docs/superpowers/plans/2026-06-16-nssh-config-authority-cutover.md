@@ -12,7 +12,7 @@
 
 ## Source Inputs
 
-- Approved schema: `docs/nssh-config-yaml-mockup.md`
+- Maintained YAML example: `docs/examples/config/config.example.yaml`
 - Decision log: `docs/nssh-config-decisions.md`
 - Current config loader: `internal/config/settings.go`, `internal/config/include.go`, `internal/config/inventory.go`, `internal/config/writer.go`
 - Current resolver: `internal/connect/lookup.go`, `internal/connect/resolve.go`, `internal/connect/connect.go`
@@ -1772,7 +1772,6 @@ Run:
 
 ```bash
 go test ./internal/cli/self -run 'TestConfig|TestStatus' -count=1
-/Users/cj/.local/bin/validate-markdown --check docs/nssh-config-yaml-mockup.md
 /Users/cj/.local/bin/validate-markdown --check docs/nssh-config-decisions.md
 ```
 

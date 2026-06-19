@@ -43,6 +43,10 @@ logging:
   audit:
     enabled: true
     max_size: 10MB
+  export:
+    gif:
+      window_size: 145x30
+      font_size: 18
   session:
     enabled: false
     append_mode: true

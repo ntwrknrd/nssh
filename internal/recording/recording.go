@@ -28,7 +28,6 @@ type RecordingSettings struct {
 	ExcludePatterns   []HostPattern
 	Directory         string
 	AsciinemaServer   string
-	WindowSize        string  // e.g., "100x30"
 	IdleTimeLimit     float64 // seconds, 0 = disabled
 	IdleTimeLimitMode string  // "play", "record", or "both"
 	TitleFormat       string  // template with {host}, {user}, {date}, {time}
@@ -100,7 +99,6 @@ type RecordingPlan struct {
 	LockDirectory string
 	Sequence      int
 	SessionLabel  string
-	WindowSize    string
 	IdleTimeLimit float64 // seconds, 0 = disabled
 	// Warn indicates the user should be warned that recording was skipped.
 	// Used for fail-open scenarios such as missing asciinema.
@@ -161,9 +159,6 @@ func LoadRecordingSettings() RecordingSettings {
 		}
 		if session.AsciinemaServer != "" {
 			settings.AsciinemaServer = session.AsciinemaServer
-		}
-		if session.WindowSize != "" {
-			settings.WindowSize = session.WindowSize
 		}
 		if session.IdleTimeLimit > 0 {
 			settings.IdleTimeLimit = session.IdleTimeLimit
@@ -360,7 +355,6 @@ func BuildRecordingPlan(hostname string, settings RecordingSettings) (RecordingP
 		LockDirectory: lockDir,
 		Sequence:      sequence,
 		SessionLabel:  sessionLabel,
-		WindowSize:    settings.WindowSize,
 		IdleTimeLimit: idleTimeLimit,
 	}, nil
 }
@@ -647,11 +641,6 @@ func BuildAsciinemaCommand(plan RecordingPlan, sshCmd []string) []string {
 	// Headless mode for non-interactive recording
 	if os.Getenv("NSSH_RECORD_HEADLESS") == "1" || os.Getenv("NSSH_RECORD_HEADLESS") == "true" {
 		cmd = append(cmd, "--headless")
-	}
-
-	// Window size
-	if plan.WindowSize != "" {
-		cmd = append(cmd, "--window-size", plan.WindowSize)
 	}
 
 	// Idle time limit

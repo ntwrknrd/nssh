@@ -3,8 +3,8 @@
 This log records architecture decisions for removing generated OpenSSH config as
 a runtime dependency in the `release-0.3` worktree.
 
-The companion YAML schema spec is approved for implementation in
-`docs/nssh-config-yaml-mockup.md`.
+The maintained YAML example lives in
+`docs/examples/config/config.example.yaml`.
 
 ## Decisions
 

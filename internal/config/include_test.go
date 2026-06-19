@@ -116,8 +116,9 @@ func TestMarshalSparseWritesYAML(t *testing.T) {
 	cfg.Agent.ActivityIncrement = Duration(30 * time.Minute)
 	cfg.Agent.MaxLifetime = Duration(8 * time.Hour)
 	cfg.Logging.Session.Enabled = boolPtr(true)
-	cfg.Logging.Session.WindowSize = "145x30"
 	cfg.Logging.Session.AutoExportTxt = true
+	cfg.Logging.Export.GIF.WindowSize = "145x30"
+	cfg.Logging.Export.GIF.FontSize = 18
 	cfg.SSH.Security.HostKeyPolicy = "tofu"
 
 	got, err := MarshalSparse(cfg)
@@ -131,6 +132,7 @@ func TestMarshalSparseWritesYAML(t *testing.T) {
 		"providers:",
 		"idle_timeout: 4h0m0s",
 		"window_size: 145x30",
+		"font_size: 18",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("sparse config missing %q:\n%s", want, got)

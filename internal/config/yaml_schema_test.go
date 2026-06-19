@@ -73,6 +73,45 @@ ssh:
 	}
 }
 
+func TestLoggingExportGIFSchemaDecodes(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.yaml")
+	writeConfigFile(t, path, `
+logging:
+  export:
+    gif:
+      window_size: 145x30
+      font_size: 18
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Logging.Export.GIF.WindowSize; got != "145x30" {
+		t.Fatalf("logging.export.gif.window_size = %q, want 145x30", got)
+	}
+	if got := cfg.Logging.Export.GIF.FontSize; got != 18 {
+		t.Fatalf("logging.export.gif.font_size = %d, want 18", got)
+	}
+}
+
+func TestLoggingSessionWindowSizeFieldIsRejected(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.yaml")
+	writeConfigFile(t, path, `
+logging:
+  session:
+    window_size: 145x30
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load succeeded, want unknown field error")
+	}
+	if !strings.Contains(err.Error(), "field window_size not found") {
+		t.Fatalf("Load error = %v, want window_size unknown field", err)
+	}
+}
+
 func TestLegacySSHOptionFieldsAreRejected(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.yaml")

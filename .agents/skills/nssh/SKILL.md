@@ -36,6 +36,19 @@ Read only what matches the user request:
   agent runtime, host keys, legacy SSH fixes, recordings, logs, benchmarks, and
   diagnostics.
 
+## Recording Guidance
+
+- Do not set a fixed window size on live `asciinema rec` sessions. Although it
+  makes published recordings more stable and readable, it also changes the live
+  PTY size seen by shells and full-screen/line-editing programs. That can leave
+  stale terminal paint, merged history lines, and confusing redraw behavior.
+- Keep live SSH sessions on the operator's real terminal size. Apply readable
+  dimensions only during export, using `logging.export.gif.window_size` and
+  `logging.export.gif.font_size` for GIF output through `agg`.
+- Do not reintroduce `logging.session.window_size`,
+  `RecordingPlan.WindowSize`, or `asciinema rec --window-size` for interactive
+  connections.
+
 ## Root SSH Contract
 
 Root `nssh` follows OpenSSH command grammar:

@@ -60,8 +60,9 @@ type HostDefaultsConfig struct {
 
 // LoggingConfig holds audit and session logging settings.
 type LoggingConfig struct {
-	Audit   AuditConfig   `yaml:"audit,omitempty"`
-	Session SessionConfig `yaml:"session,omitempty"`
+	Audit   AuditConfig         `yaml:"audit,omitempty"`
+	Export  LoggingExportConfig `yaml:"export,omitempty"`
+	Session SessionConfig       `yaml:"session,omitempty"`
 }
 
 // AuditConfig holds security event logging settings.
@@ -92,12 +93,23 @@ type SessionConfig struct {
 	IncludeHosts []string `yaml:"include_hosts,omitempty"`
 	// TitleFormat is a template for recording titles with {host}, {user}, {date}, {time}
 	TitleFormat string `yaml:"title_format,omitempty"`
-	// WindowSize is fixed terminal dimensions for recordings (cols x rows)
-	WindowSize string `yaml:"window_size,omitempty"`
 	// AutoExportTxt automatically exports recordings to plain text (.txt) when session ends
 	AutoExportTxt bool `yaml:"auto_export_txt,omitempty"`
 	// Archive holds automatic archival settings
 	Archive SessionArchiveConfig `yaml:"archive,omitempty"`
+}
+
+// LoggingExportConfig holds export-time recording conversion settings.
+type LoggingExportConfig struct {
+	GIF GIFExportConfig `yaml:"gif,omitempty"`
+}
+
+// GIFExportConfig holds export-time GIF rendering settings.
+type GIFExportConfig struct {
+	// WindowSize is export render dimensions as COLSxROWS.
+	WindowSize string `yaml:"window_size,omitempty"`
+	// FontSize is the GIF renderer font size in pixels.
+	FontSize int `yaml:"font_size,omitempty"`
 }
 
 // SessionArchiveConfig holds automatic session archival settings.
