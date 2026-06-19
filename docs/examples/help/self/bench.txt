@@ -7,7 +7,7 @@ $ nssh self bench --help
 │   scp                               Benchmark SCP transfers                  │
 │   ssh                               Benchmark SSH connections                │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │

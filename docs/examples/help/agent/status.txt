@@ -2,7 +2,7 @@ $ nssh agent status --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
 │   nssh agent status [flags]         Show agent status                        │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │
 │   -V, --version                     Print command version                    │

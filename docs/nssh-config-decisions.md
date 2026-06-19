@@ -10,8 +10,8 @@ The companion YAML schema spec is approved for implementation in
 
 ### nssh Config Is The Runtime Source Of Truth
 
-`nssh connect` must resolve connections from nssh config, included nssh config
-files, and provider state. It must not read `~/.ssh/config` or generated
+Root `nssh` connections must resolve from nssh config, included nssh config
+files, and provider state. They must not read `~/.ssh/config` or generated
 `~/.ssh/nssh.d/*` files for host lookup, auth policy, routing, compatibility
 fixes, or connection defaults.
 
@@ -90,7 +90,6 @@ Runtime resolution should apply config in this order:
 
 ```text
 global ssh.defaults
--> provider defaults
 -> discovered provider facts or local host identity
 -> selected group defaults
 -> provider.hosts.<host> per-host config
@@ -101,9 +100,9 @@ For local hosts, the `hosts.<name>` entry supplies identity fields such as
 `port`, and `aliases`, but its config fields still override selected
 group defaults later in the merge.
 
-Provider defaults and selected group defaults should include `ssh:` config, not
-only `auth:` config. This gives nssh a native replacement for broad OpenSSH
-`Host` wildcard policy without preserving OpenSSH's pattern precedence rules.
+Selected group defaults include `ssh:` config, not only `auth:` config. This
+gives nssh a native replacement for broad OpenSSH `Host` wildcard policy without
+preserving OpenSSH's pattern precedence rules.
 
 The runtime SSH merge must be deterministic:
 
@@ -124,16 +123,12 @@ The resolved SSH config should then be rendered to `exec.Command("ssh", args...)
 argv with `-F none`. nssh should never construct a shell command string for
 normal SSH execution.
 
-### Runtime Argv Must Be Inspectable
+### Runtime Argv Is Debug-Visible
 
-Add a diagnostic command that prints the exact OpenSSH argv nssh would execute
-for a host after config resolution. The command should redact nothing by default
-because argv contains policy, not passwords; if a future option may carry secret
-material, that specific value should be redacted.
-
-This command is the replacement for using `ssh -G <host>` as a truth source.
-`ssh -G` is still useful for raw OpenSSH debugging, but it cannot explain nssh
-behavior once nssh runs OpenSSH with `-F none`.
+Debug logging prints the exact OpenSSH argv immediately before execution. That
+is the nssh truth source for rendered SSH policy. `ssh -G <host>` is still useful
+for raw OpenSSH debugging, but it cannot explain nssh behavior once nssh runs
+OpenSSH with `-F none`.
 
 ### Group Inheritance Is Singular
 
@@ -278,7 +273,8 @@ is higher.
 ## Expected Losses
 
 - Raw `ssh <provider-host>` support is no longer guaranteed.
-- `ssh -G <host>` is no longer the truth source for nssh behavior.
+- Debug logging, not `ssh -G <host>`, is the truth source for rendered nssh SSH
+  argv.
 - OpenSSH `Host` wildcard and `Match` behavior will not apply at runtime unless
   nssh models equivalent behavior explicitly.
 - Arbitrary OpenSSH directives will not be silently inherited from
@@ -312,8 +308,8 @@ is higher.
   - host-key policy
   - connection, password, and idle timeouts
 - Safe pass-through for uncommon OpenSSH options.
-- Provider-level and group-level `ssh:` inheritance.
-- A command that shows the final rendered OpenSSH argv for a resolved nssh host.
+- Group-level `ssh:` inheritance.
+- Debug output that shows the final rendered OpenSSH argv before execution.
 
 ## Resolved Schema Questions
 
@@ -331,10 +327,10 @@ is higher.
 - Discovered providers select one group by first matching group in file order,
   unless `hosts.<canonical>.group` overrides it.
 - Local hosts require `hosts.<name>.group`.
-- Runtime merge order is global defaults, provider defaults, host identity,
-  selected group defaults, per-host config, then CLI flags.
-- Provider-level and group-level `ssh:` config use the same
-  `compatibility`/`options` schema as host-level `ssh:` config.
+- Runtime merge order is global defaults, host identity, selected group
+  defaults, per-host config, then CLI flags.
+- Group-level `ssh:` config uses the same `compatibility`/`options` schema as
+  host-level `ssh:` config.
 - Imported `ssh.defaults` must affect runtime argv; storing the defaults without
   merging them into resolved host config is not acceptable.
 - nssh handles OpenSSH `Include`, broad wildcard, and `Match` use cases through
@@ -342,8 +338,8 @@ is higher.
   host overlays.
 - Compatibility policy should be stored as typed `ssh.compatibility` algorithm
   floors, not as named `legacy-*` presets or hand-written OpenSSH fragments.
-- Compatibility diagnostics and argv inspection must show the configured floor,
-  selected policy expansion, and final OpenSSH options.
+- Compatibility diagnostics and debug argv output must show the configured
+  floor, selected policy expansion, and final OpenSSH options.
 - Compatibility policy belongs under provider-scoped `hosts` entries, not
   generated state.
 - The first YAML cutover should include a minimal SSH config import command.

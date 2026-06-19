@@ -2,7 +2,7 @@ $ nssh agent restart --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
 │   nssh agent restart [flags]        Restart agent                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │
 │   -V, --version                     Print command version                    │

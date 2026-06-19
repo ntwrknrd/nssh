@@ -2,12 +2,12 @@ $ nssh self cfg --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
 │   nssh self cfg [flags]             Manage configuration                     │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────╮
+╭─ Flags ──────────────────────────────────────────────────────────────────────╮
 │   --edit                            open config in editor                    │
 │   --paths                           print config file paths only             │
 │   --source                          print source config files with comm...   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │

@@ -12,7 +12,11 @@ import (
 // SSH syntax: ssh [options] hostname [command]
 // The -- separator marks the start of the remote command, which must come AFTER hostname.
 func (c *Connector) buildSSHArgs() ([]string, error) {
-	args := []string{"-tt"} // Force PTY allocation
+	options, command := splitSSHArgs(c.sshArgs)
+	args := make([]string, 0, len(options)+len(command)+8)
+	if len(command) == 0 && !hasExplicitTTYOption(options) {
+		args = append(args, "-tt")
+	}
 	args = append(args, RenderSSHOptions(c.sshOptions, c.sshVerbosity)...)
 
 	// Build target (user@host or just host). OpenSSH config is disabled with
@@ -20,24 +24,6 @@ func (c *Connector) buildSSHArgs() ([]string, error) {
 	target := c.hostname
 	if c.username != "" {
 		target = fmt.Sprintf("%s@%s", c.username, target)
-	}
-
-	// Split sshArgs into options (before --) and command (-- and after)
-	// SSH requires: ssh [options] hostname [-- command]
-	var options, command []string
-	separatorIdx := -1
-	for i, arg := range c.sshArgs {
-		if arg == "--" {
-			separatorIdx = i
-			break
-		}
-	}
-
-	if separatorIdx >= 0 {
-		options = c.sshArgs[:separatorIdx]
-		command = c.sshArgs[separatorIdx:] // Includes --
-	} else {
-		options = c.sshArgs
 	}
 
 	// Add connection timeout if configured
@@ -84,4 +70,23 @@ func (c *Connector) buildSSHArgs() ([]string, error) {
 	}
 
 	return args, nil
+}
+
+func splitSSHArgs(args []string) (options, command []string) {
+	for i, arg := range args {
+		if arg == "--" {
+			return args[:i], args[i+1:]
+		}
+	}
+	return args, nil
+}
+
+func hasExplicitTTYOption(args []string) bool {
+	for _, arg := range args {
+		switch arg {
+		case "-t", "-tt", "-T":
+			return true
+		}
+	}
+	return false
 }

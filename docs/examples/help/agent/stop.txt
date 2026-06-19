@@ -2,7 +2,7 @@ $ nssh agent stop --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
 │   nssh agent stop [flags]           Stop agent                               │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │
 │   -V, --version                     Print command version                    │

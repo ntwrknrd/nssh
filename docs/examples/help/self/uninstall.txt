@@ -2,13 +2,13 @@ $ nssh self uninstall --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
 │   nssh self uninstall [flags]       Uninstall nssh                           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────╮
+╭─ Flags ──────────────────────────────────────────────────────────────────────╮
 │   --dry-run                         preview changes without applying         │
 │   --keep-config                     keep nssh config and local state         │
 │   --keep-recordings                 keep session recordings                  │
 │   -y, --yes                         skip confirmation prompts                │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │

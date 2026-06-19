@@ -5,7 +5,7 @@ $ nssh self import --help
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
 │   ssh-config                        Import OpenSSH config                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │
 │   -V, --version                     Print command version                    │

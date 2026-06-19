@@ -1,16 +1,19 @@
 $ nssh --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh [host] [flags]               Smart connect to host                    │
+│   nssh [flags] [ssh-options] HOST [command]                                  │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
 │   agent                             Manage nssh agent                        │
-│   connect                           Connect to host                          │
 │   cp                                Copy files via SCP                       │
 │   inv                               Manage inventory                         │
 │   log                               Manage session recordings                │
 │   self                              Manage nssh                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Flags ──────────────────────────────────────────────────────────────────────╮
+│   --select                          Open smart target picker                 │
+│   --target STRING                   Use literal target                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │

@@ -4,7 +4,7 @@ $ nssh inv set --help
 │   nssh inv set -g local/GROUP                                                │
 │   nssh inv set HOST -g local/GROUP                                           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────╮
+╭─ Flags ──────────────────────────────────────────────────────────────────────╮
 │   --alias STRINGARRAY               add host alias                           │
 │   --credential-clear                clear host auth override                 │
 │   --credential-provider STRING      credential provider instance for ho...   │
@@ -16,7 +16,7 @@ $ nssh inv set --help
 │   --port INT                        SSH Port                                 │
 │   --user STRING                     SSH User                                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │

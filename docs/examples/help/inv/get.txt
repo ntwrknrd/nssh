@@ -2,7 +2,7 @@ $ nssh inv get --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
 │   nssh inv get HOST                 Show inventory details                   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │

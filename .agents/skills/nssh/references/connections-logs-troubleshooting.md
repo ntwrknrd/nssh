@@ -15,9 +15,10 @@ Source paths:
 - `internal/ssh/connector/`
 - `internal/ssh/compat/`
 
-`nssh HOST` is rewritten by `internal/app.PreprocessArgs` to hidden
-`smart-connect`. Direct `nssh connect HOST` bypasses smart host-add fallback and
-treats the host as the SSH destination.
+`nssh [ssh-options] HOST [command...]` is rewritten by
+`internal/app.PreprocessArgs` to hidden `smart-connect`. Use `nssh --select` for
+the smart picker and `nssh --target HOST` for literal destinations that collide
+with nssh command names or should bypass fuzzy resolution.
 
 Smart lookup behavior:
 

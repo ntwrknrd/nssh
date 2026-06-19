@@ -20,13 +20,13 @@ func TestBuildSSHArgsPreservesOptionsTargetAndCommand(t *testing.T) {
 		t.Fatalf("buildSSHArgs() error = %v", err)
 	}
 
-	want := []string{"-tt", "-F", "none", "-o", "ConnectTimeout=7", "-p", "2222", "-o", "LogLevel=ERROR", "netops@edge01", "--", "show version"}
+	want := []string{"-F", "none", "-o", "ConnectTimeout=7", "-p", "2222", "-o", "LogLevel=ERROR", "netops@edge01", "show version"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
 	}
 }
 
-func TestBuildSSHArgsUsesResolvedPortWhenNoExplicitPort(t *testing.T) {
+func TestBuildSSHArgsAddsDefaultTTYForInteractiveSession(t *testing.T) {
 	conn := NewConnector("edge01", "netops", nil, []string{"-o", "LogLevel=ERROR"})
 	conn.SetResolvedEndpoint("edge01", "2200")
 
@@ -38,6 +38,47 @@ func TestBuildSSHArgsUsesResolvedPortWhenNoExplicitPort(t *testing.T) {
 	want := []string{"-tt", "-F", "none", "-p", "2200", "-o", "LogLevel=ERROR", "netops@edge01"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildSSHArgsDoesNotAddDefaultTTYForRemoteCommand(t *testing.T) {
+	conn := NewConnector("edge01", "netops", nil, []string{"--", "show", "version"})
+	conn.SetResolvedEndpoint("edge01", "2200")
+
+	got, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatalf("buildSSHArgs() error = %v", err)
+	}
+
+	want := []string{"-F", "none", "-p", "2200", "netops@edge01", "show", "version"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildSSHArgsPreservesExplicitTTYFlagsForRemoteCommand(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{name: "single force tty", args: []string{"-t", "--", "show"}, want: []string{"-F", "none", "-t", "edge01", "show"}},
+		{name: "double force tty", args: []string{"-tt", "--", "show"}, want: []string{"-F", "none", "-tt", "edge01", "show"}},
+		{name: "disable tty", args: []string{"-T", "--", "show"}, want: []string{"-F", "none", "-T", "edge01", "show"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := NewConnector("edge01", "", nil, tt.args)
+
+			got, err := conn.buildSSHArgs()
+			if err != nil {
+				t.Fatalf("buildSSHArgs() error = %v", err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("buildSSHArgs() = %#v, want %#v", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -23,7 +23,6 @@ var (
 		"log":                true,
 		"cp":                 true,
 		"self":               true,
-		"connect":            true,
 		"smart-connect":      true,
 		"__list-subcommands": true,
 		"__agent":            true,
@@ -70,13 +69,16 @@ var (
 // NewRootCmd creates and configures the root Cobra command with all subcommands.
 func NewRootCmd(opts Options) *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "nssh [host]",
+		Use:   "nssh [opts] host [cmd]",
 		Short: "Smart connect to host",
 		Long: `SSH wrapper for power users: manage hosts and credentials, inject passwords automatically,
 and record sessions.`,
 		SilenceUsage:      true,
 		SilenceErrors:     true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
+		Annotations: map[string]string{
+			ui.UsageLinesAnnotation: "nssh [flags] [ssh-options] HOST [command]",
+		},
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			if showVersion {
 				self.RunVersionExit()
@@ -90,12 +92,13 @@ and record sessions.`,
 
 	rootCmd.PersistentFlags().CountVarP(&verboseCount, "verbose", "v", "Increase debug verbosity")
 	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "V", false, "Print command version")
+	rootCmd.Flags().Bool("select", false, "Open smart target picker")
+	rootCmd.Flags().String("target", "", "Use literal target")
 	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
 	rootCmd.PersistentFlags().BoolP("help", "h", false, "Print command help")
 
 	self.SetVersion(opts.Version, opts.Commit, opts.Date)
 
-	rootCmd.AddCommand(newConnectCmd())
 	rootCmd.AddCommand(newSmartConnectCmd())
 	agentCmd := agentcmd.NewCmd()
 	ui.ApplyStyledHelp(agentCmd)
@@ -110,91 +113,88 @@ and record sessions.`,
 	return rootCmd
 }
 
-// PreprocessArgs transforms "nssh hostname" into "nssh smart-connect hostname".
+// PreprocessArgs transforms root nssh invocations into hidden smart-connect
+// calls while preserving OpenSSH grammar: options before destination, command
+// after destination.
 func PreprocessArgs(args []string) []string {
 	if len(args) == 0 {
 		return args
 	}
 
 	var globalFlagArgs []string
-	var sshPassthroughArgs []string
-	var hostnameIdx = -1
+	var sshOptionArgs []string
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 
-		if !strings.HasPrefix(arg, "-") {
-			if subcommands[arg] {
+		if arg == "--select" {
+			result := append([]string{}, globalFlagArgs...)
+			return append(result, "smart-connect")
+		}
+		if arg == "--target" {
+			if i+1 >= len(args) {
 				return args
 			}
-			hostnameIdx = i
-			sshPassthroughArgs = append(sshPassthroughArgs, args[i+1:]...)
-			break
+			target := args[i+1]
+			command := args[i+2:]
+			return buildSmartConnectArgs(globalFlagArgs, true, target, sshOptionArgs, command)
 		}
 
 		switch {
 		case globalFlags[arg] || isVerboseCluster(arg):
 			globalFlagArgs = append(globalFlagArgs, arg)
 		case len(arg) == 2 && sshFlagsWithValue[arg]:
-			sshPassthroughArgs = append(sshPassthroughArgs, arg)
+			sshOptionArgs = append(sshOptionArgs, arg)
 			if i+1 < len(args) {
 				i++
-				sshPassthroughArgs = append(sshPassthroughArgs, args[i])
+				sshOptionArgs = append(sshOptionArgs, args[i])
 			}
+		case arg == "--":
+			if i+1 >= len(args) {
+				return args
+			}
+			target := args[i+1]
+			command := args[i+2:]
+			return buildSmartConnectArgs(globalFlagArgs, false, target, sshOptionArgs, command)
 		case strings.HasPrefix(arg, "--"):
 			if arg == "--verbose" || arg == "--version" || arg == "--help" {
 				globalFlagArgs = append(globalFlagArgs, arg)
 			} else {
-				sshPassthroughArgs = append(sshPassthroughArgs, arg)
+				sshOptionArgs = append(sshOptionArgs, arg)
 			}
+		case strings.HasPrefix(arg, "-"):
+			sshOptionArgs = append(sshOptionArgs, arg)
 		default:
-			sshPassthroughArgs = append(sshPassthroughArgs, arg)
+			if subcommands[arg] {
+				return args
+			}
+			target := arg
+			command := args[i+1:]
+			return buildSmartConnectArgs(globalFlagArgs, false, target, sshOptionArgs, command)
 		}
 	}
 
-	if hostnameIdx == -1 {
-		return args
-	}
+	return args
+}
 
-	hostname := args[hostnameIdx]
-	result := make([]string, 0, len(args)+1)
-	result = append(result, globalFlagArgs...)
-	result = append(result, "smart-connect", hostname)
-	result = append(result, sshPassthroughArgs...)
+func buildSmartConnectArgs(globalArgs []string, literal bool, target string, sshArgs, command []string) []string {
+	result := make([]string, 0, len(globalArgs)+len(sshArgs)+len(command)+4)
+	result = append(result, globalArgs...)
+	result = append(result, "smart-connect")
+	if literal {
+		result = append(result, "--literal-target")
+	}
+	result = append(result, target)
+	result = append(result, sshArgs...)
+	if len(command) > 0 {
+		result = append(result, "--")
+		result = append(result, command...)
+	}
 	return result
 }
 
-func newConnectCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "connect [host]",
-		Short: "Connect to host",
-		Long: `Connect to a host via SSH with direct routing.
-
-Without a hostname, opens the fuzzy finder across all known hosts.
-With a hostname, bypasses smart matching and treats the argument as the
-SSH destination verbatim - no host-add fallback. Useful when a Host alias
-conflicts with a subcommand name (e.g., "host", "log", "cp", "self").
-
-Example: nssh connect host -p 2222`,
-		Args: cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				hostname, err := connect.ResolveHostname("")
-				if err != nil {
-					return err
-				}
-				return connect.ConnectHost(context.Background(), hostname, nil, connect.Options{Verbosity: verboseCount, SSHVerbosity: sshVerbosity()})
-			}
-			return connect.ConnectHost(context.Background(), args[0], args[1:], connect.Options{Verbosity: verboseCount, SSHVerbosity: sshVerbosity()})
-		},
-	}
-
-	cmd.Flags().SetInterspersed(false)
-	ui.ApplyStyledHelp(cmd)
-	return cmd
-}
-
 func newSmartConnectCmd() *cobra.Command {
+	var literalTarget bool
 	cmd := &cobra.Command{
 		Use:    "smart-connect [host] [ssh-args...]",
 		Short:  "Connect to a host with smart resolution",
@@ -205,10 +205,6 @@ func newSmartConnectCmd() *cobra.Command {
 			if len(args) > 0 {
 				user, host = parseUserHost(args[0])
 			}
-			hostname, err := connect.ResolveHostname(host)
-			if err != nil {
-				return err
-			}
 			var sshArgs []string
 			if len(args) > 1 {
 				sshArgs = args[1:]
@@ -216,10 +212,19 @@ func newSmartConnectCmd() *cobra.Command {
 			if user != "" {
 				sshArgs = append([]string{"-l", user}, sshArgs...)
 			}
+			if literalTarget {
+				return connect.ConnectLiteralHost(context.Background(), host, sshArgs, connect.Options{Verbosity: verboseCount, SSHVerbosity: sshVerbosity()})
+			}
+			hostname, err := connect.ResolveHostname(host)
+			if err != nil {
+				return err
+			}
 			return connect.ConnectHost(context.Background(), hostname, sshArgs, connect.Options{Verbosity: verboseCount, SSHVerbosity: sshVerbosity()})
 		},
 	}
 
+	cmd.Flags().BoolVar(&literalTarget, "literal-target", false, "Use literal target")
+	_ = cmd.Flags().MarkHidden("literal-target")
 	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
@@ -330,7 +335,7 @@ func newListSubcommandsCmd() *cobra.Command {
 		Use:    "__list-subcommands",
 		Hidden: true,
 		Run: func(cmd *cobra.Command, args []string) {
-			for _, subcmd := range []string{"inv", "agent", "log", "cp", "self", "connect"} {
+			for _, subcmd := range []string{"inv", "agent", "log", "cp", "self"} {
 				fmt.Println(subcmd)
 			}
 		},

@@ -1,8 +1,8 @@
 $ nssh inv status --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh inv status [provider] [fl... Show inventory provider status           │
+│   nssh inv status [provider] [flags]                                         │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │

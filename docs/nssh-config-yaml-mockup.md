@@ -205,7 +205,8 @@ inventory:
   per-host overlays.
 - Discovered provider hosts select one group. Explicit `hosts.<name>.group`
   wins over implicit matching.
-- No generated SSH config file is produced or consumed by `nssh connect`.
+- No generated SSH config file is produced or consumed by root `nssh`
+  connections.
 
 ## Local Inventory
 
@@ -319,7 +320,6 @@ Runtime resolution should apply config in a fixed order.
 
 ```text
 global ssh.defaults
--> provider defaults
 -> discovered provider facts or local host identity
 -> selected group defaults
 -> provider.hosts.<host> per-host config
@@ -329,12 +329,11 @@ global ssh.defaults
 For local hosts, `hosts.<name>` supplies identity fields early, but its config
 fields still override selected group defaults later in the merge.
 
-Provider defaults and selected group defaults include `ssh:` config. The same
-`compatibility` and `options` schema is valid under:
+Selected group defaults include `ssh:` config. The same `compatibility` and
+`options` schema is valid under:
 
 ```text
 ssh.defaults
-inventory.providers.<provider>.ssh
 inventory.providers.<provider>.groups.<group>.ssh
 inventory.providers.<provider>.hosts.<host>.ssh
 ```
@@ -357,12 +356,9 @@ executes `ssh` with `-F none`. Runtime must not read generated SSH config or
 
 ## Runtime Argv Inspection
 
-nssh should include a diagnostic command that prints the exact OpenSSH argv it
-would execute for a resolved host after applying defaults, provider config,
-group config, host config, and CLI flags.
-
-This command replaces `ssh -G <host>` for nssh debugging. `ssh -G` cannot be the
-truth source once nssh disables OpenSSH config with `-F none`.
+Debug logging prints the exact OpenSSH argv immediately before execution after
+applying defaults, group config, host config, and CLI flags. `ssh -G <host>`
+cannot be the truth source once nssh disables OpenSSH config with `-F none`.
 
 ## Runtime Verbosity
 
@@ -407,7 +403,7 @@ ssh:
 ### Imported Defaults Notes
 
 - These defaults are nssh-owned after import.
-- `nssh connect` still uses `-F none`.
+- Root `nssh` connections still use `-F none`.
 - Import should translate deterministic OpenSSH directives into `ssh.options`.
 - Known `ssh.options` keys should validate type-aware values before rendering.
 - Import should preserve unsupported directives in `ssh.options` only when they
@@ -816,9 +812,9 @@ working option is a weak last entry such as `diffie-hellman-group1-sha1`, nssh
 should still be able to propose and persist it without requiring manual YAML
 editing.
 
-Diagnostics must stay transparent: `nssh inv get`, `nssh self cfg`, and rendered
-argv inspection should show the configured floor and the exact OpenSSH expansion
-nssh will execute.
+Diagnostics must stay transparent: `nssh inv get`, `nssh self cfg`, and debug
+argv output should show the configured floor and the exact OpenSSH expansion nssh
+will execute.
 
 ```text
 kex: [diffie-hellman-group-exchange-sha256, diffie-hellman-group14-sha1, diffie-hellman-group-exchange-sha1, diffie-hellman-group1-sha1]
@@ -889,9 +885,9 @@ Implementation should satisfy these statements:
 - Runtime verbosity is explicit and does not require raw argv.
 - `ssh.defaults` is the right place for imported global OpenSSH behavior.
 - Imported `ssh.defaults` affects runtime argv.
-- Provider-level and group-level `ssh:` config use the same
-  `compatibility`/`options` schema as host-level `ssh:` config.
-- nssh can show the final rendered OpenSSH argv for a resolved host.
+- Group-level `ssh:` config uses the same `compatibility`/`options` schema as
+  host-level `ssh:` config.
+- nssh debug output shows the final rendered OpenSSH argv for a resolved host.
 - Type-aware `ssh.options` plus `ssh.compatibility` are sufficient for the first
   YAML cutover.
 - No raw argv escape hatch is required for `release-0.3`.

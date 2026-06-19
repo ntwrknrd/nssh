@@ -2,13 +2,13 @@ $ nssh log search --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
 │   nssh log search <pattern> [flags] Search recordings for text               │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────╮
+╭─ Flags ──────────────────────────────────────────────────────────────────────╮
 │   -i, --case-sensitive              Case-sensitive search                    │
 │   -C, --context INT                 Show N lines of context around matches   │
 │   -l, --last INT                    Search only the last N sessions          │
 │   -s, --select STRING               Filter sessions by pattern (today, ...   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │

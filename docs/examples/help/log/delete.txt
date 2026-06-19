@@ -2,13 +2,13 @@ $ nssh log delete --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
 │   nssh log delete [flags]           Delete recordings                        │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────╮
+╭─ Flags ──────────────────────────────────────────────────────────────────────╮
 │   --dry-run                         Preview actions without executing        │
 │   --older-than INT                  Delete recordings older than N days      │
 │   -s, --select STRING               Filter by pattern (today, yesterday...   │
 │   -y, --yes                         Skip confirmation                        │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │

@@ -155,6 +155,51 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 	}, nil
 }
 
+// ResolveLiteralHostForConnect resolves a literal destination without fuzzy
+// matching or host-add fallback. Exact inventory matches still use managed
+// metadata and credentials; unmanaged literals fall back to SSH defaults.
+func ResolveLiteralHostForConnect(query, explicitUser string, cfg ...*config.Config) (*ResolvedHost, error) {
+	var c *config.Config
+	if len(cfg) > 0 && cfg[0] != nil {
+		c = cfg[0]
+	} else {
+		var err error
+		c, err = config.LoadDefault()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	hostname := strings.TrimSpace(query)
+	if idx := strings.LastIndex(hostname, "@"); idx != -1 {
+		if explicitUser == "" {
+			explicitUser = hostname[:idx]
+		}
+		hostname = hostname[idx+1:]
+	}
+	if hostname == "" {
+		return nil, fmt.Errorf("literal target is required")
+	}
+
+	catalog, err := BuildHostCatalog(c)
+	if err != nil {
+		return nil, err
+	}
+	if _, managed := catalog.Find(hostname); managed {
+		return ResolveHostForConnect(query, explicitUser, c)
+	}
+
+	return &ResolvedHost{
+		Query:     query,
+		Canonical: hostname,
+		Hostname:  hostname,
+		Port:      22,
+		Username:  explicitUser,
+		SSH:       config.MergeSSH(config.SSHHostConfig{}, c.SSH.Defaults),
+		Config:    c,
+	}, nil
+}
+
 type providerRegistry interface {
 	Provider(name string) credential.Provider
 }

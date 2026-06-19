@@ -2,11 +2,11 @@ $ nssh self reset --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
 │   nssh self reset [flags]           Reset configuration                      │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────╮
+╭─ Flags ──────────────────────────────────────────────────────────────────────╮
 │   --dry-run                         preview what would be deleted witho...   │
 │   --force                           skip confirmation prompt (for scripts)   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │

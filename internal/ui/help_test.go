@@ -27,8 +27,8 @@ func TestRenderStyledHelp_BasicCommand(t *testing.T) {
 	if !strings.Contains(output, "Usage") {
 		t.Error("Expected Usage panel")
 	}
-	if !strings.Contains(output, "Options") {
-		t.Error("Expected Options panel")
+	if !strings.Contains(output, "Flags") {
+		t.Error("Expected Flags panel")
 	}
 	if !strings.Contains(output, "test [ARG]") {
 		t.Error("Expected usage line")
@@ -65,12 +65,12 @@ func TestRenderStyledHelp_WithGlobalFlags(t *testing.T) {
 
 	output := RenderStyledHelp(child, cfg)
 
-	// Check for both local and global options
-	if !strings.Contains(output, "Options") {
-		t.Error("Expected Options panel")
+	// Check for both local and global flags
+	if !strings.Contains(output, "Flags") {
+		t.Error("Expected Flags panel")
 	}
-	if !strings.Contains(output, "Global Options") {
-		t.Error("Expected Global Options panel")
+	if !strings.Contains(output, "Global Flags") {
+		t.Error("Expected Global Flags panel")
 	}
 	if !strings.Contains(output, "--output") {
 		t.Error("Expected local flag --output")
@@ -102,6 +102,21 @@ func TestRenderStyledHelp_AnnotatedUsageLines(t *testing.T) {
 	}
 	if strings.Contains(output, "get NAME [flags]") {
 		t.Fatalf("help used generic cobra usage:\n%s", output)
+	}
+}
+
+func TestRenderStyledHelp_LongAnnotatedUsageLineDoesNotTruncate(t *testing.T) {
+	cmd := &cobra.Command{
+		Use:   "nssh",
+		Short: "Smart connect to host",
+		Annotations: map[string]string{
+			UsageLinesAnnotation: "nssh [flags] [ssh-options] HOST [command]",
+		},
+	}
+
+	output := RenderStyledHelp(cmd, StyledHelpConfig{ShowGlobalFlags: false, Width: 80})
+	if !strings.Contains(output, "nssh [flags] [ssh-options] HOST [command]") {
+		t.Fatalf("help truncated usage line:\n%s", output)
 	}
 }
 
@@ -212,7 +227,7 @@ func TestPadRight(t *testing.T) {
 
 func TestRenderPanel(t *testing.T) {
 	content := "  -v, --verbose  Enable verbose output"
-	panel := renderPanel("Options", content, 60)
+	panel := renderPanel("Flags", content, 60)
 
 	// Check for panel structure
 	if !strings.Contains(panel, "╭") {
@@ -221,7 +236,7 @@ func TestRenderPanel(t *testing.T) {
 	if !strings.Contains(panel, "╯") {
 		t.Error("Expected bottom-right corner")
 	}
-	if !strings.Contains(panel, "Options") {
+	if !strings.Contains(panel, "Flags") {
 		t.Error("Expected title in panel")
 	}
 	if !strings.Contains(panel, "--verbose") {

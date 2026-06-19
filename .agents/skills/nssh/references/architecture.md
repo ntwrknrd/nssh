@@ -26,9 +26,12 @@ The root command is built in `internal/app.NewRootCmd`.
 
 Public command groups:
 
-- `nssh [host]`: smart connect path. `internal/app.PreprocessArgs` rewrites an
-  unknown first non-flag argument to hidden `smart-connect`.
-- `nssh connect [host]`: direct connect path. Without a host, opens selection.
+- `nssh [ssh-options] host [command...]`: SSH-compatible smart connect path.
+  `internal/app.PreprocessArgs` rewrites root SSH-style invocations to hidden
+  `smart-connect`.
+- `nssh --select`: opens smart target selection.
+- `nssh --target host [command...]`: literal target escape hatch for names that
+  collide with public nssh commands or should bypass fuzzy resolution.
 - `nssh cp`: SCP wrapper with shared host and credential resolution.
 - `nssh inv`: inventory management and provider diagnostics.
 - `nssh agent`: background runtime status, stop, restart, and doctor.
@@ -191,7 +194,8 @@ packages.
 
 Interactive connection starts in `internal/connect.ConnectHost`.
 
-1. `internal/app.PreprocessArgs` maps `nssh HOST` to hidden `smart-connect`.
+1. `internal/app.PreprocessArgs` maps root SSH-style commands to hidden
+   `smart-connect`.
 2. `connect.ResolveHostname` checks the nssh host catalog, exact matches,
    suggestions, and fuzzy selection. On misses, it returns host-not-found
    immediately.

@@ -19,9 +19,7 @@ source.
    - `docs/examples/help/`
    - `docs/examples/config/config.example.yaml`
    - `references/architecture.md`
-3. Do not describe removed command surfaces as current. In release/0.3, the old
-   local vault plus `host`, `ctx`, `sync`, `lock`, and `unlock` workflows are
-   gone.
+3. Describe only the current release/0.3 command surface.
 
 ## Progressive References
 
@@ -29,7 +27,7 @@ Read only what matches the user request:
 
 - [architecture.md](references/architecture.md) for architecture, package
   boundaries, command flow, storage model, credential model, agent runtime, SSH
-  connector behavior, recordings, and removed surfaces.
+  connector behavior, and recordings.
 - [configuration-inventory-credentials.md](references/configuration-inventory-credentials.md)
   for config files, includes, inventory groups, local inventory, NetBox,
   containerlab, credential providers, and auth mappings.
@@ -37,6 +35,27 @@ Read only what matches the user request:
   for connect/SCP behavior, fuzzy matching, provider refresh on lookup miss,
   agent runtime, host keys, legacy SSH fixes, recordings, logs, benchmarks, and
   diagnostics.
+
+## Root SSH Contract
+
+Root `nssh` follows OpenSSH command grammar:
+
+```text
+nssh [flags] [ssh-options] HOST [command]
+```
+
+- Bare `nssh` prints help.
+- Parse SSH options only before `HOST`; tokens after `HOST` are remote command.
+- `nssh HOST` uses smart host resolution.
+- `nssh HOST command...` runs `command...` remotely.
+- `--select` opens the smart target picker.
+- `--target HOST` bypasses subcommand parsing and fuzzy resolution; exact
+  managed targets still use inventory metadata, unmanaged targets use SSH
+  defaults.
+- nssh-specific root flags are long-only so they do not collide with OpenSSH
+  short flags.
+- Interactive sessions add default remote `-tt` unless the user passes `-t`,
+  `-tt`, or `-T`; remote command mode does not add default `-tt`.
 
 ## Common Commands
 
@@ -49,7 +68,8 @@ nssh inv set <host> --hostname <addr> --user <user> -g <group>
 nssh inv status
 nssh inv doctor
 nssh <host>
-nssh connect <host>
+nssh --select
+nssh --target <host>
 nssh cp <host>:/remote/path ./local/path
 nssh agent status
 nssh agent doctor

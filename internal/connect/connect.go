@@ -78,6 +78,44 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ..
 	return result.Err
 }
 
+func ConnectLiteralHost(ctx context.Context, hostname string, sshArgs []string, opts ...Options) error {
+	var options Options
+	if len(opts) > 0 {
+		options = opts[0]
+	}
+	recorded, err := maybeWrapWithRecording(hostname, sshArgs, options)
+	if err != nil {
+		return err
+	}
+	if recorded {
+		return nil
+	}
+
+	configTimer := connector.StartTiming(connector.TimingConfigLoad)
+	explicitUser := extractExplicitUser(hostname, sshArgs)
+	resolved, err := ResolveLiteralHostForConnect(hostname, explicitUser)
+	if err != nil {
+		return fmt.Errorf("resolve literal host: %w", err)
+	}
+	cfg := resolved.Config
+	configTimer.Emit()
+
+	audit := newConnectAudit(cfg)
+	if audit != nil {
+		defer func() { _ = audit.Close() }()
+		audit.Info("ssh_connect_start", "host", resolved.Hostname, "ssh_args", sshArgs)
+	}
+
+	result := runResolvedConnection(ctx, resolved, sshArgs, cfg, audit, options)
+	if result.Err != nil && resolved.Provider != "" && isCompatibilityError(result.Err) {
+		var compatErr error
+		if result, resolved, compatErr = handleCompatibilityFixes(ctx, hostname, explicitUser, resolved, sshArgs, cfg, audit, options, result); compatErr != nil {
+			return compatErr
+		}
+	}
+	return result.Err
+}
+
 func newConnectAudit(cfg *config.Config) *audit.Logger {
 	if cfg == nil || !cfg.Logging.Audit.Enabled {
 		return nil

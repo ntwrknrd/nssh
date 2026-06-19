@@ -210,6 +210,37 @@ func TestResolveBoundCredentialSkipsDisabledHostAuth(t *testing.T) {
 	}
 }
 
+func TestResolveLiteralHostForConnectBypassesCatalog(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.SSH.Defaults.Options = config.SSHOptions{
+		"LogLevel": config.NewSSHOptionString("ERROR"),
+	}
+
+	resolved, err := ResolveLiteralHostForConnect("admin@192.0.2.10", "", cfg)
+	if err != nil {
+		t.Fatalf("ResolveLiteralHostForConnect: %v", err)
+	}
+
+	if resolved.Query != "admin@192.0.2.10" {
+		t.Fatalf("query = %q, want original target", resolved.Query)
+	}
+	if resolved.Hostname != "192.0.2.10" || resolved.Canonical != "192.0.2.10" {
+		t.Fatalf("host = %q canonical = %q, want literal address", resolved.Hostname, resolved.Canonical)
+	}
+	if resolved.Username != "admin" {
+		t.Fatalf("username = %q, want admin", resolved.Username)
+	}
+	if resolved.Port != 22 {
+		t.Fatalf("port = %d, want 22", resolved.Port)
+	}
+	if resolved.Credential != nil {
+		t.Fatalf("credential = %+v, want nil for unmanaged literal target", resolved.Credential)
+	}
+	if got := resolved.SSH.Options["LogLevel"].Scalar; got != "ERROR" {
+		t.Fatalf("default LogLevel = %q, want ERROR", got)
+	}
+}
+
 func TestResolveInventoryCredentialDefersDirectPasswordRefWithLiteralUsername(t *testing.T) {
 	provider := &countingCredentialProvider{
 		record: &credential.Record{Username: "netops", Secret: secret.NewFromString("secret"), Ref: "op://Network/Edge/password"},

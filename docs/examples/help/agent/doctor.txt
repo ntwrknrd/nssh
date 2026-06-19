@@ -2,7 +2,7 @@ $ nssh agent doctor --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
 │   nssh agent doctor [flags]         Diagnose agent                           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │
 │   -V, --version                     Print command version                    │

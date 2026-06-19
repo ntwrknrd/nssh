@@ -18,8 +18,10 @@ prompts, and can record sessions.
 
 ## Features
 
-- Smart connect: `nssh HOST`, `nssh user@HOST`, and `nssh connect` route through
-  nssh inventory lookup, partial host matching, and optional `fzf` selection.
+- Smart connect: `nssh HOST`, `nssh user@HOST`, and `nssh --select` route
+  through nssh inventory lookup, partial host matching, and optional `fzf`
+  selection. Use `nssh --target HOST` for literal destinations that collide
+  with nssh command names.
 - Inventory: `nssh inv` manages local hosts and external providers; current
   providers are NetBox and containerlab.
 - Credentials: Pass, 1Password, and Bitwarden providers are selected by
