@@ -178,3 +178,29 @@ func TestReconcileReportsConflictingGroupSelectors(t *testing.T) {
 		t.Fatalf("adds = %+v, want no additions on conflict", plan.Adds)
 	}
 }
+
+func TestReconcileChoosesMostSpecificWildcardDomainSuffixSelector(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{
+		{Group: "netbox-prod/customer", Provider: "netbox-prod", Match: config.InventoryMatch{"domain_suffix": {"*custcbb.local"}}},
+		{Group: "netbox-prod/ldap", Provider: "netbox-prod", Match: config.InventoryMatch{"domain_suffix": {"*ldap.custcbb.local"}}},
+	}
+	objects := []Object{{
+		ObjectID: "device:1",
+		Name:     "810-teps03.ldap.custcbb.local",
+		HostName: "810-teps03.ldap.custcbb.local",
+		Attributes: map[string][]string{
+			"domain_suffix": {".ldap.custcbb.local"},
+		},
+	}}
+
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, nil)
+	if len(plan.Conflicts) != 0 {
+		t.Fatalf("conflicts = %+v, want none", plan.Conflicts)
+	}
+	if len(plan.Adds) != 1 {
+		t.Fatalf("adds = %d, want 1", len(plan.Adds))
+	}
+	if plan.Adds[0].Group != "netbox-prod/ldap" {
+		t.Fatalf("group = %q, want netbox-prod/ldap", plan.Adds[0].Group)
+	}
+}

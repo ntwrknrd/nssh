@@ -19,6 +19,7 @@ var groupNamePattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_-]*$`)
 func newSetCmd() *cobra.Command {
 	var group string
 	var hostname string
+	var aliases []string
 	var user string
 	var port int
 	var credentialProvider string
@@ -50,11 +51,12 @@ func newSetCmd() *cobra.Command {
 					UsernameRef:        credentialUsernameRef,
 				},
 			}
-			return runSetHost(args[0], group, hostname, user, port, cmd.Flags().Changed("port"), authPatch)
+			return runSetHost(args[0], group, hostname, aliases, user, port, cmd.Flags().Changed("port"), authPatch)
 		},
 	}
 	cmd.Flags().StringVarP(&group, "group", "g", "", "target provider-qualified group")
-	cmd.Flags().StringVar(&hostname, "hostname", "", "SSH HostName")
+	cmd.Flags().StringVar(&hostname, "hostname", "", "SSH connection target override")
+	cmd.Flags().StringArrayVar(&aliases, "alias", nil, "add host alias")
 	cmd.Flags().StringVar(&user, "user", "", "SSH User")
 	cmd.Flags().IntVar(&port, "port", 0, "SSH Port")
 	cmd.Flags().StringVar(&credentialProvider, "credential-provider", "", "credential provider instance for host auth override")
@@ -157,7 +159,7 @@ func validateLocalGroupID(group string) error {
 	return nil
 }
 
-func runSetHost(host, group, hostname, user string, port int, portSet bool, authPatch hostAuthPatch) error {
+func runSetHost(host, group, hostname string, aliases []string, user string, port int, portSet bool, authPatch hostAuthPatch) error {
 	if group != "" {
 		if err := validateLocalGroupID(group); err != nil {
 			return err
@@ -173,7 +175,7 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 	var parser *sshconfig.Parser
 	paths := config.DefaultPaths()
 	pendingCreatedGroup := ""
-	if group != "" || hostname != "" || user != "" || portSet || !authPatch.HasChange() {
+	if group != "" || hostname != "" || len(aliases) > 0 || user != "" || portSet || !authPatch.HasChange() {
 		existing, _, err := findInventoryHostWithLocation(parser, cfg, paths, host)
 		if err != nil {
 			return err
@@ -184,20 +186,10 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 		interactiveAdd := shouldPromptLocalHostAddDetails(existing, group, hostname, user, portSet, authPatch)
 		ui.Info(`Inventory Provider: "local"`)
 		ui.Info("%s", localProviderOwnerLabel(paths))
-		groupPrompt := promptInventoryGroup
-		if summaries, err := loadInventoryGroupSummaries(cfg, parser, paths); err == nil {
-			previewHostName := host
-			if strings.TrimSpace(hostname) != "" {
-				previewHostName = hostname
-			}
-			options := inventoryGroupSelectOptions(summaries, previewHostName)
-			groupPrompt = func(groups []string) (string, error) {
-				return promptInventoryGroupOptions(inventoryGroupSelectOptionsForNames(groups, options))
-			}
-		}
 		patch := hostPatch{
 			Host:     host,
 			HostName: hostname,
+			Aliases:  aliases,
 			User:     user,
 			Port:     port,
 			PortSet:  portSet,
@@ -205,10 +197,30 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 		hostAuthChanged := false
 		var groupCreated bool
 		for {
+			if interactiveAdd {
+				patch, err = promptLocalHostHost(patch, nil)
+				if err != nil {
+					return err
+				}
+				host = patch.Host
+				existing, _, err = findInventoryHostWithLocation(parser, cfg, paths, host)
+				if err != nil {
+					return err
+				}
+				if existing != nil && metadataForHost(existing, cfg, paths, nil).Owner != "local" {
+					return fmt.Errorf("host %q is provider-owned; change provider group selector config instead", host)
+				}
+			}
+			groupPrompt := promptInventoryGroup
+			if summaries, err := loadInventoryGroupSummaries(cfg, parser, paths); err == nil {
+				options := inventoryGroupSelectOptions(summaries, patch.Host)
+				groupPrompt = func(groups []string) (string, error) {
+					return promptInventoryGroupOptions(inventoryGroupSelectOptionsForNames(groups, options))
+				}
+			}
 			resolvedGroup, err := resolveLocalHostGroup(cfg, hostPatch{
-				Host:     patch.Host,
-				Group:    group,
-				HostName: patch.HostName,
+				Host:  patch.Host,
+				Group: group,
 			}, existing, groupPrompt)
 			if err != nil {
 				if errors.Is(err, errPromptBack) {
@@ -218,7 +230,7 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 			}
 			patch.Group = resolvedGroup
 			if interactiveAdd {
-				patch, err = promptLocalHostAddDetails(cfg, patch, nil)
+				patch, err = promptLocalHostConnectionDetails(cfg, patch, nil)
 				if errors.Is(err, errPromptBack) && group == "" {
 					continue
 				}
@@ -268,8 +280,6 @@ func runSetHost(host, group, hostname, user string, port int, portSet bool, auth
 						return nil
 					}
 				}
-			} else if existing == nil && strings.TrimSpace(patch.HostName) == "" {
-				patch.HostName = defaultHostNameForGroup(cfg, host, patch.Group)
 			}
 			break
 		}

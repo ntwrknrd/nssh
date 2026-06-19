@@ -262,7 +262,7 @@ func TestResolveHostForConnectCarriesResolvedAuthMode(t *testing.T) {
 				}},
 			},
 			Hosts: map[string]config.InventoryHostConfig{
-				"edge01": {Group: "customer", Hostname: "edge01.example.com"},
+				"edge01.example.com": {Group: "customer", Aliases: []string{"edge01"}},
 			},
 		},
 	}

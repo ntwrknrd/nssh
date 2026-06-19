@@ -177,7 +177,6 @@ func (c *Connector) relay(ctx context.Context) error {
 		case <-stdinFallbackTimer.C:
 			// No PTY output received within the fallback window.
 			// Start stdin relay to handle commands that wait for input first.
-			slog.Debug("stdin relay fallback timer fired, starting relay")
 			c.hostKeyHandled = true
 			startStdinRelay()
 			continue

@@ -29,12 +29,11 @@ func TestUpsertLocalHostWritesSingleLocalProviderFile(t *testing.T) {
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
 	err := upsertLocalHost(parser, cfg, paths, hostPatch{
-		Host:     "edge01",
-		Group:    "local/lab",
-		HostName: "edge01.lab.local",
-		User:     "admin",
-		Port:     2222,
-		PortSet:  true,
+		Host:    "edge01.lab.local",
+		Group:   "local/lab",
+		User:    "admin",
+		Port:    2222,
+		PortSet: true,
 	})
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
@@ -45,10 +44,81 @@ func TestUpsertLocalHostWritesSingleLocalProviderFile(t *testing.T) {
 		t.Fatalf("read local file: %v", err)
 	}
 	got := string(content)
-	for _, want := range []string{"edge01:", "group: lab", "hostname: edge01.lab.local", "port: 2222", "username: admin"} {
+	for _, want := range []string{"edge01.lab.local:", "group: lab", "aliases:", "- edge01", "port: 2222", "username: admin"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "hostname:") {
+		t.Fatalf("canonical host should not write hostname override:\n%s", got)
+	}
+}
+
+func TestUpsertLocalHostPatchesHostWithoutRewritingExistingGroup(t *testing.T) {
+	tmp := t.TempDir()
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml")}
+	target := localProviderYAMLPath(nil, paths)
+	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+		t.Fatal(err)
+	}
+	existing := `inventory:
+  providers:
+    local:
+      type: local
+      groups:
+        # keep this comment
+        custcbb:
+          match:
+            domain_suffix:
+              - .custcbb.local
+      hosts:
+        existing01.custcbb.local:
+          group: custcbb
+`
+	if err := os.WriteFile(target, []byte(existing), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Providers: map[string]config.InventoryProviderConfig{
+			config.ProviderLocal: {
+				Type: config.ProviderLocal,
+				Groups: map[string]config.GroupConfig{
+					"custcbb": {Match: config.InventoryMatch{"domain_suffix": []string{".custcbb.local"}}},
+				},
+				Hosts: map[string]config.InventoryHostConfig{
+					"existing01.custcbb.local": {Group: "custcbb"},
+				},
+			},
+		},
+	}}
+
+	if err := upsertLocalHost(nil, cfg, paths, hostPatch{
+		Host:    "acm-tor-sw50.custcbb.local",
+		Group:   "local/custcbb",
+		Port:    22,
+		PortSet: true,
+	}); err != nil {
+		t.Fatalf("upsertLocalHost: %v", err)
+	}
+
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read local inventory: %v", err)
+	}
+	got := string(content)
+	for _, want := range []string{
+		"# keep this comment",
+		"existing01.custcbb.local:",
+		"acm-tor-sw50.custcbb.local:",
+		"aliases:",
+		"- acm-tor-sw50",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "custcbb:") != 1 {
+		t.Fatalf("group was duplicated or rewritten unexpectedly:\n%s", got)
 	}
 }
 
@@ -63,7 +133,7 @@ func TestLocalProviderOwnerLabelUsesLocalProviderFile(t *testing.T) {
 	}
 }
 
-func TestPromptLocalHostAddDetailsCollectsHostHostnameUserPortAndAuth(t *testing.T) {
+func TestPromptLocalHostAddDetailsCollectsHostUserPortAndAuth(t *testing.T) {
 	cfg := &config.Config{
 		Credential: config.CredentialConfig{Provider: map[string]config.CredentialProviderConfig{
 			"op-network": {Type: config.CredentialProvider1Password, Config: config.CredentialProviderDetailConfig{Vault: "Network"}},
@@ -74,9 +144,8 @@ func TestPromptLocalHostAddDetailsCollectsHostHostnameUserPortAndAuth(t *testing
 	}
 	prompter := &fakeLocalHostAddPrompter{
 		inputs: map[string]string{
-			"Host":     "810-neteng01",
-			"HostName": "810-neteng01.custcbb.local",
-			"Port":     "2222",
+			"Host": "810-neteng01.custcbb.local",
+			"Port": "2222",
 		},
 		selects: map[string]string{
 			"Authentication":      config.AuthModePassword,
@@ -96,7 +165,7 @@ func TestPromptLocalHostAddDetailsCollectsHostHostnameUserPortAndAuth(t *testing
 		t.Fatalf("promptLocalHostAddDetails: %v", err)
 	}
 
-	if patch.Host != "810-neteng01" || patch.HostName != "810-neteng01.custcbb.local" {
+	if patch.Host != "810-neteng01.custcbb.local" || patch.HostName != "" {
 		t.Fatalf("host fields = %q/%q", patch.Host, patch.HostName)
 	}
 	if patch.User != "" || patch.Port != 2222 || !patch.PortSet {
@@ -111,7 +180,7 @@ func TestPromptLocalHostAddDetailsCollectsHostHostnameUserPortAndAuth(t *testing
 	if patch.AuthDisabled {
 		t.Fatal("host stored credential should not disable auth")
 	}
-	wantPrompts := "Host,HostName,Port,Authentication,Credential source,Credential provider,Credential item"
+	wantPrompts := "Host,Port,Authentication,Credential source,Credential provider,Credential item"
 	if got := strings.Join(prompter.prompts, ","); got != wantPrompts {
 		t.Fatalf("prompts = %s, want %s", got, wantPrompts)
 	}
@@ -139,10 +208,10 @@ func TestPromptLocalHostAddDetailsPromptsUserForPublicKey(t *testing.T) {
 	if patch.AuthMode != config.AuthModeKey || patch.User != "admin" {
 		t.Fatalf("patch = %+v", patch)
 	}
-	if patch.Auth.Username != "admin" || patch.Auth.AuthMode != config.AuthModeKey || patch.AuthDisabled {
+	if patch.Auth.Username != "admin" || patch.Auth.Mode != config.AuthModeKey || patch.AuthDisabled {
 		t.Fatalf("public key auth = %+v disabled=%v", patch.Auth, patch.AuthDisabled)
 	}
-	wantPrompts := "Host,HostName,Port,Authentication,User"
+	wantPrompts := "Host,Port,Authentication,User"
 	if got := strings.Join(prompter.prompts, ","); got != wantPrompts {
 		t.Fatalf("prompts = %s, want %s", got, wantPrompts)
 	}
@@ -168,10 +237,10 @@ func TestPromptLocalHostAddDetailsPasswordWithoutStoredCredentialPromptsUser(t *
 	if err != nil {
 		t.Fatalf("promptLocalHostAddDetails: %v", err)
 	}
-	if patch.User != "admin" || patch.Auth.Username != "admin" || patch.Auth.AuthMode != config.AuthModePassword || patch.AuthDisabled {
+	if patch.User != "admin" || patch.Auth.Username != "admin" || patch.Auth.Mode != config.AuthModePassword || patch.AuthDisabled {
 		t.Fatalf("patch = %+v", patch)
 	}
-	wantPrompts := "Host,HostName,Port,Authentication,Credential source,User"
+	wantPrompts := "Host,Port,Authentication,Credential source,User"
 	if got := strings.Join(prompter.prompts, ","); got != wantPrompts {
 		t.Fatalf("prompts = %s, want %s", got, wantPrompts)
 	}
@@ -236,7 +305,7 @@ func TestPromptLocalHostAddDetailsCanBackOutOfCredentialProvider(t *testing.T) {
 	if patch.AuthMode != config.AuthModeKey || patch.User != "admin" {
 		t.Fatalf("patch = %+v, want public key admin after backing out", patch)
 	}
-	wantPrompts := "Host,HostName,Port,Authentication,Credential source,Credential provider,Credential source,Authentication,User"
+	wantPrompts := "Host,Port,Authentication,Credential source,Credential provider,Credential source,Authentication,User"
 	if got := strings.Join(prompter.prompts, ","); got != wantPrompts {
 		t.Fatalf("prompts = %s, want %s", got, wantPrompts)
 	}
@@ -386,11 +455,15 @@ func TestUpsertLocalHostWritesSelectedAuthModeAndCompatFixes(t *testing.T) {
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
 
 	err := upsertLocalHost(parser, cfg, paths, hostPatch{
-		Host:        "edge01",
-		Group:       "local/lab",
-		HostName:    "edge01.lab.local",
-		AuthMode:    config.AuthModePassword,
-		CompatFixes: []compat.CompatType{compat.CompatKex},
+		Host:     "edge01",
+		Group:    "local/lab",
+		HostName: "edge01.lab.local",
+		AuthMode: config.AuthModePassword,
+		CompatFixes: []compat.FloorSelection{{
+			Category:  compat.CategoryKex,
+			Directive: "KexAlgorithms",
+			Floor:     "diffie-hellman-group14-sha1",
+		}},
 	})
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
@@ -403,12 +476,110 @@ func TestUpsertLocalHostWritesSelectedAuthModeAndCompatFixes(t *testing.T) {
 	got := string(content)
 	for _, want := range []string{
 		"mode: password",
-		"compat:",
-		"- legacy-kex",
+		"compatibility:",
+		"kex: diffie-hellman-group14-sha1",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
 		}
+	}
+}
+
+func TestUpsertLocalHostWritesExplicitHostnameOverride(t *testing.T) {
+	tmp := t.TempDir()
+	parser := sshconfig.NewParserWithPaths(filepath.Join(tmp, ".ssh", "config"), filepath.Join(tmp, "backups"), 5)
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Group: map[string]config.GroupConfig{"lab": {}},
+	}}
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
+
+	err := upsertLocalHost(parser, cfg, paths, hostPatch{
+		Host:     "edge01.lab.local",
+		Group:    "local/lab",
+		HostName: "192.0.2.10",
+	})
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	content, err := os.ReadFile(localProviderYAMLPath(cfg, paths))
+	if err != nil {
+		t.Fatalf("read local file: %v", err)
+	}
+	got := string(content)
+	for _, want := range []string{"edge01.lab.local:", "ssh:", "options:", "HostName: 192.0.2.10", "aliases:", "- edge01"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestUpsertLocalHostDoesNotAddShortAliasForIP(t *testing.T) {
+	tmp := t.TempDir()
+	parser := sshconfig.NewParserWithPaths(filepath.Join(tmp, ".ssh", "config"), filepath.Join(tmp, "backups"), 5)
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Group: map[string]config.GroupConfig{"lab": {}},
+	}}
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
+
+	err := upsertLocalHost(parser, cfg, paths, hostPatch{
+		Host:  "192.0.2.10",
+		Group: "local/lab",
+	})
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	content, err := os.ReadFile(localProviderYAMLPath(cfg, paths))
+	if err != nil {
+		t.Fatalf("read local file: %v", err)
+	}
+	got := string(content)
+	if strings.Contains(got, "aliases:") || strings.Contains(got, "hostname:") {
+		t.Fatalf("IP host should not get alias or hostname override:\n%s", got)
+	}
+}
+
+func TestUpsertLocalHostAddsAliasesAdditively(t *testing.T) {
+	tmp := t.TempDir()
+	parser := sshconfig.NewParserWithPaths(filepath.Join(tmp, ".ssh", "config"), filepath.Join(tmp, "backups"), 5)
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Providers: map[string]config.InventoryProviderConfig{
+			config.ProviderLocal: {
+				Type:   config.ProviderLocal,
+				Groups: map[string]config.GroupConfig{"lab": {}},
+				Hosts: map[string]config.InventoryHostConfig{
+					"edge01.lab.local": {Group: "lab", Aliases: []string{"edge01"}},
+				},
+			},
+		},
+	}}
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
+
+	err := upsertLocalHost(parser, cfg, paths, hostPatch{
+		Host:    "edge01.lab.local",
+		Aliases: []string{"edge"},
+	})
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	content, err := os.ReadFile(localProviderYAMLPath(cfg, paths))
+	if err != nil {
+		t.Fatalf("read local file: %v", err)
+	}
+	got := string(content)
+	for _, want := range []string{"- edge01", "- edge"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing alias %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestSetCommandDefinesAliasFlag(t *testing.T) {
+	cmd := newSetCmd()
+	if flag := cmd.Flags().Lookup("alias"); flag == nil {
+		t.Fatal("alias flag missing")
 	}
 }
 
@@ -427,19 +598,27 @@ func TestLocalWrittenHostConfigReturnsPersistedStanza(t *testing.T) {
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Group: map[string]config.GroupConfig{"lab": {}},
 	}}
-	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
 	if err := upsertLocalHost(parser, cfg, paths, hostPatch{Host: "edge01", Group: "local/lab", HostName: "edge01.lab.local"}); err != nil {
 		t.Fatalf("upsert: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join("inventory", "local.yaml")); err == nil {
+		t.Fatalf("test leaked inventory/local.yaml into package directory")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat leaked inventory/local.yaml: %v", err)
 	}
 
 	stanza, err := localWrittenHostConfig(parser, cfg, paths, "edge01")
 	if err != nil {
 		t.Fatalf("localWrittenHostConfig: %v", err)
 	}
-	for _, want := range []string{"edge01:", "hostname: edge01.lab.local"} {
+	for _, want := range []string{"edge01:", "ssh:", "options:", "HostName: edge01.lab.local"} {
 		if !strings.Contains(stanza, want) {
 			t.Fatalf("missing %q in:\n%s", want, stanza)
 		}
+	}
+	if strings.Contains(stanza, "groups:") {
+		t.Fatalf("written host config should not include existing group context:\n%s", stanza)
 	}
 }
 
@@ -452,7 +631,7 @@ func TestLocalHostCompatibilityAppliesDetectedFixesBeforeRetry(t *testing.T) {
 		if calls == 1 {
 			return &connector.TestResult{
 				ExitCode: 255,
-				Stderr:   "Unable to negotiate with 192.0.2.1 port 22: no matching key exchange method found.",
+				Stderr:   "Unable to negotiate with 192.0.2.1 port 22: no matching key exchange method found. Their offer: diffie-hellman-group14-sha1,diffie-hellman-group1-sha1",
 			}, nil
 		}
 		content, err := os.ReadFile(cfg.ConfigFile)
@@ -480,8 +659,8 @@ Permission denied (publickey,password).`,
 	if calls != 2 {
 		t.Fatalf("calls = %d, want 2", calls)
 	}
-	if len(result.FixesApplied) != 1 || result.FixesApplied[0] != compat.CompatKex {
-		t.Fatalf("fixes = %v, want [kex]", result.FixesApplied)
+	if len(result.FixesApplied) != 1 || result.FixesApplied[0].Category != compat.CategoryKex || result.FixesApplied[0].Floor != "diffie-hellman-group14-sha1" {
+		t.Fatalf("fixes = %v, want kex floor diffie-hellman-group14-sha1", result.FixesApplied)
 	}
 }
 
@@ -525,14 +704,60 @@ func TestResolveLocalHostGroupInfersFromMatchDomainSuffix(t *testing.T) {
 	}}
 
 	group, err := resolveLocalHostGroup(cfg, hostPatch{
-		Host:     "nre-netlab01",
-		HostName: "nre-netlab01.custcbb.local",
+		Host: "nre-netlab01.custcbb.local",
 	}, nil, nil)
 	if err != nil {
 		t.Fatalf("resolveLocalHostGroup: %v", err)
 	}
 	if group != "local/custcbb" {
 		t.Fatalf("group = %q, want local/custcbb", group)
+	}
+}
+
+func TestResolveLocalHostGroupInfersParentDomainSuffix(t *testing.T) {
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Provider: map[string]config.InventoryProviderConfig{
+			config.ProviderLocal: {
+				Type: config.ProviderLocal,
+				Group: map[string]config.GroupConfig{
+					"custcbb": {Match: config.InventoryMatch{"domain_suffix": []string{".custcbb.local"}}},
+				},
+			},
+		},
+	}}
+
+	group, err := resolveLocalHostGroup(cfg, hostPatch{
+		Host: "810-teps03.ldap.custcbb.local",
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("resolveLocalHostGroup: %v", err)
+	}
+	if group != "local/custcbb" {
+		t.Fatalf("group = %q, want local/custcbb", group)
+	}
+}
+
+func TestResolveLocalHostGroupInfersMostSpecificWildcardDomainSuffix(t *testing.T) {
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Provider: map[string]config.InventoryProviderConfig{
+			config.ProviderLocal: {
+				Type: config.ProviderLocal,
+				Group: map[string]config.GroupConfig{
+					"custcbb":     {Match: config.InventoryMatch{"domain_suffix": []string{"*custcbb.local"}}},
+					"ldapcustcbb": {Match: config.InventoryMatch{"domain_suffix": []string{"*ldap.custcbb.local"}}},
+				},
+			},
+		},
+	}}
+
+	group, err := resolveLocalHostGroup(cfg, hostPatch{
+		Host: "810-teps03.ldap.custcbb.local",
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("resolveLocalHostGroup: %v", err)
+	}
+	if group != "local/ldapcustcbb" {
+		t.Fatalf("group = %q, want local/ldapcustcbb", group)
 	}
 }
 
@@ -631,7 +856,12 @@ func TestUpsertLocalHostPreservesExistingGroupWhenGroupOmitted(t *testing.T) {
 			config.ProviderLocal: {
 				Type:   config.ProviderLocal,
 				Groups: map[string]config.GroupConfig{"lab": {}},
-				Hosts:  map[string]config.InventoryHostConfig{"edge01": {Group: "lab", Hostname: "old.lab.local"}},
+				Hosts: map[string]config.InventoryHostConfig{"edge01": {
+					Group: "lab",
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"HostName": config.NewSSHOptionString("old.lab.local"),
+					}},
+				}},
 			},
 		},
 	}}
@@ -645,7 +875,7 @@ func TestUpsertLocalHostPreservesExistingGroupWhenGroupOmitted(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(content)
-	for _, want := range []string{"group: lab", "hostname: new.lab.local"} {
+	for _, want := range []string{"group: lab", "ssh:", "options:", "HostName: new.lab.local"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
 		}
@@ -663,7 +893,7 @@ func TestUpsertLocalHostRefusesProviderOwnedHost(t *testing.T) {
 		Providers: map[string]config.InventoryProviderConfig{
 			"netbox-prod": {
 				Type:  config.ProviderNetBox,
-				Hosts: map[string]config.InventoryHostConfig{"edge01": {Group: "cbb", Hostname: "edge01.example.com"}},
+				Hosts: map[string]config.InventoryHostConfig{"edge01.example.com": {Group: "cbb", Aliases: []string{"edge01"}}},
 			},
 		},
 	}}
@@ -688,8 +918,8 @@ func TestRemoveLocalHostRemovesOnlyLocalHosts(t *testing.T) {
 				Type:   config.ProviderLocal,
 				Groups: map[string]config.GroupConfig{"lab": {}},
 				Hosts: map[string]config.InventoryHostConfig{
-					"edge01": {Group: "lab", Hostname: "edge01.lab.local"},
-					"edge02": {Group: "lab", Hostname: "edge02.lab.local"},
+					"edge01.lab.local": {Group: "lab", Aliases: []string{"edge01"}},
+					"edge02.lab.local": {Group: "lab", Aliases: []string{"edge02"}},
 				},
 			},
 		},
@@ -711,7 +941,7 @@ func TestRemoveLocalHostRemovesOnlyLocalHosts(t *testing.T) {
 	if strings.Contains(got, "edge01:") {
 		t.Fatalf("removed host still present:\n%s", got)
 	}
-	if !strings.Contains(got, "edge02:") {
+	if !strings.Contains(got, "edge02.lab.local:") {
 		t.Fatalf("other host missing:\n%s", got)
 	}
 }
@@ -873,7 +1103,7 @@ func TestInventoryHostsIgnoresNonNsshIncludes(t *testing.T) {
 			config.ProviderLocal: {
 				Type:   config.ProviderLocal,
 				Groups: map[string]config.GroupConfig{"lab": {}},
-				Hosts:  map[string]config.InventoryHostConfig{"managed": {Group: "lab", Hostname: "managed.example.com"}},
+				Hosts:  map[string]config.InventoryHostConfig{"managed.example.com": {Group: "lab", Aliases: []string{"managed"}}},
 			},
 		},
 	}}
@@ -886,7 +1116,7 @@ func TestInventoryHostsIgnoresNonNsshIncludes(t *testing.T) {
 	if len(hosts) != 1 {
 		t.Fatalf("hosts = %d, want 1", len(hosts))
 	}
-	if hosts[0].Host != "managed" {
+	if hosts[0].Host != "managed.example.com" {
 		t.Fatalf("host = %q", hosts[0].Host)
 	}
 }
@@ -1032,7 +1262,7 @@ func TestImportLocalCSVAddsHostsToLocalProviderFile(t *testing.T) {
 	if strings.Index(got, "edge01:") > strings.Index(got, "edge02:") {
 		t.Fatalf("hosts not sorted:\n%s", got)
 	}
-	for _, want := range []string{"group: lab", "edge01:", "hostname: edge01.lab.local", "edge02:", "port: 2222"} {
+	for _, want := range []string{"group: lab", "edge01:", "HostName: edge01.lab.local", "edge02:", "port: 2222"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
 		}
@@ -1092,7 +1322,7 @@ func TestEnsureGroupCreatesMetadataOnlyGroup(t *testing.T) {
 
 func TestEnsureLocalGroupCreatesMissingGroup(t *testing.T) {
 	cfg := &config.Config{}
-	created, err := ensureLocalGroup(cfg, "local/lab", hostPatch{Host: "edge01", HostName: "edge01.lab.local"})
+	created, err := ensureLocalGroup(cfg, "local/lab", hostPatch{Host: "edge01.lab.local"})
 	if err != nil {
 		t.Fatalf("ensureLocalGroup: %v", err)
 	}

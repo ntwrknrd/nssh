@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
@@ -110,10 +111,22 @@ func SelectIndex(title string, options []string, input io.Reader) (int, error) {
 // Confirm shows a yes/no confirmation prompt.
 // Returns the user's choice.
 func Confirm(title string, defaultValue bool) (bool, error) {
+	return ConfirmWithDescription(title, "", defaultValue)
+}
+
+// IsUserAbort reports whether an interactive prompt was canceled by the user.
+func IsUserAbort(err error) bool {
+	return errors.Is(err, huh.ErrUserAborted)
+}
+
+// ConfirmWithDescription shows a yes/no confirmation prompt with optional detail.
+// Returns the user's choice.
+func ConfirmWithDescription(title, description string, defaultValue bool) (bool, error) {
 	var result bool
 
 	confirm := huh.NewConfirm().
 		Title(title).
+		Description(description).
 		Affirmative("Yes").
 		Negative("No").
 		Value(&result)

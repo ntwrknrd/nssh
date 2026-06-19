@@ -75,9 +75,10 @@ func (c *Connector) start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	logOpenSSHCommand(args)
 	c.sshCmd = exec.CommandContext(ctx, "ssh", args...)
 
-	ptyFile, err := pty.Start(c.sshCmd)
+	ptyFile, err := startPTYWithInheritedSize(c.sshCmd)
 	if err != nil {
 		return fmt.Errorf("pty start: %w", err)
 	}
@@ -87,6 +88,20 @@ func (c *Connector) start(ctx context.Context) error {
 	c.propagateWindowSize()
 
 	return nil
+}
+
+func startPTYWithInheritedSize(cmd *exec.Cmd) (*os.File, error) {
+	if isTerminal(os.Stdin.Fd()) {
+		if size, err := pty.GetsizeFull(os.Stdin); err == nil && size.Rows > 0 && size.Cols > 0 {
+			return pty.StartWithSize(cmd, size)
+		}
+	}
+	return pty.Start(cmd)
+}
+
+func logOpenSSHCommand(args []string) {
+	argv := append([]string{"ssh"}, args...)
+	slog.Debug("executing openssh", "argv", argv)
 }
 
 // waitChild waits for the SSH child process and returns an appropriate error.

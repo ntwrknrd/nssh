@@ -48,8 +48,6 @@ This command permanently deletes:
 - Session recordings
 - nssh configuration
 
-SSH config (~/.ssh/) will not be modified.
-
 Use --dry-run to preview what would be deleted.
 Use --force to skip the confirmation prompt (for scripts).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -83,10 +81,6 @@ func runReset(dryRun, force bool) error {
 		ui.Deletion("Session recordings")
 	}
 	ui.Deletion("nssh configuration")
-	fmt.Println()
-
-	// Show what's preserved
-	ui.Info("SSH config (~/.ssh/) will not be modified")
 	fmt.Println()
 
 	// Show directories

@@ -42,6 +42,12 @@ func Reconcile(objects []Object, selectors []config.InventoryGroupSelector, prov
 			host.AuthMode = groupAuthMode(selector.Group, groups)
 			desired[host.ObjectID] = host
 		default:
+			if selector, ok := BestGroupSelectorMatch(obj, matches); ok {
+				host := objectToProviderHost(obj, selector.Group)
+				host.AuthMode = groupAuthMode(selector.Group, groups)
+				desired[host.ObjectID] = host
+				continue
+			}
 			plan.Conflicts = append(plan.Conflicts, GroupConflict{Object: *obj, Groups: selectorGroups(matches)})
 			continue
 		}
@@ -93,8 +99,8 @@ func groupAuthMode(group string, groups map[string]config.GroupConfig) string {
 		}
 		auth := groups[shortGroup].Auth
 		auth.Normalize()
-		if auth.AuthMode != "" {
-			return auth.AuthMode
+		if auth.Mode != "" {
+			return auth.Mode
 		}
 		if auth.PasswordRef != "" {
 			return config.AuthModePassword

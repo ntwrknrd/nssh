@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 )
@@ -35,6 +36,8 @@ type TestConfig struct {
 	// ConfigFile specifies a custom SSH config file to use (-F flag).
 	// If empty, uses the default SSH config.
 	ConfigFile string
+	// SSHOptions specifies nssh-rendered OpenSSH options for probes.
+	SSHOptions config.SSHHostConfig
 }
 
 // buildTestSSHArgs builds SSH arguments for a probe and returns a cleanup
@@ -53,6 +56,8 @@ func buildTestSSHArgs(hostname, username string, cfg TestConfig) ([]string, func
 	// Use custom config file if specified
 	if cfg.ConfigFile != "" {
 		args = append(args, "-F", cfg.ConfigFile)
+	} else if hasSSHOptions(cfg.SSHOptions) {
+		args = append(args, RenderSSHOptions(diagnosticSSHOptions(cfg.SSHOptions), 0)...)
 	}
 
 	if !cfg.UseSystemKnownHosts {
@@ -86,6 +91,25 @@ func buildTestSSHArgs(hostname, username string, cfg TestConfig) ([]string, func
 	args = append(args, target, "--", "exit")
 
 	return args, cleanup, nil
+}
+
+func hasSSHOptions(opts config.SSHHostConfig) bool {
+	return len(RenderSSHOptions(opts, 0)) > 2
+}
+
+func diagnosticSSHOptions(opts config.SSHHostConfig) config.SSHHostConfig {
+	out := opts
+	if len(opts.Options) == 0 {
+		return out
+	}
+	out.Options = make(config.SSHOptions, len(opts.Options))
+	for key, value := range opts.Options {
+		if strings.EqualFold(key, "LogLevel") {
+			continue
+		}
+		out.Options[key] = value
+	}
+	return out
 }
 
 // TestConnection runs a non-interactive SSH connection test.

@@ -32,6 +32,7 @@ type ResolvedCredential struct {
 // connect or run a remote command.
 type ResolvedHost struct {
 	Query       string
+	Canonical   string
 	Hostname    string
 	Port        int
 	Username    string
@@ -140,6 +141,7 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 
 	return &ResolvedHost{
 		Query:      query,
+		Canonical:  hostData.Canonical,
 		Hostname:   hostData.Hostname,
 		Port:       hostData.Port,
 		Username:   username,

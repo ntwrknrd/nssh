@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/recording"
@@ -15,7 +16,7 @@ import (
 
 // maybeWrapWithRecording checks if recording is enabled and wraps the connection.
 // Returns true if recording was started (caller should exit), false to continue normally.
-func maybeWrapWithRecording(hostname string, args []string) (bool, error) {
+func maybeWrapWithRecording(hostname string, args []string, opts Options) (bool, error) {
 	// Check if we're already inside a recording
 	if os.Getenv("NSSH_RECORDING_INNER") == "1" {
 		return false, nil
@@ -49,9 +50,7 @@ func maybeWrapWithRecording(hostname string, args []string) (bool, error) {
 		exe = "nssh"
 	}
 
-	// Build command: nssh <hostname> [args...]
-	innerCmd := []string{exe, hostname}
-	innerCmd = append(innerCmd, args...)
+	innerCmd := recordingInnerCommand(exe, hostname, args, opts)
 
 	// Build asciinema command
 	asciinemaCmd := recording.BuildAsciinemaCommand(plan, innerCmd)
@@ -100,4 +99,14 @@ func maybeWrapWithRecording(hostname string, args []string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func recordingInnerCommand(exe, hostname string, args []string, opts Options) []string {
+	innerCmd := []string{exe}
+	if opts.Verbosity > 0 {
+		innerCmd = append(innerCmd, "-"+strings.Repeat("v", opts.Verbosity))
+	}
+	innerCmd = append(innerCmd, hostname)
+	innerCmd = append(innerCmd, args...)
+	return innerCmd
 }

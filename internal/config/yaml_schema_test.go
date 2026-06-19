@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -24,6 +25,9 @@ inventory:
         token_env: NETBOX_TOKEN
       groups:
         cbb:
+          ssh:
+            options:
+              ProxyJump: bastion
           match:
             domain_suffix: [.expedient.com]
           auth:
@@ -36,16 +40,19 @@ inventory:
           group: cbb
           aliases: [701-sw37]
           ssh:
-            compat: [legacy-kex, legacy-macs]
+            compatibility:
+              kex: diffie-hellman-group14-sha1
+              mac: hmac-sha1
             options:
-              Ciphers: aes256-ctr
+              Ciphers:
+                - aes256-ctr
 ssh:
   defaults:
-    identities_only: true
-    identity_agent:
-      path: ~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock
-    identity_files:
-      - ~/.ssh/ed25519-1Password-Personal.pub
+    options:
+      IdentitiesOnly: true
+      IdentityAgent: ~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock
+      IdentityFile:
+        - ~/.ssh/ed25519-1Password-Personal.pub
 `)
 	cfg, err := Load(path)
 	if err != nil {
@@ -58,7 +65,144 @@ ssh:
 	if got := host.Group; got != "cbb" {
 		t.Fatalf("host group = %q, want cbb", got)
 	}
-	if got := cfg.SSH.Defaults.IdentityAgent.Path; got == "" {
+	if got := cfg.SSH.Defaults.Options["IdentityAgent"].Scalar; got == "" {
 		t.Fatalf("identity agent path not decoded")
+	}
+	if got := cfg.Inventory.Providers["netbox-prod"].Groups["cbb"].SSH.Options["ProxyJump"].Scalar; got != "bastion" {
+		t.Fatalf("group ssh proxy_jump = %q, want bastion", got)
+	}
+}
+
+func TestLegacySSHOptionFieldsAreRejected(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.yaml")
+	writeConfigFile(t, path, `
+ssh:
+  defaults:
+    identity_agent: ~/agent.sock
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load succeeded, want unknown field error")
+	}
+	if !strings.Contains(err.Error(), "field identity_agent not found") {
+		t.Fatalf("Load error = %v, want identity_agent unknown field", err)
+	}
+}
+
+func TestInventoryHostnameFieldIsRejected(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.yaml")
+	writeConfigFile(t, path, `
+inventory:
+  providers:
+    local:
+      type: local
+      groups:
+        lab: {}
+      hosts:
+        edge01:
+          group: lab
+          hostname: edge01.example.com
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load succeeded, want unknown field error")
+	}
+	if !strings.Contains(err.Error(), "field hostname not found") {
+		t.Fatalf("Load error = %v, want hostname unknown field", err)
+	}
+}
+
+func TestInventoryAuthModeFieldIsRejected(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.yaml")
+	writeConfigFile(t, path, `
+inventory:
+  providers:
+    local:
+      type: local
+      groups:
+        lab:
+          auth:
+            auth_mode: password
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load succeeded, want unknown field error")
+	}
+	if !strings.Contains(err.Error(), "field auth_mode not found") {
+		t.Fatalf("Load error = %v, want auth_mode unknown field", err)
+	}
+}
+
+func TestKnownSSHOptionTypesAreValidated(t *testing.T) {
+	tests := []struct {
+		name    string
+		options string
+		wantErr string
+	}{
+		{
+			name: "boolean rejects string",
+			options: `
+      IdentitiesOnly: "yes"
+`,
+			wantErr: "ssh.defaults.options.IdentitiesOnly must be a boolean",
+		},
+		{
+			name: "setenv rejects scalar",
+			options: `
+      SetEnv: TERM=xterm-256color
+`,
+			wantErr: "ssh.defaults.options.SetEnv must be a map",
+		},
+		{
+			name: "identity agent rejects list",
+			options: `
+      IdentityAgent:
+        - ~/agent.sock
+`,
+			wantErr: "ssh.defaults.options.IdentityAgent must be a string",
+		},
+		{
+			name: "unknown option rejects map",
+			options: `
+      VendorOption:
+        nested: value
+`,
+			wantErr: "ssh.defaults.options.VendorOption must be a scalar, boolean, or list",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			path := filepath.Join(tmp, "config.yaml")
+			writeConfigFile(t, path, "ssh:\n  defaults:\n    options:\n"+tt.options)
+			_, err := Load(path)
+			if err == nil {
+				t.Fatal("Load succeeded, want validation error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Load error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestUnknownSSHOptionScalarBoolAndListAreAccepted(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.yaml")
+	writeConfigFile(t, path, `
+ssh:
+  defaults:
+    options:
+      VendorScalar: value
+      VendorBool: true
+      VendorList:
+        - one
+        - two
+`)
+	if _, err := Load(path); err != nil {
+		t.Fatalf("Load: %v", err)
 	}
 }

@@ -6,9 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -72,10 +70,40 @@ func SaveInventoryGroupAndHostAuth(path string, cfg *Config, groupID, host strin
 	return saveRootTable(path, hostRoot)
 }
 
+func SaveInventoryProviderHost(path string, cfg *Config, providerName, host string) error {
+	if cfg == nil {
+		return fmt.Errorf("config is required")
+	}
+	targetPath, err := inventoryProviderHostSavePath(path, cfg, providerName)
+	if err != nil {
+		return err
+	}
+	root, err := rootTableForPath(path, cfg, targetPath)
+	if err != nil {
+		return err
+	}
+	if err := setInventoryProviderHostInRoot(root, cfg, providerName, host); err != nil {
+		return err
+	}
+	return saveInventoryProviderTable(targetPath, root)
+}
+
 func inventoryGroupSavePath(rootPath string, cfg *Config, groupID string) (string, error) {
 	providerName, _, err := ParseInventoryGroupID(groupID)
 	if err != nil {
 		return "", err
+	}
+	if cfg != nil {
+		if source := cfg.InventoryProviderSource(providerName); source != "" {
+			return source, nil
+		}
+	}
+	return rootPath, nil
+}
+
+func inventoryProviderHostSavePath(rootPath string, cfg *Config, providerName string) (string, error) {
+	if strings.TrimSpace(providerName) == "" {
+		return "", fmt.Errorf("inventory provider is required")
 	}
 	if cfg != nil {
 		if source := cfg.InventoryProviderSource(providerName); source != "" {
@@ -147,6 +175,16 @@ func inventoryProviderGroupPath(root map[string]any, providerName, groupName str
 	return []string{"inventory", "provider", providerName, "group", groupName}
 }
 
+func inventoryProviderHostPath(root map[string]any, providerName, host string) []string {
+	if tablePathDefined(root, "inventory", "providers", providerName) || tablePathDefined(root, "inventory", "providers") {
+		return []string{"inventory", "providers", providerName, "hosts", host}
+	}
+	if tablePathDefined(root, "provider", providerName) && !tablePathDefined(root, "inventory", "provider", providerName) {
+		return []string{"provider", providerName, "host", host}
+	}
+	return []string{"inventory", "provider", providerName, "host", host}
+}
+
 func inventoryHostPath(root map[string]any, host string) []string {
 	if tablePathDefined(root, "inventory", "hosts", host) || tablePathDefined(root, "inventory", "hosts") {
 		return []string{"inventory", "hosts", host}
@@ -158,60 +196,7 @@ func inventoryHostPath(root map[string]any, host string) []string {
 }
 
 func saveInventoryProviderTable(path string, table map[string]any) error {
-	if !isInventoryScopedTable(table) {
-		return saveRootTable(path, table)
-	}
-	stripLegacyIdentityKeys(table)
-	text, err := marshalInventoryScopedTable(table)
-	if err != nil {
-		return err
-	}
-	return writeConfigText(path, text)
-}
-
-func isInventoryScopedTable(table map[string]any) bool {
-	if tablePathDefined(table, "provider") && !tablePathDefined(table, "inventory", "provider") {
-		return true
-	}
-	return tablePathDefined(table, "host") && !tablePathDefined(table, "inventory", "host")
-}
-
-func marshalInventoryScopedTable(table map[string]any) (string, error) {
-	var b bytes.Buffer
-	writeRootScalars(&b, table)
-	hosts, _ := asMap(table["host"])
-	for _, name := range sortedMapKeys(hosts) {
-		path := "host." + name
-		host, _ := asMap(hosts[name])
-		writeTableHeader(&b, path)
-		writeOptionIfPresent(&b, path, host, "auth_disabled")
-		writeInlineMapIfPresent(&b, path, host, "auth")
-	}
-	providers, _ := asMap(table["provider"])
-	for _, name := range sortedMapKeys(providers) {
-		path := "provider." + name
-		provider, _ := asMap(providers[name])
-		writeTableHeader(&b, path)
-		writeOptionIfPresent(&b, path, provider, "type")
-		writeInlineMapIfPresent(&b, path, provider, "auth")
-		writeInlineMapIfPresent(&b, path, provider, "config")
-		groups, _ := asMap(provider["group"])
-		for _, groupName := range sortedMapKeys(groups) {
-			groupPath := path + ".group." + groupName
-			group, _ := asMap(groups[groupName])
-			writeTableHeader(&b, groupPath)
-			writeOptionIfPresent(&b, groupPath, group, "domain_suffix")
-			writeInlineMapIfPresent(&b, groupPath, group, "auth")
-			if match, ok := asMap(group["match"]); ok && len(match) > 0 {
-				matchPath := groupPath + ".match"
-				writeTableHeader(&b, matchPath)
-				for _, key := range sortedMapKeys(match) {
-					writeOption(&b, matchPath, key, match[key])
-				}
-			}
-		}
-	}
-	return strings.TrimRight(b.String(), "\n") + "\n", nil
+	return saveRootTable(path, table)
 }
 
 func SaveInventoryHostAuth(path string, cfg *Config, host string) error {
@@ -235,13 +220,9 @@ func InventoryHostAuthConfigText(path string, cfg *Config, host string) (string,
 	if err != nil {
 		return "", err
 	}
-	var b bytes.Buffer
-	hostPath := strings.Join(inventoryHostPath(root, host), ".")
-	hostTable := inventoryHostTable(hostCfg)
-	writeTableHeader(&b, hostPath)
-	writeRawOptionIfPresent(&b, hostTable, "auth_disabled")
-	writeRawOptionIfPresent(&b, hostTable, "auth")
-	return strings.TrimRight(b.String(), "\n") + "\n", nil
+	out := make(map[string]any)
+	setMapPath(out, inventoryHostPath(root, host), inventoryHostTable(hostCfg))
+	return marshalConfigTable(out)
 }
 
 func DeleteInventoryHostAuth(path string, cfg *Config, host string) error {
@@ -273,6 +254,23 @@ func setInventoryHostAuthInRoot(root map[string]any, path string, cfg *Config, h
 	return nil
 }
 
+func setInventoryProviderHostInRoot(root map[string]any, cfg *Config, providerName, host string) error {
+	providerCfg, ok := cfg.Inventory.Provider[providerName]
+	if !ok {
+		providerCfg, ok = cfg.Inventory.Providers[providerName]
+	}
+	if !ok {
+		return fmt.Errorf("inventory provider %q is not configured", providerName)
+	}
+	providerCfg.syncAliasFields()
+	hostCfg, ok := providerCfg.Hosts[host]
+	if !ok {
+		return fmt.Errorf("inventory provider %q host %q is not configured", providerName, host)
+	}
+	setMapPath(root, inventoryProviderHostPath(root, providerName, host), inventoryHostTable(hostCfg))
+	return nil
+}
+
 func InventoryGroupConfigText(path string, cfg *Config, groupID string) (string, error) {
 	if cfg == nil {
 		return "", fmt.Errorf("config is required")
@@ -290,20 +288,9 @@ func InventoryGroupConfigText(path string, cfg *Config, groupID string) (string,
 	if err != nil {
 		return "", err
 	}
-	var b bytes.Buffer
-	groupPath := strings.Join(inventoryProviderGroupPath(root, providerName, groupName), ".")
-	group := groupTable(groupCfg)
-	writeTableHeader(&b, groupPath)
-	writeRawOptionIfPresent(&b, group, "domain_suffix")
-	writeRawOptionIfPresent(&b, group, "auth")
-	if match, ok := asMap(group["match"]); ok && len(match) > 0 {
-		matchPath := groupPath + ".match"
-		writeTableHeader(&b, matchPath)
-		for _, key := range sortedMapKeys(match) {
-			writeRawOption(&b, key, match[key])
-		}
-	}
-	return strings.TrimRight(b.String(), "\n") + "\n", nil
+	out := make(map[string]any)
+	setMapPath(out, inventoryProviderGroupPath(root, providerName, groupName), groupTable(groupCfg))
+	return marshalConfigTable(out)
 }
 
 func DeleteInventoryGroup(path string, cfg *Config, groupID string) error {
@@ -513,13 +500,16 @@ func groupTable(cfg GroupConfig) map[string]any {
 	if len(cfg.Match) > 0 {
 		table["match"] = inventoryMatchTable(cfg.Match)
 	}
+	ssh := sshHostTable(cfg.SSH)
+	if len(ssh) > 0 {
+		table["ssh"] = ssh
+	}
 	return table
 }
 
 func inventoryHostTable(cfg InventoryHostConfig) map[string]any {
 	table := make(map[string]any)
 	addString(table, "group", cfg.Group)
-	addString(table, "hostname", cfg.Hostname)
 	if len(cfg.Aliases) > 0 {
 		table["aliases"] = cfg.Aliases
 	}
@@ -547,7 +537,7 @@ func authTable(cfg InventoryAuthConfig) map[string]any {
 	addString(table, "password_ref", cfg.PasswordRef)
 	addString(table, "username", cfg.Username)
 	addString(table, "username_ref", cfg.UsernameRef)
-	addString(table, "mode", cfg.AuthMode)
+	addString(table, "mode", cfg.Mode)
 	return table
 }
 
@@ -711,67 +701,16 @@ func sshTable(cfg SSHConfig) map[string]any {
 
 func sshHostTable(cfg SSHHostConfig) map[string]any {
 	table := make(map[string]any)
-	addString(table, "proxy_jump", cfg.ProxyJump)
-	addString(table, "proxy_command", cfg.ProxyCommand)
-	if cfg.IdentitiesOnly != nil {
-		table["identities_only"] = *cfg.IdentitiesOnly
+	compatibility := make(map[string]any)
+	addString(compatibility, "kex", cfg.Compatibility.Kex)
+	addString(compatibility, "mac", cfg.Compatibility.MAC)
+	addString(compatibility, "host_key", cfg.Compatibility.HostKey)
+	addString(compatibility, "public_key", cfg.Compatibility.PublicKey)
+	if len(compatibility) > 0 {
+		table["compatibility"] = compatibility
 	}
-	if cfg.IdentityAgent.Path != "" {
-		table["identity_agent"] = map[string]any{"path": cfg.IdentityAgent.Path}
-	}
-	if len(cfg.IdentityFiles) > 0 {
-		table["identity_files"] = cfg.IdentityFiles
-	}
-	if len(cfg.CertificateFiles) > 0 {
-		table["certificate_files"] = cfg.CertificateFiles
-	}
-	if cfg.ForwardAgent != nil {
-		table["forward_agent"] = *cfg.ForwardAgent
-	}
-	if len(cfg.LocalForwards) > 0 {
-		table["local_forwards"] = cfg.LocalForwards
-	}
-	if len(cfg.RemoteForwards) > 0 {
-		table["remote_forwards"] = cfg.RemoteForwards
-	}
-	if len(cfg.SetEnv) > 0 {
-		table["set_env"] = cfg.SetEnv
-	}
-	addString(table, "remote_command", cfg.RemoteCommand)
-	if cfg.ServerAliveInterval.Duration() > 0 {
-		table["server_alive_interval"] = cfg.ServerAliveInterval.Duration().String()
-	}
-	if cfg.ServerAliveCountMax > 0 {
-		table["server_alive_count_max"] = cfg.ServerAliveCountMax
-	}
-	if cfg.ConnectionTimeout.Duration() > 0 {
-		table["connection_timeout"] = cfg.ConnectionTimeout.Duration().String()
-	}
-	addString(table, "control_master", cfg.ControlMaster)
-	if cfg.ControlPersist.Duration() > 0 {
-		table["control_persist"] = cfg.ControlPersist.Duration().String()
-	}
-	addString(table, "control_path", cfg.ControlPath)
-	if len(cfg.Ciphers) > 0 {
-		table["ciphers"] = cfg.Ciphers
-	}
-	if len(cfg.MACs) > 0 {
-		table["macs"] = cfg.MACs
-	}
-	if len(cfg.KexAlgorithms) > 0 {
-		table["kex_algorithms"] = cfg.KexAlgorithms
-	}
-	if len(cfg.HostKeyAlgorithms) > 0 {
-		table["host_key_algorithms"] = cfg.HostKeyAlgorithms
-	}
-	if len(cfg.PubkeyAcceptedAlgorithms) > 0 {
-		table["pubkey_accepted_algorithms"] = cfg.PubkeyAcceptedAlgorithms
-	}
-	if len(cfg.Compat) > 0 {
-		table["compat"] = cfg.Compat
-	}
-	if len(cfg.Options) > 0 {
-		table["options"] = cfg.Options
+	if options := cfg.Options; len(options) > 0 {
+		table["options"] = options
 	}
 	return table
 }
@@ -793,373 +732,6 @@ func marshalConfigTable(table map[string]any) (string, error) {
 		return "", err
 	}
 	return strings.TrimRight(b.String(), "\n") + "\n", nil
-}
-
-func writeRootScalars(b *bytes.Buffer, table map[string]any) {
-	if include, ok := table["include"]; ok {
-		writeOption(b, "", "include", include)
-		b.WriteString("\n")
-	}
-}
-
-func writeKnownSections(b *bytes.Buffer, table map[string]any) {
-	writeSimpleTable(b, table, "agent")
-	writeCredential(b, table)
-	writeInventory(b, table)
-	writeLogging(b, table)
-	writeSSH(b, table)
-}
-
-func writeSimpleTable(b *bytes.Buffer, parent map[string]any, name string) {
-	table, ok := asMap(parent[name])
-	if !ok || len(table) == 0 {
-		return
-	}
-	writeTableHeader(b, name)
-	for _, key := range orderedKeys(table, optionOrder(name)) {
-		if isNestedValue(table[key]) {
-			continue
-		}
-		writeOption(b, name, key, table[key])
-	}
-}
-
-func writeCredential(b *bytes.Buffer, root map[string]any) {
-	credential, ok := asMap(root["credential"])
-	if !ok || len(credential) == 0 {
-		return
-	}
-	writeTableHeader(b, "credential")
-	for _, key := range []string{"include"} {
-		if value, ok := credential[key]; ok {
-			writeOption(b, "credential", key, value)
-		}
-	}
-	providers, _ := asMap(credential["provider"])
-	for _, name := range sortedMapKeys(providers) {
-		path := "credential.provider." + name
-		provider, _ := asMap(providers[name])
-		writeTableHeader(b, path)
-		writeOptionIfPresent(b, path, provider, "type")
-		if cfg, ok := asMap(provider["config"]); ok && len(cfg) > 0 {
-			cfgPath := path + ".config"
-			writeTableHeader(b, cfgPath)
-			for _, key := range orderedKeys(cfg, optionOrder(cfgPath)) {
-				writeOption(b, cfgPath, key, cfg[key])
-			}
-		}
-	}
-}
-
-func writeInventory(b *bytes.Buffer, root map[string]any) {
-	inventory, ok := asMap(root["inventory"])
-	if !ok || len(inventory) == 0 {
-		return
-	}
-	writeTableHeader(b, "inventory")
-	for _, key := range []string{"include"} {
-		if value, ok := inventory[key]; ok {
-			writeOption(b, "inventory", key, value)
-		}
-	}
-	writeInlineMapIfPresent(b, "inventory", inventory, "auth")
-	hosts, _ := asMap(inventory["host"])
-	for _, name := range sortedMapKeys(hosts) {
-		path := "inventory.host." + name
-		host, _ := asMap(hosts[name])
-		writeTableHeader(b, path)
-		writeOptionIfPresent(b, path, host, "auth_disabled")
-		writeInlineMapIfPresent(b, path, host, "auth")
-	}
-	providers, _ := asMap(inventory["provider"])
-	for _, name := range sortedMapKeys(providers) {
-		path := "inventory.provider." + name
-		provider, _ := asMap(providers[name])
-		writeTableHeader(b, path)
-		writeOptionIfPresent(b, path, provider, "type")
-		writeInlineMapIfPresent(b, path, provider, "auth")
-		writeInlineMapIfPresent(b, path, provider, "config")
-		groups, _ := asMap(provider["group"])
-		for _, groupName := range sortedMapKeys(groups) {
-			groupPath := path + ".group." + groupName
-			group, _ := asMap(groups[groupName])
-			writeTableHeader(b, groupPath)
-			writeOptionIfPresent(b, groupPath, group, "domain_suffix")
-			writeInlineMapIfPresent(b, groupPath, group, "auth")
-			if match, ok := asMap(group["match"]); ok && len(match) > 0 {
-				matchPath := groupPath + ".match"
-				writeTableHeader(b, matchPath)
-				for _, key := range sortedMapKeys(match) {
-					writeOption(b, matchPath, key, match[key])
-				}
-			}
-		}
-	}
-}
-
-func writeLogging(b *bytes.Buffer, root map[string]any) {
-	logging, ok := asMap(root["logging"])
-	if !ok {
-		return
-	}
-	for _, section := range []string{"audit", "session"} {
-		table, ok := asMap(logging[section])
-		if !ok || len(table) == 0 {
-			continue
-		}
-		path := "logging." + section
-		writeTableHeader(b, path)
-		for _, key := range orderedKeys(table, optionOrder(path)) {
-			if key == "archive" {
-				continue
-			}
-			writeOption(b, path, key, table[key])
-		}
-		if archive, ok := asMap(table["archive"]); ok && len(archive) > 0 {
-			archivePath := path + ".archive"
-			writeTableHeader(b, archivePath)
-			for _, key := range orderedKeys(archive, optionOrder(archivePath)) {
-				writeOption(b, archivePath, key, archive[key])
-			}
-		}
-	}
-}
-
-func writeSSH(b *bytes.Buffer, root map[string]any) {
-	ssh, ok := asMap(root["ssh"])
-	if !ok {
-		return
-	}
-	for _, section := range []string{"connection", "security"} {
-		table, ok := asMap(ssh[section])
-		if !ok || len(table) == 0 {
-			continue
-		}
-		path := "ssh." + section
-		writeTableHeader(b, path)
-		for _, key := range orderedKeys(table, optionOrder(path)) {
-			writeOption(b, path, key, table[key])
-		}
-	}
-}
-
-func writeTableHeader(b *bytes.Buffer, path string) {
-	if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n\n") {
-		b.WriteString("\n")
-	}
-	fmt.Fprintf(b, "[%s]\n", path)
-}
-
-func writeArrayTableHeader(b *bytes.Buffer, path string) {
-	if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n\n") {
-		b.WriteString("\n")
-	}
-	fmt.Fprintf(b, "[[%s]]\n", path)
-}
-
-func writeOptionIfPresent(b *bytes.Buffer, path string, table map[string]any, key string) {
-	if value, ok := table[key]; ok {
-		writeOption(b, path, key, value)
-	}
-}
-
-func writeInlineMapIfPresent(b *bytes.Buffer, path string, table map[string]any, key string) {
-	value, ok := asMap(table[key])
-	if !ok || len(value) == 0 {
-		return
-	}
-	writeOption(b, path, key, value)
-}
-
-func writeRawOptionIfPresent(b *bytes.Buffer, table map[string]any, key string) {
-	if value, ok := table[key]; ok {
-		writeRawOption(b, key, value)
-	}
-}
-
-func writeRawOption(b *bytes.Buffer, key string, value any) {
-	fmt.Fprintf(b, "%s = %s\n", key, formatTOMLValue(value))
-}
-
-func writeOption(b *bytes.Buffer, path, key string, value any) {
-	for _, line := range optionComment(path, key) {
-		fmt.Fprintf(b, "# %s\n", line)
-	}
-	fmt.Fprintf(b, "%s = %s\n\n", key, formatTOMLValue(value))
-}
-
-func optionComment(path, key string) []string {
-	comments := map[string][]string{
-		"include":                                {"Import shared or modular config before applying this file's local overrides.", `Common value: ["conf.d/base.yaml"] or ["inventory/*.yaml"].`},
-		"agent.auto_start":                       {"Start the nssh runtime agent on first provider-session request.", "Common value: true."},
-		"agent.idle_timeout":                     {"How long the nssh runtime agent can sit idle before exiting.", `Common value: "1h" for default use, "4h" for a longer work session.`},
-		"agent.activity_increment":               {"How much activity extends the idle deadline, capped by idle_timeout.", `Common value: "15m" or "30m".`},
-		"agent.max_lifetime":                     {"Hard maximum runtime for the agent even if it remains active.", `Common value: "8h" for a workday, "24h" for default behavior.`},
-		"credential.include":                     {"Import credential provider definitions under [credential].", `Common value: ["credentials/*.yaml"].`},
-		"credential.provider.type":               {"Credential backend type.", `Acceptable values: "pass", "1password", "bitwarden".`},
-		"credential.provider.config.account":     {"1Password account shorthand passed to op when needed.", `Common value: "" or your 1Password account name.`},
-		"credential.provider.config.vault":       {"1Password vault containing SSH credential items.", `Common value: "Network" or "TeamVault".`},
-		"credential.provider.config.command":     {"Credential CLI command for pass-compatible providers.", `Common value: "pass".`},
-		"credential.provider.config.prefix":      {"Password-store path prefix for nssh-managed entries.", `Common value: "nssh".`},
-		"credential.provider.config.session":     {"Provider session handling mode.", `Acceptable values: "external", "agent", "none".`},
-		"inventory.include":                      {"Import inventory providers and provider-owned groups under [inventory].", `Common value: ["inventory/*.yaml"].`},
-		"inventory.provider.group.domain_suffix": {"Legacy group domain suffix metadata.", `Prefer inventory.provider.<provider>.group.<group>.match.domain_suffix for group selection.`},
-		"inventory.auth":                         {"Default nssh-owned SSH identity and auth routing.", `Common keys: username, username_ref, credential_provider, password_ref, auth_mode.`, "Use username_ref when treating the SSH username as sensitive; it costs an extra provider call, so time to first prompt is slower."},
-		"inventory.provider.group.auth":          {"Provider group nssh-owned SSH identity and auth routing.", `Common keys: username, username_ref, credential_provider, password_ref, auth_mode.`, "Use username_ref when treating the SSH username as sensitive; it costs an extra provider call, so time to first prompt is slower."},
-		"inventory.provider.group.match":         {"Select provider objects or local hosts into this inventory group.", "Common values: domain_suffix, manufacturer, tenant."},
-		"inventory.host.auth_disabled":           {"Disable inherited stored credentials for this host.", "Common value: true for public-key-only or manually prompted hosts."},
-		"inventory.host.auth":                    {"Host nssh-owned SSH identity and auth routing override.", "Common value: provider plus a stable provider item reference."},
-		"inventory.provider.type":                {"Inventory provider type.", `Acceptable values: "local", "netbox", "containerlab".`},
-		"inventory.provider.config":              {"Inventory provider connection settings.", "Common value: environment-backed URL/token so secrets are not stored in config."},
-		"logging.audit.enabled":                  {"Enable security event logging.", "Common value: true."},
-		"logging.audit.max_size":                 {"Maximum audit log size before rotation.", `Common value: "10MB".`},
-		"logging.session.enabled":                {"Record SSH sessions automatically.", "Common value: true for audit-heavy workflows, false to disable."},
-		"logging.session.append_mode":            {"Append sessions to a daily cast file instead of separate files.", "Common value: true."},
-		"logging.session.asciinema_server_url":   {"Custom asciinema upload server URL.", `Common value: "https://asciinema.org".`},
-		"logging.session.dir":                    {"Directory for session recording files.", `Common value: "~/.local/state/nssh/casts".`},
-		"logging.session.exclude_hosts":          {"Host patterns that should never be recorded.", `Common value: ["lab-*", "regex:.*-mgmt$"].`},
-		"logging.session.idle_time_limit":        {"Cap long pauses in recordings, in seconds.", "Common value: 0 to disable."},
-		"logging.session.idle_time_limit_mode":   {"When to apply idle time limiting.", `Acceptable values: "play", "record", "both".`},
-		"logging.session.include_hosts":          {"Host patterns that should be recorded, taking precedence over excludes.", `Common value: ["prod-*"].`},
-		"logging.session.title_format":           {"Recording title template.", `Common value: "nssh:{host}".`},
-		"logging.session.window_size":            {"Fixed terminal size used for recordings.", `Common value: "145x30" or "100x30".`},
-		"logging.session.auto_export_txt":        {"Export a plain-text copy of each recording after the session ends.", "Common value: true if recordings are searched often."},
-		"logging.session.archive.dir":            {"Directory for monthly recording archives.", `Default value: "~/.local/state/nssh/archives".`},
-		"logging.session.archive.enabled":        {"Enable automatic archival of old session recordings.", "Common value: false."},
-		"logging.session.archive.jitter":         {"Randomize archive schedule timing.", `Common value: "30m".`},
-		"logging.session.archive.max_bundles":    {"Maximum monthly archive bundles to retain.", "Common value: 12."},
-		"logging.session.archive.max_run_bytes":  {"Maximum bytes to process per archive maintenance run.", "Common value: 0 for unlimited."},
-		"logging.session.archive.min_age":        {"Minimum recording age before archival.", `Common value: "720h" for about 30 days.`},
-		"ssh.connection.idle_timeout":            {"Disconnect SSH after inactivity.", `Common value: "0s" to disable.`},
-		"ssh.connection.password_timeout":        {"How long to wait for an SSH password prompt.", `Common value: "10s".`},
-		"ssh.connection.timeout":                 {"Overall SSH connection timeout.", `Common value: "30s".`},
-		"ssh.security.accept_once_mode":          {"Accept-once host key behavior.", `Acceptable values: "pin", "accept-new".`},
-		"ssh.security.compat_persist_probes":     {"Allow compatibility probes to write to real known_hosts.", "Common value: false unless using TOFU mode."},
-		"ssh.security.host_key_policy":           {"Host key behavior preset. \"pin\" is stricter; \"tofu\" accepts first use.", `Common value: "pin" for strict mode, "tofu" for lab/internal gear.`},
-	}
-	keyPath := commentPath(path, key)
-	if comment, ok := comments[keyPath]; ok {
-		return comment
-	}
-	if strings.Contains(keyPath, ".provider.") && strings.Contains(keyPath, ".match.") {
-		return comments["inventory.provider.group.match"]
-	}
-	return []string{"nssh configuration option.", "Use the documented type for this field."}
-}
-
-func commentPath(path, key string) string {
-	full := key
-	if path != "" {
-		full = path + "." + key
-	}
-	parts := strings.Split(full, ".")
-	if len(parts) >= 4 && parts[0] == "credential" && parts[1] == "provider" {
-		parts = append([]string{"credential", "provider"}, parts[3:]...)
-	}
-	if len(parts) >= 4 && parts[0] == "inventory" && parts[1] == "host" {
-		parts = append([]string{"inventory", "host"}, parts[3:]...)
-	}
-	if len(parts) >= 4 && parts[0] == "inventory" && parts[1] == "provider" {
-		if len(parts) >= 6 && parts[3] == "group" {
-			parts = append([]string{"inventory", "provider", "group"}, parts[5:]...)
-		} else {
-			parts = append([]string{"inventory", "provider"}, parts[3:]...)
-		}
-	}
-	return strings.Join(parts, ".")
-}
-
-func formatTOMLValue(value any) string {
-	switch typed := value.(type) {
-	case string:
-		return strconv.Quote(typed)
-	case bool:
-		if typed {
-			return "true"
-		}
-		return "false"
-	case int:
-		return strconv.Itoa(typed)
-	case int64:
-		return strconv.FormatInt(typed, 10)
-	case float64:
-		return strconv.FormatFloat(typed, 'f', -1, 64)
-	case Duration:
-		return strconv.Quote(time.Duration(typed).String())
-	case []string:
-		items := make([]string, 0, len(typed))
-		for _, item := range typed {
-			items = append(items, strconv.Quote(item))
-		}
-		return "[" + strings.Join(items, ", ") + "]"
-	case []any:
-		items := make([]string, 0, len(typed))
-		for _, item := range typed {
-			items = append(items, formatTOMLValue(item))
-		}
-		return "[" + strings.Join(items, ", ") + "]"
-	case map[string]any:
-		keys := sortedMapKeys(typed)
-		items := make([]string, 0, len(keys))
-		for _, key := range keys {
-			items = append(items, key+" = "+formatTOMLValue(typed[key]))
-		}
-		return "{ " + strings.Join(items, ", ") + " }"
-	default:
-		return strconv.Quote(fmt.Sprint(value))
-	}
-}
-
-func orderedKeys(table map[string]any, preferred []string) []string {
-	seen := make(map[string]bool)
-	out := make([]string, 0, len(table))
-	for _, key := range preferred {
-		if _, ok := table[key]; ok {
-			out = append(out, key)
-			seen[key] = true
-		}
-	}
-	rest := make([]string, 0, len(table))
-	for key := range table {
-		if !seen[key] {
-			rest = append(rest, key)
-		}
-	}
-	sort.Strings(rest)
-	return append(out, rest...)
-}
-
-func optionOrder(path string) []string {
-	switch path {
-	case "agent":
-		return []string{"auto_start", "idle_timeout", "activity_increment", "max_lifetime"}
-	case "logging.audit":
-		return []string{"enabled", "max_size"}
-	case "logging.session":
-		return []string{"enabled", "append_mode", "dir", "asciinema_server_url", "exclude_hosts", "include_hosts", "idle_time_limit", "idle_time_limit_mode", "title_format", "window_size", "auto_export_txt", "archive"}
-	case "logging.session.archive":
-		return []string{"enabled", "dir", "jitter", "max_bundles", "max_run_bytes", "min_age"}
-	case "ssh.connection":
-		return []string{"idle_timeout", "password_timeout", "timeout"}
-	case "ssh.security":
-		return []string{"accept_once_mode", "compat_persist_probes", "host_key_policy"}
-	default:
-		if strings.HasSuffix(path, ".config") {
-			return []string{"account", "vault", "command", "prefix", "session", "base_url", "url_env", "token_env", "env_file", "jump_host", "sudo", "strict_host_key_checking"}
-		}
-		return nil
-	}
-}
-
-func isNestedValue(value any) bool {
-	switch typed := value.(type) {
-	case map[string]any:
-		return len(typed) > 0
-	case []any:
-		return len(typed) > 0
-	default:
-		return false
-	}
 }
 
 func sortedCredentialProviders(in map[string]CredentialProviderConfig) []string {

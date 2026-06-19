@@ -36,3 +36,24 @@ func TestRefreshTargetAcceptsLocalAndConfiguredProvider(t *testing.T) {
 		}
 	}
 }
+
+func TestRefreshProviderCachesReportsConfiguredProviderNames(t *testing.T) {
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Provider: map[string]config.InventoryProviderConfig{
+			"local":       {Type: config.ProviderLocal},
+			"netbox-prod": {Type: "unsupported"},
+		},
+	}}
+
+	var statuses []string
+	results := refreshProviderCachesWithProgress(cfg, "", func(status string) {
+		statuses = append(statuses, status)
+	})
+
+	if got := statuses; len(got) != 1 || got[0] != "Refreshing netbox-prod" {
+		t.Fatalf("statuses = %#v, want %#v", got, []string{"Refreshing netbox-prod"})
+	}
+	if result := results["netbox-prod"]; !strings.HasPrefix(result, "error: unsupported provider") {
+		t.Fatalf("netbox-prod result = %q, want unsupported provider error", result)
+	}
+}

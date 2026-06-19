@@ -34,7 +34,7 @@ type Connector struct {
 
 	passwordMu sync.Mutex
 
-	ptyFile *os.File  // PTY master from creack/pty.Start()
+	ptyFile *os.File  // PTY master for the ssh child
 	sshCmd  *exec.Cmd // SSH child process
 
 	ringBuf        *RingBuffer
@@ -93,6 +93,15 @@ func (c *Connector) SetSSHOptions(opts config.SSHHostConfig) {
 
 func (c *Connector) SetSSHVerbosity(level int) {
 	c.sshVerbosity = level
+}
+
+func (c *Connector) LastOutput() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.ringBuf == nil {
+		return ""
+	}
+	return string(c.ringBuf.LinearBytes())
 }
 
 // SetAcceptOnceMode configures how AcceptOnce handles host keys: "pin" (default)

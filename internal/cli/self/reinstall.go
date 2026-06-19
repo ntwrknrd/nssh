@@ -1,12 +1,15 @@
 package self
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/ui"
@@ -51,25 +54,29 @@ To reinitialize credentials, use 'nssh self rekey' or 'nssh self reset'.`,
 }
 
 func runReinstallRelease(release string) error {
-
-	// Run install script from GitHub
-	ui.SubSection("Download and Install")
-	ui.Info("Fetching latest release from GitHub...")
-
 	shellCmd, err := installShellCommand(release)
 	if err != nil {
 		return err
 	}
 
-	// Use sh -c to pipe curl output to sh
-	installCmd := exec.Command("sh", "-c", shellCmd)
-	installCmd.Stdout = os.Stdout
-	installCmd.Stderr = os.Stderr
-
-	if err := installCmd.Run(); err != nil {
-		ui.Error("Installation failed: %v", err)
+	result, err := runInstallerWithEvents(shellCmd)
+	if err != nil {
+		if result.Output != "" {
+			fmt.Fprint(os.Stderr, result.Output)
+		}
+		if result.Errors != "" {
+			fmt.Fprint(os.Stderr, result.Errors)
+		}
+		fmt.Fprintf(os.Stderr, "Install failed: %v\n", err)
 		return &exit.ExitError{Code: 1}
 	}
+	if result.Path == "" {
+		result.Path = filepath.Join(homeDir(), ".local", "bin", "nssh")
+	}
+	if result.Version == "" {
+		result.Version = "unknown"
+	}
+	fmt.Printf("Installed %s (%s)\n", AbbreviatePath(result.Path), result.Version)
 
 	// Check if ~/.local/bin is on PATH
 	installDir := filepath.Join(homeDir(), ".local", "bin")
@@ -89,10 +96,115 @@ func installShellCommand(release string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if release == "" {
-		return fmt.Sprintf("curl -fsSL %s | sh", installScriptURL), nil
+	if script := localInstallScript(); script != "" {
+		if release == "" {
+			return fmt.Sprintf("sh %s --events", shellQuote(script)), nil
+		}
+		return fmt.Sprintf("sh %s --events --release %s", shellQuote(script), release), nil
 	}
-	return fmt.Sprintf("curl -fsSL %s | sh -s -- --release %s", installScriptURL, release), nil
+	if release == "" {
+		return fmt.Sprintf("curl -fsSL %s | sh -s -- --events", installScriptURL), nil
+	}
+	return fmt.Sprintf("curl -fsSL %s | sh -s -- --events --release %s", installScriptURL, release), nil
+}
+
+func localInstallScript() string {
+	projectRoot := FindProjectRoot()
+	if projectRoot == "" {
+		return ""
+	}
+	script := filepath.Join(projectRoot, "scripts", "install.sh")
+	if FileExists(script) {
+		return script
+	}
+	return ""
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+type installerResult struct {
+	Version string
+	Path    string
+	Output  string
+	Errors  string
+}
+
+func runInstallerWithEvents(shellCmd string) (installerResult, error) {
+	var result installerResult
+	var stdoutText strings.Builder
+	var stderrText strings.Builder
+
+	err := ui.RunWithStatusSpinner("Installing nssh", func(update func(string)) error {
+		installCmd := exec.Command("sh", "-c", shellCmd)
+		stdout, err := installCmd.StdoutPipe()
+		if err != nil {
+			return err
+		}
+		stderr, err := installCmd.StderrPipe()
+		if err != nil {
+			return err
+		}
+		if err := installCmd.Start(); err != nil {
+			return err
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = io.Copy(&stderrText, stderr)
+		}()
+
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			kind, data, ok := parseInstallEvent(line)
+			if !ok {
+				stdoutText.WriteString(line)
+				stdoutText.WriteByte('\n')
+				continue
+			}
+			switch kind {
+			case "status":
+				update(data)
+			case "version":
+				result.Version = data
+			case "path":
+				result.Path = data
+			}
+		}
+		scanErr := scanner.Err()
+		waitErr := installCmd.Wait()
+		wg.Wait()
+		if scanErr != nil && waitErr == nil {
+			return scanErr
+		}
+		return waitErr
+	})
+
+	result.Output = stdoutText.String()
+	result.Errors = stderrText.String()
+	return result, err
+}
+
+func parseInstallEvent(line string) (string, string, bool) {
+	event, data, ok := strings.Cut(line, "\t")
+	if !ok {
+		return "", "", false
+	}
+	data = strings.TrimSpace(data)
+	switch event {
+	case "NSSH_INSTALL_STATUS":
+		return "status", data, true
+	case "NSSH_INSTALL_VERSION":
+		return "version", data, true
+	case "NSSH_INSTALL_PATH":
+		return "path", data, true
+	default:
+		return "", "", false
+	}
 }
 
 func normalizeRelease(release string) (string, error) {
@@ -120,10 +232,8 @@ func runReinstallDev() error {
 		fmt.Println("The directory must contain a go.mod file.")
 		return &exit.ExitError{Code: 1}
 	}
-	ui.Info("Project root: %s", AbbreviatePath(projectRoot))
 
 	// Build and install to ~/.local/bin
-	ui.SubSection("Build")
 	installDir := filepath.Join(homeDir(), ".local", "bin")
 	binPath := filepath.Join(installDir, "nssh")
 
@@ -132,17 +242,22 @@ func runReinstallDev() error {
 		return &exit.ExitError{Code: 1}
 	}
 
-	ui.Info("Building nssh...")
-	buildCmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", binPath, "./cmd/nssh")
-	buildCmd.Dir = projectRoot
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-
-	if err := buildCmd.Run(); err != nil {
-		ui.Error("Build failed: %v", err)
+	var buildOutput []byte
+	err := ui.RunWithSpinner("", func() error {
+		buildCmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", binPath, "./cmd/nssh")
+		buildCmd.Dir = projectRoot
+		var runErr error
+		buildOutput, runErr = buildCmd.CombinedOutput()
+		return runErr
+	})
+	if len(buildOutput) > 0 {
+		fmt.Fprint(os.Stderr, string(buildOutput))
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Build failed: %v\n", err)
 		return &exit.ExitError{Code: 1}
 	}
-	ui.Success("Installed: %s", AbbreviatePath(binPath))
+	fmt.Printf("Built %s\n", AbbreviatePath(binPath))
 
 	// Check if ~/.local/bin is on PATH
 	if FindBinary() == "" {

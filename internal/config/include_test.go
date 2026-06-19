@@ -28,9 +28,10 @@ inventory:
             mode: key
             username: cj
       hosts:
-        rpi-a:
+        rpi-a.lan:
           group: homelab
-          hostname: rpi-a.lan
+          aliases:
+            - rpi-a
 `)
 	root := filepath.Join(tmp, "config.yaml")
 	writeConfigFile(t, root, `include: [credentials/*.yaml, inventory/*.yaml]`)
@@ -42,7 +43,7 @@ inventory:
 	if _, ok := cfg.Credentials["op-expedient"]; !ok {
 		t.Fatalf("missing credential provider")
 	}
-	if got := cfg.Inventory.Providers["local"].Hosts["rpi-a"].Group; got != "homelab" {
+	if got := cfg.Inventory.Providers["local"].Hosts["rpi-a.lan"].Group; got != "homelab" {
 		t.Fatalf("local host group = %q, want homelab", got)
 	}
 }

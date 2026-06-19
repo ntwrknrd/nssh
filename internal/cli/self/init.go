@@ -20,8 +20,15 @@ import (
 // InitOptions configures the behavior of runInit.
 type InitOptions struct {
 	DryRun bool // preview mode, no changes made
-	Yes    bool // auto-confirm all prompts
 	Quiet  bool // minimal output
+}
+
+type initWarningError struct {
+	message string
+}
+
+func (e initWarningError) Error() string {
+	return e.message
 }
 
 // NewInitCmd creates the init subcommand.
@@ -36,8 +43,6 @@ func NewInitCmd() *cobra.Command {
 Credentials are resolved through configured providers such as Pass, 1Password,
 or Bitwarden. The runtime agent can broker provider sessions when configured.
 
-Use -y to skip all confirmation prompts.
-
 To start fresh, use 'nssh self reset'.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInit(opts)
@@ -45,7 +50,6 @@ To start fresh, use 'nssh self reset'.`,
 	}
 
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "preview changes without applying")
-	cmd.Flags().BoolVarP(&opts.Yes, "yes", "y", false, "skip confirmation prompts")
 
 	return cmd
 }
@@ -119,7 +123,11 @@ func runInit(opts InitOptions) error {
 	// Install example config if none exists (skip in quiet mode)
 	if !opts.Quiet {
 		if err := ensureInitConfig(paths, opts); err != nil {
-			ui.Warning("Config setup: %v", err)
+			if isInitWarning(err) || ui.IsUserAbort(err) {
+				ui.Warning("%v", err)
+				return nil
+			}
+			return err
 		}
 		ui.Info("Credential provider authentication is owned by Pass, 1Password, or Bitwarden.")
 	}
@@ -158,7 +166,7 @@ func runInit(opts InitOptions) error {
 
 			// Offer to install (skip in dry-run mode, skip in quiet mode)
 			if !opts.DryRun && !opts.Quiet {
-				if err := offerInstallDependency(dep, opts.Yes); err != nil {
+				if err := offerInstallDependency(dep); err != nil {
 					ui.Warning("  %v", err)
 				}
 			}
@@ -222,27 +230,15 @@ func showNextSteps() {
 }
 
 func ensureInitConfig(paths *config.Paths, opts InitOptions) error {
-	var existing *config.Config
 	if _, err := os.Stat(paths.ConfigFile); err == nil {
-		cfg, loadErr := config.Load(paths.ConfigFile)
-		if loadErr != nil {
-			return loadErr
-		}
-		existing = cfg
+		return initWarningError{message: fmt.Sprintf("nssh is already initialized: %s", AbbreviatePath(paths.ConfigFile))}
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 
-	req := initPlanRequest{
-		Yes:      opts.Yes,
-		Existing: existing,
-	}
-	if !opts.Yes {
-		var err error
-		req, err = promptInitPlanRequest(uiInitPrompter{}, existing)
-		if err != nil {
-			return err
-		}
+	req, err := promptInitPlanRequest(uiInitPrompter{}, nil)
+	if err != nil {
+		return err
 	}
 	plan, err := buildInitPlan(req)
 	if err != nil {
@@ -258,6 +254,11 @@ func ensureInitConfig(paths *config.Paths, opts InitOptions) error {
 	}
 	ui.Success("Config file: %s", AbbreviatePath(paths.ConfigFile))
 	return nil
+}
+
+func isInitWarning(err error) bool {
+	_, ok := err.(initWarningError)
+	return ok
 }
 
 // getLatestGitHubRelease fetches the latest release version from GitHub API.
@@ -386,17 +387,14 @@ func extractBinaryFromTarGz(r io.Reader, binaryName string) ([]byte, error) {
 }
 
 // offerInstallDependency offers to install a single missing dependency from GitHub releases.
-func offerInstallDependency(dep Dependency, autoYes bool) error {
+func offerInstallDependency(dep Dependency) error {
 	if dep.GitHub == nil {
 		return fmt.Errorf("no GitHub release info for %s", dep.Name)
 	}
 
-	// Ask user (or auto-yes)
-	if !autoYes {
-		result, _ := ui.Confirm(fmt.Sprintf("  Install %s?", dep.Name), true)
-		if !result {
-			return nil
-		}
+	result, _ := ui.Confirm(fmt.Sprintf("  Install %s?", dep.Name), true)
+	if !result {
+		return nil
 	}
 
 	ui.Info("  Installing from GitHub releases...")

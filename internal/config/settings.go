@@ -30,13 +30,13 @@ type Config struct {
 // AgentConfig holds agent daemon lifecycle settings.
 type AgentConfig struct {
 	// AutoStart starts the runtime agent on first provider-session request (default true)
-	AutoStart bool `toml:"auto_start" yaml:"auto_start,omitempty"`
+	AutoStart bool `yaml:"auto_start,omitempty"`
 	// IdleTimeout is how long the agent waits without activity before terminating (default 1h)
-	IdleTimeout Duration `toml:"idle_timeout" yaml:"idle_timeout,omitempty"`
+	IdleTimeout Duration `yaml:"idle_timeout,omitempty"`
 	// ActivityIncrement is how much to extend the idle deadline on activity (default 15m)
-	ActivityIncrement Duration `toml:"activity_increment,omitempty" yaml:"activity_increment,omitempty"`
+	ActivityIncrement Duration `yaml:"activity_increment,omitempty"`
 	// MaxLifetime is the maximum lifetime of the agent regardless of activity (default 24h)
-	MaxLifetime Duration `toml:"max_lifetime" yaml:"max_lifetime,omitempty"`
+	MaxLifetime Duration `yaml:"max_lifetime,omitempty"`
 }
 
 // ============================================================================
@@ -45,13 +45,13 @@ type AgentConfig struct {
 
 // HostConfig holds host-related settings.
 type HostConfig struct {
-	Defaults HostDefaultsConfig `toml:"defaults" yaml:"defaults,omitempty"`
+	Defaults HostDefaultsConfig `yaml:"defaults,omitempty"`
 }
 
 // HostDefaultsConfig holds default values for new hosts.
 type HostDefaultsConfig struct {
 	// DefaultContext is deprecated; group placement is configured under inventory.
-	DefaultContext string `toml:"default_context" yaml:"default_context,omitempty"`
+	DefaultContext string `yaml:"default_context,omitempty"`
 }
 
 // ============================================================================
@@ -60,60 +60,60 @@ type HostDefaultsConfig struct {
 
 // LoggingConfig holds audit and session logging settings.
 type LoggingConfig struct {
-	Audit   AuditConfig   `toml:"audit" yaml:"audit,omitempty"`
-	Session SessionConfig `toml:"session" yaml:"session,omitempty"`
+	Audit   AuditConfig   `yaml:"audit,omitempty"`
+	Session SessionConfig `yaml:"session,omitempty"`
 }
 
 // AuditConfig holds security event logging settings.
 type AuditConfig struct {
 	// Enabled enables security event logging to file (default: true)
-	Enabled bool `toml:"enabled" yaml:"enabled,omitempty"`
+	Enabled bool `yaml:"enabled,omitempty"`
 	// MaxSize is the max audit log size before rotation (default: "10MB")
-	MaxSize string `toml:"max_size" yaml:"max_size,omitempty"`
+	MaxSize string `yaml:"max_size,omitempty"`
 }
 
 // SessionConfig holds session recording settings.
 type SessionConfig struct {
 	// AppendMode appends to daily session file vs creating separate files
-	AppendMode *bool `toml:"append_mode" yaml:"append_mode,omitempty"`
+	AppendMode *bool `yaml:"append_mode,omitempty"`
 	// AsciinemaServer is a custom asciinema server URL for self-hosted instances
-	AsciinemaServer string `toml:"asciinema_server_url" yaml:"asciinema_server_url,omitempty"`
+	AsciinemaServer string `yaml:"asciinema_server_url,omitempty"`
 	// Dir is the recording storage directory
-	Dir string `toml:"dir" yaml:"dir,omitempty"`
+	Dir string `yaml:"dir,omitempty"`
 	// Enabled enables automatic session recording
-	Enabled *bool `toml:"enabled" yaml:"enabled,omitempty"`
+	Enabled *bool `yaml:"enabled,omitempty"`
 	// ExcludeHosts are patterns for hosts to never record
-	ExcludeHosts []string `toml:"exclude_hosts" yaml:"exclude_hosts,omitempty"`
+	ExcludeHosts []string `yaml:"exclude_hosts,omitempty"`
 	// IdleTimeLimit caps long pauses in recordings (seconds, 0 = disabled)
-	IdleTimeLimit float64 `toml:"idle_time_limit" yaml:"idle_time_limit,omitempty"`
+	IdleTimeLimit float64 `yaml:"idle_time_limit,omitempty"`
 	// IdleTimeLimitMode is when to apply idle time limit: "play", "record", or "both"
-	IdleTimeLimitMode string `toml:"idle_time_limit_mode" yaml:"idle_time_limit_mode,omitempty"`
+	IdleTimeLimitMode string `yaml:"idle_time_limit_mode,omitempty"`
 	// IncludeHosts are patterns for hosts to record (takes precedence over exclude)
-	IncludeHosts []string `toml:"include_hosts" yaml:"include_hosts,omitempty"`
+	IncludeHosts []string `yaml:"include_hosts,omitempty"`
 	// TitleFormat is a template for recording titles with {host}, {user}, {date}, {time}
-	TitleFormat string `toml:"title_format" yaml:"title_format,omitempty"`
+	TitleFormat string `yaml:"title_format,omitempty"`
 	// WindowSize is fixed terminal dimensions for recordings (cols x rows)
-	WindowSize string `toml:"window_size" yaml:"window_size,omitempty"`
+	WindowSize string `yaml:"window_size,omitempty"`
 	// AutoExportTxt automatically exports recordings to plain text (.txt) when session ends
-	AutoExportTxt bool `toml:"auto_export_txt" yaml:"auto_export_txt,omitempty"`
+	AutoExportTxt bool `yaml:"auto_export_txt,omitempty"`
 	// Archive holds automatic archival settings
-	Archive SessionArchiveConfig `toml:"archive" yaml:"archive,omitempty"`
+	Archive SessionArchiveConfig `yaml:"archive,omitempty"`
 }
 
 // SessionArchiveConfig holds automatic session archival settings.
 type SessionArchiveConfig struct {
 	// Dir is where monthly archives are stored (default: ~/.local/state/nssh/archives)
-	Dir string `toml:"dir" yaml:"dir,omitempty"`
+	Dir string `yaml:"dir,omitempty"`
 	// Enabled enables automatic recording archiving (default: false)
-	Enabled bool `toml:"enabled" yaml:"enabled,omitempty"`
+	Enabled bool `yaml:"enabled,omitempty"`
 	// Jitter introduces +/- jitter to the daily schedule (default: 30m)
-	Jitter Duration `toml:"jitter" yaml:"jitter,omitempty"`
+	Jitter Duration `yaml:"jitter,omitempty"`
 	// MaxBundles is how many monthly bundles to retain (default: 12)
-	MaxBundles int `toml:"max_bundles" yaml:"max_bundles,omitempty"`
+	MaxBundles int `yaml:"max_bundles,omitempty"`
 	// MaxRunBytes caps bytes processed per maintenance run (default: 0 = unlimited)
-	MaxRunBytes int64 `toml:"max_run_bytes" yaml:"max_run_bytes,omitempty"`
+	MaxRunBytes int64 `yaml:"max_run_bytes,omitempty"`
 	// MinAge is how old a .cast file must be before archiving (default: 30d)
-	MinAge Duration `toml:"min_age" yaml:"min_age,omitempty"`
+	MinAge Duration `yaml:"min_age,omitempty"`
 }
 
 // ============================================================================
@@ -122,29 +122,29 @@ type SessionArchiveConfig struct {
 
 // SSHConfig holds SSH connection and security settings.
 type SSHConfig struct {
-	Connection SSHConnectionConfig `toml:"connection" yaml:"connection,omitempty"`
-	Security   SSHSecurityConfig   `toml:"security" yaml:"security,omitempty"`
+	Connection SSHConnectionConfig `yaml:"connection,omitempty"`
+	Security   SSHSecurityConfig   `yaml:"security,omitempty"`
 	Defaults   SSHHostConfig       `yaml:"defaults,omitempty"`
 }
 
 // SSHConnectionConfig holds timeout settings for SSH connections.
 type SSHConnectionConfig struct {
 	// IdleTimeout disconnects after inactivity (0 = disabled)
-	IdleTimeout Duration `toml:"idle_timeout" yaml:"idle_timeout,omitempty"`
+	IdleTimeout Duration `yaml:"idle_timeout,omitempty"`
 	// PasswordTimeout is the password prompt timeout (default: 10s)
-	PasswordTimeout Duration `toml:"password_timeout" yaml:"password_timeout,omitempty"`
+	PasswordTimeout Duration `yaml:"password_timeout,omitempty"`
 	// Timeout is the SSH connection timeout (default: 30s)
-	Timeout Duration `toml:"timeout" yaml:"timeout,omitempty"`
+	Timeout Duration `yaml:"timeout,omitempty"`
 }
 
 // SSHSecurityConfig holds SSH host key policy settings.
 type SSHSecurityConfig struct {
 	// AcceptOnceMode controls how host-key "Accept once" behaves: "pin" (default) or "accept-new"
-	AcceptOnceMode string `toml:"accept_once_mode" yaml:"accept_once_mode,omitempty"`
+	AcceptOnceMode string `yaml:"accept_once_mode,omitempty"`
 	// CompatPersistProbes controls whether SSH compatibility probes write to known_hosts
-	CompatPersistProbes bool `toml:"compat_persist_probes" yaml:"compat_persist_probes,omitempty"`
+	CompatPersistProbes bool `yaml:"compat_persist_probes,omitempty"`
 	// HostKeyPolicy is a higher-level preset: "pin" (default) or "tofu"
-	HostKeyPolicy string `toml:"host_key_policy" yaml:"host_key_policy,omitempty"`
+	HostKeyPolicy string `yaml:"host_key_policy,omitempty"`
 }
 
 // ============================================================================
@@ -423,6 +423,9 @@ func (c *Config) Validate() error {
 	if err := c.Inventory.Validate(); err != nil {
 		return err
 	}
+	if err := c.validateSSHHostConfigs(); err != nil {
+		return err
+	}
 	if err := c.validateInventoryAuthProviders(); err != nil {
 		return err
 	}
@@ -434,6 +437,30 @@ func (c *Config) Validate() error {
 	}
 	if err := c.SSH.Security.Validate(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (c *Config) validateSSHHostConfigs() error {
+	if err := validateSSHHostConfig("ssh.defaults", c.SSH.Defaults); err != nil {
+		return err
+	}
+	for hostName, host := range c.Inventory.Host {
+		if err := validateSSHHostConfig("inventory.host."+hostName+".ssh", host.SSH); err != nil {
+			return err
+		}
+	}
+	for providerName, provider := range c.Inventory.Provider {
+		for groupName, group := range provider.Group {
+			if err := validateSSHHostConfig("inventory.provider."+providerName+".group."+groupName+".ssh", group.SSH); err != nil {
+				return err
+			}
+		}
+		for hostName, host := range provider.Hosts {
+			if err := validateSSHHostConfig("inventory.provider."+providerName+".hosts."+hostName+".ssh", host.SSH); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

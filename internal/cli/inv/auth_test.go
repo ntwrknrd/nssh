@@ -76,7 +76,7 @@ func testAuthPatchConfig(providerName, providerType, group, host, hostname strin
 			Type:   providerType,
 			Groups: map[string]config.GroupConfig{group: {}},
 			Group:  map[string]config.GroupConfig{group: {}},
-			Hosts:  map[string]config.InventoryHostConfig{host: {Group: group, Hostname: hostname}},
+			Hosts:  map[string]config.InventoryHostConfig{hostname: {Group: group, Aliases: []string{host}}},
 		},
 	}
 	cfg.Inventory.Providers = providers

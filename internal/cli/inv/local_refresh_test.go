@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -88,7 +89,7 @@ func TestApplyLocalRefreshFixesRemovesSelectedLocalStaleHost(t *testing.T) {
 	if strings.Contains(content, "stale01:") {
 		t.Fatalf("stale host still present:\n%s", content)
 	}
-	if !strings.Contains(content, "keep01:") {
+	if !strings.Contains(content, "keep01.example.com:") {
 		t.Fatalf("unselected host removed:\n%s", content)
 	}
 }
@@ -107,7 +108,16 @@ func TestApplyLocalRefreshFixesRemovesOnlySelectedDuplicateBlock(t *testing.T) {
 	if len(hosts) != 2 {
 		t.Fatalf("hosts = %d, want 2", len(hosts))
 	}
-	duplicate := hosts[1]
+	var duplicate *sshconfig.HostEntry
+	for _, host := range hosts {
+		if host.Host == "edge01-duplicate.example.com" {
+			duplicate = host
+			break
+		}
+	}
+	if duplicate == nil {
+		t.Fatalf("duplicate host not found: %+v", hosts)
+	}
 
 	applied, err := applyLocalRefreshFixes(parser, paths, []localRefreshFinding{{
 		Host:   duplicate.Host,
@@ -165,7 +175,7 @@ func TestApplyLocalRefreshFixesRenamesCNAMEAndPreservesAlias(t *testing.T) {
 	}
 
 	content := readTestFile(t, localFile)
-	for _, want := range []string{"new01:", "hostname: new01.example.com", "- old01"} {
+	for _, want := range []string{"new01:", "- old01"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("missing %q in:\n%s", want, content)
 		}
@@ -272,19 +282,24 @@ func newLocalRefreshFixture(t *testing.T, localContent string) (*sshconfig.Parse
 	hosts := make(map[string]config.InventoryHostConfig)
 	seen := make(map[string]int)
 	for _, host := range parsed.Hosts {
-		name := host.Host
+		name := host.HostName
+		if strings.TrimSpace(name) == "" {
+			name = host.Host
+		}
 		if seen[name] > 0 {
 			name = name + "-duplicate"
 		}
-		seen[host.Host]++
-		hostCfg := config.InventoryHostConfig{Group: "lab", Hostname: host.HostName}
+		seen[name]++
+		hostCfg := config.InventoryHostConfig{Group: "lab"}
 		if user := host.User(); user != "" {
-			hostCfg.Auth = config.InventoryAuthConfig{Username: user, AuthMode: config.AuthModeKey}
+			hostCfg.Auth = config.InventoryAuthConfig{Username: user, Mode: config.AuthModeKey}
 		}
-		if len(host.Patterns) > 1 {
-			hostCfg.Aliases = append(hostCfg.Aliases, host.Patterns[1:]...)
+		for _, pattern := range host.Patterns {
+			if pattern != name {
+				hostCfg.Aliases = append(hostCfg.Aliases, pattern)
+			}
 		}
-		if name != host.Host {
+		if name != host.Host && !slices.Contains(hostCfg.Aliases, host.Host) {
 			hostCfg.Aliases = append(hostCfg.Aliases, host.Host)
 		}
 		hosts[name] = hostCfg

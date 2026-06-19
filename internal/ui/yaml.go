@@ -21,7 +21,7 @@ func HighlightYAML(text string) string {
 
 func highlightYAMLLine(line string) string {
 	body, ending := splitLineEnding(line)
-	code, comment := splitTOMLComment(body)
+	code, comment := splitYAMLComment(body)
 	idx := strings.IndexByte(code, ':')
 	if idx < 0 {
 		rendered := highlightYAMLListItem(code)
@@ -29,13 +29,13 @@ func highlightYAMLLine(line string) string {
 			rendered = code
 		}
 		if comment != "" {
-			rendered += tomlCommentStyle.Render(comment)
+			rendered += syntaxCommentStyle.Render(comment)
 		}
 		return rendered + ending
 	}
-	rendered := highlightTOMLKey(code[:idx]) + tomlEqualStyle.Render(":") + highlightYAMLValue(code[idx+1:])
+	rendered := highlightYAMLKey(code[:idx]) + syntaxSeparatorStyle.Render(":") + highlightYAMLValue(code[idx+1:])
 	if comment != "" {
-		rendered += tomlCommentStyle.Render(comment)
+		rendered += syntaxCommentStyle.Render(comment)
 	}
 	return rendered + ending
 }
@@ -47,7 +47,7 @@ func highlightYAMLListItem(code string) string {
 		return code
 	}
 	rest := strings.TrimPrefix(trimmed, "-")
-	return leading + tomlPunctStyle.Render("-") + highlightYAMLValue(rest)
+	return leading + syntaxPunctStyle.Render("-") + highlightYAMLValue(rest)
 }
 
 func highlightYAMLValue(value string) string {
@@ -68,12 +68,12 @@ func highlightYAMLScalar(value string) string {
 		return highlightYAMLFlow(value)
 	}
 	if value[0] == '"' || value[0] == '\'' {
-		return tomlStringStyle.Render(value)
+		return syntaxStringStyle.Render(value)
 	}
 	if isYAMLBoolNull(value) || isYAMLNumber(value) {
-		return tomlNumberStyle.Render(value)
+		return syntaxNumberStyle.Render(value)
 	}
-	return tomlStringStyle.Render(value)
+	return syntaxStringStyle.Render(value)
 }
 
 func highlightYAMLFlow(value string) string {
@@ -82,11 +82,11 @@ func highlightYAMLFlow(value string) string {
 		c := value[i]
 		switch {
 		case c == '"' || c == '\'':
-			end := scanTOMLString(value, i)
-			sb.WriteString(tomlStringStyle.Render(value[i:end]))
+			end := scanQuotedString(value, i)
+			sb.WriteString(syntaxStringStyle.Render(value[i:end]))
 			i = end
 		case strings.ContainsRune("[]{}:,", rune(c)):
-			sb.WriteString(tomlPunctStyle.Render(string(c)))
+			sb.WriteString(syntaxPunctStyle.Render(string(c)))
 			i++
 		case unicode.IsSpace(rune(c)):
 			sb.WriteByte(c)

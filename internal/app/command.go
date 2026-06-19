@@ -183,9 +183,9 @@ Example: nssh connect host -p 2222`,
 				if err != nil {
 					return err
 				}
-				return connect.ConnectHost(context.Background(), hostname, nil, connect.Options{SSHVerbosity: sshVerbosity()})
+				return connect.ConnectHost(context.Background(), hostname, nil, connect.Options{Verbosity: verboseCount, SSHVerbosity: sshVerbosity()})
 			}
-			return connect.ConnectHost(context.Background(), args[0], args[1:], connect.Options{SSHVerbosity: sshVerbosity()})
+			return connect.ConnectHost(context.Background(), args[0], args[1:], connect.Options{Verbosity: verboseCount, SSHVerbosity: sshVerbosity()})
 		},
 	}
 
@@ -216,7 +216,7 @@ func newSmartConnectCmd() *cobra.Command {
 			if user != "" {
 				sshArgs = append([]string{"-l", user}, sshArgs...)
 			}
-			return connect.ConnectHost(context.Background(), hostname, sshArgs, connect.Options{SSHVerbosity: sshVerbosity()})
+			return connect.ConnectHost(context.Background(), hostname, sshArgs, connect.Options{Verbosity: verboseCount, SSHVerbosity: sshVerbosity()})
 		},
 	}
 

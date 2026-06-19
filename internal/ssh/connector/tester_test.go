@@ -2,10 +2,61 @@ package connector
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ntwrknrd/nssh/internal/config"
 )
+
+func TestBuildTestSSHArgsUsesRenderedNSSHOptions(t *testing.T) {
+	cfg := TestConfig{
+		Timeout: 5 * time.Second,
+		SSHOptions: config.SSHHostConfig{
+			Options: config.SSHOptions{
+				"KexAlgorithms": config.NewSSHOptionItems("curve25519-sha256"),
+			},
+		},
+	}
+
+	args, cleanup, err := buildTestSSHArgs("example.com", "alice", cfg)
+	if err != nil {
+		t.Fatalf("buildTestSSHArgs error: %v", err)
+	}
+	defer cleanup()
+
+	for _, want := range []string{"-F", "none", "KexAlgorithms=curve25519-sha256"} {
+		if !slices.Contains(args, want) {
+			t.Fatalf("args missing %q: %#v", want, args)
+		}
+	}
+}
+
+func TestBuildTestSSHArgsStripsLogLevelFromRenderedNSSHOptions(t *testing.T) {
+	cfg := TestConfig{
+		Timeout: 5 * time.Second,
+		SSHOptions: config.SSHHostConfig{
+			Options: config.SSHOptions{
+				"LogLevel":     config.NewSSHOptionString("ERROR"),
+				"TCPKeepAlive": config.NewSSHOptionBool(true),
+			},
+		},
+	}
+
+	args, cleanup, err := buildTestSSHArgs("example.com", "alice", cfg)
+	if err != nil {
+		t.Fatalf("buildTestSSHArgs error: %v", err)
+	}
+	defer cleanup()
+
+	if slices.Contains(args, "LogLevel=ERROR") {
+		t.Fatalf("diagnostic probe args should not inherit LogLevel=ERROR: %#v", args)
+	}
+	if !slices.Contains(args, "TCPKeepAlive=yes") {
+		t.Fatalf("diagnostic probe args should preserve other options: %#v", args)
+	}
+}
 
 func TestBuildTestSSHArgs_UsesTempKnownHostsByDefault(t *testing.T) {
 	cfg := TestConfig{Timeout: 5 * time.Second}

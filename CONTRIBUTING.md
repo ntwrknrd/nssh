@@ -67,7 +67,7 @@ connector timing markers.
 - CLI help snapshots live in `docs/examples/help/` and are tested by
   `cmd/nssh/help_test.go`.
 - The embedded example config is
-  `docs/examples/config/config.example.toml`; `internal/config/embed.go`
+  `docs/examples/config/config.example.yaml`; `internal/config/embed.go`
   exposes it to `nssh self init`.
 - Demo media and example command outputs under `docs/examples/` are retained as
   examples/assets, not narrative docs.

@@ -50,7 +50,7 @@ func TestRunCpUsesSharedResolvePath(t *testing.T) {
 			Hostname: "edge01.example.com",
 			Port:     2200,
 			Username: "resolved-user",
-			SSH:      config.SSHHostConfig{Options: map[string]string{"Compression": "yes"}},
+			SSH:      config.SSHHostConfig{Options: config.SSHOptions{"Compression": config.NewSSHOptionBool(true)}},
 			Credential: &clireconnect.ResolvedCredential{
 				Username: "resolved-user",
 				Password: resolvedPassword,

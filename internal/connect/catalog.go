@@ -44,6 +44,9 @@ func loadProviderStates() ([]*inventory.ProviderState, error) {
 	for _, name := range names {
 		state, err := inventory.LoadProviderState(name)
 		if err != nil {
+			if inventory.IsUnsupportedStateVersion(err) {
+				continue
+			}
 			return nil, err
 		}
 		if state != nil {
@@ -83,7 +86,7 @@ func buildHostCatalog(cfg *config.Config, states []*inventory.ProviderState) (*H
 			if host == nil {
 				continue
 			}
-			data := resolvedHostFromState(cfg, state.Provider, provider, host)
+			data := resolvedHostFromState(cfg, state.Provider, provider, host, cat)
 			cat.add(data)
 		}
 	}
@@ -99,22 +102,23 @@ func (c *HostCatalog) addLocalHosts(cfg *config.Config, providerName string, pro
 			return fmt.Errorf("inventory.providers.%s.hosts.%s.group references unknown group %q", providerName, name, host.Group)
 		}
 		auth := cfg.ResolveInventoryAuth(config.InventoryAuthContext{Host: name, Provider: providerName, Group: config.FormatInventoryGroupID(providerName, host.Group)})
+		ssh := mergeCatalogSSH(cfg, provider, host.Group, host.SSH)
 		c.add(&ResolvedHostData{
 			Canonical: name,
-			Hostname:  firstNonEmpty(host.Hostname, name),
+			Hostname:  name,
 			Aliases:   slices.Clone(host.Aliases),
 			Provider:  providerName,
 			Group:     host.Group,
 			Port:      host.Port,
 			Username:  auth.Username,
 			Auth:      host.Auth,
-			SSH:       host.SSH,
+			SSH:       ssh,
 		})
 	}
 	return nil
 }
 
-func resolvedHostFromState(cfg *config.Config, providerName string, provider config.InventoryProviderConfig, host *inventory.ProviderHost) *ResolvedHostData {
+func resolvedHostFromState(cfg *config.Config, providerName string, provider config.InventoryProviderConfig, host *inventory.ProviderHost, cat *HostCatalog) *ResolvedHostData {
 	group := shortGroup(host.Group)
 	overlay := provider.Hosts[host.HostName]
 	if overlay.Group == "" {
@@ -132,17 +136,74 @@ func resolvedHostFromState(cfg *config.Config, providerName string, provider con
 	})
 	aliases := slices.Clone(host.Patterns)
 	aliases = appendUnique(aliases, overlay.Aliases...)
+	ssh := mergeCatalogSSH(cfg, provider, group, overlay.SSH)
+	ssh = applyProviderStateSSH(ssh, host, cat)
 	return &ResolvedHostData{
 		Canonical: host.HostName,
-		Hostname:  firstNonEmpty(overlay.Hostname, host.HostName),
+		Hostname:  host.HostName,
 		Aliases:   aliases,
 		Provider:  providerName,
 		Group:     group,
 		Port:      firstNonZero(overlay.Port, host.Port),
 		Username:  auth.Username,
 		Auth:      overlay.Auth,
-		SSH:       overlay.SSH,
+		SSH:       ssh,
 	}
+}
+
+func mergeCatalogSSH(cfg *config.Config, provider config.InventoryProviderConfig, group string, host config.SSHHostConfig) config.SSHHostConfig {
+	ssh := config.SSHHostConfig{}
+	if cfg != nil {
+		ssh = config.MergeSSH(ssh, cfg.SSH.Defaults)
+	}
+	if groupCfg, ok := provider.Groups[group]; ok {
+		ssh = config.MergeSSH(ssh, groupCfg.SSH)
+	}
+	return config.MergeSSH(ssh, host)
+}
+
+func applyProviderStateSSH(ssh config.SSHHostConfig, host *inventory.ProviderHost, cat *HostCatalog) config.SSHHostConfig {
+	if host == nil || strings.TrimSpace(host.ProxyJump) == "" || hasSSHOption(ssh.Options, "ProxyJump") {
+		return ssh
+	}
+	proxyJump := strings.TrimSpace(host.ProxyJump)
+	if jump, ok := cat.Find(proxyJump); ok {
+		proxyJump = formatProxyJumpTarget(jump)
+	}
+	if ssh.Options == nil {
+		ssh.Options = make(config.SSHOptions)
+	}
+	ssh.Options["ProxyJump"] = config.NewSSHOptionString(proxyJump)
+	return ssh
+}
+
+func formatProxyJumpTarget(host *ResolvedHostData) string {
+	if host == nil {
+		return ""
+	}
+	target := firstNonEmpty(host.Hostname, host.Canonical)
+	if target == "" {
+		return ""
+	}
+	if host.Port != 0 && host.Port != 22 {
+		if strings.Contains(target, ":") && !strings.HasPrefix(target, "[") {
+			target = "[" + target + "]"
+		}
+		target = fmt.Sprintf("%s:%d", target, host.Port)
+	}
+	if host.Username != "" {
+		target = host.Username + "@" + target
+	}
+	return target
+}
+
+func hasSSHOption(options config.SSHOptions, key string) bool {
+	for existing := range options {
+		if strings.EqualFold(existing, key) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *HostCatalog) add(host *ResolvedHostData) {

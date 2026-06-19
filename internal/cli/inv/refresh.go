@@ -47,7 +47,13 @@ func runRefresh(target string) error {
 		return err
 	}
 
-	results := refreshProviderCaches(cfg, target)
+	var results map[string]string
+	if err := ui.RunWithStatusSpinner("Refreshing inventory", func(update func(string)) error {
+		results = refreshProviderCachesWithProgress(cfg, target, update)
+		return nil
+	}); err != nil {
+		return err
+	}
 	names := make([]string, 0, len(results))
 	for name := range results {
 		names = append(names, name)
@@ -76,16 +82,29 @@ func validateRefreshTarget(cfg *config.Config, target string) error {
 }
 
 func refreshProviderCaches(cfg *config.Config, providerName string) map[string]string {
+	return refreshProviderCachesWithProgress(cfg, providerName, nil)
+}
+
+func refreshProviderCachesWithProgress(cfg *config.Config, providerName string, progress func(string)) map[string]string {
 	results := make(map[string]string)
 	now := time.Now().UTC()
 
+	names := make([]string, 0, len(cfg.Inventory.Provider))
 	for name := range cfg.Inventory.Provider {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
 		providerCfg := cfg.Inventory.Provider[name]
 		if providerCfg.Type == config.ProviderLocal {
 			continue
 		}
 		if providerName != "" && providerName != name {
 			continue
+		}
+		if progress != nil {
+			progress("Refreshing " + name)
 		}
 		provider, err := invproviders.New(providerCfg.Type)
 		if err != nil {

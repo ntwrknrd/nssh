@@ -159,7 +159,7 @@ func TestInventoryAuthResolutionUsesLowestConfiguredField(t *testing.T) {
 		t.Fatalf("password binding = provider %q ref %q", got.CredentialProvider, got.PasswordRef)
 	}
 	if got.AuthMode != AuthModePassword {
-		t.Fatalf("auth_mode = %q, want password", got.AuthMode)
+		t.Fatalf("auth mode = %q, want password", got.AuthMode)
 	}
 }
 

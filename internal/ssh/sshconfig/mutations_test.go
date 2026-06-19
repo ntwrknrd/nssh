@@ -27,12 +27,12 @@ func TestApplyCompatFixes(t *testing.T) {
 			wantLines: []string{
 				"Host testhost\n",
 				"  HostName test.example.com\n",
-				"  KexAlgorithms +diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1\n",
+				"  KexAlgorithms +diffie-hellman-group14-sha1\n",
 				"  User admin\n",
 				"\n",
 			},
 			wantProps: map[string]string{
-				"kexalgorithms": "+diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1",
+				"kexalgorithms": "+diffie-hellman-group14-sha1",
 			},
 		},
 		{
@@ -48,13 +48,13 @@ func TestApplyCompatFixes(t *testing.T) {
 				"Host testhost\n",
 				"  HostName test.example.com\n",
 				"  Port 22\n",
-				"  KexAlgorithms +diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1\n",
-				"  MACs +hmac-sha1,+hmac-sha1-96\n",
+				"  KexAlgorithms +diffie-hellman-group14-sha1\n",
+				"  MACs +hmac-sha1\n",
 				"\n",
 			},
 			wantProps: map[string]string{
-				"kexalgorithms": "+diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1",
-				"macs":          "+hmac-sha1,+hmac-sha1-96",
+				"kexalgorithms": "+diffie-hellman-group14-sha1",
+				"macs":          "+hmac-sha1",
 			},
 		},
 		{
@@ -70,12 +70,12 @@ func TestApplyCompatFixes(t *testing.T) {
 			wantLines: []string{
 				"Host testhost\n",
 				"  HostName test.example.com\n",
-				"  KexAlgorithms +diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1\n",
+				"  KexAlgorithms +diffie-hellman-group14-sha1\n",
 				"  User admin\n",
 				"\n",
 			},
 			wantProps: map[string]string{
-				"kexalgorithms": "+diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1",
+				"kexalgorithms": "+diffie-hellman-group14-sha1",
 			},
 		},
 		{

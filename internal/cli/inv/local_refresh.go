@@ -274,7 +274,6 @@ func applyLocalRefreshFixes(parser *sshconfig.Parser, paths *config.Paths, findi
 				newID = finding.fix.host.Host
 			}
 			delete(provider.Hosts, finding.fix.host.Host)
-			host.Hostname = finding.fix.cnameTarget
 			host.Aliases = uniqueHostPatterns(append(host.Aliases, finding.fix.host.Host))
 			provider.Hosts[newID] = host
 			applied++

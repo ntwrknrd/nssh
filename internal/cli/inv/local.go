@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,6 +32,7 @@ type hostPatch struct {
 	Host         string
 	Group        string
 	HostName     string
+	Aliases      []string
 	User         string
 	Port         int
 	PortSet      bool
@@ -38,7 +40,7 @@ type hostPatch struct {
 	Auth         config.InventoryAuthConfig
 	AuthDisabled bool
 
-	CompatFixes []compat.CompatType
+	CompatFixes []compat.FloorSelection
 }
 
 type hostMetadata struct {
@@ -72,7 +74,7 @@ type importResult struct {
 
 type localHostCompatResult struct {
 	Success       bool
-	FixesApplied  []compat.CompatType
+	FixesApplied  []compat.FloorSelection
 	TestResult    *connector.TestResult
 	StoppedReason string
 }
@@ -150,18 +152,13 @@ func upsertLocalHostYAML(cfg *config.Config, paths *config.Paths, patch hostPatc
 	if provider.Hosts == nil {
 		provider.Hosts = make(map[string]config.InventoryHostConfig)
 	}
-	host := provider.Hosts[patch.Host]
+	hostName := strings.TrimSpace(patch.Host)
+	host := provider.Hosts[hostName]
 	host.Group = shortInventoryGroup(groupName)
-	if patch.HostName != "" || host.Hostname == "" {
-		host.Hostname = patch.HostName
-	}
-	if host.Hostname == "" {
-		host.Hostname = patch.Host
-	}
+	setHostNameOption(&host.SSH, hostName, patch.HostName)
+	host.Aliases = mergeHostAliases(hostName, host.Aliases, autoLocalHostAliases(hostName), patch.Aliases)
 	if patch.PortSet {
 		host.Port = patch.Port
-	} else if host.Port == 0 {
-		host.Port = 22
 	}
 	if patch.Auth.IsSet() || patch.AuthDisabled || patch.AuthMode != "" || patch.User != "" {
 		host.Auth = patch.Auth
@@ -170,16 +167,74 @@ func upsertLocalHostYAML(cfg *config.Config, paths *config.Paths, patch hostPatc
 			host.Auth.Username = patch.User
 		}
 		if patch.AuthMode != "" {
-			host.Auth.AuthMode = patch.AuthMode
+			host.Auth.Mode = patch.AuthMode
 		}
 	}
 	if len(patch.CompatFixes) > 0 {
-		host.SSH.Compat = compatTypesToNames(patch.CompatFixes)
+		for _, fix := range patch.CompatFixes {
+			setLocalHostCompatibilityFloor(&host.SSH.Compatibility, fix)
+		}
 	}
-	provider.Hosts[patch.Host] = host
+	provider.Hosts[hostName] = host
 	cfg.Inventory.Providers[config.ProviderLocal] = provider
 	cfg.Inventory.Provider = cfg.Inventory.Providers
-	return saveLocalProviderInventory(cfg, paths)
+	return saveLocalProviderHostInventory(cfg, paths, hostName)
+}
+
+func setHostNameOption(ssh *config.SSHHostConfig, hostName, target string) {
+	if ssh == nil {
+		return
+	}
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return
+	}
+	if strings.TrimSpace(hostName) == target {
+		deleteSSHOption(ssh.Options, "HostName")
+		return
+	}
+	if ssh.Options == nil {
+		ssh.Options = make(config.SSHOptions)
+	}
+	ssh.Options["HostName"] = config.NewSSHOptionString(target)
+}
+
+func deleteSSHOption(options config.SSHOptions, key string) {
+	for existing := range options {
+		if strings.EqualFold(existing, key) {
+			delete(options, existing)
+		}
+	}
+}
+
+func autoLocalHostAliases(host string) []string {
+	host = strings.TrimSpace(host)
+	if host == "" || net.ParseIP(host) != nil {
+		return nil
+	}
+	if suffix := domainSuffixFromFQDN(host); suffix == "" {
+		return nil
+	}
+	short, _, _ := strings.Cut(host, ".")
+	if short == "" || short == host {
+		return nil
+	}
+	return []string{short}
+}
+
+func mergeHostAliases(host string, aliasSets ...[]string) []string {
+	host = strings.TrimSpace(host)
+	aliases := make([]string, 0)
+	for _, set := range aliasSets {
+		for _, alias := range set {
+			alias = strings.TrimSpace(alias)
+			if alias == "" || alias == host || slices.Contains(aliases, alias) {
+				continue
+			}
+			aliases = append(aliases, alias)
+		}
+	}
+	return aliases
 }
 
 func resolveLocalHostGroup(cfg *config.Config, patch hostPatch, existing *sshconfig.HostEntry, prompt groupPromptFunc) (string, error) {
@@ -220,11 +275,13 @@ func inferLocalHostGroupFromMatch(cfg *config.Config, patch hostPatch) string {
 	if len(selectors) == 0 {
 		return ""
 	}
-	matches := inventory.MatchGroupSelectors(localHostInventoryObject(patch), selectors)
-	if len(matches) != 1 {
+	obj := localHostInventoryObject(patch)
+	matches := inventory.MatchGroupSelectors(obj, selectors)
+	selector, ok := inventory.BestGroupSelectorMatch(obj, matches)
+	if !ok {
 		return ""
 	}
-	return matches[0].Group
+	return selector.Group
 }
 
 func localGroupSelectors(cfg *config.Config) []config.InventoryGroupSelector {
@@ -330,53 +387,45 @@ func promptLocalHostAddDetails(cfg *config.Config, patch hostPatch, prompter loc
 	if prompter == nil {
 		prompter = uiLocalHostAddPrompter{}
 	}
-	patch.Host = strings.TrimSpace(patch.Host)
-	if patch.Host == "" {
+	var err error
+	patch, err = promptLocalHostHost(patch, prompter)
+	if err != nil {
+		return patch, err
+	}
+	return promptLocalHostConnectionDetails(cfg, patch, prompter)
+}
+
+func promptLocalHostHost(patch hostPatch, prompter localHostAddPrompter) (hostPatch, error) {
+	if prompter == nil {
+		prompter = uiLocalHostAddPrompter{}
+	}
+	hostDefault := strings.TrimSpace(patch.Host)
+	host, err := promptInputWithBack(prompter, "Host", hostDefault, true)
+	if err != nil {
+		return patch, err
+	}
+	host = strings.TrimSpace(host)
+	if host == "" {
 		return patch, fmt.Errorf("host is required")
 	}
+	patch.Host = host
+	return patch, nil
+}
 
+func promptLocalHostConnectionDetails(cfg *config.Config, patch hostPatch, prompter localHostAddPrompter) (hostPatch, error) {
+	if prompter == nil {
+		prompter = uiLocalHostAddPrompter{}
+	}
 	type promptStep int
 	const (
-		stepHost promptStep = iota
-		stepHostName
-		stepPort
+		stepPort promptStep = iota
 		stepAuth
 		stepCredentialSource
 		stepUser
 	)
-	step := stepHost
+	step := stepPort
 	for {
 		switch step {
-		case stepHost:
-			hostDefault := strings.TrimSpace(patch.Host)
-			if derived := sshconfig.DeriveHostID(hostDefault); derived != "" {
-				hostDefault = derived
-			}
-			host, err := promptInputWithBack(prompter, "Host", hostDefault, true)
-			if err != nil {
-				return patch, err
-			}
-			host = strings.TrimSpace(host)
-			if host == "" {
-				return patch, fmt.Errorf("host is required")
-			}
-			patch.Host = host
-			step = stepHostName
-		case stepHostName:
-			hostNameDefault := strings.TrimSpace(patch.HostName)
-			if hostNameDefault == "" {
-				hostNameDefault = defaultHostNameForGroup(cfg, patch.Host, patch.Group)
-			}
-			hostName, err := promptInputWithBack(prompter, "HostName", hostNameDefault, true)
-			if errors.Is(err, errPromptBack) {
-				step = stepHost
-				continue
-			}
-			if err != nil {
-				return patch, err
-			}
-			patch.HostName = strings.TrimSpace(hostName)
-			step = stepPort
 		case stepPort:
 			portDefault := "22"
 			if patch.PortSet && patch.Port > 0 {
@@ -384,8 +433,7 @@ func promptLocalHostAddDetails(cfg *config.Config, patch hostPatch, prompter loc
 			}
 			portValue, err := promptInputWithBack(prompter, "Port", portDefault, true)
 			if errors.Is(err, errPromptBack) {
-				step = stepHostName
-				continue
+				return patch, err
 			}
 			if err != nil {
 				return patch, err
@@ -459,7 +507,7 @@ func promptLocalHostAddDetails(cfg *config.Config, patch hostPatch, prompter loc
 			} else if err != nil {
 				return patch, err
 			}
-			patch.Auth = config.InventoryAuthConfig{Username: patch.User, AuthMode: patch.AuthMode}
+			patch.Auth = config.InventoryAuthConfig{Username: patch.User, Mode: patch.AuthMode}
 			return patch, nil
 		}
 	}
@@ -983,11 +1031,6 @@ func localWrittenHostConfig(parser *sshconfig.Parser, cfg *config.Config, paths 
 		Hosts:  map[string]config.InventoryHostConfig{entry.Host: hostCfg},
 		Groups: map[string]config.GroupConfig{},
 	}
-	if group := strings.TrimSpace(hostCfg.Group); group != "" {
-		if groupCfg, ok := provider.Groups[group]; ok {
-			partialProvider.Groups[group] = groupCfg
-		}
-	}
 	text, err := marshalInventoryProviderYAML(config.ProviderLocal, partialProvider)
 	if err != nil {
 		return "", err
@@ -1001,7 +1044,7 @@ func printLocalWrittenHostConfig(parser *sshconfig.Parser, cfg *config.Config, p
 		ui.Warning("Failed to print written config: %v", err)
 		return
 	}
-	ui.Info("Written config:")
+	ui.Info("Written host config:")
 	for _, line := range strings.Split(strings.TrimRight(stanza, "\n"), "\n") {
 		fmt.Printf("    %s\n", line)
 	}
@@ -1037,8 +1080,8 @@ func testLocalHostCompatibility(
 		return nil, fmt.Errorf("write temp ssh config: %w", err)
 	}
 
-	result := &localHostCompatResult{FixesApplied: make([]compat.CompatType, 0)}
-	appliedSet := make(map[compat.CompatType]bool)
+	result := &localHostCompatResult{FixesApplied: make([]compat.FloorSelection, 0)}
+	appliedSet := make(map[string]bool)
 	for iteration := 1; iteration <= maxIterations; iteration++ {
 		ui.Info("Testing connection to %s (%d/%d)...", testHost.Host, iteration, maxIterations)
 		testResult, err := localHostConnectionTest(ctx, testHost, connector.TestConfig{
@@ -1064,35 +1107,40 @@ func testLocalHostCompatibility(
 			return result, nil
 		}
 
-		compatTypes := compat.ParseCompatibilityError(testResult.Stderr)
-		if len(compatTypes) == 0 {
+		issues := compat.ParseNegotiationIssues(testResult.Stderr)
+		if len(issues) == 0 {
 			result.StoppedReason = "no_compatibility_issues"
 			return result, nil
 		}
 
-		var newFixes []compat.CompatType
-		for _, ct := range compatTypes {
-			if !appliedSet[ct] {
-				newFixes = append(newFixes, ct)
+		var newFixes []compat.FloorSelection
+		for _, issue := range issues {
+			fix, ok := compat.SelectCompatibilityFloor(issue, compat.LocalSupportedAlgorithms(issue.Category))
+			if !ok {
+				continue
+			}
+			key := string(fix.Category) + "\x00" + fix.Floor
+			if !appliedSet[key] {
+				newFixes = append(newFixes, fix)
 			}
 		}
 		if len(newFixes) == 0 {
 			result.StoppedReason = "no_progress"
 			return result, nil
 		}
-		for _, ct := range newFixes {
-			ui.Warning("Applying: %s", compat.CompatConfigs[ct].Name)
+		for _, fix := range newFixes {
+			ui.Warning("Applying: %s=%s", fix.Directive, fix.Floor)
 		}
-		if err := sshconfig.ApplyCompatFixes(testHost, newFixes); err != nil {
+		if err := applyCompatibilityFloorsToHostEntry(testHost, newFixes); err != nil {
 			result.StoppedReason = "fix_application_error"
 			return result, nil
 		}
 		if err := writeTemp(); err != nil {
 			return nil, fmt.Errorf("update temp ssh config: %w", err)
 		}
-		for _, ct := range newFixes {
-			appliedSet[ct] = true
-			result.FixesApplied = append(result.FixesApplied, ct)
+		for _, fix := range newFixes {
+			appliedSet[string(fix.Category)+"\x00"+fix.Floor] = true
+			result.FixesApplied = append(result.FixesApplied, fix)
 		}
 	}
 	result.StoppedReason = "max_iterations_reached"
@@ -1152,7 +1200,7 @@ func findInventoryHostWithLocation(parser *sshconfig.Parser, cfg *config.Config,
 }
 
 func hostEntryFromInventoryHost(cfg *config.Config, paths *config.Paths, providerName, name string, hostCfg config.InventoryHostConfig) *sshconfig.HostEntry {
-	hostname := strings.TrimSpace(hostCfg.Hostname)
+	hostname := inventoryHostSSHHostName(name, hostCfg)
 	if hostname == "" {
 		hostname = name
 	}
@@ -1166,6 +1214,15 @@ func hostEntryFromInventoryHost(cfg *config.Config, paths *config.Paths, provide
 	host.Patterns = append(host.Patterns, hostCfg.Aliases...)
 	inventory.SetLocalHostGroup(host, groupID)
 	return host
+}
+
+func inventoryHostSSHHostName(name string, hostCfg config.InventoryHostConfig) string {
+	for key, option := range hostCfg.SSH.Options {
+		if strings.EqualFold(key, "HostName") && strings.TrimSpace(option.Scalar) != "" {
+			return strings.TrimSpace(option.Scalar)
+		}
+	}
+	return strings.TrimSpace(name)
 }
 
 func hostEntryFromProviderState(paths *config.Paths, providerName string, host *inventory.ProviderHost) *sshconfig.HostEntry {
@@ -1232,6 +1289,157 @@ func saveLocalProviderInventory(cfg *config.Config, paths *config.Paths) error {
 	return os.WriteFile(target, []byte(text), 0600)
 }
 
+func saveLocalProviderHostInventory(cfg *config.Config, paths *config.Paths, hostName string) error {
+	if cfg == nil {
+		return fmt.Errorf("config is required")
+	}
+	target := localProviderYAMLPath(cfg, paths)
+	provider := cfg.Inventory.Providers[config.ProviderLocal]
+	hostCfg, ok := provider.Hosts[hostName]
+	if !ok {
+		return fmt.Errorf("local host %q is not configured", hostName)
+	}
+	patched, err := patchLocalProviderHostYAML(target, hostName, hostCfg)
+	if err != nil {
+		return err
+	}
+	if patched {
+		return nil
+	}
+	return saveLocalProviderInventory(cfg, paths)
+}
+
+func patchLocalProviderHostYAML(path, hostName string, hostCfg config.InventoryHostConfig) (bool, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("read local inventory: %w", err)
+	}
+	if strings.TrimSpace(string(content)) == "" {
+		return false, nil
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(content, &doc); err != nil {
+		return false, fmt.Errorf("parse local inventory %s: %w", path, err)
+	}
+	root := yamlDocumentMapping(&doc)
+	if root == nil {
+		return false, fmt.Errorf("local inventory %s must be a YAML mapping", path)
+	}
+	inventoryNode := ensureYAMLMapping(root, "inventory")
+	providersNode := ensureYAMLMapping(inventoryNode, "providers")
+	localNode := ensureYAMLMapping(providersNode, config.ProviderLocal)
+	if yamlMappingValue(localNode, "type") == nil {
+		setYAMLMappingValue(localNode, "type", yamlScalarNode(config.ProviderLocal))
+	}
+	hostsNode := ensureYAMLMapping(localNode, "hosts")
+	var hostNode yaml.Node
+	if err := hostNode.Encode(hostCfg); err != nil {
+		return false, fmt.Errorf("encode local host %s: %w", hostName, err)
+	}
+	setYAMLMappingValue(hostsNode, hostName, &hostNode)
+	sortYAMLMappingKeys(hostsNode)
+
+	var b strings.Builder
+	enc := yaml.NewEncoder(&b)
+	enc.SetIndent(2)
+	if err := enc.Encode(&doc); err != nil {
+		return false, fmt.Errorf("marshal local inventory %s: %w", path, err)
+	}
+	if err := enc.Close(); err != nil {
+		return false, fmt.Errorf("marshal local inventory %s: %w", path, err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimRight(b.String(), "\n")+"\n"), 0600); err != nil {
+		return false, fmt.Errorf("write local inventory: %w", err)
+	}
+	return true, nil
+}
+
+func yamlDocumentMapping(doc *yaml.Node) *yaml.Node {
+	if doc == nil {
+		return nil
+	}
+	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
+		if doc.Content[0].Kind == yaml.MappingNode {
+			return doc.Content[0]
+		}
+		return nil
+	}
+	if doc.Kind == yaml.MappingNode {
+		return doc
+	}
+	return nil
+}
+
+func ensureYAMLMapping(parent *yaml.Node, key string) *yaml.Node {
+	if existing := yamlMappingValue(parent, key); existing != nil {
+		if existing.Kind != yaml.MappingNode {
+			existing.Kind = yaml.MappingNode
+			existing.Tag = "!!map"
+			existing.Value = ""
+			existing.Content = nil
+		}
+		return existing
+	}
+	value := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	setYAMLMappingValue(parent, key, value)
+	return value
+}
+
+func yamlMappingValue(parent *yaml.Node, key string) *yaml.Node {
+	if parent == nil || parent.Kind != yaml.MappingNode {
+		return nil
+	}
+	for idx := 0; idx+1 < len(parent.Content); idx += 2 {
+		if parent.Content[idx].Value == key {
+			return parent.Content[idx+1]
+		}
+	}
+	return nil
+}
+
+func setYAMLMappingValue(parent *yaml.Node, key string, value *yaml.Node) {
+	if parent.Kind != yaml.MappingNode {
+		parent.Kind = yaml.MappingNode
+		parent.Tag = "!!map"
+		parent.Content = nil
+	}
+	for idx := 0; idx+1 < len(parent.Content); idx += 2 {
+		if parent.Content[idx].Value == key {
+			parent.Content[idx+1] = value
+			return
+		}
+	}
+	parent.Content = append(parent.Content, yamlScalarNode(key), value)
+}
+
+func sortYAMLMappingKeys(node *yaml.Node) {
+	if node == nil || node.Kind != yaml.MappingNode || len(node.Content) < 4 {
+		return
+	}
+	type pair struct {
+		key   *yaml.Node
+		value *yaml.Node
+	}
+	pairs := make([]pair, 0, len(node.Content)/2)
+	for idx := 0; idx+1 < len(node.Content); idx += 2 {
+		pairs = append(pairs, pair{key: node.Content[idx], value: node.Content[idx+1]})
+	}
+	sort.SliceStable(pairs, func(i, j int) bool {
+		return pairs[i].key.Value < pairs[j].key.Value
+	})
+	node.Content = node.Content[:0]
+	for _, pair := range pairs {
+		node.Content = append(node.Content, pair.key, pair.value)
+	}
+}
+
+func yamlScalarNode(value string) *yaml.Node {
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value}
+}
+
 func marshalInventoryProviderYAML(name string, provider config.InventoryProviderConfig) (string, error) {
 	provider.Group = nil
 	providerMap := map[string]any{"type": provider.Type}
@@ -1268,14 +1476,41 @@ func shortInventoryGroup(group string) string {
 	return short
 }
 
-func compatTypesToNames(types []compat.CompatType) []string {
-	names := make([]string, 0, len(types))
-	for _, ct := range types {
-		if _, ok := compat.CompatConfigs[ct]; ok {
-			names = append(names, string(ct))
-		}
+func applyCompatibilityFloorsToHostEntry(host *sshconfig.HostEntry, fixes []compat.FloorSelection) error {
+	if host == nil {
+		return fmt.Errorf("host is required")
 	}
-	return names
+	for _, fix := range fixes {
+		policy, ok := compat.AlgorithmPolicies[fix.Category]
+		if !ok {
+			return fmt.Errorf("unsupported compatibility category %q", fix.Category)
+		}
+		directive := fix.Directive
+		if directive == "" {
+			directive = policy.Directive
+		}
+		algorithms := compat.AlgorithmsAtOrAboveFloor(fix.Category, fix.Floor, compat.LocalSupportedAlgorithms(fix.Category))
+		if len(algorithms) == 0 {
+			return fmt.Errorf("unsupported compatibility floor %q for %s", fix.Floor, fix.Category)
+		}
+		value := "+" + strings.Join(algorithms, ",")
+		upsertDirective(host, directive, value)
+		host.Properties[strings.ToLower(directive)] = value
+	}
+	return nil
+}
+
+func setLocalHostCompatibilityFloor(cfg *config.SSHCompatibility, fix compat.FloorSelection) {
+	switch fix.Category {
+	case compat.CategoryKex:
+		cfg.Kex = fix.Floor
+	case compat.CategoryMAC:
+		cfg.MAC = fix.Floor
+	case compat.CategoryHostKey:
+		cfg.HostKey = fix.Floor
+	case compat.CategoryPublicKey:
+		cfg.PublicKey = fix.Floor
+	}
 }
 
 func inventoryFiles(cfg *config.Config, paths *config.Paths) ([]string, error) {

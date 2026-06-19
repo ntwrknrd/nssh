@@ -15,7 +15,7 @@ files, and provider state. It must not read `~/.ssh/config` or generated
 `~/.ssh/nssh.d/*` files for host lookup, auth policy, routing, compatibility
 fixes, or connection defaults.
 
-Rationale: splitting authority between nssh TOML and generated OpenSSH config
+Rationale: splitting authority between nssh config and generated OpenSSH config
 allowed credential resolution to be correct while OpenSSH auth policy remained
 stale.
 
@@ -39,12 +39,11 @@ Local, manually managed hosts should live in provider-scoped nssh inventory
 files, not in the root config. The root config should stay lean and use includes
 for credential, inventory, and host data.
 
-### Strict YAML Replaces TOML
+### Strict YAML Is Canonical
 
-The clean cutover should replace TOML with YAML as the canonical nssh
-configuration format.
+The clean cutover should use YAML as the canonical nssh configuration format.
 
-Rationale: the next config model is deeply hierarchical. TOML dotted table names
+Rationale: the next config model is deeply hierarchical. Flat dotted table names
 and inline maps make provider, group, host, auth, match, and SSH option data hard
 to scan. YAML gives the required visual nesting while preserving comments.
 
@@ -78,8 +77,8 @@ verbosity. OpenSSH verbosity should be capped at `-vvv`.
 ### Runtime Resolution Uses One Connection Model
 
 Connection execution should be driven by a single resolved model containing host
-identity, aliases, hostname, port, username, provider, group, auth mode,
-credential target, proxy settings, compatibility fixes, host-key policy, and
+identity, aliases, port, username, provider, group, auth mode,
+credential target, proxy settings, compatibility policy, host-key policy, and
 timeouts.
 
 This model should be transport-neutral enough that a future custom SSH client can
@@ -99,8 +98,42 @@ global ssh.defaults
 ```
 
 For local hosts, the `hosts.<name>` entry supplies identity fields such as
-`hostname`, `port`, and `aliases`, but its config fields still override selected
+`port`, and `aliases`, but its config fields still override selected
 group defaults later in the merge.
+
+Provider defaults and selected group defaults should include `ssh:` config, not
+only `auth:` config. This gives nssh a native replacement for broad OpenSSH
+`Host` wildcard policy without preserving OpenSSH's pattern precedence rules.
+
+The runtime SSH merge must be deterministic:
+
+- `ssh.options` maps merge by OpenSSH directive key, with the higher-priority
+  layer winning.
+- `ssh.options` is type-aware for known OpenSSH directives: booleans, durations,
+  string lists, forwarding strings, and maps such as `SetEnv` should validate
+  before rendering.
+- Unknown `ssh.options` keys may pass through only when they can be rendered as
+  safe one-to-one OpenSSH `-o Key=Value` directives.
+- `ssh.compatibility` maps merge by category, with higher-priority layers
+  winning. Values are legacy algorithm floors, not exact final selections.
+- If `ssh.options` sets an OpenSSH directive controlled by a compatibility
+  category, that explicit option disables nssh compatibility policy for that
+  category.
+
+The resolved SSH config should then be rendered to `exec.Command("ssh", args...)`
+argv with `-F none`. nssh should never construct a shell command string for
+normal SSH execution.
+
+### Runtime Argv Must Be Inspectable
+
+Add a diagnostic command that prints the exact OpenSSH argv nssh would execute
+for a host after config resolution. The command should redact nothing by default
+because argv contains policy, not passwords; if a future option may carry secret
+material, that specific value should be redacted.
+
+This command is the replacement for using `ssh -G <host>` as a truth source.
+`ssh -G` is still useful for raw OpenSSH debugging, but it cannot explain nssh
+behavior once nssh runs OpenSSH with `-F none`.
 
 ### Group Inheritance Is Singular
 
@@ -116,9 +149,9 @@ resolver should emit a warning or debug-visible event. A provider-level
 For the local provider, `hosts.<name>.group` is required unless a later schema
 adds an explicit default group.
 
-### Compatibility Fixes Are Per-Host Config
+### Compatibility Policy Is Per-Host Config
 
-Legacy SSH compatibility fixes should be stored as provider-scoped per-host nssh
+Legacy SSH compatibility policy should be stored as provider-scoped per-host nssh
 config, not in generated OpenSSH config and not as hidden runtime-only state.
 
 Provider state may identify discovered hosts and current group placement, but
@@ -130,15 +163,34 @@ discovered hosts; for the local provider, entries are the inventory.
 
 `nssh` may provide an import command that reads existing OpenSSH config as source
 material. Import can translate global defaults and Host blocks into nssh config
-and preserve unsupported directives through an explicit escape hatch.
+and preserve safe OpenSSH directives in `ssh.options`.
 
 After import, runtime connection behavior must still come from nssh config.
 
-For `release-0.3`, import these OpenSSH directives as typed nssh fields:
+The user-facing import command should stay simple: no source, provider, output,
+or dry-run flags. It reads `~/.ssh/config`, expands includes recursively, prompts
+before importing each included file, prompts before importing `Host *` defaults,
+and asks which local group each imported file's concrete hosts should use.
+Imported SSH defaults write directly to the root `config.yaml` under
+`ssh.defaults`. Imported hosts always write to the `local` inventory provider in
+a fixed YAML file under `inventory/`.
 
-- `HostName`
-- `User`
-- `Port`
+Import prompts should preview the full nssh YAML fragment that will be written
+and identify the destination file/key path. They should not hide config behind
+line-count summaries.
+
+For `release-0.3`, import OpenSSH host identity directives into nssh inventory
+or auth fields:
+
+- `HostName` -> host key when concrete; otherwise `ssh.options.HostName`
+- `User` -> auth `username`
+- `Port` -> host `port`
+
+Import OpenSSH behavioral directives into the type-aware `ssh.options` map, not
+as many parallel typed fields under `ssh`.
+
+Known option keys should validate their value shape before rendering:
+
 - `ProxyJump`
 - `ProxyCommand`
 - `IdentityAgent`
@@ -164,37 +216,60 @@ For `release-0.3`, import these OpenSSH directives as typed nssh fields:
 
 Preserve unsupported directives in `ssh.options` only when they are simple
 one-to-one OpenSSH `-o Key=Value` options. Warn and do not import `Match`,
-`Include`, shell-expanded conditionals, `CanonicalizeHostname`, and any
-directive with ordering or conditional behavior nssh cannot preserve honestly.
+shell-expanded conditionals, `CanonicalizeHostname`, and any directive with
+ordering or conditional behavior nssh cannot preserve honestly.
 
 No raw argv escape hatch should be included in `release-0.3`.
 
-### Compatibility Fix Catalog Is Narrow
+### Compatibility Uses Algorithm Floors
 
-`release-0.3` should include four named compatibility fixes:
+`release-0.3` should replace named compatibility lists with typed
+compatibility floors:
 
-- `legacy-kex`
-- `legacy-macs`
-- `legacy-hostkey`
-- `legacy-pubkey`
-
-They should translate to these OpenSSH option additions:
-
-```text
-legacy-kex      -> KexAlgorithms +diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1
-legacy-macs     -> MACs +hmac-sha1,+hmac-sha1-96
-legacy-hostkey  -> HostKeyAlgorithms +ssh-rsa
-legacy-pubkey   -> PubkeyAcceptedAlgorithms +ssh-rsa
+```yaml
+ssh:
+  compatibility:
+    kex: diffie-hellman-group1-sha1
+    mac: hmac-sha1
+    host_key: ssh-rsa
+    public_key: ssh-rsa
 ```
 
-Do not include a broad `legacy` preset in `release-0.3`; it hides too much and
-encourages sloppy per-host fixes.
+Each value is the weakest legacy algorithm this host is allowed to use for that
+category. nssh owns a small ordered policy list per category, sorted from most
+preferred to least preferred. At render time, nssh includes only algorithms at
+or above the configured floor, filters them against local OpenSSH support, and
+orders them by nssh preference. OpenSSH then selects the first client-preferred
+algorithm that the server also offers.
+
+This keeps config honest without requiring operators to hand-maintain long
+algorithm lists. It also avoids blindly copying the server's `Their offer` list,
+which may include weak algorithms or reflect an old server's preference order.
+
+Initial ordered policy lists:
+
+```text
+kex: [diffie-hellman-group-exchange-sha256, diffie-hellman-group14-sha1, diffie-hellman-group-exchange-sha1, diffie-hellman-group1-sha1]
+mac: [hmac-sha2-512, hmac-sha2-256, hmac-sha1, hmac-sha1-96, hmac-md5]
+host_key: [rsa-sha2-512, rsa-sha2-256, ssh-rsa]
+public_key: [rsa-sha2-512, rsa-sha2-256, ssh-rsa]
+```
+
+Auto-remediation should parse `Their offer`, intersect it with the relevant
+policy list and `ssh -Q` local support, choose the most preferred working
+algorithm, and persist that algorithm as the compatibility floor. If the only
+working option is a weak last entry such as `diffie-hellman-group1-sha1`, nssh
+should still be able to propose and persist it without requiring manual YAML
+editing.
+
+Diagnostics must show both the configured floor and the effective OpenSSH argv
+expansion so compatibility policy is visible.
 
 ### Preserve 1Password SSH Agent Integration
 
 Using OpenSSH as transport keeps 1Password SSH agent integration viable.
 Settings such as `IdentityAgent`, `IdentityFile`, and `IdentitiesOnly` should be
-modeled explicitly in nssh config or imported from OpenSSH config.
+stored as validated keys under `ssh.options`.
 
 If nssh later moves to a custom SSH client, the 1Password agent remains possible
 because it speaks the SSH agent protocol over a Unix socket, but the complexity
@@ -208,7 +283,7 @@ is higher.
   nssh models equivalent behavior explicitly.
 - Arbitrary OpenSSH directives will not be silently inherited from
   `~/.ssh/config`.
-- Existing TOML config is replaced rather than carried as a runtime format.
+- Existing pre-YAML config is replaced rather than carried as a runtime format.
 
 ## Required Capabilities
 
@@ -217,11 +292,12 @@ is higher.
 - YAML includes for modular config files.
 - Strict validation for unknown YAML fields.
 - Explicit auth argv for password and key modes.
-- Explicit support for common SSH options:
-  - hostname
+- Explicit support for nssh host identity and auth fields:
   - aliases
+  - `ssh.options.HostName` override when the connection target differs from the inventory key
   - port
   - username
+- Explicit support for common OpenSSH behavior under type-aware `ssh.options`:
   - proxy jump
   - identity agent
   - identity file
@@ -231,32 +307,51 @@ is higher.
   - local and remote forwarding
   - set environment
   - remote command
-  - host-key policy
   - compatibility algorithms
-  - connection and idle timeouts
-- An explicit escape hatch for uncommon OpenSSH options.
+- Explicit support for nssh SSH runtime policy:
+  - host-key policy
+  - connection, password, and idle timeouts
+- Safe pass-through for uncommon OpenSSH options.
+- Provider-level and group-level `ssh:` inheritance.
+- A command that shows the final rendered OpenSSH argv for a resolved nssh host.
 
 ## Resolved Schema Questions
 
 - Global SSH defaults belong under `ssh.defaults`.
 - Provider-level `hosts` is the single key for local host entries and
   discovered-provider per-host overlays.
+- Local auto-add treats the prompted `Host` value as the canonical inventory
+  key and dial target.
+- If a local auto-added host is an FQDN, nssh automatically adds its short name
+  as an alias. Additional aliases are explicit and additive through
+  `nssh inv set HOST --alias ALIAS`.
+- Inventory `hostname` is not supported. When a target override is truly
+  needed, configure OpenSSH `HostName` under `ssh.options`.
 - All providers use singular group inheritance.
 - Discovered providers select one group by first matching group in file order,
   unless `hosts.<canonical>.group` overrides it.
 - Local hosts require `hosts.<name>.group`.
 - Runtime merge order is global defaults, provider defaults, host identity,
   selected group defaults, per-host config, then CLI flags.
-- Compatibility fixes should be stored as user-visible nssh names such as
-  `legacy-kex`, not as hand-written OpenSSH fragments.
-- Compatibility fixes belong under provider-scoped `hosts` entries, not
+- Provider-level and group-level `ssh:` config use the same
+  `compatibility`/`options` schema as host-level `ssh:` config.
+- Imported `ssh.defaults` must affect runtime argv; storing the defaults without
+  merging them into resolved host config is not acceptable.
+- nssh handles OpenSSH `Include`, broad wildcard, and `Match` use cases through
+  nssh-native mechanisms: YAML includes, provider/group selection, and explicit
+  host overlays.
+- Compatibility policy should be stored as typed `ssh.compatibility` algorithm
+  floors, not as named `legacy-*` presets or hand-written OpenSSH fragments.
+- Compatibility diagnostics and argv inspection must show the configured floor,
+  selected policy expansion, and final OpenSSH options.
+- Compatibility policy belongs under provider-scoped `hosts` entries, not
   generated state.
 - The first YAML cutover should include a minimal SSH config import command.
-- SSH config import has a narrow first-version boundary: typed fields for common
-  directives, `ssh.options` for safe one-to-one options, warnings for anything
-  conditional or order-sensitive.
+- SSH config import has a narrow first-version boundary: type-aware
+  `ssh.options` for common directives, safe one-to-one pass-through for unknown
+  directives, and warnings for anything conditional or order-sensitive.
 - `release-0.3` should not include raw argv config.
 - Runtime verbosity is first-class: `-v` enables nssh debug, while `-vv` through
   `-vvvv` add OpenSSH `-v` through `-vvv`.
-- `release-0.3` compatibility fixes are `legacy-kex`, `legacy-macs`,
-  `legacy-hostkey`, and `legacy-pubkey`.
+- `release-0.3` compatibility categories are `kex`, `mac`, `host_key`, and
+  `public_key`.

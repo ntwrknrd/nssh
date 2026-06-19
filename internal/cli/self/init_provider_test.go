@@ -2,6 +2,7 @@ package self
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,8 +11,8 @@ import (
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
 
-func TestInitYesDefaultsToLocalInventoryAndPassCredentialProvider(t *testing.T) {
-	plan, err := buildInitPlan(initPlanRequest{Yes: true})
+func TestInitPlanDefaultsToLocalInventoryAndPassCredentialProvider(t *testing.T) {
+	plan, err := buildInitPlan(initPlanRequest{})
 	if err != nil {
 		t.Fatalf("buildInitPlan: %v", err)
 	}
@@ -152,7 +153,7 @@ func TestApplyInitPlanBacksUpExistingConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := buildInitPlan(initPlanRequest{Yes: true})
+	plan, err := buildInitPlan(initPlanRequest{})
 	if err != nil {
 		t.Fatalf("buildInitPlan: %v", err)
 	}
@@ -167,6 +168,97 @@ func TestApplyInitPlanBacksUpExistingConfig(t *testing.T) {
 	}
 	if string(data) != "old: true\n" {
 		t.Fatalf("backup content = %q", data)
+	}
+}
+
+func TestEnsureInitConfigRejectsExistingConfig(t *testing.T) {
+	tmp := t.TempDir()
+	paths := &config.Paths{
+		ConfigDir:  filepath.Join(tmp, "config", "nssh"),
+		ConfigFile: filepath.Join(tmp, "config", "nssh", "config.yaml"),
+	}
+	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.ConfigFile, []byte("{}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := ensureInitConfig(paths, InitOptions{})
+	if err == nil || !strings.Contains(err.Error(), "already initialized") {
+		t.Fatalf("ensureInitConfig error = %v, want already initialized", err)
+	}
+	if _, err := os.Stat(paths.ConfigFile + ".bak"); !os.IsNotExist(err) {
+		t.Fatalf("backup was created for refused init: %v", err)
+	}
+}
+
+func TestRunInitStopsOnConfigSetupError(t *testing.T) {
+	if os.Getenv("NSSH_TEST_RUN_INIT_EXISTING_CONFIG") == "1" {
+		runInitExistingConfigHelper(t)
+		return
+	}
+
+	tmp := t.TempDir()
+	binDir := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(binDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "nssh"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run", "^TestRunInitStopsOnConfigSetupError$")
+	cmd.Env = append(os.Environ(),
+		"NSSH_TEST_RUN_INIT_EXISTING_CONFIG=1",
+		"HOME="+tmp,
+		"XDG_CONFIG_HOME="+filepath.Join(tmp, "config"),
+		"XDG_DATA_HOME="+filepath.Join(tmp, "data"),
+		"XDG_STATE_HOME="+filepath.Join(tmp, "state"),
+		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("runInit helper failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "[!] nssh is already initialized") {
+		t.Fatalf("runInit did not print already-initialized warning:\n%s", output)
+	}
+	if strings.Contains(string(output), "nssh:") {
+		t.Fatalf("runInit printed app-level error prefix:\n%s", output)
+	}
+	for _, reject := range []string{"Dependencies", "nssh initialized successfully", "Next Steps"} {
+		if strings.Contains(string(output), reject) {
+			t.Fatalf("runInit continued after config setup error; saw %q in:\n%s", reject, output)
+		}
+	}
+}
+
+func runInitExistingConfigHelper(t *testing.T) {
+	t.Helper()
+
+	paths := config.DefaultPaths()
+	if err := os.MkdirAll(filepath.Dir(paths.ConfigFile), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.ConfigFile, []byte("{}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runInit(InitOptions{})
+	if err != nil {
+		t.Fatalf("runInit error = %v, want nil", err)
+	}
+}
+
+func TestInitCommandDoesNotExposeYesFlag(t *testing.T) {
+	cmd := NewInitCmd()
+
+	if flag := cmd.Flags().Lookup("yes"); flag != nil {
+		t.Fatalf("init exposes --yes flag")
+	}
+	if shorthand := cmd.Flags().ShorthandLookup("y"); shorthand != nil {
+		t.Fatalf("init exposes -y shorthand")
 	}
 }
 

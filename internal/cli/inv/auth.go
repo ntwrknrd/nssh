@@ -155,7 +155,7 @@ func inventoryAuthViewFromAuth(source string, auth config.InventoryAuthConfig) i
 		passwordSource = source
 	}
 	authModeSource := "-"
-	if auth.AuthMode != "" {
+	if auth.Mode != "" {
 		authModeSource = source
 	}
 	return inventoryAuthView{
@@ -166,7 +166,7 @@ func inventoryAuthViewFromAuth(source string, auth config.InventoryAuthConfig) i
 		UsernameRef:        valueOrDash(auth.UsernameRef),
 		UsernameSource:     usernameSource,
 		PasswordSource:     passwordSource,
-		AuthMode:           valueOrDash(auth.AuthMode),
+		AuthMode:           valueOrDash(auth.Mode),
 		AuthModeSource:     authModeSource,
 	}
 }

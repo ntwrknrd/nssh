@@ -42,15 +42,15 @@ inventory:
             password_ref: nssh/groups/lab
             username: local-admin
       hosts:
-        local01:
+        local01.example.com:
           group: lab
-          hostname: local01.example.com
-        local02:
+          aliases: [local01]
+        local02.example.com:
           group: lab
-          hostname: local02.example.com
-        local03:
+          aliases: [local02]
+        local03.example.com:
           group: edge
-          hostname: local03.example.com
+          aliases: [local03]
     netbox-prod:
       type: netbox
       groups:
@@ -76,9 +76,9 @@ include: [inventory.yaml]
 	}
 	localProvider := cfg.Inventory.Providers[config.ProviderLocal]
 	localProvider.Hosts = map[string]config.InventoryHostConfig{
-		"local01": {Group: "lab", Hostname: "local01.example.com"},
-		"local02": {Group: "lab", Hostname: "local02.example.com"},
-		"local03": {Group: "edge", Hostname: "local03.example.com"},
+		"local01.example.com": {Group: "lab", Aliases: []string{"local01"}},
+		"local02.example.com": {Group: "lab", Aliases: []string{"local02"}},
+		"local03.example.com": {Group: "edge", Aliases: []string{"local03"}},
 	}
 	cfg.Inventory.Providers[config.ProviderLocal] = localProvider
 	cfg.Inventory.Provider = cfg.Inventory.Providers
@@ -420,8 +420,8 @@ func TestRenderStatusTreeReportsLocalFindingsReadOnly(t *testing.T) {
 				Type:   config.ProviderLocal,
 				Groups: map[string]config.GroupConfig{"lab": {}},
 				Hosts: map[string]config.InventoryHostConfig{
-					"edge01-a": {Group: "lab", Hostname: "192.0.2.1", Aliases: []string{"edge01"}},
-					"edge01-b": {Group: "lab", Hostname: "192.0.2.2", Aliases: []string{"edge01"}},
+					"192.0.2.1": {Group: "lab", Aliases: []string{"edge01", "edge01-a"}},
+					"192.0.2.2": {Group: "lab", Aliases: []string{"edge01", "edge01-b"}},
 				},
 			},
 		},

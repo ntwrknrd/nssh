@@ -14,7 +14,6 @@ import (
 const initInventoryLocal = "local"
 
 type initPlanRequest struct {
-	Yes                      bool
 	Existing                 *config.Config
 	InventorySources         []initInventorySourceRequest
 	CredentialProviders      []initCredentialProviderRequest

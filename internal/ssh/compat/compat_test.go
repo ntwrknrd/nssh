@@ -68,10 +68,62 @@ func TestParseCompatibilityError(t *testing.T) {
 	}
 }
 
+func TestParseNegotiationIssuesIncludesServerOffer(t *testing.T) {
+	stderr := `Unable to negotiate with 216.37.2.237 port 22: no matching key exchange method found. Their offer: ecdh-sha2-nistp256,diffie-hellman-group14-sha1,diffie-hellman-group1-sha1`
+
+	issues := ParseNegotiationIssues(stderr)
+	if len(issues) != 1 {
+		t.Fatalf("issues = %#v, want one", issues)
+	}
+	if issues[0].Category != CategoryKex {
+		t.Fatalf("category = %q, want kex", issues[0].Category)
+	}
+	want := []string{"ecdh-sha2-nistp256", "diffie-hellman-group14-sha1", "diffie-hellman-group1-sha1"}
+	if len(issues[0].ServerOffer) != len(want) {
+		t.Fatalf("offer = %#v, want %#v", issues[0].ServerOffer, want)
+	}
+	for idx := range want {
+		if issues[0].ServerOffer[idx] != want[idx] {
+			t.Fatalf("offer = %#v, want %#v", issues[0].ServerOffer, want)
+		}
+	}
+}
+
+func TestSelectCompatibilityFloorUsesBestAllowedAlgorithm(t *testing.T) {
+	issue := NegotiationIssue{
+		Category:    CategoryKex,
+		ServerOffer: []string{"diffie-hellman-group1-sha1", "diffie-hellman-group14-sha1"},
+	}
+	selection, ok := SelectCompatibilityFloor(issue, []string{"diffie-hellman-group1-sha1", "diffie-hellman-group14-sha1"})
+	if !ok {
+		t.Fatal("SelectCompatibilityFloor returned false")
+	}
+	if selection.Floor != "diffie-hellman-group14-sha1" {
+		t.Fatalf("floor = %q, want group14", selection.Floor)
+	}
+	if selection.Directive != "KexAlgorithms" {
+		t.Fatalf("directive = %q, want KexAlgorithms", selection.Directive)
+	}
+}
+
+func TestSelectCompatibilityFloorFallsBackToWeakestWhenRequired(t *testing.T) {
+	issue := NegotiationIssue{
+		Category:    CategoryKex,
+		ServerOffer: []string{"diffie-hellman-group1-sha1"},
+	}
+	selection, ok := SelectCompatibilityFloor(issue, []string{"diffie-hellman-group1-sha1", "diffie-hellman-group14-sha1"})
+	if !ok {
+		t.Fatal("SelectCompatibilityFloor returned false")
+	}
+	if selection.Floor != "diffie-hellman-group1-sha1" {
+		t.Fatalf("floor = %q, want group1", selection.Floor)
+	}
+}
+
 func TestApprovedCompatCatalog(t *testing.T) {
 	want := map[CompatType]string{
-		"legacy-kex":     "KexAlgorithms=+diffie-hellman-group14-sha1,+diffie-hellman-group1-sha1",
-		"legacy-macs":    "MACs=+hmac-sha1,+hmac-sha1-96",
+		"legacy-kex":     "KexAlgorithms=+diffie-hellman-group14-sha1",
+		"legacy-macs":    "MACs=+hmac-sha1",
 		"legacy-hostkey": "HostKeyAlgorithms=+ssh-rsa",
 		"legacy-pubkey":  "PubkeyAcceptedAlgorithms=+ssh-rsa",
 	}

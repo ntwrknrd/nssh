@@ -39,37 +39,37 @@ var supportedProviders = map[string]bool{
 
 // CredentialConfig defines named credential provider instances.
 type CredentialConfig struct {
-	Provider map[string]CredentialProviderConfig `toml:"provider" yaml:"provider,omitempty"`
+	Provider map[string]CredentialProviderConfig `yaml:"provider,omitempty"`
 
 	// Host and Group are legacy credential binding tables. Auth mappings now
 	// live under inventory.host and inventory.provider.<provider>.group.
-	Host  map[string]CredentialRefConfig `toml:"host" yaml:"host,omitempty"`
-	Group map[string]CredentialRefConfig `toml:"group" yaml:"group,omitempty"`
+	Host  map[string]CredentialRefConfig `yaml:"host,omitempty"`
+	Group map[string]CredentialRefConfig `yaml:"group,omitempty"`
 
-	Type   string                         `toml:"type" yaml:"type,omitempty"`
-	Config CredentialProviderDetailConfig `toml:"config" yaml:"config,omitempty"`
+	Type   string                         `yaml:"type,omitempty"`
+	Config CredentialProviderDetailConfig `yaml:"config,omitempty"`
 }
 
 // CredentialProviderConfig configures one named credential provider instance.
 type CredentialProviderConfig struct {
-	Type    string `toml:"type" yaml:"type"`
+	Type    string `yaml:"type"`
 	Session string `yaml:"session,omitempty"`
 	Account string `yaml:"account,omitempty"`
 	Vault   string `yaml:"vault,omitempty"`
 	Command string `yaml:"command,omitempty"`
 	Prefix  string `yaml:"prefix,omitempty"`
 
-	Config CredentialProviderDetailConfig `toml:"config" yaml:"config,omitempty"`
+	Config CredentialProviderDetailConfig `yaml:"config,omitempty"`
 }
 
 // CredentialProviderDetailConfig holds backend-specific credential provider
 // settings. Only the fields for the selected provider are used.
 type CredentialProviderDetailConfig struct {
-	Account string `toml:"account" yaml:"account,omitempty"`
-	Vault   string `toml:"vault" yaml:"vault,omitempty"`
-	Command string `toml:"command" yaml:"command,omitempty"`
-	Prefix  string `toml:"prefix" yaml:"prefix,omitempty"`
-	Session string `toml:"session" yaml:"session,omitempty"`
+	Account string `yaml:"account,omitempty"`
+	Vault   string `yaml:"vault,omitempty"`
+	Command string `yaml:"command,omitempty"`
+	Prefix  string `yaml:"prefix,omitempty"`
+	Session string `yaml:"session,omitempty"`
 }
 
 // CredentialRefConfig maps a host or group credential scope to an existing
@@ -77,72 +77,71 @@ type CredentialProviderDetailConfig struct {
 // ID/name or a provider URI. Username can be literal or resolved from
 // UsernameRef.
 type CredentialRefConfig struct {
-	Provider    string `toml:"provider" yaml:"provider,omitempty"`
-	Ref         string `toml:"ref" yaml:"ref,omitempty"`
-	Username    string `toml:"username" yaml:"username,omitempty"`
-	UsernameRef string `toml:"username_ref" yaml:"username_ref,omitempty"`
+	Provider    string `yaml:"provider,omitempty"`
+	Ref         string `yaml:"ref,omitempty"`
+	Username    string `yaml:"username,omitempty"`
+	UsernameRef string `yaml:"username_ref,omitempty"`
 }
 
 // InventoryConfig holds inventory defaults, host overrides, and provider config.
 type InventoryConfig struct {
-	Auth      InventoryAuthConfig                `toml:"auth" yaml:"auth,omitempty"`
-	Groups    map[string]GroupConfig             `toml:"-" yaml:"groups,omitempty"`
+	Auth      InventoryAuthConfig                `yaml:"auth,omitempty"`
+	Groups    map[string]GroupConfig             `yaml:"groups,omitempty"`
 	Hosts     map[string]InventoryHostConfig     `yaml:"hosts,omitempty"`
 	Providers map[string]InventoryProviderConfig `yaml:"providers,omitempty"`
 
-	Group    map[string]GroupConfig             `toml:"-" yaml:"group,omitempty"`
-	Host     map[string]InventoryHostConfig     `toml:"host" yaml:"host,omitempty"`
-	Provider map[string]InventoryProviderConfig `toml:"provider" yaml:"provider,omitempty"`
+	Group    map[string]GroupConfig             `yaml:"group,omitempty"`
+	Host     map[string]InventoryHostConfig     `yaml:"host,omitempty"`
+	Provider map[string]InventoryProviderConfig `yaml:"provider,omitempty"`
 }
 
 // InventoryHostConfig stores host-level inventory metadata and overrides.
 type InventoryHostConfig struct {
 	Group        string              `yaml:"group,omitempty"`
-	Hostname     string              `yaml:"hostname,omitempty"`
 	Aliases      []string            `yaml:"aliases,omitempty"`
 	Port         int                 `yaml:"port,omitempty"`
-	Auth         InventoryAuthConfig `toml:"auth" yaml:"auth,omitempty"`
+	Auth         InventoryAuthConfig `yaml:"auth,omitempty"`
 	SSH          SSHHostConfig       `yaml:"ssh,omitempty"`
-	AuthDisabled bool                `toml:"auth_disabled" yaml:"auth_disabled,omitempty"`
+	AuthDisabled bool                `yaml:"auth_disabled,omitempty"`
 }
 
 // InventoryAuthConfig maps an inventory host or group to a credential item.
 type InventoryAuthConfig struct {
 	Mode               string `yaml:"mode,omitempty"`
-	CredentialProvider string `toml:"credential_provider" yaml:"credential_provider,omitempty"`
-	PasswordRef        string `toml:"password_ref" yaml:"password_ref,omitempty"`
-	Username           string `toml:"username" yaml:"username,omitempty"`
-	UsernameRef        string `toml:"username_ref" yaml:"username_ref,omitempty"`
-	AuthMode           string `toml:"auth_mode" yaml:"auth_mode,omitempty"`
+	CredentialProvider string `yaml:"credential_provider,omitempty"`
+	PasswordRef        string `yaml:"password_ref,omitempty"`
+	Username           string `yaml:"username,omitempty"`
+	UsernameRef        string `yaml:"username_ref,omitempty"`
 }
 
 // InventoryProviderConfig configures one named external inventory provider.
 type InventoryProviderConfig struct {
-	Type      string                         `toml:"type" yaml:"type"`
-	Auth      InventoryAuthConfig            `toml:"auth" yaml:"auth,omitempty"`
-	Config    InventoryProviderDetailConfig  `toml:"config" yaml:"config,omitempty"`
+	Type      string                         `yaml:"type"`
+	Auth      InventoryAuthConfig            `yaml:"auth,omitempty"`
+	Config    InventoryProviderDetailConfig  `yaml:"config,omitempty"`
 	Groups    map[string]GroupConfig         `yaml:"groups,omitempty"`
 	Hosts     map[string]InventoryHostConfig `yaml:"hosts,omitempty"`
-	Group     map[string]GroupConfig         `toml:"group" yaml:"group,omitempty"`
-	Selectors []InventoryGroupSelector       `toml:"-"`
+	Group     map[string]GroupConfig         `yaml:"group,omitempty"`
+	Selectors []InventoryGroupSelector       `yaml:"-"`
 }
 
 // GroupConfig describes one provider-owned inventory group.
 type GroupConfig struct {
-	DomainSuffix []string            `toml:"domain_suffix" yaml:"domain_suffix,omitempty"`
-	Auth         InventoryAuthConfig `toml:"auth" yaml:"auth,omitempty"`
-	Match        InventoryMatch      `toml:"match" yaml:"match,omitempty"`
+	DomainSuffix []string            `yaml:"domain_suffix,omitempty"`
+	Auth         InventoryAuthConfig `yaml:"auth,omitempty"`
+	Match        InventoryMatch      `yaml:"match,omitempty"`
+	SSH          SSHHostConfig       `yaml:"ssh,omitempty"`
 }
 
 // InventoryProviderDetailConfig holds implementation-specific provider config.
 type InventoryProviderDetailConfig struct {
-	BaseURL               string `toml:"base_url" yaml:"base_url,omitempty"`
-	URLEnv                string `toml:"url_env" yaml:"url_env,omitempty"`
-	TokenEnv              string `toml:"token_env" yaml:"token_env,omitempty"`
-	EnvFile               string `toml:"env_file" yaml:"env_file,omitempty"`
-	JumpHost              string `toml:"jump_host" yaml:"jump_host,omitempty"`
-	Sudo                  bool   `toml:"sudo" yaml:"sudo,omitempty"`
-	StrictHostKeyChecking bool   `toml:"strict_host_key_checking" yaml:"strict_host_key_checking,omitempty"`
+	BaseURL               string `yaml:"base_url,omitempty"`
+	URLEnv                string `yaml:"url_env,omitempty"`
+	TokenEnv              string `yaml:"token_env,omitempty"`
+	EnvFile               string `yaml:"env_file,omitempty"`
+	JumpHost              string `yaml:"jump_host,omitempty"`
+	Sudo                  bool   `yaml:"sudo,omitempty"`
+	StrictHostKeyChecking bool   `yaml:"strict_host_key_checking,omitempty"`
 }
 
 type InventoryAuthContext struct {
@@ -424,8 +423,8 @@ func (c *InventoryConfig) Validate() error {
 // Validate checks one inventory auth mapping.
 func (c *InventoryAuthConfig) Validate(scope string) error {
 	c.Normalize()
-	if c.AuthMode != "" && c.AuthMode != AuthModePassword && c.AuthMode != AuthModeKey {
-		return fmt.Errorf("%s.auth_mode has invalid value %q", scope, c.AuthMode)
+	if c.Mode != "" && c.Mode != AuthModePassword && c.Mode != AuthModeKey {
+		return fmt.Errorf("%s.mode has invalid value %q", scope, c.Mode)
 	}
 	c.Username = strings.TrimSpace(c.Username)
 	c.UsernameRef = strings.TrimSpace(c.UsernameRef)
@@ -446,18 +445,10 @@ func (c *InventoryAuthConfig) Validate(scope string) error {
 
 func (c *InventoryAuthConfig) Normalize() {
 	c.Mode = strings.ToLower(strings.TrimSpace(c.Mode))
-	if c.AuthMode == "" {
-		c.AuthMode = c.Mode
-	}
-	if c.Mode == "" {
-		c.Mode = c.AuthMode
-	}
 	c.CredentialProvider = strings.TrimSpace(c.CredentialProvider)
 	c.PasswordRef = strings.TrimSpace(c.PasswordRef)
 	c.Username = strings.TrimSpace(c.Username)
 	c.UsernameRef = strings.TrimSpace(c.UsernameRef)
-	c.AuthMode = strings.ToLower(strings.TrimSpace(c.AuthMode))
-	c.Mode = c.AuthMode
 }
 
 // IsSet reports whether the auth mapping contains any configured value.
@@ -466,8 +457,7 @@ func (c InventoryAuthConfig) IsSet() bool {
 		strings.TrimSpace(c.PasswordRef) != "" ||
 		strings.TrimSpace(c.Username) != "" ||
 		strings.TrimSpace(c.UsernameRef) != "" ||
-		strings.TrimSpace(c.Mode) != "" ||
-		strings.TrimSpace(c.AuthMode) != ""
+		strings.TrimSpace(c.Mode) != ""
 }
 
 // CredentialRef converts inventory auth metadata into provider ref metadata.
@@ -670,8 +660,8 @@ func applyAuth(res *InventoryAuthResolution, auth InventoryAuthConfig, source st
 		res.UsernameSource = source
 		res.Source = source
 	}
-	if auth.AuthMode != "" {
-		res.AuthMode = auth.AuthMode
+	if auth.Mode != "" {
+		res.AuthMode = auth.Mode
 		res.AuthModeSource = source
 		res.Source = source
 		if auth.PasswordRef == "" {
