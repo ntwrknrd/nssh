@@ -8,6 +8,8 @@ import (
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
 
+type hostSelector func(prompt string, options []string, initialQuery string) (string, error)
+
 // ResolveHostname performs smart hostname resolution:
 // - Exact match: returns hostname unchanged
 // - Single partial match: returns the matched hostname
@@ -22,6 +24,12 @@ func ResolveHostname(hostname string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return resolveHostnameFromCatalog(hostname, catalog, func(prompt string, options []string, initialQuery string) (string, error) {
+		return ui.FuzzySelectString(prompt, options, initialQuery)
+	})
+}
+
+func resolveHostnameFromCatalog(hostname string, catalog *HostCatalog, selectHost hostSelector) (string, error) {
 	if host, ok := catalog.Find(hostname); ok {
 		if host.Canonical != hostname {
 			slog.Debug("auto-resolved hostname", "input", hostname, "resolved", host.Canonical)
@@ -29,8 +37,13 @@ func ResolveHostname(hostname string) (string, error) {
 		return host.Canonical, nil
 	}
 	suggestions := catalog.Suggestions(hostname)
-	if len(suggestions) > 0 {
-		selected, err := ui.FuzzySelectString("Select host", suggestions, hostname)
+	switch len(suggestions) {
+	case 0:
+	case 1:
+		slog.Debug("auto-resolved hostname", "input", hostname, "resolved", suggestions[0])
+		return suggestions[0], nil
+	default:
+		selected, err := selectHost("Select host", suggestions, hostname)
 		if err != nil {
 			return "", fmt.Errorf("fuzzy select: %w", err)
 		}
