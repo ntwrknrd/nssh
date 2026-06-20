@@ -1,7 +1,7 @@
 # nssh Configuration File
 # Location: ~/.config/nssh/config.yaml
 
-include: [credentials/*.yaml, inventory/*.yaml]
+include: [credential/*.yaml, inventory/*.yaml]
 
 agent:
   auto_start: true
@@ -9,12 +9,13 @@ agent:
   activity_increment: 15m
   max_lifetime: 24h
 
-credentials:
-  pass-local:
-    type: pass
-    session: external
-    command: pass
-    prefix: nssh
+credential:
+  provider:
+    pass:
+      type: pass
+      session: external
+      command: pass
+      prefix: nssh
 
 inventory:
   providers:
@@ -24,7 +25,7 @@ inventory:
         default:
           auth:
             mode: password
-            credential_provider: pass-local
+            credential_provider: pass
             password_ref: nssh/groups/default
             username: netops
       hosts: {}

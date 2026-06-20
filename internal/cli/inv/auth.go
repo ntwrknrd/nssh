@@ -9,7 +9,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
 
-type hostAuthPatch struct {
+type inventoryAuthPatch struct {
 	Auth  config.InventoryAuthConfig
 	Clear bool
 }
@@ -36,13 +36,13 @@ type inventoryDisplaySection struct {
 	Rows  []inventoryDisplayRow
 }
 
-func (p hostAuthPatch) HasChange() bool {
+func (p inventoryAuthPatch) HasChange() bool {
 	return p.Clear || p.Auth.IsSet()
 }
 
-func (p hostAuthPatch) Validate(cfg *config.Config) error {
+func (p inventoryAuthPatch) Validate(cfg *config.Config) error {
 	if p.Clear && p.Auth.IsSet() {
-		return fmt.Errorf("--credential-clear conflicts with credential mapping flags")
+		return fmt.Errorf("--cred none conflicts with credential mapping flags")
 	}
 	if !p.HasChange() {
 		return nil
@@ -60,7 +60,7 @@ func (p hostAuthPatch) Validate(cfg *config.Config) error {
 	auth.Normalize()
 	provider := auth.CredentialProvider
 	if provider == "" {
-		return fmt.Errorf("--credential-provider is required")
+		return fmt.Errorf("--cred provider is required")
 	}
 	if _, ok := cfg.Credential.Provider[provider]; !ok {
 		return fmt.Errorf("credential provider %q is not configured", provider)
@@ -68,7 +68,7 @@ func (p hostAuthPatch) Validate(cfg *config.Config) error {
 	return nil
 }
 
-func applyHostAuthPatch(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, host string, patch hostAuthPatch) error {
+func applyInventoryAuthPatch(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, host string, patch inventoryAuthPatch) error {
 	if !patch.HasChange() {
 		return nil
 	}

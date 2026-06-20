@@ -143,3 +143,22 @@ func TestSelfHelpDoesNotTruncate(t *testing.T) {
 		}
 	}
 }
+
+func TestSelfBenchRegistersOnlyConnectionBenchmarks(t *testing.T) {
+	root := NewRootCmd(Options{Version: "test"})
+	cmd, _, err := root.Find([]string{"self", "bench"})
+	if err != nil {
+		t.Fatalf("find self bench: %v", err)
+	}
+
+	var got []string
+	for _, subcmd := range cmd.Commands() {
+		if !subcmd.Hidden {
+			got = append(got, subcmd.Name())
+		}
+	}
+	want := []string{"scp", "ssh"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("self bench commands = %v, want %v", got, want)
+	}
+}

@@ -172,7 +172,7 @@ func buildInitPlan(req initPlanRequest) (*initPlan, error) {
 		req.InventorySources = []initInventorySourceRequest{{Type: initInventoryLocal, Groups: []string{"default"}}}
 	}
 	if len(req.CredentialProviders) == 0 {
-		req.CredentialProviders = []initCredentialProviderRequest{{Name: "pass-local", Type: config.CredentialProviderPass}}
+		req.CredentialProviders = []initCredentialProviderRequest{{Name: "pass", Type: config.CredentialProviderPass}}
 	}
 
 	cfg.Inventory.Provider = make(map[string]config.InventoryProviderConfig)
@@ -198,7 +198,7 @@ func buildInitPlan(req initPlanRequest) (*initPlan, error) {
 		if err != nil {
 			return nil, err
 		}
-		ref := credentialRefForGroup(provider, groupID)
+		ref := config.DefaultCredentialRef(provider, groupID, true)
 		providerCfg := cfg.Inventory.Provider[inventoryProvider]
 		groupCfg := providerCfg.Group[group]
 		groupCfg.Auth = config.InventoryAuthConfig{CredentialProvider: provider, PasswordRef: ref}
@@ -212,7 +212,7 @@ func buildInitPlan(req initPlanRequest) (*initPlan, error) {
 		cfg.Inventory.Host[host] = config.InventoryHostConfig{
 			Auth: config.InventoryAuthConfig{
 				CredentialProvider: provider,
-				PasswordRef:        credentialRefForHost(provider, host),
+				PasswordRef:        config.DefaultCredentialRef(provider, host, false),
 			},
 		}
 	}
@@ -273,7 +273,7 @@ func promptContainerlabSource(prompter initPrompter) (initInventorySourceRequest
 func promptCredentialProvider(prompter initPrompter, providerType string) (initCredentialProviderRequest, error) {
 	switch providerType {
 	case config.CredentialProviderPass:
-		name, err := prompter.Input("Pass provider name", "pass-local")
+		name, err := prompter.Input("Pass provider name", "pass")
 		if err != nil {
 			return initCredentialProviderRequest{}, err
 		}
@@ -405,6 +405,46 @@ func applyCredentialProvider(cfg *config.Config, provider initCredentialProvider
 	return nil
 }
 
+func applyCredentialProviderSetup(paths *config.Paths, cfg *config.Config, providerType string, prompter initPrompter, dryRun bool) error {
+	if paths == nil {
+		return fmt.Errorf("paths are required")
+	}
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+	if prompter == nil {
+		prompter = uiInitPrompter{}
+	}
+	provider, err := promptCredentialProvider(prompter, providerType)
+	if err != nil {
+		return err
+	}
+	if cfg.Credential.Provider == nil {
+		cfg.Credential.Provider = make(map[string]config.CredentialProviderConfig)
+	}
+	if err := applyCredentialProvider(cfg, provider); err != nil {
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	ui.Info("Credential provider: %s (%s)", provider.Name, credentialProviderLabel(provider.Type))
+	if dryRun {
+		return nil
+	}
+	if err := saveInitConfig(paths, cfg); err != nil {
+		return err
+	}
+	ui.Success("Config file: %s", AbbreviatePath(paths.ConfigFile))
+	if ok, detail := credentialProviderReadiness(cfg.Credential.Provider[provider.Name]); ok {
+		ui.Success("Provider readiness: %s", detail)
+	} else {
+		ui.Warning("Provider readiness: %s", detail)
+	}
+	return nil
+}
+
 func initInventorySourceProviderName(source initInventorySourceRequest) string {
 	if source.Type == "" || source.Type == initInventoryLocal {
 		return config.ProviderLocal
@@ -436,28 +476,6 @@ func ensureProviderGroups(cfg *config.Config, provider, providerType string, gro
 		providerCfg.Group[group] = providerCfg.Group[group]
 	}
 	cfg.Inventory.Provider[provider] = providerCfg
-}
-
-func credentialRefForGroup(provider, group string) string {
-	switch {
-	case strings.HasPrefix(provider, "op-"):
-		return "nssh group " + group
-	case strings.HasPrefix(provider, "bw-"):
-		return "nssh group " + group
-	default:
-		return "nssh/groups/" + group
-	}
-}
-
-func credentialRefForHost(provider, host string) string {
-	switch {
-	case strings.HasPrefix(provider, "op-"):
-		return "nssh host " + host
-	case strings.HasPrefix(provider, "bw-"):
-		return "nssh host " + host
-	default:
-		return "nssh/hosts/" + host
-	}
 }
 
 func initInventorySummary(cfg *config.Config) []string {
@@ -527,6 +545,10 @@ func applyInitPlan(paths *config.Paths, plan *initPlan) error {
 	if plan == nil || plan.Config == nil {
 		return fmt.Errorf("init plan config is required")
 	}
+	return saveInitConfig(paths, plan.Config)
+}
+
+func saveInitConfig(paths *config.Paths, cfg *config.Config) error {
 	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
@@ -542,7 +564,7 @@ func applyInitPlan(paths *config.Paths, plan *initPlan) error {
 	} else if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("stat config: %w", err)
 	}
-	if err := config.Save(paths.ConfigFile, plan.Config); err != nil {
+	if err := config.Save(paths.ConfigFile, cfg); err != nil {
 		return err
 	}
 	return os.Chmod(filepath.Dir(paths.ConfigFile), 0700)

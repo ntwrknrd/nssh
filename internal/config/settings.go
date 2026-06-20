@@ -10,12 +10,11 @@ import (
 
 // Config is the root configuration structure loaded from config.yaml.
 type Config struct {
-	Include     []string                            `yaml:"include,omitempty"`
-	Agent       AgentConfig                         `yaml:"agent,omitempty"`
-	Credentials map[string]CredentialProviderConfig `yaml:"credentials,omitempty"`
-	Inventory   InventoryConfig                     `yaml:"inventory,omitempty"`
-	Logging     LoggingConfig                       `yaml:"logging,omitempty"`
-	SSH         SSHConfig                           `yaml:"ssh,omitempty"`
+	Include   []string        `yaml:"include,omitempty"`
+	Agent     AgentConfig     `yaml:"agent,omitempty"`
+	Inventory InventoryConfig `yaml:"inventory,omitempty"`
+	Logging   LoggingConfig   `yaml:"logging,omitempty"`
+	SSH       SSHConfig       `yaml:"ssh,omitempty"`
 
 	Credential CredentialConfig `yaml:"credential,omitempty"`
 	Host       HostConfig       `yaml:"host,omitempty"`
@@ -209,26 +208,13 @@ func DefaultConfig() *Config {
 		},
 		Credential: CredentialConfig{
 			Provider: map[string]CredentialProviderConfig{
-				"pass-local": {
+				"pass": {
 					Type: CredentialProviderPass,
 					Config: CredentialProviderDetailConfig{
 						Command: "pass",
 						Prefix:  "nssh",
 						Session: ProviderSessionExternal,
 					},
-				},
-			},
-		},
-		Credentials: map[string]CredentialProviderConfig{
-			"pass-local": {
-				Type:    CredentialProviderPass,
-				Command: "pass",
-				Prefix:  "nssh",
-				Session: ProviderSessionExternal,
-				Config: CredentialProviderDetailConfig{
-					Command: "pass",
-					Prefix:  "nssh",
-					Session: ProviderSessionExternal,
 				},
 			},
 		},
@@ -240,7 +226,7 @@ func DefaultConfig() *Config {
 					Group: map[string]GroupConfig{
 						"default": {
 							Auth: InventoryAuthConfig{
-								CredentialProvider: "pass-local",
+								CredentialProvider: "pass",
 								PasswordRef:        "nssh/groups/default",
 							},
 						},
@@ -253,7 +239,7 @@ func DefaultConfig() *Config {
 					Groups: map[string]GroupConfig{
 						"default": {
 							Auth: InventoryAuthConfig{
-								CredentialProvider: "pass-local",
+								CredentialProvider: "pass",
 								PasswordRef:        "nssh/groups/default",
 							},
 						},
@@ -325,9 +311,6 @@ func Load(path string) (*Config, error) {
 	if err := decodeConfigDocument(path, doc, cfg); err != nil {
 		return nil, err
 	}
-	if tablePathDefined(doc.effective, "credentials") {
-		cfg.Credential.Provider = nil
-	}
 	if tablePathDefined(doc.effective, "inventory", "providers") {
 		cfg.Inventory.Provider = nil
 	}
@@ -354,12 +337,12 @@ func pruneImplicitCredentialDefaults(table map[string]any, cfg *Config) {
 		return
 	}
 	configDefinesProviders := tablePathDefined(table, "credential", "provider")
-	passLocalExplicit := tablePathDefined(table, "credential", "provider", "pass-local")
-	if configDefinesProviders && !passLocalExplicit {
-		delete(cfg.Credential.Provider, "pass-local")
+	passExplicit := tablePathDefined(table, "credential", "provider", "pass")
+	if configDefinesProviders && !passExplicit {
+		delete(cfg.Credential.Provider, "pass")
 		if defaultGroup, ok := cfg.Inventory.Provider[ProviderLocal].Group["default"]; ok &&
 			!tablePathDefined(table, "inventory", "provider", ProviderLocal, "group", "default", "auth") &&
-			defaultGroup.Auth.CredentialProvider == "pass-local" {
+			defaultGroup.Auth.CredentialProvider == "pass" {
 			defaultGroup.Auth = InventoryAuthConfig{}
 			localProvider := cfg.Inventory.Provider[ProviderLocal]
 			localProvider.Group["default"] = defaultGroup
@@ -481,25 +464,8 @@ func (c *Config) syncSchemaAliases() {
 	if c == nil {
 		return
 	}
-	if c.Credentials == nil && c.Credential.Provider != nil {
-		c.Credentials = c.Credential.Provider
-	}
-	if c.Credential.Provider == nil && c.Credentials != nil {
-		c.Credential.Provider = c.Credentials
-	}
-	if c.Credentials == nil {
-		c.Credentials = make(map[string]CredentialProviderConfig)
-	}
-	if c.Credential.Provider == nil {
-		c.Credential.Provider = c.Credentials
-	}
 	for name, provider := range c.Credential.Provider {
 		provider.syncDetailFields()
-		c.Credentials[name] = provider
-	}
-	for name, provider := range c.Credentials {
-		provider.syncDetailFields()
-		c.Credentials[name] = provider
 		c.Credential.Provider[name] = provider
 	}
 	c.Inventory.syncAliasFields()

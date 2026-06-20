@@ -730,7 +730,7 @@ Host *
 # Import credential providers and inventory provider files.
 # Keep this root config lean; put provider-specific settings in included files.
 include:
-  - credentials/*.yaml
+  - credential/*.yaml
   - inventory/*.yaml
 
 agent:

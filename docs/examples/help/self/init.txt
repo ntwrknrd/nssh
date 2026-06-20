@@ -1,6 +1,6 @@
 $ nssh self init --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh self init [flags]            Initialize configuration                 │
+│   nssh self init [pass|1password|bitwarden] [flags]                          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Flags ──────────────────────────────────────────────────────────────────────╮
 │   --dry-run                         preview changes without applying         │

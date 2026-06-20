@@ -10,12 +10,13 @@ import (
 
 func TestLoadYAMLIncludesInOrder(t *testing.T) {
 	tmp := t.TempDir()
-	writeConfigFile(t, filepath.Join(tmp, "credentials", "op.yaml"), `
-credentials:
-  op-expedient:
-    type: 1password
-    session: agent
-    vault: Expedient
+	writeConfigFile(t, filepath.Join(tmp, "credential", "op.yaml"), `
+credential:
+  provider:
+    op-expedient:
+      type: 1password
+      session: agent
+      vault: Expedient
 `)
 	writeConfigFile(t, filepath.Join(tmp, "inventory", "local.yaml"), `
 inventory:
@@ -34,13 +35,13 @@ inventory:
             - rpi-a
 `)
 	root := filepath.Join(tmp, "config.yaml")
-	writeConfigFile(t, root, `include: [credentials/*.yaml, inventory/*.yaml]`)
+	writeConfigFile(t, root, `include: [credential/*.yaml, inventory/*.yaml]`)
 
 	cfg, err := Load(root)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if _, ok := cfg.Credentials["op-expedient"]; !ok {
+	if _, ok := cfg.Credential.Provider["op-expedient"]; !ok {
 		t.Fatalf("missing credential provider")
 	}
 	if got := cfg.Inventory.Providers["local"].Hosts["rpi-a.lan"].Group; got != "homelab" {
@@ -111,7 +112,7 @@ inventory:
 
 func TestMarshalSparseWritesYAML(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Include = []string{"credentials/*.yaml", "inventory/*.yaml"}
+	cfg.Include = []string{"credential/*.yaml", "inventory/*.yaml"}
 	cfg.Agent.IdleTimeout = Duration(4 * time.Hour)
 	cfg.Agent.ActivityIncrement = Duration(30 * time.Minute)
 	cfg.Agent.MaxLifetime = Duration(8 * time.Hour)
@@ -127,7 +128,7 @@ func TestMarshalSparseWritesYAML(t *testing.T) {
 	}
 	for _, want := range []string{
 		"include:",
-		"credentials:",
+		"credential:",
 		"inventory:",
 		"providers:",
 		"idle_timeout: 4h0m0s",
@@ -138,7 +139,7 @@ func TestMarshalSparseWritesYAML(t *testing.T) {
 			t.Fatalf("sparse config missing %q:\n%s", want, got)
 		}
 	}
-	for _, reject := range []string{"[agent]", "credential:", "\nprovider:", "auth_mode:"} {
+	for _, reject := range []string{"[agent]", "credentials:", "auth_mode:"} {
 		if strings.Contains(got, reject) {
 			t.Fatalf("sparse config should omit %q:\n%s", reject, got)
 		}

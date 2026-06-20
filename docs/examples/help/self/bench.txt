@@ -3,7 +3,6 @@ $ nssh self bench --help
 │   nssh self bench [flags]           Performance benchmarking                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
-│   credential                        Benchmark credential auth path           │
 │   scp                               Benchmark SCP transfers                  │
 │   ssh                               Benchmark SSH connections                │
 ╰──────────────────────────────────────────────────────────────────────────────╯

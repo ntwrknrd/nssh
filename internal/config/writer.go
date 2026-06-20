@@ -427,12 +427,12 @@ func sparseConfigTable(cfg *Config) map[string]any {
 		table["agent"] = agent
 	}
 
-	if len(cfg.Credentials) > 0 {
-		credentials := make(map[string]any)
-		for _, name := range sortedCredentialProviders(cfg.Credentials) {
-			credentials[name] = credentialProviderTable(cfg.Credentials[name])
+	if len(cfg.Credential.Provider) > 0 {
+		providers := make(map[string]any)
+		for _, name := range sortedCredentialProviders(cfg.Credential.Provider) {
+			providers[name] = credentialProviderTable(cfg.Credential.Provider[name])
 		}
-		table["credentials"] = credentials
+		table["credential"] = map[string]any{"provider": providers}
 	}
 
 	inventory := make(map[string]any)

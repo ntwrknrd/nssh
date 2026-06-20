@@ -38,7 +38,7 @@ inventory:
           match:
             domain_suffix: [.example.com]
           auth:
-            credential_provider: pass-local
+            credential_provider: pass
             password_ref: nssh/groups/lab
             username: local-admin
       hosts:
@@ -58,7 +58,7 @@ inventory:
           match:
             provider: [customer]
           auth:
-            credential_provider: pass-local
+            credential_provider: pass
             password_ref: nssh/groups/customer
             username: netbox-admin
 `), 0600); err != nil {
@@ -181,7 +181,7 @@ inventory:
           match:
             provider: [customer]
           auth:
-            credential_provider: pass-local
+            credential_provider: pass
             password_ref: nssh/groups/customer
             username: netbox-admin
 `), 0600); err != nil {
@@ -233,7 +233,7 @@ include: [inventory.yaml]
 		"        provider: customer",
 		"      auth:",
 		"        mode: -",
-		"        credential provider: pass-local",
+		"        credential provider: pass",
 		"        username: netbox-admin",
 		"        username ref: -",
 		"        password ref: nssh/groups/customer",
@@ -276,7 +276,7 @@ func TestRenderStatusTreeAddsSubtleANSIStylesWithoutChangingText(t *testing.T) {
 			Match:      config.InventoryMatch{"provider": []string{"customer"}},
 			Auth: inventoryAuthView{
 				AuthMode:           "-",
-				CredentialProvider: "pass-local",
+				CredentialProvider: "pass",
 				Username:           "netbox-admin",
 				UsernameRef:        "-",
 				PasswordRef:        "nssh/groups/customer",

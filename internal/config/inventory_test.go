@@ -10,19 +10,20 @@ func TestInventoryCredentialConfigDecode(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.yaml")
 	writeConfigFile(t, path, `
-credentials:
-  pass-local:
-    type: pass
-    command: pass
-    prefix: nssh
-  op-network:
-    type: 1password
-    account: ntwrknrd
-    vault: Network
-    session: agent
-  bw-lab:
-    type: bitwarden
-    session: external
+credential:
+  provider:
+    pass:
+      type: pass
+      command: pass
+      prefix: nssh
+    op-network:
+      type: 1password
+      account: ntwrknrd
+      vault: Network
+      session: agent
+    bw-lab:
+      type: bitwarden
+      session: external
 inventory:
   providers:
     local:
@@ -69,11 +70,11 @@ inventory:
 		t.Fatalf("Load: %v", err)
 	}
 
-	if cfg.Credentials["pass-local"].Type != CredentialProviderPass {
-		t.Fatalf("pass-local type = %q", cfg.Credentials["pass-local"].Type)
+	if cfg.Credential.Provider["pass"].Type != CredentialProviderPass {
+		t.Fatalf("pass type = %q", cfg.Credential.Provider["pass"].Type)
 	}
-	if cfg.Credentials["op-network"].Vault != "Network" {
-		t.Fatalf("op-network vault = %q", cfg.Credentials["op-network"].Vault)
+	if cfg.Credential.Provider["op-network"].Vault != "Network" {
+		t.Fatalf("op-network vault = %q", cfg.Credential.Provider["op-network"].Vault)
 	}
 	if cfg.Credential.Provider["bw-lab"].Type != CredentialProviderBitwarden {
 		t.Fatalf("bw-lab type = %q", cfg.Credential.Provider["bw-lab"].Type)
@@ -169,15 +170,15 @@ func TestDefaultCredentialConfigCreatesPassLocalProvider(t *testing.T) {
 		t.Fatalf("validate: %v", err)
 	}
 
-	provider := cfg.Provider["pass-local"]
+	provider := cfg.Provider["pass"]
 	if provider.Type != CredentialProviderPass {
-		t.Fatalf("pass-local type = %q", provider.Type)
+		t.Fatalf("pass type = %q", provider.Type)
 	}
 	if provider.Command != "pass" {
-		t.Fatalf("pass-local command = %q", provider.Command)
+		t.Fatalf("pass command = %q", provider.Command)
 	}
 	if provider.Prefix != "nssh" {
-		t.Fatalf("pass-local prefix = %q", provider.Prefix)
+		t.Fatalf("pass prefix = %q", provider.Prefix)
 	}
 }
 
@@ -191,7 +192,7 @@ func TestCredentialConfigValidation(t *testing.T) {
 			name: "pass provider",
 			cfg: CredentialConfig{
 				Provider: map[string]CredentialProviderConfig{
-					"pass-local": {Type: CredentialProviderPass},
+					"pass": {Type: CredentialProviderPass},
 				},
 			},
 		},
@@ -290,7 +291,7 @@ func TestInventoryConfigValidation(t *testing.T) {
 			cfg: InventoryConfig{
 				Providers: map[string]InventoryProviderConfig{
 					"local": {Type: ProviderLocal, Groups: map[string]GroupConfig{
-						"default": {Auth: InventoryAuthConfig{CredentialProvider: "pass-local"}},
+						"default": {Auth: InventoryAuthConfig{CredentialProvider: "pass"}},
 					}},
 				},
 			},
@@ -315,7 +316,7 @@ func TestInventoryConfigValidation(t *testing.T) {
 						Type:   ProviderLocal,
 						Groups: map[string]GroupConfig{"default": {}},
 						Hosts: map[string]InventoryHostConfig{
-							"edge01": {Group: "default", Auth: InventoryAuthConfig{CredentialProvider: "pass-local", PasswordRef: "nssh/hosts/edge01", Username: "admin", UsernameRef: "op://vault/item/username"}},
+							"edge01": {Group: "default", Auth: InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/hosts/edge01", Username: "admin", UsernameRef: "op://vault/item/username"}},
 						},
 					},
 				},
@@ -333,7 +334,7 @@ func TestInventoryConfigValidation(t *testing.T) {
 							"edge01": {
 								Group:        "default",
 								AuthDisabled: true,
-								Auth:         InventoryAuthConfig{CredentialProvider: "pass-local", PasswordRef: "nssh/hosts/edge01"},
+								Auth:         InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/hosts/edge01"},
 							},
 						},
 					},

@@ -9,7 +9,7 @@ import (
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func TestHighlightYAMLAddsSyntaxColorWithoutChangingText(t *testing.T) {
-	input := "credentials:\n  op-expedient:\n    type: 1password\n    password_ref: op://Expedient/item/password\n    enabled: true\n    port: 22\n    include: [credentials/*.yaml, inventory/*.yaml]\n    # comment\n"
+	input := "credential:\n  provider:\n    op-expedient:\n      type: 1password\n      password_ref: op://Expedient/item/password\n      enabled: true\n      port: 22\n      include: [credential/*.yaml, inventory/*.yaml]\n      # comment\n"
 
 	got := HighlightYAML(input)
 

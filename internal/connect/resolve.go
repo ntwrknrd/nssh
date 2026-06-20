@@ -47,40 +47,6 @@ type ResolvedHost struct {
 	Config      *config.Config
 }
 
-type CredentialTarget struct {
-	Host            string
-	Provider        string
-	Source          string
-	Ref             string
-	RefKind         string
-	UsernamePresent bool
-	Password        *secret.Secret
-	Resolver        func(context.Context) (*secret.Secret, error)
-}
-
-func CredentialTargetFromResolvedHost(resolved *ResolvedHost) (*CredentialTarget, error) {
-	if resolved == nil {
-		return nil, nil
-	}
-	if resolved.Credential == nil {
-		return nil, fmt.Errorf("host %s has no configured credential", resolved.Hostname)
-	}
-	cred := resolved.Credential
-	if cred.Password == nil && cred.PasswordResolver == nil {
-		return nil, fmt.Errorf("host %s has no configured credential", resolved.Hostname)
-	}
-	return &CredentialTarget{
-		Host:            resolved.Hostname,
-		Provider:        cred.Provider,
-		Source:          cred.Source,
-		Ref:             cred.Ref,
-		RefKind:         credentialRefKind(cred.Ref),
-		UsernamePresent: strings.TrimSpace(resolved.Username) != "" || strings.TrimSpace(cred.Username) != "",
-		Password:        cred.Password,
-		Resolver:        cred.PasswordResolver,
-	}, nil
-}
-
 // ResolveHostForConnect performs host lookup, include-file discovery, and
 // credential resolution. This is the shared path used by both interactive
 // connect and remote command execution.
@@ -364,20 +330,6 @@ func resolveInventoryCredential(registry providerRegistry, auth config.Inventory
 		username = strings.TrimSpace(explicitUser)
 	}
 	return &ResolvedCredential{Username: username, Password: record.Secret, Source: source, Provider: auth.CredentialProvider, Ref: ref.Ref}, nil
-}
-
-func credentialRefKind(ref string) string {
-	ref = strings.TrimSpace(ref)
-	switch {
-	case ref == "":
-		return ""
-	case strings.HasPrefix(ref, "op://") && strings.HasSuffix(ref, "/"):
-		return "1password_item"
-	case strings.HasPrefix(ref, "op://"):
-		return "1password_secret"
-	default:
-		return "provider_ref"
-	}
 }
 
 func canDeferCredentialLookup(ref config.CredentialRefConfig, explicitUser string) bool {

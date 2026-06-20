@@ -19,8 +19,9 @@ import (
 
 // InitOptions configures the behavior of runInit.
 type InitOptions struct {
-	DryRun bool // preview mode, no changes made
-	Quiet  bool // minimal output
+	DryRun                 bool   // preview mode, no changes made
+	Quiet                  bool   // minimal output
+	CredentialProviderType string // optional provider setup target
 }
 
 type initWarningError struct {
@@ -31,12 +32,19 @@ func (e initWarningError) Error() string {
 	return e.message
 }
 
+type initConfigResult int
+
+const (
+	initConfigContinue initConfigResult = iota
+	initConfigStop
+)
+
 // NewInitCmd creates the init subcommand.
 func NewInitCmd() *cobra.Command {
 	var opts InitOptions
 
 	cmd := &cobra.Command{
-		Use:   "init",
+		Use:   "init [pass|1password|bitwarden]",
 		Short: "Initialize configuration",
 		Long: `Initialize nssh configuration.
 
@@ -44,7 +52,11 @@ Credentials are resolved through configured providers such as Pass, 1Password,
 or Bitwarden. The runtime agent can broker provider sessions when configured.
 
 To start fresh, use 'nssh self reset'.`,
+		Args: validateInitArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				opts.CredentialProviderType = args[0]
+			}
 			return runInit(opts)
 		},
 	}
@@ -52,6 +64,21 @@ To start fresh, use 'nssh self reset'.`,
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "preview changes without applying")
 
 	return cmd
+}
+
+func validateInitArgs(_ *cobra.Command, args []string) error {
+	if len(args) > 1 {
+		return fmt.Errorf("accepts at most one provider argument")
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	switch args[0] {
+	case config.CredentialProviderPass, config.CredentialProvider1Password, config.CredentialProviderBitwarden:
+		return nil
+	default:
+		return fmt.Errorf("unsupported credential provider %q", args[0])
+	}
 }
 
 func runInit(opts InitOptions) error {
@@ -122,12 +149,16 @@ func runInit(opts InitOptions) error {
 
 	// Install example config if none exists (skip in quiet mode)
 	if !opts.Quiet {
-		if err := ensureInitConfig(paths, opts); err != nil {
+		result, err := ensureInitConfig(paths, opts)
+		if err != nil {
 			if isInitWarning(err) || ui.IsUserAbort(err) {
 				ui.Warning("%v", err)
 				return nil
 			}
 			return err
+		}
+		if result == initConfigStop {
+			return nil
 		}
 		ui.Info("Credential provider authentication is owned by Pass, 1Password, or Bitwarden.")
 	}
@@ -219,7 +250,7 @@ func showNextSteps() {
 	ui.SubSection("Next Steps")
 
 	steps := []string{
-		"Create a group: nssh inv set -g <name>",
+		"Create a group: nssh inv set local/<name>",
 		"Add your first host: nssh inv set <host>",
 		"Connect: nssh <hostname>",
 	}
@@ -229,36 +260,70 @@ func showNextSteps() {
 	ui.Info("Run 'nssh --help' for more commands")
 }
 
-func ensureInitConfig(paths *config.Paths, opts InitOptions) error {
+func ensureInitConfig(paths *config.Paths, opts InitOptions) (initConfigResult, error) {
 	if _, err := os.Stat(paths.ConfigFile); err == nil {
-		return initWarningError{message: fmt.Sprintf("nssh is already initialized: %s", AbbreviatePath(paths.ConfigFile))}
+		cfg, loadErr := config.Load(paths.ConfigFile)
+		if loadErr != nil {
+			return initConfigStop, loadErr
+		}
+		if opts.CredentialProviderType != "" {
+			return initConfigContinue, applyCredentialProviderSetup(paths, cfg, opts.CredentialProviderType, uiInitPrompter{}, opts.DryRun)
+		}
+		ui.Success("Config file: %s", AbbreviatePath(paths.ConfigFile))
+		showExistingInitNextCommands()
+		return initConfigStop, nil
 	} else if err != nil && !os.IsNotExist(err) {
-		return err
+		return initConfigStop, err
 	}
 
-	req, err := promptInitPlanRequest(uiInitPrompter{}, nil)
-	if err != nil {
-		return err
+	var req initPlanRequest
+	var err error
+	if opts.CredentialProviderType != "" {
+		provider, promptErr := promptCredentialProvider(uiInitPrompter{}, opts.CredentialProviderType)
+		if promptErr != nil {
+			return initConfigStop, promptErr
+		}
+		req = initPlanRequest{
+			InventorySources:         []initInventorySourceRequest{{Type: initInventoryLocal, Groups: []string{"default"}}},
+			CredentialProviders:      []initCredentialProviderRequest{provider},
+			GroupCredentialProviders: map[string]string{config.FormatInventoryGroupID(config.ProviderLocal, "default"): provider.Name},
+		}
+	} else {
+		req, err = promptInitPlanRequest(uiInitPrompter{}, nil)
+		if err != nil {
+			return initConfigStop, err
+		}
 	}
 	plan, err := buildInitPlan(req)
 	if err != nil {
-		return err
+		return initConfigStop, err
 	}
 
 	ui.Info("%s", plan.Summary())
 	if opts.DryRun {
-		return nil
+		return initConfigContinue, nil
 	}
 	if err := applyInitPlan(paths, plan); err != nil {
-		return err
+		return initConfigStop, err
 	}
 	ui.Success("Config file: %s", AbbreviatePath(paths.ConfigFile))
-	return nil
+	return initConfigContinue, nil
 }
 
 func isInitWarning(err error) bool {
 	_, ok := err.(initWarningError)
 	return ok
+}
+
+func showExistingInitNextCommands() {
+	ui.SubSection("Next Commands")
+	ui.NumberedList([]string{
+		"nssh self init pass",
+		"nssh self init 1password",
+		"nssh self init bitwarden",
+		"nssh inv set <host-or-group>",
+	})
+	fmt.Println()
 }
 
 // getLatestGitHubRelease fetches the latest release version from GitHub API.

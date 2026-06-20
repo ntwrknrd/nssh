@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
@@ -89,6 +90,7 @@ func runStatus() error {
 		ui.StatusLineNeutral("Provider instances", fmt.Sprintf("%d", len(cfg.Credential.Provider)))
 		ui.StatusLineNeutral("Host auth overrides", fmt.Sprintf("%d", len(cfg.Inventory.Host)))
 		ui.StatusLineNeutral("Group auth mappings", fmt.Sprintf("%d", inventoryGroupAuthCount(cfg)))
+		printCredentialProviderStatus(cfg)
 	} else {
 		ui.StatusLineNeutral("Credential providers", "config unavailable: "+err.Error())
 	}
@@ -125,6 +127,23 @@ func runStatus() error {
 	}
 
 	return nil
+}
+
+func printCredentialProviderStatus(cfg *config.Config) {
+	if cfg == nil || len(cfg.Credential.Provider) == 0 {
+		return
+	}
+	ui.SubSection("Credential Providers")
+	names := make([]string, 0, len(cfg.Credential.Provider))
+	for name := range cfg.Credential.Provider {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		provider := cfg.Credential.Provider[name]
+		ok, detail := credentialProviderReadiness(provider)
+		printStatus(ok, name, detail)
+	}
 }
 
 func inventoryGroupAuthCount(cfg *config.Config) int {

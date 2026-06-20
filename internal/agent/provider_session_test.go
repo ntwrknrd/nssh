@@ -28,7 +28,7 @@ func TestNewConfiguredRuntimeProviderRegistersAgentOwned1PasswordProviders(t *te
 				Session: config.ProviderSessionExternal,
 			},
 		},
-		"pass-local": {
+		"pass": {
 			Type: config.CredentialProviderPass,
 		},
 	}

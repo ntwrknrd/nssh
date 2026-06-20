@@ -220,7 +220,7 @@ func TestPromptLocalHostAddDetailsPromptsUserForPublicKey(t *testing.T) {
 func TestPromptLocalHostAddDetailsPasswordWithoutStoredCredentialPromptsUser(t *testing.T) {
 	cfg := &config.Config{
 		Inventory: config.InventoryConfig{Group: map[string]config.GroupConfig{
-			"lab": {Auth: config.InventoryAuthConfig{CredentialProvider: "pass-local", PasswordRef: "nssh/groups/lab"}},
+			"lab": {Auth: config.InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/groups/lab"}},
 		}},
 	}
 	prompter := &fakeLocalHostAddPrompter{
@@ -337,7 +337,7 @@ func TestApplyInteractiveHostAuthSelectionStoresHostCredential(t *testing.T) {
 	cfg := &config.Config{}
 	patch := hostPatch{
 		Host: "edge01",
-		Auth: config.InventoryAuthConfig{CredentialProvider: "pass-local", PasswordRef: "nssh/hosts/edge01"},
+		Auth: config.InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/hosts/edge01"},
 	}
 
 	changed := applyInteractiveHostAuthSelection(cfg, patch)
@@ -345,7 +345,7 @@ func TestApplyInteractiveHostAuthSelectionStoresHostCredential(t *testing.T) {
 	if !changed {
 		t.Fatal("expected host auth change")
 	}
-	if got := cfg.Inventory.Host["edge01"].Auth; got.CredentialProvider != "pass-local" || got.PasswordRef != "nssh/hosts/edge01" {
+	if got := cfg.Inventory.Host["edge01"].Auth; got.CredentialProvider != "pass" || got.PasswordRef != "nssh/hosts/edge01" {
 		t.Fatalf("host auth = %+v", got)
 	}
 }
@@ -392,14 +392,14 @@ func TestLocalHostProbeUserUsesCredentialUsernameWhenInventoryUserMissing(t *tes
 
 func TestPromptHostCredentialAuthFallsBackToManualRef(t *testing.T) {
 	cfg := &config.Config{Credential: config.CredentialConfig{Provider: map[string]config.CredentialProviderConfig{
-		"pass-local": {Type: config.CredentialProviderPass},
+		"pass": {Type: config.CredentialProviderPass},
 	}}}
 	prompter := &fakeLocalHostAddPrompter{
 		inputs: map[string]string{
 			"Password ref": "nssh/hosts/edge01",
 		},
 		selects: map[string]string{
-			"Credential provider": "pass-local",
+			"Credential provider": "pass",
 		},
 	}
 	old := listCredentialItems
@@ -410,20 +410,20 @@ func TestPromptHostCredentialAuthFallsBackToManualRef(t *testing.T) {
 	if err != nil {
 		t.Fatalf("promptHostCredentialAuth: %v", err)
 	}
-	if auth.CredentialProvider != "pass-local" || auth.PasswordRef != "nssh/hosts/edge01" || auth.Username != "" || auth.UsernameRef != "" {
+	if auth.CredentialProvider != "pass" || auth.PasswordRef != "nssh/hosts/edge01" || auth.Username != "" || auth.UsernameRef != "" {
 		t.Fatalf("auth = %+v", auth)
 	}
 }
 
 func TestResolveLocalHostCredentialUsesHostAuthMapping(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{"pass-local": {Type: config.CredentialProviderPass}}
+	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{"pass": {Type: config.CredentialProviderPass}}
 	cfg.Inventory.Host = map[string]config.InventoryHostConfig{
-		"edge01": {Auth: config.InventoryAuthConfig{CredentialProvider: "pass-local", PasswordRef: "nssh/hosts/edge01", Username: "admin"}},
+		"edge01": {Auth: config.InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/hosts/edge01", Username: "admin"}},
 	}
 	old := newCredentialRegistry
 	newCredentialRegistry = func(*config.Config) (credentialRegistry, error) {
-		return fakeCredentialRegistry{providers: map[string]credential.Provider{"pass-local": fakeCredentialProvider{record: &credential.Record{Username: "admin", Secret: secretFromTest("pw")}}}}, nil
+		return fakeCredentialRegistry{providers: map[string]credential.Provider{"pass": fakeCredentialProvider{record: &credential.Record{Username: "admin", Secret: secretFromTest("pw")}}}}, nil
 	}
 	defer func() { newCredentialRegistry = old }()
 
@@ -954,7 +954,7 @@ inventory:
   hosts:
     edge01:
       auth:
-        credential_provider: pass-local
+        credential_provider: pass
         password_ref: nssh/hosts/edge01
     edge02:
       auth:

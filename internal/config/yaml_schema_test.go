@@ -11,11 +11,12 @@ func TestApprovedYAMLSchemaDecodes(t *testing.T) {
 	path := filepath.Join(tmp, "config.yaml")
 	writeConfigFile(t, path, `
 include: []
-credentials:
-  op-expedient:
-    type: 1password
-    session: agent
-    vault: Expedient
+credential:
+  provider:
+    op-expedient:
+      type: 1password
+      session: agent
+      vault: Expedient
 inventory:
   providers:
     netbox-prod:
@@ -58,7 +59,7 @@ ssh:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got := cfg.Credentials["op-expedient"].Vault; got != "Expedient" {
+	if got := cfg.Credential.Provider["op-expedient"].Vault; got != "Expedient" {
 		t.Fatalf("vault = %q, want Expedient", got)
 	}
 	host := cfg.Inventory.Providers["netbox-prod"].Hosts["701-sw37r103c608.expedient.com"]
@@ -70,6 +71,21 @@ ssh:
 	}
 	if got := cfg.Inventory.Providers["netbox-prod"].Groups["cbb"].SSH.Options["ProxyJump"].Scalar; got != "bastion" {
 		t.Fatalf("group ssh proxy_jump = %q, want bastion", got)
+	}
+}
+
+func TestLegacyCredentialsSchemaIsRejected(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.yaml")
+	writeConfigFile(t, path, `
+credentials:
+  op-expedient:
+    type: 1password
+    vault: Expedient
+`)
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "credentials") {
+		t.Fatalf("Load error = %v, want legacy credentials schema rejection", err)
 	}
 }
 

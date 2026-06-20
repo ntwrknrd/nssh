@@ -11,7 +11,7 @@ func TestSaveSparseWritesYAMLIncludesAndProviderHosts(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.yaml")
 	cfg := DefaultConfig()
-	cfg.Include = []string{"credentials/*.yaml", "inventory/*.yaml"}
+	cfg.Include = []string{"credential/*.yaml", "inventory/*.yaml"}
 	cfg.Inventory.Provider = nil
 	cfg.Inventory.Providers = map[string]InventoryProviderConfig{
 		ProviderLocal: {

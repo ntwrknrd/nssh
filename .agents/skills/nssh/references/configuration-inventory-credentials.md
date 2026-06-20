@@ -81,7 +81,7 @@ Source paths:
 Supported providers:
 
 - `pass`: local password-store compatible CLI, default provider name
-  `pass-local`.
+  `pass`.
 - `1password`: `op` CLI, with `session = "agent"` by default.
 - `bitwarden`: `bw` CLI, with provider auth state owned externally.
 
@@ -95,7 +95,7 @@ inventory:
       groups:
         default:
           auth:
-            credential_provider: pass-local
+            credential_provider: pass
             password_ref: nssh/groups/default
       hosts:
         edge01:

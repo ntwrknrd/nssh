@@ -49,8 +49,8 @@ func TestDefaultConfig(t *testing.T) {
 	if !cfg.Agent.AutoStart {
 		t.Error("default agent.auto_start = false, want true")
 	}
-	if _, ok := cfg.Credentials["pass-local"]; !ok {
-		t.Fatal("default credentials missing pass-local")
+	if _, ok := cfg.Credential.Provider["pass"]; !ok {
+		t.Fatal("default credentials missing pass")
 	}
 	if _, ok := cfg.Inventory.Providers[ProviderLocal]; !ok {
 		t.Fatal("default inventory missing local provider")

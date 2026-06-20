@@ -22,36 +22,33 @@ func newSetCmd() *cobra.Command {
 	var aliases []string
 	var user string
 	var port int
-	var credentialProvider string
-	var passwordRef string
-	var credentialUsername string
-	var credentialUsernameRef string
-	var credentialClear bool
+	var authMode string
+	var credential string
 	cmd := &cobra.Command{
-		Use:   "set HOST",
+		Use:   "set TARGET",
 		Short: "Create or update inventory",
 		Long:  "Create or update a managed host, group, or host auth override.",
 		Args:  cobra.MaximumNArgs(1),
 		Annotations: map[string]string{
-			ui.UsageLinesAnnotation: "nssh inv set HOST\nnssh inv set -g local/GROUP\nnssh inv set HOST -g local/GROUP",
+			ui.UsageLinesAnnotation: "nssh inv set HOST\nnssh inv set local/GROUP\nnssh inv set HOST -g local/GROUP",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if cmd.Flags().Changed("group") && len(args) == 0 {
-				return runSetGroup(group)
+			target, err := resolveSetTarget(args, group, cmd.Flags().Changed("group"), hasHostSetFlags(cmd))
+			if err != nil {
+				return err
 			}
-			if len(args) != 1 {
-				return fmt.Errorf("host is required")
+			if target.Kind == setTargetGroup {
+				authPatch, err := buildSetAuthPatch(authMode, credential, target.Value, true)
+				if err != nil {
+					return err
+				}
+				return runSetGroup(target.Value, authPatch)
 			}
-			authPatch := hostAuthPatch{
-				Clear: credentialClear,
-				Auth: config.InventoryAuthConfig{
-					CredentialProvider: credentialProvider,
-					PasswordRef:        passwordRef,
-					Username:           credentialUsername,
-					UsernameRef:        credentialUsernameRef,
-				},
+			authPatch, err := buildSetAuthPatch(authMode, credential, target.Value, false)
+			if err != nil {
+				return err
 			}
-			return runSetHost(args[0], group, hostname, aliases, user, port, cmd.Flags().Changed("port"), authPatch)
+			return runSetHost(target.Value, group, hostname, aliases, user, port, cmd.Flags().Changed("port"), authPatch)
 		},
 	}
 	cmd.Flags().StringVarP(&group, "group", "g", "", "target provider-qualified group")
@@ -59,39 +56,224 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&aliases, "alias", nil, "add host alias")
 	cmd.Flags().StringVar(&user, "user", "", "SSH User")
 	cmd.Flags().IntVar(&port, "port", 0, "SSH Port")
-	cmd.Flags().StringVar(&credentialProvider, "credential-provider", "", "credential provider instance for host auth override")
-	cmd.Flags().StringVar(&passwordRef, "password-ref", "", "credential provider item or secret reference for SSH password")
-	cmd.Flags().StringVar(&credentialUsername, "credential-username", "", "literal SSH username for credential lookup")
-	cmd.Flags().StringVar(&credentialUsernameRef, "credential-username-ref", "", "provider secret reference for SSH username")
-	cmd.Flags().BoolVar(&credentialClear, "credential-clear", false, "clear host auth override")
+	cmd.Flags().StringVar(&authMode, "auth", "", "auth mode: password or key")
+	cmd.Flags().StringVar(&credential, "cred", "", "credential provider or provider:ref; use none to clear")
 	return cmd
 }
 
-func runSetGroup(group string) error {
-	if err := validateLocalGroupID(group); err != nil {
+type setTargetKind string
+
+const (
+	setTargetHost  setTargetKind = "host"
+	setTargetGroup setTargetKind = "group"
+)
+
+type setTarget struct {
+	Kind  setTargetKind
+	Value string
+}
+
+func hasHostSetFlags(cmd *cobra.Command) bool {
+	for _, name := range []string{"hostname", "alias", "user", "port", "group"} {
+		if cmd.Flags().Changed(name) {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveSetTarget(args []string, group string, groupFlagChanged bool, hostFlagChanged bool) (setTarget, error) {
+	if groupFlagChanged && len(args) == 0 {
+		return setTarget{Kind: setTargetGroup, Value: group}, nil
+	}
+	if len(args) != 1 {
+		return setTarget{}, fmt.Errorf("host is required")
+	}
+	if isInventoryGroupTarget(args[0]) && !hostFlagChanged {
+		return setTarget{Kind: setTargetGroup, Value: args[0]}, nil
+	}
+	return setTarget{Kind: setTargetHost, Value: args[0]}, nil
+}
+
+func isInventoryGroupTarget(target string) bool {
+	if !strings.Contains(target, "/") {
+		return false
+	}
+	_, _, err := config.ParseInventoryGroupID(target)
+	return err == nil
+}
+
+func buildSetAuthPatch(authMode, credentialValue, target string, groupTarget bool) (inventoryAuthPatch, error) {
+	authMode = strings.ToLower(strings.TrimSpace(authMode))
+	credentialValue = strings.TrimSpace(credentialValue)
+	if authMode != "" && authMode != config.AuthModePassword && authMode != config.AuthModeKey {
+		return inventoryAuthPatch{}, fmt.Errorf("--auth must be password or key")
+	}
+	if authMode == "" && credentialValue == "" {
+		return inventoryAuthPatch{}, nil
+	}
+	if credentialValue == "none" {
+		if authMode == "" {
+			return inventoryAuthPatch{Clear: true}, nil
+		}
+		return inventoryAuthPatch{Auth: config.InventoryAuthConfig{Mode: authMode}}, nil
+	}
+	if authMode == config.AuthModeKey && credentialValue != "" {
+		return inventoryAuthPatch{}, fmt.Errorf("--auth key conflicts with --cred")
+	}
+
+	auth := config.InventoryAuthConfig{Mode: authMode}
+	if credentialValue != "" {
+		provider, ref := splitCredentialValue(credentialValue)
+		if provider == "" {
+			return inventoryAuthPatch{}, fmt.Errorf("--cred must be <provider> or <provider>:<ref>")
+		}
+		if ref == "" {
+			ref = config.DefaultCredentialRef(provider, target, groupTarget)
+		}
+		auth.Mode = config.AuthModePassword
+		auth.CredentialProvider = provider
+		auth.PasswordRef = ref
+	}
+	return inventoryAuthPatch{Auth: auth}, nil
+}
+
+func splitCredentialValue(value string) (string, string) {
+	provider, ref, ok := strings.Cut(value, ":")
+	if !ok {
+		return strings.TrimSpace(value), ""
+	}
+	return strings.TrimSpace(provider), strings.TrimSpace(ref)
+}
+
+func runSetGroup(group string, authPatch inventoryAuthPatch) error {
+	if _, _, err := config.ParseInventoryGroupID(group); err != nil {
 		return err
 	}
 	cfg, err := config.LoadDefault()
 	if err != nil {
 		return err
 	}
-	created := ensureGroup(cfg, group)
+	if err := authPatch.Validate(cfg); err != nil {
+		return err
+	}
+	created, err := ensureInventoryGroup(cfg, group)
+	if err != nil {
+		return err
+	}
+	if !authPatch.HasChange() {
+		authPatch, err = promptGroupAuthPatch(cfg, group)
+		if err != nil {
+			return err
+		}
+		if err := authPatch.Validate(cfg); err != nil {
+			return err
+		}
+	}
+	if authPatch.HasChange() {
+		if err := applyGroupAuthPatch(cfg, group, authPatch); err != nil {
+			return err
+		}
+	}
 	if err := cfg.Inventory.Validate(); err != nil {
 		return err
 	}
-	if !created {
+	if !created && !authPatch.HasChange() {
 		ui.Noop("Group %q already exists", group)
 		return nil
 	}
 	if err := config.SaveInventoryGroup(config.DefaultPaths().ConfigFile, cfg, group); err != nil {
 		return err
 	}
-	ui.Success("Group %q created", group)
+	if created {
+		ui.Success("Group %q created", group)
+	} else {
+		ui.Success("Group %q updated", group)
+	}
+	if authPatch.HasChange() {
+		stopAgentAfterInventoryAuthMutation()
+	}
 	return nil
+}
+
+func promptGroupAuthPatch(cfg *config.Config, group string) (inventoryAuthPatch, error) {
+	return promptGroupAuthPatchWithPrompter(cfg, group, uiLocalHostAddPrompter{})
+}
+
+func promptGroupAuthPatchWithPrompter(cfg *config.Config, group string, prompter localHostAddPrompter) (inventoryAuthPatch, error) {
+	selected, err := promptSelectWithBack(prompter, "Authentication", []ui.SelectOption{
+		{Label: "Password", Value: config.AuthModePassword},
+		{Label: "SSH key", Value: config.AuthModeKey},
+		{Label: "No stored credential", Value: "none"},
+	}, true)
+	if err != nil {
+		return inventoryAuthPatch{}, err
+	}
+	switch selected {
+	case "", "none":
+		return inventoryAuthPatch{Clear: true}, nil
+	case config.AuthModeKey:
+		return inventoryAuthPatch{Auth: config.InventoryAuthConfig{Mode: config.AuthModeKey}}, nil
+	case config.AuthModePassword:
+		auth, err := promptStoredCredentialAuth(cfg, group, true, prompter)
+		if err != nil {
+			return inventoryAuthPatch{}, err
+		}
+		auth.Mode = config.AuthModePassword
+		return inventoryAuthPatch{Auth: auth}, nil
+	default:
+		return inventoryAuthPatch{}, fmt.Errorf("unknown auth mode %q", selected)
+	}
 }
 
 func ensureGroup(cfg *config.Config, group string) bool {
 	return ensureGroupWithConfig(cfg, group, config.GroupConfig{})
+}
+
+func ensureInventoryGroup(cfg *config.Config, groupID string) (bool, error) {
+	provider, groupName, err := config.ParseInventoryGroupID(groupID)
+	if err != nil {
+		return false, err
+	}
+	if provider == config.ProviderLocal {
+		return ensureGroup(cfg, groupID), nil
+	}
+	if cfg.Inventory.Provider == nil {
+		cfg.Inventory.Provider = make(map[string]config.InventoryProviderConfig)
+	}
+	providerCfg, ok := cfg.Inventory.Provider[provider]
+	if !ok {
+		return false, fmt.Errorf("inventory provider %q is not configured", provider)
+	}
+	if providerCfg.Group == nil {
+		providerCfg.Group = make(map[string]config.GroupConfig)
+	}
+	if _, ok := providerCfg.Group[groupName]; ok {
+		return false, nil
+	}
+	providerCfg.Group[groupName] = config.GroupConfig{}
+	cfg.Inventory.Provider[provider] = providerCfg
+	return true, nil
+}
+
+func applyGroupAuthPatch(cfg *config.Config, groupID string, patch inventoryAuthPatch) error {
+	if !patch.HasChange() {
+		return nil
+	}
+	provider, groupName, err := config.ParseInventoryGroupID(groupID)
+	if err != nil {
+		return err
+	}
+	providerCfg := cfg.Inventory.Provider[provider]
+	groupCfg := providerCfg.Group[groupName]
+	if patch.Clear {
+		groupCfg.Auth = config.InventoryAuthConfig{}
+	} else {
+		groupCfg.Auth = patch.Auth
+	}
+	providerCfg.Group[groupName] = groupCfg
+	cfg.Inventory.Provider[provider] = providerCfg
+	return cfg.Validate()
 }
 
 func ensureGroupWithConfig(cfg *config.Config, group string, groupCfg config.GroupConfig) bool {
@@ -159,7 +341,7 @@ func validateLocalGroupID(group string) error {
 	return nil
 }
 
-func runSetHost(host, group, hostname string, aliases []string, user string, port int, portSet bool, authPatch hostAuthPatch) error {
+func runSetHost(host, group, hostname string, aliases []string, user string, port int, portSet bool, authPatch inventoryAuthPatch) error {
 	if group != "" {
 		if err := validateLocalGroupID(group); err != nil {
 			return err
@@ -310,7 +492,7 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 		}
 	}
 	if authPatch.HasChange() {
-		if err := applyHostAuthPatch(parser, cfg, config.DefaultPaths(), host, authPatch); err != nil {
+		if err := applyInventoryAuthPatch(parser, cfg, config.DefaultPaths(), host, authPatch); err != nil {
 			return err
 		}
 		if pendingCreatedGroup != "" {

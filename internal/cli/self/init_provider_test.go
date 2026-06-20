@@ -23,15 +23,15 @@ func TestInitPlanDefaultsToLocalInventoryAndPassCredentialProvider(t *testing.T)
 	if !strings.Contains(plan.Summary(), "Credential providers: Pass") {
 		t.Fatalf("summary missing Pass provider:\n%s", plan.Summary())
 	}
-	if !strings.Contains(plan.Summary(), "Credential assignment: local/default -> pass-local") {
+	if !strings.Contains(plan.Summary(), "Credential assignment: local/default -> pass") {
 		t.Fatalf("summary missing default assignment:\n%s", plan.Summary())
 	}
 
 	cfg := plan.Config
-	if cfg.Credential.Provider["pass-local"].Type != config.CredentialProviderPass {
-		t.Fatalf("pass-local provider = %+v", cfg.Credential.Provider["pass-local"])
+	if cfg.Credential.Provider["pass"].Type != config.CredentialProviderPass {
+		t.Fatalf("pass provider = %+v", cfg.Credential.Provider["pass"])
 	}
-	if got := cfg.Inventory.Provider["local"].Group["default"].Auth; got.CredentialProvider != "pass-local" || got.PasswordRef != "nssh/groups/local/default" {
+	if got := cfg.Inventory.Provider["local"].Group["default"].Auth; got.CredentialProvider != "pass" || got.PasswordRef != "nssh/groups/local/default" {
 		t.Fatalf("default credential binding = %+v", got)
 	}
 }
@@ -58,12 +58,12 @@ func TestInitPlanWritesMultipleInventorySourcesWithoutSecrets(t *testing.T) {
 			},
 		},
 		CredentialProviders: []initCredentialProviderRequest{
-			{Name: "pass-local", Type: config.CredentialProviderPass},
+			{Name: "pass", Type: config.CredentialProviderPass},
 		},
 		GroupCredentialProviders: map[string]string{
-			"local/default":    "pass-local",
-			"netbox-prod/prod": "pass-local",
-			"lab01/lab":        "pass-local",
+			"local/default":    "pass",
+			"netbox-prod/prod": "pass",
+			"lab01/lab":        "pass",
 		},
 	})
 	if err != nil {
@@ -95,7 +95,7 @@ func TestInitPlanRejectsContainerlabWithoutJumpHost(t *testing.T) {
 			Groups: []string{"lab"},
 		}},
 		CredentialProviders: []initCredentialProviderRequest{
-			{Name: "pass-local", Type: config.CredentialProviderPass},
+			{Name: "pass", Type: config.CredentialProviderPass},
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "jump_host") {
@@ -107,12 +107,12 @@ func TestInitPlanSupportsOnePasswordAndBitwardenWithoutAuthMaterial(t *testing.T
 	plan, err := buildInitPlan(initPlanRequest{
 		InventorySources: []initInventorySourceRequest{{Type: initInventoryLocal, Groups: []string{"default", "prod", "lab"}}},
 		CredentialProviders: []initCredentialProviderRequest{
-			{Name: "pass-local", Type: config.CredentialProviderPass},
+			{Name: "pass", Type: config.CredentialProviderPass},
 			{Name: "op-network", Type: config.CredentialProvider1Password, Account: "ntwrknrd", Vault: "Network", Session: "agent", AuthToken: "should-not-be-stored"},
 			{Name: "bw-lab", Type: config.CredentialProviderBitwarden, Session: "external", BWSession: "should-not-be-stored"},
 		},
 		GroupCredentialProviders: map[string]string{
-			"local/default": "pass-local",
+			"local/default": "pass",
 			"local/prod":    "op-network",
 			"local/lab":     "bw-lab",
 		},
@@ -171,7 +171,7 @@ func TestApplyInitPlanBacksUpExistingConfig(t *testing.T) {
 	}
 }
 
-func TestEnsureInitConfigRejectsExistingConfig(t *testing.T) {
+func TestApplyCredentialProviderSetupMergesExistingConfig(t *testing.T) {
 	tmp := t.TempDir()
 	paths := &config.Paths{
 		ConfigDir:  filepath.Join(tmp, "config", "nssh"),
@@ -180,20 +180,43 @@ func TestEnsureInitConfigRejectsExistingConfig(t *testing.T) {
 	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(paths.ConfigFile, []byte("{}\n"), 0600); err != nil {
-		t.Fatal(err)
+	cfg := config.DefaultConfig()
+	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{
+		"op-network": {Type: config.CredentialProvider1Password, Config: config.CredentialProviderDetailConfig{Vault: "Network"}},
+	}
+	localProvider := cfg.Inventory.Provider[config.ProviderLocal]
+	defaultGroup := localProvider.Group["default"]
+	defaultGroup.Auth = config.InventoryAuthConfig{}
+	localProvider.Group["default"] = defaultGroup
+	cfg.Inventory.Provider[config.ProviderLocal] = localProvider
+	if err := config.Save(paths.ConfigFile, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
 	}
 
-	err := ensureInitConfig(paths, InitOptions{})
-	if err == nil || !strings.Contains(err.Error(), "already initialized") {
-		t.Fatalf("ensureInitConfig error = %v, want already initialized", err)
+	prompter := &fakeInitPrompter{inputs: map[string]string{"Pass provider name": "pass"}}
+	if err := applyCredentialProviderSetup(paths, cfg, config.CredentialProviderPass, prompter, false); err != nil {
+		t.Fatalf("applyCredentialProviderSetup: %v", err)
 	}
-	if _, err := os.Stat(paths.ConfigFile + ".bak"); !os.IsNotExist(err) {
-		t.Fatalf("backup was created for refused init: %v", err)
+
+	loaded, err := config.Load(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if _, ok := loaded.Credential.Provider["op-network"]; !ok {
+		t.Fatalf("existing provider was lost: %+v", loaded.Credential.Provider)
+	}
+	if loaded.Credential.Provider["pass"].Type != config.CredentialProviderPass {
+		t.Fatalf("pass provider = %+v", loaded.Credential.Provider["pass"])
+	}
+	if loaded.Inventory.Provider["local"].Group["default"].Auth.IsSet() {
+		t.Fatalf("default group auth should not be assigned by provider setup: %+v", loaded.Inventory.Provider["local"].Group["default"].Auth)
+	}
+	if _, err := os.Stat(paths.ConfigFile + ".bak"); err != nil {
+		t.Fatalf("backup missing: %v", err)
 	}
 }
 
-func TestRunInitStopsOnConfigSetupError(t *testing.T) {
+func TestRunInitExistingConfigPrintsNextCommands(t *testing.T) {
 	if os.Getenv("NSSH_TEST_RUN_INIT_EXISTING_CONFIG") == "1" {
 		runInitExistingConfigHelper(t)
 		return
@@ -208,7 +231,7 @@ func TestRunInitStopsOnConfigSetupError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run", "^TestRunInitStopsOnConfigSetupError$")
+	cmd := exec.Command(os.Args[0], "-test.run", "^TestRunInitExistingConfigPrintsNextCommands$")
 	cmd.Env = append(os.Environ(),
 		"NSSH_TEST_RUN_INIT_EXISTING_CONFIG=1",
 		"HOME="+tmp,
@@ -221,15 +244,17 @@ func TestRunInitStopsOnConfigSetupError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runInit helper failed: %v\n%s", err, output)
 	}
-	if !strings.Contains(string(output), "[!] nssh is already initialized") {
-		t.Fatalf("runInit did not print already-initialized warning:\n%s", output)
-	}
 	if strings.Contains(string(output), "nssh:") {
 		t.Fatalf("runInit printed app-level error prefix:\n%s", output)
 	}
-	for _, reject := range []string{"Dependencies", "nssh initialized successfully", "Next Steps"} {
+	for _, want := range []string{"Config file:", "nssh self init pass", "nssh self init 1password", "nssh self init bitwarden", "nssh inv set <host-or-group>"} {
+		if !strings.Contains(string(output), want) {
+			t.Fatalf("runInit output missing %q:\n%s", want, output)
+		}
+	}
+	for _, reject := range []string{"nssh initialized successfully", "Next Steps"} {
 		if strings.Contains(string(output), reject) {
-			t.Fatalf("runInit continued after config setup error; saw %q in:\n%s", reject, output)
+			t.Fatalf("runInit existing-config output should not contain %q:\n%s", reject, output)
 		}
 	}
 }
@@ -259,6 +284,19 @@ func TestInitCommandDoesNotExposeYesFlag(t *testing.T) {
 	}
 	if shorthand := cmd.Flags().ShorthandLookup("y"); shorthand != nil {
 		t.Fatalf("init exposes -y shorthand")
+	}
+}
+
+func TestInitCommandAcceptsCredentialProviderArg(t *testing.T) {
+	cmd := NewInitCmd()
+
+	for _, provider := range []string{"pass", "1password", "bitwarden"} {
+		if err := cmd.Args(cmd, []string{provider}); err != nil {
+			t.Fatalf("init %s args error = %v", provider, err)
+		}
+	}
+	if err := cmd.Args(cmd, []string{"vault"}); err == nil {
+		t.Fatal("init accepted unsupported provider arg")
 	}
 }
 

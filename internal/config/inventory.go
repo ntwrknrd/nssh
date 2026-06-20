@@ -192,7 +192,7 @@ func (c *CredentialConfig) Validate() error {
 		c.Provider = make(map[string]CredentialProviderConfig)
 	}
 	if zeroConfig {
-		c.Provider["pass-local"] = CredentialProviderConfig{
+		c.Provider["pass"] = CredentialProviderConfig{
 			Type: CredentialProviderPass,
 			Config: CredentialProviderDetailConfig{
 				Command: "pass",

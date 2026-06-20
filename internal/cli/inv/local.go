@@ -513,7 +513,7 @@ func promptLocalHostConnectionDetails(cfg *config.Config, patch hostPatch, promp
 	}
 }
 
-func shouldPromptLocalHostAddDetails(existing *sshconfig.HostEntry, group, hostname, user string, portSet bool, authPatch hostAuthPatch) bool {
+func shouldPromptLocalHostAddDetails(existing *sshconfig.HostEntry, group, hostname, user string, portSet bool, authPatch inventoryAuthPatch) bool {
 	return existing == nil &&
 		strings.TrimSpace(group) == "" &&
 		strings.TrimSpace(hostname) == "" &&
@@ -629,6 +629,10 @@ func displayStoredPasswordRef(ref string) string {
 }
 
 func promptHostCredentialAuth(cfg *config.Config, host string, prompter localHostAddPrompter) (config.InventoryAuthConfig, error) {
+	return promptStoredCredentialAuth(cfg, host, false, prompter)
+}
+
+func promptStoredCredentialAuth(cfg *config.Config, target string, groupTarget bool, prompter localHostAddPrompter) (config.InventoryAuthConfig, error) {
 	providers := credentialProviderOptions(cfg)
 	if len(providers) == 0 {
 		return config.InventoryAuthConfig{}, fmt.Errorf("no credential providers configured")
@@ -643,7 +647,7 @@ func promptHostCredentialAuth(cfg *config.Config, host string, prompter localHos
 			return config.InventoryAuthConfig{}, fmt.Errorf("credential provider is required")
 		}
 
-		ref, err := promptPasswordRef(cfg, provider, host, prompter)
+		ref, err := promptPasswordRef(cfg, provider, target, groupTarget, prompter)
 		if errors.Is(err, errPromptBack) {
 			continue
 		}
@@ -685,7 +689,7 @@ func credentialProviderOptions(cfg *config.Config) []ui.SelectOption {
 	return options
 }
 
-func promptPasswordRef(cfg *config.Config, provider, host string, prompter localHostAddPrompter) (string, error) {
+func promptPasswordRef(cfg *config.Config, provider, target string, groupTarget bool, prompter localHostAddPrompter) (string, error) {
 	items, err := listCredentialItems(cfg, provider)
 	if err == nil && len(items) > 0 {
 		options := make([]ui.SelectOption, 0, len(items)+1)
@@ -701,24 +705,7 @@ func promptPasswordRef(cfg *config.Config, provider, host string, prompter local
 			return selected, nil
 		}
 	}
-	return promptInputWithBack(prompter, "Password ref", defaultPasswordRef(cfg, provider, host), true)
-}
-
-func defaultPasswordRef(cfg *config.Config, provider, host string) string {
-	if cfg == nil {
-		return host
-	}
-	providerCfg := cfg.Credential.Provider[provider]
-	switch providerCfg.Type {
-	case config.CredentialProviderPass:
-		prefix := strings.Trim(strings.TrimSpace(providerCfg.Config.Prefix), "/")
-		if prefix == "" {
-			prefix = "nssh"
-		}
-		return prefix + "/hosts/" + host
-	default:
-		return host
-	}
+	return promptInputWithBack(prompter, "Password ref", config.DefaultCredentialRef(provider, target, groupTarget), true)
 }
 
 func resolveLocalHostCredentialSecret(cfg *config.Config, patch hostPatch) (*secret.Secret, error) {
