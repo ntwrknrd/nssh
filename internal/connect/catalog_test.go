@@ -286,6 +286,68 @@ func TestCatalogCarriesProviderStateProxyJump(t *testing.T) {
 	}
 }
 
+func TestCatalogUsesProviderHostAsCanonicalAndSearchesAliases(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		"nre-netlab01": {
+			Type: config.ProviderContainerlab,
+			Groups: map[string]config.GroupConfig{
+				"juniper-crpd": {},
+			},
+			Hosts: map[string]config.InventoryHostConfig{
+				"clab-dfz-core01": {
+					Group:   "juniper-crpd",
+					Aliases: []string{"dfz-core"},
+				},
+			},
+		},
+	}
+	state := &inventory.ProviderState{
+		Provider: "nre-netlab01",
+		Type:     config.ProviderContainerlab,
+		Objects: map[string]*inventory.ProviderHost{
+			"dfz/core01": {
+				ObjectID: "dfz/core01",
+				Host:     "clab-dfz-core01",
+				HostName: "172.20.20.13",
+				Patterns: []string{"clab-dfz-core01", "dfz-core01"},
+				Group:    "nre-netlab01/juniper-crpd",
+			},
+		},
+	}
+
+	cat := buildCatalogForTest(t, cfg, []*inventory.ProviderState{state})
+	host, ok := cat.Find("clab-dfz-core01")
+	if !ok {
+		t.Fatalf("Find(clab-dfz-core01) failed")
+	}
+	if host.Canonical != "clab-dfz-core01" {
+		t.Fatalf("canonical = %q, want clab-dfz-core01", host.Canonical)
+	}
+	if host.Hostname != "172.20.20.13" {
+		t.Fatalf("hostname = %q, want 172.20.20.13", host.Hostname)
+	}
+
+	addressMatch, ok := cat.Find("172.20.20.13")
+	if !ok {
+		t.Fatalf("Find(172.20.20.13) failed")
+	}
+	if addressMatch.Canonical != "clab-dfz-core01" {
+		t.Fatalf("address canonical = %q, want clab-dfz-core01", addressMatch.Canonical)
+	}
+
+	for query, want := range map[string][]string{
+		"clab":   {"clab-dfz-core01"},
+		"172.20": {"clab-dfz-core01"},
+		"dfz":    {"clab-dfz-core01"},
+	} {
+		if got := cat.Suggestions(query); !reflect.DeepEqual(got, want) {
+			t.Fatalf("Suggestions(%q) = %#v, want %#v", query, got, want)
+		}
+	}
+}
+
 func buildCatalogForTest(t *testing.T, cfg *config.Config, states []*inventory.ProviderState) *HostCatalog {
 	t.Helper()
 	cat, err := buildHostCatalog(cfg, states)

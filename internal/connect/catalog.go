@@ -138,9 +138,10 @@ func resolvedHostFromState(cfg *config.Config, providerName string, provider con
 	aliases = appendUnique(aliases, overlay.Aliases...)
 	ssh := mergeCatalogSSH(cfg, provider, group, overlay.SSH)
 	ssh = applyProviderStateSSH(ssh, host, cat)
+	canonical := firstNonEmpty(host.Host, firstString(aliases), host.HostName)
 	return &ResolvedHostData{
-		Canonical: host.HostName,
-		Hostname:  host.HostName,
+		Canonical: canonical,
+		Hostname:  firstNonEmpty(host.HostName, canonical),
 		Aliases:   aliases,
 		Provider:  providerName,
 		Group:     group,
@@ -223,6 +224,9 @@ func (c *HostCatalog) add(host *ResolvedHostData) {
 	if short := shortName(host.Hostname); short != "" {
 		c.aliases[short] = canonical
 	}
+	if hostname := strings.TrimSpace(host.Hostname); hostname != "" {
+		c.aliases[hostname] = canonical
+	}
 	for _, alias := range host.Aliases {
 		alias = strings.TrimSpace(alias)
 		if alias != "" {
@@ -295,6 +299,15 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func firstString(values []string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
 func firstNonZero(values ...int) int {
 	for _, value := range values {
 		if value != 0 {
@@ -325,14 +338,33 @@ func normalizeCatalogProvider(provider config.InventoryProviderConfig) config.In
 
 func (c *HostCatalog) Suggestions(query string) []string {
 	query = strings.ToLower(strings.TrimSpace(query))
+	seen := make(map[string]bool, len(c.hosts))
 	out := make([]string, 0, len(c.hosts))
-	for canonical := range c.hosts {
-		if query == "" || strings.Contains(strings.ToLower(canonical), query) {
-			out = append(out, canonical)
+	for canonical, host := range c.hosts {
+		if query == "" || hostMatchesQuery(host, query) {
+			if !seen[canonical] {
+				seen[canonical] = true
+				out = append(out, canonical)
+			}
 		}
 	}
 	slices.Sort(out)
 	return out
+}
+
+func hostMatchesQuery(host *ResolvedHostData, query string) bool {
+	if host == nil {
+		return false
+	}
+	values := make([]string, 0, 2+len(host.Aliases))
+	values = append(values, host.Canonical, host.Hostname)
+	values = append(values, host.Aliases...)
+	for _, value := range values {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(value)), query) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *HostCatalog) All() []*ResolvedHostData {
