@@ -24,7 +24,7 @@ func RenderSSHOptions(opts config.SSHHostConfig, sshVerbose int) []string {
 	appendO := func(key, value string) {
 		if strings.TrimSpace(value) != "" {
 			rendered := value
-			if !strings.EqualFold(key, "SetEnv") {
+			if !strings.EqualFold(key, "SetEnv") && !strings.EqualFold(key, "ProxyCommand") {
 				rendered = renderOpenSSHOptionValue(value)
 			}
 			args = append(args, "-o", key+"="+rendered)

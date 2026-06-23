@@ -7,6 +7,7 @@ import (
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/inventory"
+	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 )
 
 type HostCatalog struct {
@@ -86,7 +87,7 @@ func buildHostCatalog(cfg *config.Config, states []*inventory.ProviderState) (*H
 			if host == nil {
 				continue
 			}
-			data := resolvedHostFromState(cfg, state.Provider, provider, host, cat)
+			data := resolvedHostFromState(cfg, state, provider, host, cat)
 			cat.add(data)
 		}
 	}
@@ -118,7 +119,11 @@ func (c *HostCatalog) addLocalHosts(cfg *config.Config, providerName string, pro
 	return nil
 }
 
-func resolvedHostFromState(cfg *config.Config, providerName string, provider config.InventoryProviderConfig, host *inventory.ProviderHost, cat *HostCatalog) *ResolvedHostData {
+func resolvedHostFromState(cfg *config.Config, state *inventory.ProviderState, provider config.InventoryProviderConfig, host *inventory.ProviderHost, cat *HostCatalog) *ResolvedHostData {
+	providerName := ""
+	if state != nil {
+		providerName = state.Provider
+	}
 	group := shortGroup(host.Group)
 	overlay := provider.Hosts[host.HostName]
 	if overlay.Group == "" {
@@ -136,8 +141,8 @@ func resolvedHostFromState(cfg *config.Config, providerName string, provider con
 	})
 	aliases := slices.Clone(host.Patterns)
 	aliases = appendUnique(aliases, overlay.Aliases...)
-	ssh := mergeCatalogSSH(cfg, provider, group, overlay.SSH)
-	ssh = applyProviderStateSSH(ssh, host, cat)
+	ssh := mergeProviderStateSSH(cfg, state, provider, group, overlay.SSH)
+	ssh = applyProviderStateSSH(ssh, host, state, cat)
 	canonical := firstNonEmpty(host.Host, firstString(aliases), host.HostName)
 	return &ResolvedHostData{
 		Canonical: canonical,
@@ -163,12 +168,40 @@ func mergeCatalogSSH(cfg *config.Config, provider config.InventoryProviderConfig
 	return config.MergeSSH(ssh, host)
 }
 
-func applyProviderStateSSH(ssh config.SSHHostConfig, host *inventory.ProviderHost, cat *HostCatalog) config.SSHHostConfig {
-	if host == nil || strings.TrimSpace(host.ProxyJump) == "" || hasSSHOption(ssh.Options, "ProxyJump") {
+func mergeProviderStateSSH(cfg *config.Config, state *inventory.ProviderState, provider config.InventoryProviderConfig, group string, host config.SSHHostConfig) config.SSHHostConfig {
+	if state != nil && state.Type == config.ProviderContainerlab {
+		ssh := config.SSHHostConfig{}
+		if groupCfg, ok := provider.Groups[group]; ok {
+			ssh = config.MergeSSH(ssh, groupCfg.SSH)
+		}
+		return config.MergeSSH(ssh, host)
+	}
+	return mergeCatalogSSH(cfg, provider, group, host)
+}
+
+func applyProviderStateSSH(ssh config.SSHHostConfig, host *inventory.ProviderHost, state *inventory.ProviderState, cat *HostCatalog) config.SSHHostConfig {
+	if state != nil && state.Type == config.ProviderContainerlab && !state.StrictHostKeyChecking {
+		if ssh.Options == nil {
+			ssh.Options = make(config.SSHOptions)
+		}
+		setSSHOptionIfAbsent(ssh.Options, "StrictHostKeyChecking", config.NewSSHOptionString("no"))
+		setSSHOptionIfAbsent(ssh.Options, "UserKnownHostsFile", config.NewSSHOptionString("/dev/null"))
+		setSSHOptionIfAbsent(ssh.Options, "GlobalKnownHostsFile", config.NewSSHOptionString("/dev/null"))
+		setSSHOptionIfAbsent(ssh.Options, "LogLevel", config.NewSSHOptionString("ERROR"))
+		setSSHOptionIfAbsent(ssh.Options, "WarnWeakCrypto", config.NewSSHOptionString("no-pq-kex"))
+	}
+	if host == nil || strings.TrimSpace(host.ProxyJump) == "" || hasSSHOption(ssh.Options, "ProxyJump") || hasSSHOption(ssh.Options, "ProxyCommand") {
 		return ssh
 	}
 	proxyJump := strings.TrimSpace(host.ProxyJump)
-	if jump, ok := cat.Find(proxyJump); ok {
+	if jump, ok := cat.findProxyJumpHost(proxyJump); ok {
+		if command := formatManagedProxyCommand(jump); command != "" {
+			if ssh.Options == nil {
+				ssh.Options = make(config.SSHOptions)
+			}
+			ssh.Options["ProxyCommand"] = config.NewSSHOptionString(command)
+			return ssh
+		}
 		proxyJump = formatProxyJumpTarget(jump)
 	}
 	if ssh.Options == nil {
@@ -176,6 +209,83 @@ func applyProviderStateSSH(ssh config.SSHHostConfig, host *inventory.ProviderHos
 	}
 	ssh.Options["ProxyJump"] = config.NewSSHOptionString(proxyJump)
 	return ssh
+}
+
+func (c *HostCatalog) findProxyJumpHost(target string) (*ResolvedHostData, bool) {
+	target = strings.TrimSpace(target)
+	if target == "" || strings.Contains(target, ",") {
+		return nil, false
+	}
+	if jump, ok := c.Find(target); ok {
+		return jump, true
+	}
+	user, host, port := splitProxyJumpTarget(target)
+	jump, ok := c.Find(host)
+	if !ok {
+		return nil, false
+	}
+	if user != "" {
+		jump.Username = user
+	}
+	if port != 0 {
+		jump.Port = port
+	}
+	return jump, true
+}
+
+func splitProxyJumpTarget(target string) (user, host string, port int) {
+	target = strings.TrimSpace(target)
+	if at := strings.LastIndex(target, "@"); at != -1 {
+		user = strings.TrimSpace(target[:at])
+		target = strings.TrimSpace(target[at+1:])
+	}
+	host = target
+	if strings.HasPrefix(target, "[") {
+		if end := strings.LastIndex(target, "]"); end != -1 {
+			host = target[1:end]
+			if len(target) > end+2 && target[end+1] == ':' {
+				port = parsePort(target[end+2:])
+			}
+		}
+		return user, host, port
+	}
+	if colon := strings.LastIndex(target, ":"); colon != -1 && strings.Count(target, ":") == 1 {
+		host = strings.TrimSpace(target[:colon])
+		port = parsePort(target[colon+1:])
+	}
+	return user, host, port
+}
+
+func parsePort(value string) int {
+	var port int
+	if _, err := fmt.Sscanf(strings.TrimSpace(value), "%d", &port); err != nil || port <= 0 {
+		return 0
+	}
+	return port
+}
+
+func setSSHOptionIfAbsent(options config.SSHOptions, key string, value config.SSHOptionValue) {
+	if !hasSSHOption(options, key) {
+		options[key] = value
+	}
+}
+
+func formatManagedProxyCommand(host *ResolvedHostData) string {
+	if host == nil {
+		return ""
+	}
+	target := formatProxyJumpTarget(host)
+	if target == "" {
+		return ""
+	}
+	args := connector.RenderSSHOptions(host.SSH, 0)
+	argv := make([]string, 0, len(args)+4)
+	argv = append(argv, "ssh")
+	for _, arg := range args {
+		argv = append(argv, escapeProxyCommandTokenExpansion(arg))
+	}
+	argv = append(argv, "-W", "%h:%p", target)
+	return shellJoin(argv)
 }
 
 func formatProxyJumpTarget(host *ResolvedHostData) string {
@@ -205,6 +315,28 @@ func hasSSHOption(options config.SSHOptions, key string) bool {
 		}
 	}
 	return false
+}
+
+func escapeProxyCommandTokenExpansion(value string) string {
+	return strings.ReplaceAll(value, "%", "%%")
+}
+
+func shellJoin(argv []string) string {
+	quoted := make([]string, 0, len(argv))
+	for _, arg := range argv {
+		quoted = append(quoted, shellQuote(arg))
+	}
+	return strings.Join(quoted, " ")
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	if !strings.ContainsAny(value, " \t\r\n'\"\\$`!*?[]{}()<>|&;#~") {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func (c *HostCatalog) add(host *ResolvedHostData) {

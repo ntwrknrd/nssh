@@ -2,6 +2,7 @@ package connect
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
@@ -236,6 +237,10 @@ func TestCatalogMergesSSHDefaultsGroupAndProviderOverlay(t *testing.T) {
 
 func TestCatalogCarriesProviderStateProxyJump(t *testing.T) {
 	cfg := config.DefaultConfig()
+	cfg.SSH.Defaults = config.SSHHostConfig{Options: config.SSHOptions{
+		"ControlPath":  config.NewSSHOptionString("~/.ssh/sockets/%r@%h:%p"),
+		"IdentityFile": config.NewSSHOptionItems("~/.ssh/ed25519-1Password-Expedient.pub"),
+	}}
 	cfg.Inventory.Provider = nil
 	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
 		config.ProviderLocal: {
@@ -257,13 +262,21 @@ func TestCatalogCarriesProviderStateProxyJump(t *testing.T) {
 		"nre-netlab01": {
 			Type: config.ProviderContainerlab,
 			Groups: map[string]config.GroupConfig{
-				"juniper-crpd": {Auth: config.InventoryAuthConfig{Mode: config.AuthModePassword, Username: "admin"}},
+				"juniper-crpd": {
+					Auth: config.InventoryAuthConfig{Mode: config.AuthModePassword, Username: "admin"},
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"LogLevel": config.NewSSHOptionString("DEBUG"),
+					}},
+				},
 			},
 		},
 	}
 	state := &inventory.ProviderState{
 		Provider: "nre-netlab01",
 		Type:     config.ProviderContainerlab,
+		// Containerlab targets are ephemeral; the provider policy should be
+		// rendered into the SSH options used for the final target.
+		StrictHostKeyChecking: false,
 		Objects: map[string]*inventory.ProviderHost{
 			"dfz/core01": {
 				ObjectID:  "dfz/core01",
@@ -271,7 +284,7 @@ func TestCatalogCarriesProviderStateProxyJump(t *testing.T) {
 				HostName:  "172.20.20.13",
 				Patterns:  []string{"clab-dfz-core01"},
 				Group:     "nre-netlab01/juniper-crpd",
-				ProxyJump: "nre-netlab01",
+				ProxyJump: "nre@nre-netlab01.custcbb.local",
 			},
 		},
 	}
@@ -281,8 +294,108 @@ func TestCatalogCarriesProviderStateProxyJump(t *testing.T) {
 	if !ok {
 		t.Fatalf("Find(clab-dfz-core01) failed")
 	}
-	if got := host.SSH.Options["ProxyJump"].StringValue(); got != "nre@nre-netlab01.custcbb.local" {
-		t.Fatalf("ProxyJump = %q, want nre@nre-netlab01.custcbb.local", got)
+	if hasSSHOption(host.SSH.Options, "ProxyJump") {
+		t.Fatalf("ProxyJump should be replaced by managed ProxyCommand: %#v", host.SSH.Options)
+	}
+	got := host.SSH.Options["ProxyCommand"].StringValue()
+	for _, want := range []string{
+		"ssh -F none",
+		"ControlPath=~/.ssh/sockets/%%r@%%h:%%p",
+		"IdentityFile=~/.ssh/ed25519-1Password-Expedient.pub",
+		"-W %h:%p",
+		"nre@nre-netlab01.custcbb.local",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("ProxyCommand = %q, want substring %q", got, want)
+		}
+	}
+	if got := host.SSH.Options["StrictHostKeyChecking"].StringValue(); got != "no" {
+		t.Fatalf("StrictHostKeyChecking = %q, want no", got)
+	}
+	if got := host.SSH.Options["UserKnownHostsFile"].StringValue(); got != "/dev/null" {
+		t.Fatalf("UserKnownHostsFile = %q, want /dev/null", got)
+	}
+	if got := host.SSH.Options["GlobalKnownHostsFile"].StringValue(); got != "/dev/null" {
+		t.Fatalf("GlobalKnownHostsFile = %q, want /dev/null", got)
+	}
+	if got := host.SSH.Options["WarnWeakCrypto"].StringValue(); got != "no-pq-kex" {
+		t.Fatalf("WarnWeakCrypto = %q, want no-pq-kex", got)
+	}
+	if got := host.SSH.Options["LogLevel"].StringValue(); got != "DEBUG" {
+		t.Fatalf("LogLevel = %q, want DEBUG", got)
+	}
+	for _, targetOnly := range []string{"ControlPath", "IdentityFile"} {
+		if hasSSHOption(host.SSH.Options, targetOnly) {
+			t.Fatalf("containerlab target should not inherit global %s: %#v", targetOnly, host.SSH.Options)
+		}
+	}
+}
+
+func TestSplitProxyJumpTarget(t *testing.T) {
+	tests := []struct {
+		name     string
+		target   string
+		wantUser string
+		wantHost string
+		wantPort int
+	}{
+		{name: "host", target: "nre-netlab01", wantHost: "nre-netlab01"},
+		{name: "user host", target: "nre@nre-netlab01.custcbb.local", wantUser: "nre", wantHost: "nre-netlab01.custcbb.local"},
+		{name: "user host port", target: "nre@nre-netlab01.custcbb.local:2222", wantUser: "nre", wantHost: "nre-netlab01.custcbb.local", wantPort: 2222},
+		{name: "ipv6 host port", target: "nre@[2001:db8::1]:2222", wantUser: "nre", wantHost: "2001:db8::1", wantPort: 2222},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotUser, gotHost, gotPort := splitProxyJumpTarget(tt.target)
+			if gotUser != tt.wantUser || gotHost != tt.wantHost || gotPort != tt.wantPort {
+				t.Fatalf("splitProxyJumpTarget(%q) = (%q, %q, %d), want (%q, %q, %d)", tt.target, gotUser, gotHost, gotPort, tt.wantUser, tt.wantHost, tt.wantPort)
+			}
+		})
+	}
+}
+
+func TestCatalogContainerlabStrictFalseAppliesQuietDisposableHostOptions(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		"nre-netlab01": {
+			Type: config.ProviderContainerlab,
+			Groups: map[string]config.GroupConfig{
+				"vjunos": {},
+			},
+		},
+	}
+	state := &inventory.ProviderState{
+		Provider:              "nre-netlab01",
+		Type:                  config.ProviderContainerlab,
+		StrictHostKeyChecking: false,
+		Objects: map[string]*inventory.ProviderHost{
+			"isis/r1": {
+				ObjectID: "isis/r1",
+				Host:     "clab-isis-r1",
+				HostName: "192.168.123.101",
+				Patterns: []string{"isis"},
+				Group:    "nre-netlab01/vjunos",
+			},
+		},
+	}
+
+	cat := buildCatalogForTest(t, cfg, []*inventory.ProviderState{state})
+	host, ok := cat.Find("isis")
+	if !ok {
+		t.Fatalf("Find(isis) failed")
+	}
+	for key, want := range map[string]string{
+		"StrictHostKeyChecking": "no",
+		"UserKnownHostsFile":    "/dev/null",
+		"GlobalKnownHostsFile":  "/dev/null",
+		"LogLevel":              "ERROR",
+		"WarnWeakCrypto":        "no-pq-kex",
+	} {
+		if got := host.SSH.Options[key].StringValue(); got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
 	}
 }
 

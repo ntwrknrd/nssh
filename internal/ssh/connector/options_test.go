@@ -40,6 +40,24 @@ func TestRenderSSHOptionsQuotesValuesWithSpaces(t *testing.T) {
 	}
 }
 
+func TestRenderSSHOptionsDoesNotQuoteWholeProxyCommand(t *testing.T) {
+	opts := config.SSHHostConfig{
+		Options: config.SSHOptions{
+			"ProxyCommand": config.NewSSHOptionString("ssh -F none -W %h:%p jump.example.com"),
+		},
+	}
+	args := RenderSSHOptions(opts, 0)
+	want := "ProxyCommand=ssh -F none -W %h:%p jump.example.com"
+	if !slices.Contains(args, want) {
+		t.Fatalf("args = %#v, want %q", args, want)
+	}
+	for _, arg := range args {
+		if arg == `ProxyCommand="ssh -F none -W %h:%p jump.example.com"` {
+			t.Fatalf("ProxyCommand should not quote the whole command: %#v", args)
+		}
+	}
+}
+
 func TestRenderSSHOptionsAddsVerbosity(t *testing.T) {
 	args := RenderSSHOptions(config.SSHHostConfig{}, 3)
 	if !slices.Contains(args, "-vvv") {
