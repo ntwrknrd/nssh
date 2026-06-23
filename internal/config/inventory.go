@@ -5,18 +5,13 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
-	CredentialProviderPass      = "pass"
+	CredentialProviderSOPSAge   = "sops-age"
 	CredentialProvider1Password = "1password"
 	CredentialProviderBitwarden = "bitwarden"
-)
-
-const (
-	ProviderSessionExternal   = "external"
-	ProviderSessionAgentOwned = "agent"
-	ProviderSessionNone       = "none"
 )
 
 const (
@@ -53,11 +48,18 @@ type CredentialConfig struct {
 // CredentialProviderConfig configures one named credential provider instance.
 type CredentialProviderConfig struct {
 	Type    string `yaml:"type"`
-	Session string `yaml:"session,omitempty"`
 	Account string `yaml:"account,omitempty"`
 	Vault   string `yaml:"vault,omitempty"`
 	Command string `yaml:"command,omitempty"`
 	Prefix  string `yaml:"prefix,omitempty"`
+	File    string `yaml:"file,omitempty"`
+
+	AgeKeyFile  string `yaml:"age_key_file,omitempty"`
+	WarmSession bool   `yaml:"warm_session,omitempty"`
+
+	Keepalive         bool     `yaml:"keepalive,omitempty"`
+	KeepaliveInterval Duration `yaml:"keepalive_interval,omitempty"`
+	KeepaliveTimeout  Duration `yaml:"keepalive_timeout,omitempty"`
 
 	Config CredentialProviderDetailConfig `yaml:"config,omitempty"`
 }
@@ -69,7 +71,14 @@ type CredentialProviderDetailConfig struct {
 	Vault   string `yaml:"vault,omitempty"`
 	Command string `yaml:"command,omitempty"`
 	Prefix  string `yaml:"prefix,omitempty"`
-	Session string `yaml:"session,omitempty"`
+	File    string `yaml:"file,omitempty"`
+
+	AgeKeyFile  string `yaml:"age_key_file,omitempty"`
+	WarmSession bool   `yaml:"warm_session,omitempty"`
+
+	Keepalive         bool     `yaml:"keepalive,omitempty"`
+	KeepaliveInterval Duration `yaml:"keepalive_interval,omitempty"`
+	KeepaliveTimeout  Duration `yaml:"keepalive_timeout,omitempty"`
 }
 
 // CredentialRefConfig maps a host or group credential scope to an existing
@@ -192,13 +201,9 @@ func (c *CredentialConfig) Validate() error {
 		c.Provider = make(map[string]CredentialProviderConfig)
 	}
 	if zeroConfig {
-		c.Provider["pass"] = CredentialProviderConfig{
-			Type: CredentialProviderPass,
-			Config: CredentialProviderDetailConfig{
-				Command: "pass",
-				Prefix:  "nssh",
-				Session: ProviderSessionExternal,
-			},
+		c.Provider["sops"] = CredentialProviderConfig{
+			Type: CredentialProviderSOPSAge,
+			File: "~/.local/share/nssh/credentials.sops.yaml",
 		}
 	}
 	for name, provider := range c.Provider {
@@ -218,34 +223,46 @@ func (c *CredentialProviderConfig) Validate(name string) error {
 	c.syncDetailFields()
 	c.Type = strings.ToLower(strings.TrimSpace(c.Type))
 	switch c.Type {
-	case CredentialProviderPass:
-		if strings.TrimSpace(c.Command) == "" {
-			c.Command = "pass"
+	case CredentialProviderSOPSAge:
+		if c.WarmSession {
+			return fmt.Errorf("credential.provider.%s.warm_session is only supported for %q", name, CredentialProviderBitwarden)
 		}
-		if strings.TrimSpace(c.Prefix) == "" {
-			c.Prefix = "nssh"
+		if c.Keepalive || c.KeepaliveInterval.Duration() != 0 || c.KeepaliveTimeout.Duration() != 0 {
+			return fmt.Errorf("credential.provider.%s.keepalive is only supported for %q", name, CredentialProvider1Password)
 		}
-		if strings.TrimSpace(c.Session) == "" {
-			c.Session = ProviderSessionExternal
+		if strings.TrimSpace(c.File) == "" {
+			return fmt.Errorf("credential.provider.%s.config.file is required for %q", name, CredentialProviderSOPSAge)
 		}
 	case CredentialProvider1Password:
+		if c.WarmSession {
+			return fmt.Errorf("credential.provider.%s.warm_session is only supported for %q", name, CredentialProviderBitwarden)
+		}
 		if strings.TrimSpace(c.Vault) == "" {
 			return fmt.Errorf("credential.provider.%s.config.vault is required for %q", name, CredentialProvider1Password)
 		}
-		if strings.TrimSpace(c.Session) == "" {
-			c.Session = ProviderSessionAgentOwned
+		if c.KeepaliveInterval.Duration() == 0 {
+			c.KeepaliveInterval = Duration(5 * time.Minute)
+		}
+		if c.KeepaliveTimeout.Duration() == 0 {
+			c.KeepaliveTimeout = Duration(10 * time.Second)
+		}
+		if c.KeepaliveInterval.Duration() < time.Minute {
+			return fmt.Errorf("credential.provider.%s.keepalive_interval must be >= 1m (got %v)", name, c.KeepaliveInterval.Duration())
+		}
+		if c.KeepaliveInterval.Duration() > 9*time.Minute {
+			return fmt.Errorf("credential.provider.%s.keepalive_interval must be <= 9m (got %v)", name, c.KeepaliveInterval.Duration())
+		}
+		if c.KeepaliveTimeout.Duration() < time.Second {
+			return fmt.Errorf("credential.provider.%s.keepalive_timeout must be >= 1s (got %v)", name, c.KeepaliveTimeout.Duration())
 		}
 	case CredentialProviderBitwarden:
-		if strings.TrimSpace(c.Session) == "" {
-			c.Session = ProviderSessionExternal
+		if c.Keepalive || c.KeepaliveInterval.Duration() != 0 || c.KeepaliveTimeout.Duration() != 0 {
+			return fmt.Errorf("credential.provider.%s.keepalive is only supported for %q", name, CredentialProvider1Password)
 		}
 	default:
 		return fmt.Errorf("unsupported credential provider %q", c.Type)
 	}
 	c.syncConfigFields()
-	if err := validateProviderSessionPolicy("credential.provider."+name+".config.session", c.Session); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -262,8 +279,23 @@ func (c *CredentialProviderConfig) syncDetailFields() {
 	if c.Prefix == "" {
 		c.Prefix = c.Config.Prefix
 	}
-	if c.Session == "" {
-		c.Session = c.Config.Session
+	if c.File == "" {
+		c.File = c.Config.File
+	}
+	if c.AgeKeyFile == "" {
+		c.AgeKeyFile = c.Config.AgeKeyFile
+	}
+	if !c.WarmSession {
+		c.WarmSession = c.Config.WarmSession
+	}
+	if !c.Keepalive {
+		c.Keepalive = c.Config.Keepalive
+	}
+	if c.KeepaliveInterval.Duration() == 0 {
+		c.KeepaliveInterval = c.Config.KeepaliveInterval
+	}
+	if c.KeepaliveTimeout.Duration() == 0 {
+		c.KeepaliveTimeout = c.Config.KeepaliveTimeout
 	}
 }
 
@@ -272,7 +304,12 @@ func (c *CredentialProviderConfig) syncConfigFields() {
 	c.Config.Vault = c.Vault
 	c.Config.Command = c.Command
 	c.Config.Prefix = c.Prefix
-	c.Config.Session = c.Session
+	c.Config.File = c.File
+	c.Config.AgeKeyFile = c.AgeKeyFile
+	c.Config.WarmSession = c.WarmSession
+	c.Config.Keepalive = c.Keepalive
+	c.Config.KeepaliveInterval = c.KeepaliveInterval
+	c.Config.KeepaliveTimeout = c.KeepaliveTimeout
 }
 
 // Validate checks a credential reference mapping.
@@ -291,15 +328,6 @@ func (c *CredentialRefConfig) Validate(scope string, providers map[string]Creden
 		return fmt.Errorf("%s.provider references unknown provider %q", scope, c.Provider)
 	}
 	return nil
-}
-
-func validateProviderSessionPolicy(scope, policy string) error {
-	switch strings.ToLower(strings.TrimSpace(policy)) {
-	case ProviderSessionExternal, ProviderSessionAgentOwned, ProviderSessionNone:
-		return nil
-	default:
-		return fmt.Errorf("%s has invalid provider session policy %q", scope, policy)
-	}
 }
 
 // FormatInventoryGroupID returns the canonical public group identifier.

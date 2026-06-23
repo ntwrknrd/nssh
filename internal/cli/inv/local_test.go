@@ -220,7 +220,7 @@ func TestPromptLocalHostAddDetailsPromptsUserForPublicKey(t *testing.T) {
 func TestPromptLocalHostAddDetailsPasswordWithoutStoredCredentialPromptsUser(t *testing.T) {
 	cfg := &config.Config{
 		Inventory: config.InventoryConfig{Group: map[string]config.GroupConfig{
-			"lab": {Auth: config.InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/groups/lab"}},
+			"lab": {Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "groups.lab.password"}},
 		}},
 	}
 	prompter := &fakeLocalHostAddPrompter{
@@ -337,7 +337,7 @@ func TestApplyInteractiveHostAuthSelectionStoresHostCredential(t *testing.T) {
 	cfg := &config.Config{}
 	patch := hostPatch{
 		Host: "edge01",
-		Auth: config.InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/hosts/edge01"},
+		Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "hosts.edge01.password"},
 	}
 
 	changed := applyInteractiveHostAuthSelection(cfg, patch)
@@ -345,7 +345,7 @@ func TestApplyInteractiveHostAuthSelectionStoresHostCredential(t *testing.T) {
 	if !changed {
 		t.Fatal("expected host auth change")
 	}
-	if got := cfg.Inventory.Host["edge01"].Auth; got.CredentialProvider != "pass" || got.PasswordRef != "nssh/hosts/edge01" {
+	if got := cfg.Inventory.Host["edge01"].Auth; got.CredentialProvider != "sops" || got.PasswordRef != "hosts.edge01.password" {
 		t.Fatalf("host auth = %+v", got)
 	}
 }
@@ -392,14 +392,14 @@ func TestLocalHostProbeUserUsesCredentialUsernameWhenInventoryUserMissing(t *tes
 
 func TestPromptHostCredentialAuthFallsBackToManualRef(t *testing.T) {
 	cfg := &config.Config{Credential: config.CredentialConfig{Provider: map[string]config.CredentialProviderConfig{
-		"pass": {Type: config.CredentialProviderPass},
+		"sops": {Type: config.CredentialProviderSOPSAge, File: "~/.local/share/nssh/credentials.sops.yaml"},
 	}}}
 	prompter := &fakeLocalHostAddPrompter{
 		inputs: map[string]string{
-			"Password ref": "nssh/hosts/edge01",
+			"SOPS key path": "infra.hosts.edge01.password",
 		},
 		selects: map[string]string{
-			"Credential provider": "pass",
+			"Credential provider": "sops",
 		},
 	}
 	old := listCredentialItems
@@ -410,20 +410,48 @@ func TestPromptHostCredentialAuthFallsBackToManualRef(t *testing.T) {
 	if err != nil {
 		t.Fatalf("promptHostCredentialAuth: %v", err)
 	}
-	if auth.CredentialProvider != "pass" || auth.PasswordRef != "nssh/hosts/edge01" || auth.Username != "" || auth.UsernameRef != "" {
+	if auth.CredentialProvider != "sops" || auth.PasswordRef != "infra.hosts.edge01.password" || auth.Username != "" || auth.UsernameRef != "" {
 		t.Fatalf("auth = %+v", auth)
 	}
 }
 
+func TestPromptGroupCredentialAuthShowsProviderQualifiedDefaultPattern(t *testing.T) {
+	cfg := &config.Config{Credential: config.CredentialConfig{Provider: map[string]config.CredentialProviderConfig{
+		"sops": {Type: config.CredentialProviderSOPSAge, File: "~/.local/share/nssh/credentials.sops.yaml"},
+	}}}
+	prompter := &fakeLocalHostAddPrompter{
+		selects: map[string]string{
+			"Credential provider": "sops",
+		},
+	}
+	old := listCredentialItems
+	listCredentialItems = func(*config.Config, string) ([]credentialItem, error) { return nil, nil }
+	defer func() { listCredentialItems = old }()
+
+	auth, err := promptStoredCredentialAuth(cfg, "local/default", true, prompter)
+	if err != nil {
+		t.Fatalf("promptStoredCredentialAuth: %v", err)
+	}
+	if auth.CredentialProvider != "sops" || auth.PasswordRef != "groups.local.default.password" {
+		t.Fatalf("auth = %+v", auth)
+	}
+	for _, prompt := range prompter.prompts {
+		if prompt == "SOPS key path" {
+			return
+		}
+	}
+	t.Fatalf("group credential prompt did not explain provider-qualified pattern; prompts were %v", prompter.prompts)
+}
+
 func TestResolveLocalHostCredentialUsesHostAuthMapping(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{"pass": {Type: config.CredentialProviderPass}}
+	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{"sops": {Type: config.CredentialProviderSOPSAge, File: "~/.local/share/nssh/credentials.sops.yaml"}}
 	cfg.Inventory.Host = map[string]config.InventoryHostConfig{
-		"edge01": {Auth: config.InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/hosts/edge01", Username: "admin"}},
+		"edge01": {Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "hosts.edge01.password", Username: "admin"}},
 	}
 	old := newCredentialRegistry
 	newCredentialRegistry = func(*config.Config) (credentialRegistry, error) {
-		return fakeCredentialRegistry{providers: map[string]credential.Provider{"pass": fakeCredentialProvider{record: &credential.Record{Username: "admin", Secret: secretFromTest("pw")}}}}, nil
+		return fakeCredentialRegistry{providers: map[string]credential.Provider{"sops": fakeCredentialProvider{record: &credential.Record{Username: "admin", Secret: secretFromTest("pw")}}}}, nil
 	}
 	defer func() { newCredentialRegistry = old }()
 
@@ -954,8 +982,8 @@ inventory:
   hosts:
     edge01:
       auth:
-        credential_provider: pass
-        password_ref: nssh/hosts/edge01
+        credential_provider: sops
+        password_ref: hosts.edge01.password
     edge02:
       auth:
         username: netops
@@ -978,7 +1006,7 @@ inventory:
 		t.Fatal(err)
 	}
 	got := string(data)
-	if strings.Contains(got, "edge01") || strings.Contains(got, "nssh/hosts/edge01") {
+	if strings.Contains(got, "edge01") || strings.Contains(got, "hosts.edge01.password") {
 		t.Fatalf("removed host auth still present:\n%s", got)
 	}
 	if !strings.Contains(got, "edge02:") {

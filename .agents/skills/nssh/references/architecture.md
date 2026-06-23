@@ -11,14 +11,15 @@ OpenSSH behavior while adding:
 
 - smart host lookup and fuzzy selection
 - local and external inventory resolved from nssh YAML config and provider state
-- provider-backed SSH credentials from Pass, 1Password, or Bitwarden
+- provider-backed SSH credentials from SOPS+age, 1Password, or Bitwarden
 - request-scoped password injection through a PTY
 - optional asciinema session recording and log management
 - typed legacy SSH compatibility fixes under nssh host SSH config
 - status, diagnostics, benchmarking, install, reset, and uninstall commands
 
-nssh must not own external password-manager authentication, store long-lived
-passwords, or maintain a local credential vault.
+nssh must not maintain a local credential vault or write decrypted credential
+material to disk. The runtime agent may hold provider runtime material in memory
+until it stops.
 
 ## Command Surface
 
@@ -34,7 +35,7 @@ Public command groups:
   collide with public nssh commands or should bypass fuzzy resolution.
 - `nssh cp`: SCP wrapper with shared host and credential resolution.
 - `nssh inv`: inventory management and provider diagnostics.
-- `nssh agent`: background runtime status, stop, restart, and doctor.
+- `nssh agent`: background runtime status, stop, and reset.
 - `nssh log`: session recording list, play, delete, upload, export, auth, and
   search.
 - `nssh self`: init, status, reinstall, uninstall, reset, version, cfg, and
@@ -134,11 +135,15 @@ Primary packages:
 
 Supported credential providers:
 
-- `pass`: `credential.passProvider`, using a `pass`-compatible command.
-- `1password`: `credential.onePasswordProvider`, using `op`; default session
-  mode is agent-owned.
-- `bitwarden`: `credential.bitwardenProvider`, using `bw`; default session mode
-  is external.
+- `sops-age`: `credential.sopsAgeProvider`, using `sops`; default provider
+  instance name is `sops`.
+- `1password`: `credential.onePasswordProvider`, using `op`; lookups run
+  directly in the foreground unless `keepalive: true` requires the runtime
+  agent. A signed-out user-driven lookup may run `op signin` once and retry the
+  same credential command.
+- `bitwarden`: `credential.bitwardenProvider`, using `bw`; lazy unlock uses a
+  request-scoped `BW_SESSION` unless `warm_session: true` requires the runtime
+  agent to retain it in memory.
 
 Auth mappings live under provider-scoped YAML:
 
@@ -174,20 +179,25 @@ credential provider at all.
 ## Agent Runtime
 
 `internal/agent` is a Unix-domain-socket runtime daemon. It is not a password
-manager and must not become a long-lived password cache.
+manager and must not persist decrypted credentials.
 
 Responsibilities:
 
-- provider-session requests for agent-owned providers
+- retained-access provider requests for 1Password and Bitwarden
+- in-memory Bitwarden `BW_SESSION` handling only for providers with
+  `warm_session: true`
+- 1Password keepalive only for providers with `keepalive: true`, armed after a
+  successful credential lookup and suspended after a failed refresh
 - socket path management and stale socket cleanup
 - peer credential verification
-- idle timeout, max lifetime, stop/restart behavior, and signal handling
-- background recording archive runner
+- idle timeout, max lifetime, stop/reset behavior, and signal handling
 
-The protocol is in `internal/agent/protocol.go`. Public commands live in
-`internal/cli/agent`. The internal stop operation is named `lock` in protocol
-terms, but the user-facing command is `nssh agent stop`; there is no public
-password-manager lock/unlock workflow.
+Provider execution lives in `internal/credential/providerexec`; foreground
+providers choose direct transport unless retained access requires agent
+transport. The protocol is in `internal/agent/protocol.go`. Public commands live
+in `internal/cli/agent`. The internal stop operation is named `lock` in protocol
+terms, but the user-facing commands are `nssh agent stop` and `nssh agent reset`;
+there is no public password-manager lock/unlock workflow or manual start command.
 
 Import boundary tests require `internal/agent` to stay below CLI, UI, and SSH
 packages.
@@ -247,9 +257,10 @@ behavior, index metadata, text export, and archive eligibility.
 `internal/connect/recording.go` wraps the outer nssh invocation with asciinema
 and guards the inner process with `NSSH_RECORDING_INNER=1`.
 
-The `nssh log` commands live in `internal/cli/log`. Background archive
-maintenance is hosted by `internal/agent` but archive policy lives in
-`internal/recording`.
+The `nssh log` commands live in `internal/cli/log`. Archive maintenance is an
+explicit `nssh log archive` command; automation belongs in cron, launchd,
+systemd timers, or another operator-owned scheduler. Archive policy lives in
+`internal/recording`, not `internal/agent`.
 
 ## Audit, UI, And Exit Codes
 

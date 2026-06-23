@@ -190,3 +190,22 @@ func InputWithDefault(title, defaultValue string) (string, error) {
 
 	return result, nil
 }
+
+// InputWithDefaultSilent shows a text input prompt with a pre-filled default
+// value without printing a persisted summary after the TUI clears.
+func InputWithDefaultSilent(title, defaultValue string) (string, error) {
+	result := defaultValue
+
+	input := huh.NewInput().
+		Title(title).
+		Value(&result)
+
+	form := huh.NewForm(huh.NewGroup(input)).
+		WithTheme(huhTheme())
+
+	if err := form.Run(); err != nil {
+		return "", err
+	}
+
+	return result, nil
+}

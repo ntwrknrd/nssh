@@ -49,11 +49,25 @@ func TestDefaultConfig(t *testing.T) {
 	if !cfg.Agent.AutoStart {
 		t.Error("default agent.auto_start = false, want true")
 	}
-	if _, ok := cfg.Credential.Provider["pass"]; !ok {
-		t.Fatal("default credentials missing pass")
+	provider, ok := cfg.Credential.Provider["sops"]
+	if !ok {
+		t.Fatal("default credentials missing sops")
+	}
+	if provider.Type != CredentialProviderSOPSAge {
+		t.Fatalf("default sops type = %q, want %q", provider.Type, CredentialProviderSOPSAge)
+	}
+	if provider.File != "~/.local/share/nssh/credentials.sops.yaml" {
+		t.Fatalf("default sops file = %q", provider.File)
+	}
+	if _, ok := cfg.Credential.Provider["pass"]; ok {
+		t.Fatal("default credentials still include pass")
 	}
 	if _, ok := cfg.Inventory.Providers[ProviderLocal]; !ok {
 		t.Fatal("default inventory missing local provider")
+	}
+	group := cfg.Inventory.Providers[ProviderLocal].Groups["default"]
+	if group.Auth.IsSet() {
+		t.Fatalf("default local group auth = %+v, want unset", group.Auth)
 	}
 }
 
@@ -101,6 +115,57 @@ agent:
 	}
 }
 
+func TestLoad_AcceptsArchiveTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	writeConfigFile(t, configPath, `
+logging:
+  session:
+    archive:
+      timeout: 45s
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.Logging.Session.Archive.Timeout.Duration(); got != 45*time.Second {
+		t.Fatalf("logging.session.archive.timeout = %v, want 45s", got)
+	}
+}
+
+func TestLoad_RejectsObsoleteArchiveSchedulerFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+	}{
+		{name: "enabled", field: "enabled: true"},
+		{name: "jitter", field: "jitter: 5m"},
+		{name: "min_interval", field: "min_interval: 24h"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.yaml")
+			writeConfigFile(t, configPath, `
+logging:
+  session:
+    archive:
+      `+tt.field+`
+`)
+
+			_, err := Load(configPath)
+			if err == nil {
+				t.Fatalf("Load() should reject obsolete archive field %q", tt.name)
+			}
+			if !strings.Contains(err.Error(), tt.name) {
+				t.Fatalf("Load() error = %v, want %q", err, tt.name)
+			}
+		})
+	}
+}
+
 func TestLoad_RejectsObsoleteMaxBackupFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
@@ -143,10 +208,39 @@ func TestAgentConfig_Validate(t *testing.T) {
 		{
 			name: "valid defaults",
 			config: AgentConfig{
+				IdleTimeout:            Duration(time.Hour),
+				ActivityIncrement:      Duration(15 * time.Minute),
+				MaxLifetime:            Duration(24 * time.Hour),
+				ProviderRequestTimeout: Duration(2 * time.Minute),
+			},
+		},
+		{
+			name: "provider_request_timeout zero uses default",
+			config: AgentConfig{
 				IdleTimeout:       Duration(time.Hour),
 				ActivityIncrement: Duration(15 * time.Minute),
 				MaxLifetime:       Duration(24 * time.Hour),
 			},
+		},
+		{
+			name: "provider_request_timeout too short",
+			config: AgentConfig{
+				IdleTimeout:            Duration(time.Hour),
+				ActivityIncrement:      Duration(15 * time.Minute),
+				MaxLifetime:            Duration(24 * time.Hour),
+				ProviderRequestTimeout: Duration(4 * time.Second),
+			},
+			wantErr: "provider_request_timeout must be >= 5s",
+		},
+		{
+			name: "provider_request_timeout too long",
+			config: AgentConfig{
+				IdleTimeout:            Duration(time.Hour),
+				ActivityIncrement:      Duration(15 * time.Minute),
+				MaxLifetime:            Duration(24 * time.Hour),
+				ProviderRequestTimeout: Duration(11 * time.Minute),
+			},
+			wantErr: "provider_request_timeout must be <= 10m",
 		},
 		{
 			name: "idle_timeout too short",
@@ -197,6 +291,23 @@ func TestAgentConfig_Validate(t *testing.T) {
 				t.Errorf("Validate() error = %v, want containing %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestLoad_AcceptsProviderRequestTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	writeConfigFile(t, configPath, `
+agent:
+  provider_request_timeout: 90s
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.Agent.ProviderRequestTimeout.Duration(); got != 90*time.Second {
+		t.Fatalf("agent.provider_request_timeout = %v, want 90s", got)
 	}
 }
 

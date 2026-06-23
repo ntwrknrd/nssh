@@ -12,18 +12,16 @@ func TestInventoryCredentialConfigDecode(t *testing.T) {
 	writeConfigFile(t, path, `
 credential:
   provider:
-    pass:
-      type: pass
-      command: pass
-      prefix: nssh
+    sops:
+      type: sops-age
+      file: ~/.local/share/nssh/credentials.sops.yaml
+      age_key_file: ~/.config/sops/age/keys.txt
     op-network:
       type: 1password
       account: ntwrknrd
       vault: Network
-      session: agent
     bw-lab:
       type: bitwarden
-      session: external
 inventory:
   providers:
     local:
@@ -70,8 +68,14 @@ inventory:
 		t.Fatalf("Load: %v", err)
 	}
 
-	if cfg.Credential.Provider["pass"].Type != CredentialProviderPass {
-		t.Fatalf("pass type = %q", cfg.Credential.Provider["pass"].Type)
+	if cfg.Credential.Provider["sops"].Type != CredentialProviderSOPSAge {
+		t.Fatalf("sops type = %q", cfg.Credential.Provider["sops"].Type)
+	}
+	if cfg.Credential.Provider["sops"].File != "~/.local/share/nssh/credentials.sops.yaml" {
+		t.Fatalf("sops file = %q", cfg.Credential.Provider["sops"].File)
+	}
+	if cfg.Credential.Provider["sops"].AgeKeyFile != "~/.config/sops/age/keys.txt" {
+		t.Fatalf("sops age_key_file = %q", cfg.Credential.Provider["sops"].AgeKeyFile)
 	}
 	if cfg.Credential.Provider["op-network"].Vault != "Network" {
 		t.Fatalf("op-network vault = %q", cfg.Credential.Provider["op-network"].Vault)
@@ -164,21 +168,18 @@ func TestInventoryAuthResolutionUsesLowestConfiguredField(t *testing.T) {
 	}
 }
 
-func TestDefaultCredentialConfigCreatesPassLocalProvider(t *testing.T) {
+func TestDefaultCredentialConfigCreatesSOPSAgeProvider(t *testing.T) {
 	cfg := CredentialConfig{}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 
-	provider := cfg.Provider["pass"]
-	if provider.Type != CredentialProviderPass {
-		t.Fatalf("pass type = %q", provider.Type)
+	provider := cfg.Provider["sops"]
+	if provider.Type != CredentialProviderSOPSAge {
+		t.Fatalf("sops type = %q", provider.Type)
 	}
-	if provider.Command != "pass" {
-		t.Fatalf("pass command = %q", provider.Command)
-	}
-	if provider.Prefix != "nssh" {
-		t.Fatalf("pass prefix = %q", provider.Prefix)
+	if provider.File != "~/.local/share/nssh/credentials.sops.yaml" {
+		t.Fatalf("sops file = %q", provider.File)
 	}
 }
 
@@ -189,12 +190,30 @@ func TestCredentialConfigValidation(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "pass provider",
+			name: "sops-age provider",
 			cfg: CredentialConfig{
 				Provider: map[string]CredentialProviderConfig{
-					"pass": {Type: CredentialProviderPass},
+					"sops": {Type: CredentialProviderSOPSAge, File: "~/.local/share/nssh/credentials.sops.yaml"},
 				},
 			},
+		},
+		{
+			name: "pass provider is unsupported",
+			cfg: CredentialConfig{
+				Provider: map[string]CredentialProviderConfig{
+					"pass": {Type: "pass"},
+				},
+			},
+			wantErr: "unsupported credential provider",
+		},
+		{
+			name: "sops-age provider requires file",
+			cfg: CredentialConfig{
+				Provider: map[string]CredentialProviderConfig{
+					"sops": {Type: CredentialProviderSOPSAge},
+				},
+			},
+			wantErr: "config.file is required",
 		},
 		{
 			name: "1password provider",
@@ -216,19 +235,10 @@ func TestCredentialConfigValidation(t *testing.T) {
 			name: "provider name must be config-key safe",
 			cfg: CredentialConfig{
 				Provider: map[string]CredentialProviderConfig{
-					"bad.name": {Type: CredentialProviderPass},
+					"bad.name": {Type: CredentialProviderSOPSAge, File: "~/.local/share/nssh/credentials.sops.yaml"},
 				},
 			},
 			wantErr: "must use only",
-		},
-		{
-			name: "invalid provider-session policy",
-			cfg: CredentialConfig{
-				Provider: map[string]CredentialProviderConfig{
-					"op-network": {Type: CredentialProvider1Password, Vault: "Network", Session: "forever"},
-				},
-			},
-			wantErr: "invalid provider session policy",
 		},
 	}
 
@@ -291,7 +301,7 @@ func TestInventoryConfigValidation(t *testing.T) {
 			cfg: InventoryConfig{
 				Providers: map[string]InventoryProviderConfig{
 					"local": {Type: ProviderLocal, Groups: map[string]GroupConfig{
-						"default": {Auth: InventoryAuthConfig{CredentialProvider: "pass"}},
+						"default": {Auth: InventoryAuthConfig{CredentialProvider: "sops"}},
 					}},
 				},
 			},
@@ -302,7 +312,7 @@ func TestInventoryConfigValidation(t *testing.T) {
 			cfg: InventoryConfig{
 				Providers: map[string]InventoryProviderConfig{
 					"local": {Type: ProviderLocal, Groups: map[string]GroupConfig{
-						"default": {Auth: InventoryAuthConfig{PasswordRef: "nssh/groups/default"}},
+						"default": {Auth: InventoryAuthConfig{PasswordRef: "groups.default.password"}},
 					}},
 				},
 			},
@@ -316,7 +326,7 @@ func TestInventoryConfigValidation(t *testing.T) {
 						Type:   ProviderLocal,
 						Groups: map[string]GroupConfig{"default": {}},
 						Hosts: map[string]InventoryHostConfig{
-							"edge01": {Group: "default", Auth: InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/hosts/edge01", Username: "admin", UsernameRef: "op://vault/item/username"}},
+							"edge01": {Group: "default", Auth: InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "hosts.edge01.password", Username: "admin", UsernameRef: "op://vault/item/username"}},
 						},
 					},
 				},
@@ -334,7 +344,7 @@ func TestInventoryConfigValidation(t *testing.T) {
 							"edge01": {
 								Group:        "default",
 								AuthDisabled: true,
-								Auth:         InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/hosts/edge01"},
+								Auth:         InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "hosts.edge01.password"},
 							},
 						},
 					},

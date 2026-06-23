@@ -8,26 +8,29 @@ agent:
   idle_timeout: 1h
   activity_increment: 15m
   max_lifetime: 24h
+  provider_request_timeout: 2m
 
 credential:
   provider:
-    pass:
-      type: pass
-      session: external
-      command: pass
-      prefix: nssh
+    sops:
+      type: sops-age
+      file: ~/.local/share/nssh/credentials.sops.yaml
+    op-expedient:
+      type: 1password
+      vault: Expedient
+      keepalive: false
+      keepalive_interval: 5m
+      keepalive_timeout: 10s
+    bw-work:
+      type: bitwarden
+      warm_session: false
 
 inventory:
   providers:
     local:
       type: local
       groups:
-        default:
-          auth:
-            mode: password
-            credential_provider: pass
-            password_ref: nssh/groups/default
-            username: netops
+        default: {}
       hosts: {}
 
 ssh:
@@ -53,3 +56,9 @@ logging:
     append_mode: true
     dir: ~/.local/state/nssh/casts
     auto_export_txt: true
+    archive:
+      dir: ~/.local/state/nssh/archives
+      min_age: 720h
+      max_bundles: 12
+      max_run_bytes: 0
+      timeout: 30s

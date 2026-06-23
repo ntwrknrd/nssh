@@ -37,6 +37,6 @@
 //
 // The package provides utilities for parsing the recording index file,
 // which tracks metadata (hostname, timestamp, duration) for all recordings.
-// It also owns recording archive bundle policy used by the background agent
-// runtime.
+// It also owns recording archive bundle policy used by the explicit
+// `nssh log archive` command.
 package recording

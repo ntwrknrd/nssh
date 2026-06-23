@@ -11,14 +11,16 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+
+	"github.com/ntwrknrd/nssh/internal/config"
 )
 
 // Clock provides wall-clock time and timers to the archive runner.
@@ -60,13 +62,11 @@ func stripMonotonic(t time.Time) time.Time {
 
 // ArchiveConfig is the internal configuration used by the recording archiver.
 type ArchiveConfig struct {
-	Enabled     bool
 	SourceDir   string
 	ArchiveDir  string
 	MinAge      time.Duration
 	MaxBundles  int
 	MaxRunBytes int64
-	Jitter      time.Duration
 }
 
 type archiveCandidate struct {
@@ -85,18 +85,25 @@ type ArchiveSummary struct {
 	BundlesWritten int
 	BundlesPruned  int
 	Capped         bool
+	SkippedReason  string
 }
 
-// ArchiveRunner handles periodic recording archival.
+// ArchiveMaintenanceConfig is the public maintenance wrapper around archive policy.
+type ArchiveMaintenanceConfig struct {
+	Archive      config.SessionArchiveConfig
+	RecordingDir string
+	StateDir     string
+}
+
+// ArchiveRunner handles recording archival.
 type ArchiveRunner struct {
 	cfg    ArchiveConfig
 	logger *slog.Logger
 	clock  Clock
-	rand   *rand.Rand
 	mu     sync.Mutex
 }
 
-// NewArchiveRunner creates a periodic recording archive runner.
+// NewArchiveRunner creates a recording archive runner.
 func NewArchiveRunner(cfg ArchiveConfig, logger *slog.Logger, clk Clock) *ArchiveRunner {
 	if logger == nil {
 		logger = slog.Default()
@@ -104,63 +111,94 @@ func NewArchiveRunner(cfg ArchiveConfig, logger *slog.Logger, clk Clock) *Archiv
 	if clk == nil {
 		clk = realClock{}
 	}
-	seed := clk.Now().UnixNano()
 	return &ArchiveRunner{
 		cfg:    cfg,
 		logger: logger,
 		clock:  clk,
-		rand:   rand.New(rand.NewSource(seed)),
 	}
 }
 
-func (r *ArchiveRunner) Enabled() bool {
-	return r != nil && r.cfg.Enabled && r.cfg.SourceDir != "" && r.cfg.ArchiveDir != ""
-}
-
-// runLoop executes RunOnce on a daily cadence with jitter until the context is canceled.
-func (r *ArchiveRunner) RunLoop(ctx context.Context) {
-	if !r.Enabled() {
-		return
+// RunArchive runs one explicit recording archive maintenance pass.
+func RunArchive(ctx context.Context, maint ArchiveMaintenanceConfig, logger *slog.Logger) (ArchiveSummary, error) {
+	var summary ArchiveSummary
+	if logger == nil {
+		logger = slog.Default()
 	}
-
 	if ctx == nil {
 		ctx = context.Background()
 	}
-
-	// First run occurs shortly after start to catch up if the agent was down.
-	delay := r.initialDelay()
-
-	for {
-		timer := r.clock.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C():
-		}
-
-		if summary, err := r.RunOnce(ctx); err != nil {
-			r.logger.Warn("recording archive run failed", "err", err)
-		} else {
-			r.logger.Debug("recording archive run complete",
-				"files_archived", summary.FilesArchived,
-				"bytes_archived", summary.BytesArchived,
-				"files_deleted", summary.FilesDeleted,
-				"bundles_written", summary.BundlesWritten,
-				"bundles_pruned", summary.BundlesPruned,
-				"capped", summary.Capped)
-		}
-
-		delay = r.nextInterval()
+	if err := maint.Archive.Validate(); err != nil {
+		return summary, err
 	}
+	paths := config.DefaultPaths()
+	recordingDir := maint.RecordingDir
+	if recordingDir == "" {
+		recordingDir = paths.RecordingsDir
+	}
+	stateDir := maint.StateDir
+	if stateDir == "" {
+		stateDir = paths.StateDir
+	}
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return summary, fmt.Errorf("create state dir: %w", err)
+	}
+
+	lockFile, locked, err := acquireArchiveLock(filepath.Join(stateDir, "recording-archive.lock"))
+	if err != nil {
+		return summary, err
+	}
+	if !locked {
+		summary.SkippedReason = "archive already running"
+		return summary, nil
+	}
+	defer func() {
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		_ = lockFile.Close()
+	}()
+
+	timeout := maint.Archive.Timeout.Duration()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	return NewArchiveRunner(ArchiveConfig{
+		SourceDir:   recordingDir,
+		ArchiveDir:  maint.Archive.Dir,
+		MinAge:      maint.Archive.MinAge.Duration(),
+		MaxBundles:  maint.Archive.MaxBundles,
+		MaxRunBytes: maint.Archive.MaxRunBytes,
+	}, logger, nil).RunOnce(ctx)
+}
+
+func acquireArchiveLock(path string) (*os.File, bool, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, false, fmt.Errorf("open archive lock: %w", err)
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = file.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("lock archive maintenance: %w", err)
+	}
+	return file, true, nil
 }
 
 // RunOnce performs a single archival maintenance pass.
 func (r *ArchiveRunner) RunOnce(ctx context.Context) (ArchiveSummary, error) {
 	var summary ArchiveSummary
 
-	if !r.Enabled() {
+	if r == nil {
 		return summary, nil
+	}
+	if r.cfg.SourceDir == "" {
+		return summary, fmt.Errorf("recording source directory is empty")
+	}
+	if r.cfg.ArchiveDir == "" {
+		return summary, fmt.Errorf("recording archive directory is empty")
 	}
 
 	r.mu.Lock()
@@ -633,26 +671,6 @@ func (r *ArchiveRunner) pruneBundles() (int, error) {
 		deleted++
 	}
 	return deleted, nil
-}
-
-// initialDelay returns a random delay between 0 and jitter before the first run.
-func (r *ArchiveRunner) initialDelay() time.Duration {
-	if r.cfg.Jitter <= 0 {
-		return 0
-	}
-	return time.Duration(r.rand.Int63n(int64(r.cfg.Jitter) + 1))
-}
-
-// nextInterval returns 24h +/- jitter for the next run.
-func (r *ArchiveRunner) nextInterval() time.Duration {
-	base := 24 * time.Hour
-	j := r.cfg.Jitter
-	if j <= 0 {
-		return base
-	}
-	span := int64(j) * 2
-	shift := r.rand.Int63n(span+1) - int64(j)
-	return base + time.Duration(shift)
 }
 
 func (s ArchiveSummary) merge(other ArchiveSummary) ArchiveSummary {

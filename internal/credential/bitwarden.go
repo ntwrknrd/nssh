@@ -1,134 +1,128 @@
 package credential
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/credential/providerexec"
 	"github.com/ntwrknrd/nssh/internal/secret"
 )
 
+var unlockBitwardenProvider = runBitwardenUnlock
+
 type bitwardenProvider struct {
-	hostRefs  map[string]config.CredentialRefConfig
-	groupRefs map[string]config.CredentialRefConfig
-	runner    bwRunner
+	name        string
+	hostRefs    map[string]config.CredentialRefConfig
+	groupRefs   map[string]config.CredentialRefConfig
+	warmSession bool
+	transport   providerTransport
 }
 
-type bwRunner interface {
-	Run(ctx context.Context, stdin []byte, args ...string) ([]byte, error)
-}
-
-type bwCLIRunner struct{}
-
-type bitwardenItem struct {
-	ID    string         `json:"id,omitempty"`
-	Type  int            `json:"type"`
-	Name  string         `json:"name"`
-	Login bitwardenLogin `json:"login"`
-}
-
-type bitwardenLogin struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
-func newBitwardenProvider(config.CredentialProviderConfig) Provider {
-	return &bitwardenProvider{runner: bwCLIRunner{}}
-}
-
-func (bwCLIRunner) Run(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "bw", args...)
-	if stdin != nil {
-		cmd.Stdin = bytes.NewReader(stdin)
+func newBitwardenProviderNamed(name string, cfg config.CredentialProviderConfig) Provider {
+	return &bitwardenProvider{
+		name:        name,
+		hostRefs:    map[string]config.CredentialRefConfig{},
+		groupRefs:   map[string]config.CredentialRefConfig{},
+		warmSession: cfg.WarmSession,
+		transport:   agentProviderTransport{autoStart: true},
 	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return out, fmt.Errorf("bw %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return out, nil
 }
 
 func (p *bitwardenProvider) GetHost(host string) (*Record, error) {
-	return p.get(p.hostName(host))
+	if ref := p.refForScope(scopeHost, host); ref.Ref != "" {
+		return p.transportGet(scopeHost, host, ref)
+	}
+	return nil, nil
 }
 
 func (p *bitwardenProvider) GetGroup(group string) (*Record, error) {
-	return p.get(p.groupName(group))
+	if ref := p.refForScope(scopeGroup, group); ref.Ref != "" {
+		return p.transportGet(scopeGroup, group, ref)
+	}
+	return nil, nil
 }
 
 func (p *bitwardenProvider) GetRef(ref config.CredentialRefConfig) (*Record, error) {
-	record, err := p.get(ref.Ref)
-	if err != nil || record == nil {
-		return record, err
-	}
-	if ref.Username != "" {
-		record.Username = strings.TrimSpace(ref.Username)
-	}
-	return record, nil
+	return p.transportGet(scopeHost, "", ref)
 }
 
-func (p *bitwardenProvider) get(name string) (*Record, error) {
-	if strings.TrimSpace(name) == "" {
-		return nil, nil
+func (p *bitwardenProvider) transportGet(scope credentialScope, name string, ref config.CredentialRefConfig) (*Record, error) {
+	transport := p.transport
+	if transport == nil {
+		transport = agentProviderTransport{autoStart: true}
 	}
-	item, err := p.getItem(name)
-	if err != nil || item == nil {
-		return nil, err
-	}
-	if item.Login.Username == "" && item.Login.Password == "" {
-		return nil, nil
-	}
-	return &Record{
-		Username: item.Login.Username,
-		Secret:   secret.NewFromString(item.Login.Password),
-		Ref:      item.Name,
-	}, nil
-}
-
-func (p *bitwardenProvider) getItem(name string) (*bitwardenItem, error) {
-	out, err := p.runnerOrDefault().Run(context.Background(), nil, "get", "item", name)
-	if err != nil {
-		if isBitwardenMissing(out, err) {
-			return nil, nil
+	resp, err := transport.ProviderRequest(providerexec.ProviderRequest{
+		Provider:    p.name,
+		Action:      "get",
+		Scope:       string(scope),
+		Name:        name,
+		Ref:         ref.Ref,
+		Username:    ref.Username,
+		UsernameRef: ref.UsernameRef,
+	})
+	if isBitwardenAuthRequired(err) {
+		session, unlockErr := unlockBitwardenProvider()
+		if unlockErr != nil {
+			return nil, unlockErr
 		}
+		if p.warmSession {
+			if _, authErr := transport.ProviderRequest(providerexec.ProviderRequest{
+				Provider: p.name,
+				Action:   "auth",
+				Session:  session,
+			}); authErr != nil {
+				return nil, authErr
+			}
+		}
+		resp, err = transport.ProviderRequest(providerexec.ProviderRequest{
+			Provider:    p.name,
+			Action:      "get",
+			Scope:       string(scope),
+			Name:        name,
+			Ref:         ref.Ref,
+			Username:    ref.Username,
+			UsernameRef: ref.UsernameRef,
+			Session:     session,
+		})
+	}
+	if err != nil {
 		return nil, err
 	}
-	var item bitwardenItem
-	if err := json.Unmarshal(out, &item); err != nil {
-		return nil, fmt.Errorf("parse Bitwarden item %q: %w", name, err)
+	if resp == nil || !resp.Found {
+		return nil, nil
 	}
-	return &item, nil
+	return &Record{Username: resp.Username, Secret: secret.NewFromString(string(resp.Secret)), Ref: resp.Ref}, nil
 }
 
-func (p *bitwardenProvider) runnerOrDefault() bwRunner {
-	if p.runner != nil {
-		return p.runner
+func runBitwardenUnlock() (string, error) {
+	cmd := exec.Command("bw", "unlock", "--raw")
+	cmd.Stdin = os.Stdin
+	cmd.Stderr = os.Stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("bw unlock --raw: %w", err)
 	}
-	p.runner = bwCLIRunner{}
-	return p.runner
+	session := strings.TrimSpace(string(out))
+	if session == "" {
+		return "", fmt.Errorf("bw unlock --raw returned an empty session")
+	}
+	return session, nil
 }
 
-func (p *bitwardenProvider) hostName(host string) string {
-	if ref := p.hostRefs[host]; strings.TrimSpace(ref.Ref) != "" {
-		return ref.Ref
-	}
-	return ""
+func isBitwardenAuthRequired(err error) bool {
+	return err != nil && strings.Contains(err.Error(), providerexec.ErrBitwardenNotAuthenticated)
 }
 
-func (p *bitwardenProvider) groupName(group string) string {
-	if ref := p.groupRefs[group]; strings.TrimSpace(ref.Ref) != "" {
-		return ref.Ref
+func (p *bitwardenProvider) refForScope(scope credentialScope, name string) config.CredentialRefConfig {
+	switch scope {
+	case scopeHost:
+		return p.hostRefs[name]
+	case scopeGroup:
+		return p.groupRefs[name]
+	default:
+		return config.CredentialRefConfig{}
 	}
-	return ""
-}
-
-func isBitwardenMissing(out []byte, err error) bool {
-	text := strings.ToLower(string(out) + " " + err.Error())
-	return strings.Contains(text, "not found") ||
-		strings.Contains(text, "couldn't find") ||
-		strings.Contains(text, "could not find")
 }

@@ -269,7 +269,7 @@ func applyGroupAuthPatch(cfg *config.Config, groupID string, patch inventoryAuth
 	if patch.Clear {
 		groupCfg.Auth = config.InventoryAuthConfig{}
 	} else {
-		groupCfg.Auth = patch.Auth
+		groupCfg.Auth = mergeInventoryAuthPatch(groupCfg.Auth, patch.Auth)
 	}
 	providerCfg.Group[groupName] = groupCfg
 	cfg.Inventory.Provider[provider] = providerCfg

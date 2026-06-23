@@ -41,8 +41,9 @@ func NewRegistry(cfg *config.Config) (*Registry, error) {
 	registry := &Registry{
 		providers: make(map[string]Provider, len(credCfg.Provider)),
 	}
+	executor := newConfiguredProviderExecutor(cfg)
 	for name, providerCfg := range credCfg.Provider {
-		provider, err := buildNamedProvider(name, providerCfg, cfg)
+		provider, err := buildNamedProvider(name, providerCfg, cfg, executor)
 		if err != nil {
 			return nil, err
 		}
@@ -59,14 +60,16 @@ func (r *Registry) Provider(name string) Provider {
 	return r.providers[name]
 }
 
-func buildNamedProvider(name string, providerCfg config.CredentialProviderConfig, cfg *config.Config) (Provider, error) {
+func buildNamedProvider(name string, providerCfg config.CredentialProviderConfig, cfg *config.Config, executor providerRequestExecutor) (Provider, error) {
 	hostRefs := hostRefsForProvider(cfg.Inventory.Host, name)
 	groupRefs := groupRefsForProvider(cfg.Inventory.Provider, name)
+	transport := newProviderTransport(providerCfg, cfg, executor)
 	switch providerCfg.Type {
-	case config.CredentialProviderPass:
-		provider := newPassProvider(providerCfg).(*passProvider)
+	case config.CredentialProviderSOPSAge:
+		provider := newSOPSAgeProviderNamed(name, providerCfg).(*sopsAgeProvider)
 		provider.hostRefs = hostRefs
 		provider.groupRefs = groupRefs
+		provider.transport = transport
 		return provider, nil
 	case config.CredentialProvider1Password:
 		provider := newOnePasswordProviderNamed(name, config.CredentialConfig{
@@ -74,12 +77,13 @@ func buildNamedProvider(name string, providerCfg config.CredentialProviderConfig
 			Host:   hostRefs,
 			Group:  groupRefs,
 		}).(*onePasswordProvider)
-		provider.autoStartAgent = cfg.Agent.AutoStart
+		provider.transport = transport
 		return provider, nil
 	case config.CredentialProviderBitwarden:
-		provider := newBitwardenProvider(providerCfg).(*bitwardenProvider)
+		provider := newBitwardenProviderNamed(name, providerCfg).(*bitwardenProvider)
 		provider.hostRefs = hostRefs
 		provider.groupRefs = groupRefs
+		provider.transport = transport
 		return provider, nil
 	default:
 		return nil, fmt.Errorf("unsupported credential provider %q", providerCfg.Type)

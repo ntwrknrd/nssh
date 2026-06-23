@@ -29,7 +29,6 @@ func runAgentDaemon() {
 		}
 		agentCfg := agent.DefaultRuntimeConfig()
 		agentCfg.Agent = &cfg.Agent
-		agentCfg.Archive = &cfg.Logging.Session.Archive
 		agentCfg.ReadyPipe = readyPipe
 		if err := agent.Run(agent.NewConfiguredRuntimeProvider(cfg), agentCfg); err != nil {
 			if readyPipe != nil {

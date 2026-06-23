@@ -3,8 +3,7 @@ $ nssh agent --help
 │   nssh agent [flags]                Manage nssh agent                        │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
-│   doctor                            Diagnose agent                           │
-│   restart                           Restart agent                            │
+│   reset                             Reset agent                              │
 │   status                            Show agent status                        │
 │   stop                              Stop agent                               │
 ╰──────────────────────────────────────────────────────────────────────────────╯

@@ -3,49 +3,84 @@
 package agent
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/credential/providerexec"
+	"github.com/ntwrknrd/nssh/internal/credential/sopsdoc"
 )
 
 type RuntimeProvider struct {
 	mu          sync.RWMutex
-	onePassword map[string]OnePasswordSessionConfig
+	executor    *providerexec.Executor
+	onePassword map[string]*OnePasswordProviderConfig
+	bitwarden   map[string]*BitwardenProviderConfig
 }
 
-type OnePasswordSessionConfig struct {
-	Account string
-	Vault   string
-	Runner  OnePasswordRunner
+type OnePasswordProviderConfig struct {
+	Account           string
+	Vault             string
+	Runner            OnePasswordRunner
+	Keepalive         bool
+	KeepaliveInterval time.Duration
+	KeepaliveTimeout  time.Duration
+
+	mu                   sync.RWMutex
+	keepaliveState       string
+	keepaliveCancel      context.CancelFunc
+	keepaliveLastSuccess time.Time
+	keepaliveNext        time.Time
+	keepaliveLastError   string
 }
 
-type OnePasswordRunner interface {
-	Run(ctx context.Context, stdin []byte, args ...string) ([]byte, error)
+type OnePasswordRunner = providerexec.OnePasswordRunner
+
+type SOPSAgeProviderConfig = providerexec.SOPSAgeProviderConfig
+
+type BitwardenProviderConfig struct {
+	Runner      BitwardenRunner
+	WarmSession bool
+	Session     string
+	mu          sync.RWMutex
 }
 
-type opCLIRunner struct{}
+type BitwardenRunner = providerexec.BitwardenRunner
 
-type onePasswordSessionItem struct {
-	Title  string                    `json:"title"`
-	Fields []onePasswordSessionField `json:"fields"`
-}
+type opCLIRunner = providerexec.OPCLIRunner
+type bwAgentCLIRunner = providerexec.BWCLIRunner
 
-type onePasswordSessionField struct {
-	ID    string `json:"id,omitempty"`
-	Label string `json:"label"`
-	Value string `json:"value"`
+const (
+	onePasswordKeepaliveDisabled  = "disabled"
+	onePasswordKeepaliveIdle      = "idle"
+	onePasswordKeepaliveActive    = "active"
+	onePasswordKeepaliveSuspended = "suspended"
+)
+
+type AccessStatus struct {
+	Name                 string
+	Type                 string
+	OnePasswordKeepalive bool
+	OnePasswordState     string
+	KeepaliveInterval    int64
+	KeepaliveNextUnix    int64
+	KeepaliveLastSuccess int64
+	BitwardenWarmSession bool
+	BitwardenWarmActive  bool
+	LastError            string
 }
 
 func NewRuntimeProvider() *RuntimeProvider {
-	return &RuntimeProvider{onePassword: make(map[string]OnePasswordSessionConfig)}
+	return &RuntimeProvider{
+		executor:    providerexec.NewExecutor(),
+		onePassword: make(map[string]*OnePasswordProviderConfig),
+		bitwarden:   make(map[string]*BitwardenProviderConfig),
+	}
 }
 
 func NewConfiguredRuntimeProvider(cfg *config.Config) *RuntimeProvider {
@@ -54,44 +89,88 @@ func NewConfiguredRuntimeProvider(cfg *config.Config) *RuntimeProvider {
 		cfg = config.DefaultConfig()
 	}
 	for name, providerCfg := range cfg.Credential.Provider {
-		if providerCfg.Type != config.CredentialProvider1Password {
-			continue
+		switch providerCfg.Type {
+		case config.CredentialProvider1Password:
+			provider.Register1Password(name, OnePasswordProviderConfig{
+				Account:           firstNonEmpty(providerCfg.Account, providerCfg.Config.Account),
+				Vault:             firstNonEmpty(providerCfg.Vault, providerCfg.Config.Vault),
+				Runner:            opCLIRunner{},
+				Keepalive:         providerCfg.Keepalive,
+				KeepaliveInterval: providerCfg.KeepaliveInterval.Duration(),
+				KeepaliveTimeout:  providerCfg.KeepaliveTimeout.Duration(),
+			})
+		case config.CredentialProviderSOPSAge:
+			provider.RegisterSOPSAge(name, SOPSAgeProviderConfig{
+				File:       firstNonEmpty(providerCfg.File, providerCfg.Config.File),
+				AgeKeyFile: firstNonEmpty(providerCfg.AgeKeyFile, providerCfg.Config.AgeKeyFile),
+				Runner:     sopsdoc.CLIRunner{Command: "sops"},
+			})
+		case config.CredentialProviderBitwarden:
+			provider.RegisterBitwarden(name, BitwardenProviderConfig{
+				Runner:      bwAgentCLIRunner{},
+				WarmSession: providerCfg.WarmSession,
+			})
 		}
-		session := strings.TrimSpace(providerCfg.Config.Session)
-		if session == "" {
-			session = config.ProviderSessionAgentOwned
-		}
-		if session != config.ProviderSessionAgentOwned {
-			continue
-		}
-		provider.Register1Password(name, OnePasswordSessionConfig{
-			Account: providerCfg.Config.Account,
-			Vault:   providerCfg.Config.Vault,
-			Runner:  opCLIRunner{},
-		})
 	}
 	return provider
 }
 
-func (opCLIRunner) Run(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "op", args...)
-	if stdin != nil {
-		cmd.Stdin = bytes.NewReader(stdin)
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return out, fmt.Errorf("op %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return out, nil
-}
-
-func (p *RuntimeProvider) Register1Password(name string, cfg OnePasswordSessionConfig) {
+func (p *RuntimeProvider) Register1Password(name string, cfg OnePasswordProviderConfig) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.onePassword == nil {
-		p.onePassword = make(map[string]OnePasswordSessionConfig)
+	if p.executor == nil {
+		p.executor = providerexec.NewExecutor()
 	}
-	p.onePassword[name] = cfg
+	if p.onePassword == nil {
+		p.onePassword = make(map[string]*OnePasswordProviderConfig)
+	}
+	if cfg.Runner == nil {
+		cfg.Runner = opCLIRunner{}
+	}
+	if cfg.KeepaliveInterval == 0 {
+		cfg.KeepaliveInterval = 5 * time.Minute
+	}
+	if cfg.KeepaliveTimeout == 0 {
+		cfg.KeepaliveTimeout = 10 * time.Second
+	}
+	if cfg.Keepalive {
+		cfg.keepaliveState = onePasswordKeepaliveIdle
+	} else {
+		cfg.keepaliveState = onePasswordKeepaliveDisabled
+	}
+	p.executor.Register1Password(name, providerexec.OnePasswordProviderConfig{
+		Account: cfg.Account,
+		Vault:   cfg.Vault,
+		Runner:  cfg.Runner,
+	})
+	p.onePassword[name] = &cfg
+}
+
+func (p *RuntimeProvider) RegisterSOPSAge(name string, cfg SOPSAgeProviderConfig) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.executor == nil {
+		p.executor = providerexec.NewExecutor()
+	}
+	p.executor.RegisterSOPSAge(name, cfg)
+}
+
+func (p *RuntimeProvider) RegisterBitwarden(name string, cfg BitwardenProviderConfig) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.executor == nil {
+		p.executor = providerexec.NewExecutor()
+	}
+	if p.bitwarden == nil {
+		p.bitwarden = make(map[string]*BitwardenProviderConfig)
+	}
+	if cfg.Runner == nil {
+		cfg.Runner = bwAgentCLIRunner{}
+	}
+	p.executor.RegisterBitwarden(name, providerexec.BitwardenProviderConfig{
+		Runner: cfg.Runner,
+	})
+	p.bitwarden[name] = &cfg
 }
 
 func (p *RuntimeProvider) HandleProviderRequest(ctx context.Context, req ProviderRequest) (ProviderResponse, error) {
@@ -99,161 +178,231 @@ func (p *RuntimeProvider) HandleProviderRequest(ctx context.Context, req Provide
 		return ProviderResponse{}, errors.New("provider is required")
 	}
 	p.mu.RLock()
-	cfg, ok := p.onePassword[req.Provider]
+	opCfg := p.onePassword[req.Provider]
+	bwCfg := p.bitwarden[req.Provider]
+	executor := p.executor
 	p.mu.RUnlock()
-	if !ok {
-		return ProviderResponse{}, fmt.Errorf("unknown provider session %q", req.Provider)
-	}
-	if cfg.Runner == nil {
-		return ProviderResponse{}, fmt.Errorf("provider session %q has no runner", req.Provider)
+	if executor == nil {
+		return ProviderResponse{}, fmt.Errorf("unknown credential provider %q", req.Provider)
 	}
 	switch req.Action {
+	case "auth":
+		if bwCfg == nil {
+			return ProviderResponse{}, fmt.Errorf("credential provider %q does not support auth", req.Provider)
+		}
+		return p.handleBitwardenAuth(bwCfg, req)
 	case "get":
-		return p.handleOnePasswordGet(ctx, cfg, req)
+		if bwCfg != nil && strings.TrimSpace(req.Session) == "" {
+			bwCfg.mu.RLock()
+			req.Session = strings.TrimSpace(bwCfg.Session)
+			bwCfg.mu.RUnlock()
+		}
+		resp, err := executor.HandleProviderRequest(ctx, req)
+		if err == nil && resp.Found && opCfg != nil {
+			opCfg.armKeepalive()
+		}
+		return resp, err
 	default:
 		return ProviderResponse{}, fmt.Errorf("unsupported provider action %q", req.Action)
 	}
 }
 
 func (p *RuntimeProvider) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, cfg := range p.bitwarden {
+		if cfg == nil {
+			continue
+		}
+		cfg.mu.Lock()
+		cfg.Session = ""
+		cfg.mu.Unlock()
+	}
+	for _, cfg := range p.onePassword {
+		if cfg == nil {
+			continue
+		}
+		cfg.stopKeepalive()
+	}
 	return nil
 }
 
-func (p *RuntimeProvider) SessionCount() int {
+func (p *RuntimeProvider) ProviderCount() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return len(p.onePassword)
+	if p.executor == nil {
+		return 0
+	}
+	return p.executor.ProviderCount()
 }
 
-func (p *RuntimeProvider) SessionNames() []string {
+func (p *RuntimeProvider) ProviderNames() []string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	names := make([]string, 0, len(p.onePassword))
-	for name := range p.onePassword {
-		names = append(names, name)
+	if p.executor == nil {
+		return nil
 	}
-	sort.Strings(names)
-	return names
+	return p.executor.ProviderNames()
 }
 
-func (p *RuntimeProvider) handleOnePasswordGet(ctx context.Context, cfg OnePasswordSessionConfig, req ProviderRequest) (ProviderResponse, error) {
-	ref := strings.TrimSpace(req.Ref)
-	if ref == "" {
-		ref = "nssh " + req.Scope + " " + req.Name
+func (p *RuntimeProvider) AccessStatus() []AccessStatus {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	entries := make([]AccessStatus, 0)
+	for name, cfg := range p.onePassword {
+		if cfg == nil || !cfg.Keepalive {
+			continue
+		}
+		entries = append(entries, cfg.accessStatus(name))
 	}
-	username := strings.TrimSpace(req.Username)
-	if username == "" && strings.TrimSpace(req.UsernameRef) != "" {
-		resolved, err := readOnePasswordSecretRef(ctx, cfg, req.UsernameRef)
-		if err != nil {
-			return ProviderResponse{}, err
+	for name, cfg := range p.bitwarden {
+		if cfg == nil || !cfg.WarmSession {
+			continue
 		}
-		username = resolved
+		cfg.mu.RLock()
+		sessionActive := strings.TrimSpace(cfg.Session) != ""
+		cfg.mu.RUnlock()
+		entries = append(entries, AccessStatus{
+			Name:                 name,
+			Type:                 config.CredentialProviderBitwarden,
+			BitwardenWarmSession: true,
+			BitwardenWarmActive:  sessionActive,
+		})
 	}
-	if isOnePasswordItemBaseRef(ref) {
-		if username == "" {
-			resolved, err := readOnePasswordSecretRef(ctx, cfg, onePasswordFieldRef(ref, "username"))
-			if err != nil {
-				return ProviderResponse{}, err
-			}
-			username = resolved
-		}
-		password, err := readOnePasswordSecretRef(ctx, cfg, onePasswordFieldRef(ref, "password"))
-		if err != nil {
-			return ProviderResponse{}, err
-		}
-		if username == "" && password == "" {
-			return ProviderResponse{Found: false}, nil
-		}
-		return ProviderResponse{Found: true, Username: username, Secret: []byte(password), Ref: ref}, nil
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+	return entries
+}
+
+func (p *RuntimeProvider) handleBitwardenAuth(cfg *BitwardenProviderConfig, req ProviderRequest) (ProviderResponse, error) {
+	if cfg == nil {
+		return ProviderResponse{}, errors.New("credential provider is nil")
 	}
-	if isOnePasswordSecretRef(ref) {
-		password, err := readOnePasswordSecretRef(ctx, cfg, ref)
-		if err != nil {
-			return ProviderResponse{}, err
-		}
-		if username == "" && password == "" {
-			return ProviderResponse{Found: false}, nil
-		}
-		return ProviderResponse{Found: true, Username: username, Secret: []byte(password), Ref: ref}, nil
+	session := strings.TrimSpace(req.Session)
+	if session == "" {
+		return ProviderResponse{}, errors.New("bitwarden session is required")
 	}
-	args := []string{"item", "get", ref}
-	if cfg.Vault != "" {
-		args = append(args, "--vault", cfg.Vault)
+	if !cfg.WarmSession {
+		return ProviderResponse{Found: true}, nil
 	}
-	if cfg.Account != "" {
+	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
+	cfg.Session = session
+	return ProviderResponse{Found: true}, nil
+}
+
+func (cfg *OnePasswordProviderConfig) armKeepalive() {
+	if cfg == nil || !cfg.Keepalive {
+		return
+	}
+	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
+	if cfg.keepaliveState == onePasswordKeepaliveActive {
+		return
+	}
+	if cfg.keepaliveCancel != nil {
+		cfg.keepaliveCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cfg.keepaliveCancel = cancel
+	cfg.keepaliveState = onePasswordKeepaliveActive
+	cfg.keepaliveLastError = ""
+	cfg.keepaliveNext = time.Now().Add(cfg.KeepaliveInterval)
+	go cfg.runKeepalive(ctx)
+}
+
+func (cfg *OnePasswordProviderConfig) stopKeepalive() {
+	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
+	if cfg.keepaliveCancel != nil {
+		cfg.keepaliveCancel()
+		cfg.keepaliveCancel = nil
+	}
+}
+
+func (cfg *OnePasswordProviderConfig) runKeepalive(ctx context.Context) {
+	for {
+		cfg.mu.RLock()
+		interval := cfg.KeepaliveInterval
+		cfg.mu.RUnlock()
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+
+		if err := cfg.runKeepaliveTick(ctx); err != nil {
+			cfg.mu.Lock()
+			cfg.keepaliveState = onePasswordKeepaliveSuspended
+			cfg.keepaliveLastError = sanitizeProviderError(err)
+			cfg.keepaliveCancel = nil
+			cfg.mu.Unlock()
+			return
+		}
+		cfg.mu.Lock()
+		cfg.keepaliveLastSuccess = time.Now()
+		cfg.keepaliveNext = cfg.keepaliveLastSuccess.Add(cfg.KeepaliveInterval)
+		cfg.keepaliveLastError = ""
+		cfg.mu.Unlock()
+	}
+}
+
+func (cfg *OnePasswordProviderConfig) runKeepaliveTick(parent context.Context) error {
+	timeout := cfg.KeepaliveTimeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	args := []string{"whoami"}
+	if strings.TrimSpace(cfg.Account) != "" {
 		args = append(args, "--account", cfg.Account)
 	}
-	args = append(args, "--format", "json", "--reveal")
-	out, err := cfg.Runner.Run(ctx, nil, args...)
-	if err != nil {
-		if isRuntimeItemNotFound(out, err) {
-			return ProviderResponse{Found: false}, nil
-		}
-		return ProviderResponse{}, err
-	}
-	var item onePasswordSessionItem
-	if err := json.Unmarshal(out, &item); err != nil {
-		return ProviderResponse{}, fmt.Errorf("parse 1Password item %q: %w", ref, err)
-	}
-	if username == "" {
-		username = sessionItemField(item, "username")
-	}
-	password := sessionItemField(item, "password")
-	if username == "" && password == "" {
-		return ProviderResponse{Found: false}, nil
-	}
-	return ProviderResponse{Found: true, Username: username, Secret: []byte(password), Ref: ref}, nil
+	_, err := cfg.Runner.Run(ctx, nil, args...)
+	return err
 }
 
-func readOnePasswordSecretRef(ctx context.Context, cfg OnePasswordSessionConfig, ref string) (string, error) {
-	args := []string{"read", strings.TrimSpace(ref)}
-	if cfg.Account != "" {
-		args = append(args, "--account", cfg.Account)
+func (cfg *OnePasswordProviderConfig) accessStatus(name string) AccessStatus {
+	cfg.mu.RLock()
+	defer cfg.mu.RUnlock()
+	status := AccessStatus{
+		Name:                 name,
+		Type:                 config.CredentialProvider1Password,
+		OnePasswordKeepalive: true,
+		OnePasswordState:     cfg.keepaliveState,
+		KeepaliveInterval:    int64(cfg.KeepaliveInterval.Seconds()),
+		LastError:            cfg.keepaliveLastError,
 	}
-	out, err := cfg.Runner.Run(ctx, nil, args...)
-	if err != nil {
-		return "", err
+	if !cfg.keepaliveLastSuccess.IsZero() {
+		status.KeepaliveLastSuccess = cfg.keepaliveLastSuccess.Unix()
 	}
-	return strings.TrimSpace(string(out)), nil
+	if !cfg.keepaliveNext.IsZero() {
+		status.KeepaliveNextUnix = cfg.keepaliveNext.Unix()
+	}
+	return status
 }
 
-func isOnePasswordSecretRef(ref string) bool {
-	return strings.HasPrefix(strings.TrimSpace(ref), "op://")
-}
-
-func isOnePasswordItemBaseRef(ref string) bool {
-	ref = strings.TrimSpace(ref)
-	return strings.HasPrefix(ref, "op://") && strings.HasSuffix(ref, "/")
-}
-
-func onePasswordFieldRef(ref, field string) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
+func sanitizeProviderError(err error) string {
+	if err == nil {
 		return ""
 	}
-	if strings.HasSuffix(ref, "/") {
-		return ref + field
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "deadline") || strings.Contains(text, "timeout"):
+		return "timeout"
+	case strings.Contains(text, "not signed in") || strings.Contains(text, "signin"):
+		return "not signed in"
+	default:
+		return "provider command failed"
 	}
-	idx := strings.LastIndex(ref, "/")
-	if idx == -1 || idx == len(ref)-1 {
-		return ""
-	}
-	return ref[:idx+1] + field
 }
 
-func sessionItemField(item onePasswordSessionItem, label string) string {
-	for _, field := range item.Fields {
-		if strings.EqualFold(field.Label, label) || strings.EqualFold(field.ID, label) {
-			return field.Value
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
 		}
 	}
 	return ""
-}
-
-func isRuntimeItemNotFound(out []byte, err error) bool {
-	text := strings.ToLower(string(out) + " " + err.Error())
-	return strings.Contains(text, "not found") ||
-		strings.Contains(text, "isn't an item") ||
-		strings.Contains(text, "is not an item") ||
-		strings.Contains(text, "does not exist")
 }

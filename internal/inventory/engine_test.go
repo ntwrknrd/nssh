@@ -123,7 +123,7 @@ func TestReconcileDefaultsAuthModeFromGroupAuth(t *testing.T) {
 		Attributes: map[string][]string{"role": {"switch"}},
 	}}
 	groups := map[string]config.GroupConfig{
-		"network": {Auth: config.InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/groups/network"}},
+		"network": {Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "groups.network.password"}},
 	}
 
 	plan := Reconcile(objects, selectors, "netbox-prod", nil, groups)

@@ -100,8 +100,18 @@ func applyInventoryAuthPatch(parser *sshconfig.Parser, cfg *config.Config, paths
 	if cfg.Inventory.Host == nil {
 		cfg.Inventory.Host = make(map[string]config.InventoryHostConfig)
 	}
-	cfg.Inventory.Host[host] = config.InventoryHostConfig{Auth: patch.Auth}
+	hostCfg := cfg.Inventory.Host[host]
+	hostCfg.Auth = mergeInventoryAuthPatch(hostCfg.Auth, patch.Auth)
+	cfg.Inventory.Host[host] = hostCfg
 	return cfg.Validate()
+}
+
+func mergeInventoryAuthPatch(existing, next config.InventoryAuthConfig) config.InventoryAuthConfig {
+	if next.Username == "" && next.UsernameRef == "" {
+		next.Username = existing.Username
+		next.UsernameRef = existing.UsernameRef
+	}
+	return next
 }
 
 func stopAgentAfterInventoryAuthMutation() {

@@ -1,6 +1,6 @@
-$ nssh agent restart --help
+$ nssh agent reset --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh agent restart [flags]        Restart agent                            │
+│   nssh agent reset [flags]          Reset agent                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -h, --help                        Print command help                       │

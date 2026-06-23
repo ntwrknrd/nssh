@@ -18,8 +18,8 @@ func TestApplyInventoryAuthPatchWritesInventoryHostAuth(t *testing.T) {
 
 	err := applyInventoryAuthPatch(parser, cfg, paths, "edge01", inventoryAuthPatch{
 		Auth: config.InventoryAuthConfig{
-			CredentialProvider: "pass",
-			PasswordRef:        "nssh/hosts/edge01",
+			CredentialProvider: "sops",
+			PasswordRef:        "hosts.edge01.password",
 			Username:           "admin",
 		},
 	})
@@ -27,7 +27,7 @@ func TestApplyInventoryAuthPatchWritesInventoryHostAuth(t *testing.T) {
 		t.Fatalf("apply auth: %v", err)
 	}
 	got := cfg.Inventory.Host["edge01"].Auth
-	if got.CredentialProvider != "pass" || got.PasswordRef != "nssh/hosts/edge01" || got.Username != "admin" {
+	if got.CredentialProvider != "sops" || got.PasswordRef != "hosts.edge01.password" || got.Username != "admin" {
 		t.Fatalf("auth = %+v", got)
 	}
 }
@@ -38,7 +38,7 @@ func TestApplyInventoryAuthPatchClearsOnlyHostAuth(t *testing.T) {
 	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := testAuthPatchConfig("local", config.ProviderLocal, "lab", "edge01", "edge01.lab.local")
 	cfg.Inventory.Host = map[string]config.InventoryHostConfig{
-		"edge01": {Auth: config.InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/hosts/edge01"}},
+		"edge01": {Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "hosts.edge01.password"}},
 	}
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
@@ -59,13 +59,42 @@ func TestApplyInventoryAuthPatchAllowsProviderOwnedHost(t *testing.T) {
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
 	err := applyInventoryAuthPatch(parser, cfg, paths, "edge01", inventoryAuthPatch{
-		Auth: config.InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/hosts/edge01"},
+		Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "hosts.edge01.password"},
 	})
 	if err != nil {
 		t.Fatalf("apply auth: %v", err)
 	}
-	if got := cfg.Inventory.Host["edge01"].Auth.PasswordRef; got != "nssh/hosts/edge01" {
+	if got := cfg.Inventory.Host["edge01"].Auth.PasswordRef; got != "hosts.edge01.password" {
 		t.Fatalf("password_ref = %q", got)
+	}
+}
+
+func TestApplyInventoryAuthPatchPreservesExistingUsername(t *testing.T) {
+	tmp := t.TempDir()
+	mainConfig := filepath.Join(tmp, ".ssh", "config")
+	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
+	cfg := testAuthPatchConfig("local", config.ProviderLocal, "lab", "edge01", "edge01.lab.local")
+	cfg.Inventory.Host = map[string]config.InventoryHostConfig{
+		"edge01": {Auth: config.InventoryAuthConfig{
+			CredentialProvider: "op-expedient",
+			PasswordRef:        "op://Expedient/item/password",
+			Username:           "chris.jones",
+		}},
+	}
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
+
+	err := applyInventoryAuthPatch(parser, cfg, paths, "edge01", inventoryAuthPatch{
+		Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "expedient.password", Mode: config.AuthModePassword},
+	})
+	if err != nil {
+		t.Fatalf("apply auth: %v", err)
+	}
+	got := cfg.Inventory.Host["edge01"].Auth
+	if got.CredentialProvider != "sops" || got.PasswordRef != "expedient.password" {
+		t.Fatalf("credential = %+v", got)
+	}
+	if got.Username != "chris.jones" {
+		t.Fatalf("username = %q, want preserved chris.jones; auth=%+v", got.Username, got)
 	}
 }
 
@@ -88,21 +117,21 @@ func TestInventoryAuthPatchRejectsConflicts(t *testing.T) {
 	cfg := config.DefaultConfig()
 	err := (inventoryAuthPatch{
 		Clear: true,
-		Auth:  config.InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/hosts/edge01"},
+		Auth:  config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "hosts.edge01.password"},
 	}).Validate(cfg)
 	if err == nil {
 		t.Fatal("expected clear conflict")
 	}
 
 	err = (inventoryAuthPatch{
-		Auth: config.InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/hosts/edge01", Username: "admin", UsernameRef: "op://vault/item/username"},
+		Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "hosts.edge01.password", Username: "admin", UsernameRef: "op://vault/item/username"},
 	}).Validate(cfg)
 	if err == nil {
 		t.Fatal("expected username conflict")
 	}
 
 	err = (inventoryAuthPatch{
-		Auth: config.InventoryAuthConfig{PasswordRef: "nssh/hosts/edge01"},
+		Auth: config.InventoryAuthConfig{PasswordRef: "hosts.edge01.password"},
 	}).Validate(cfg)
 	if err == nil {
 		t.Fatal("expected missing provider error")
@@ -133,7 +162,7 @@ func TestInvAuthCommandIsNotRegistered(t *testing.T) {
 
 func TestEffectiveInventoryAuthHostOverridesGroup(t *testing.T) {
 	cfg := config.DefaultConfig()
-	localGroupID := setInvTestLocalGroup(cfg, "default", config.GroupConfig{Auth: config.InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/groups/default"}})
+	localGroupID := setInvTestLocalGroup(cfg, "default", config.GroupConfig{Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "groups.default.password"}})
 	cfg.Inventory.Host = map[string]config.InventoryHostConfig{
 		"edge01": {Auth: config.InventoryAuthConfig{CredentialProvider: "op-network", PasswordRef: "nssh host edge01", Username: "netops"}},
 	}
@@ -146,10 +175,10 @@ func TestEffectiveInventoryAuthHostOverridesGroup(t *testing.T) {
 
 func TestEffectiveInventoryAuthFallsBackToGroupProvider(t *testing.T) {
 	cfg := config.DefaultConfig()
-	labGroup := setInvTestLocalGroup(cfg, "lab", config.GroupConfig{Auth: config.InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/groups/lab"}})
+	labGroup := setInvTestLocalGroup(cfg, "lab", config.GroupConfig{Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "groups.lab.password"}})
 
 	view := effectiveInventoryAuth(cfg, "edge01", labGroup)
-	if view.Source != "group local/lab" || view.CredentialProvider != "pass" || view.PasswordRef != "nssh/groups/lab" {
+	if view.Source != "group local/lab" || view.CredentialProvider != "sops" || view.PasswordRef != "groups.lab.password" {
 		t.Fatalf("view = %+v", view)
 	}
 }

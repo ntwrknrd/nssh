@@ -79,13 +79,13 @@ nssh inv list
 nssh inv get <host>
 nssh inv set <host> --hostname <addr> --user <user> -g <group>
 nssh inv status
-nssh inv doctor
 nssh <host>
 nssh --select
 nssh --target <host>
 nssh cp <host>:/remote/path ./local/path
 nssh agent status
-nssh agent doctor
+nssh agent stop
+nssh agent reset
 nssh log list
 nssh -v <command>
 NSSH_DEBUG=1 nssh <host>

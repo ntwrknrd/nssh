@@ -40,24 +40,3 @@ func TestListOnePasswordCredentialItemsUsesConfiguredScopeAndIDs(t *testing.T) {
 		t.Fatalf("items = %+v, want %+v", items, want)
 	}
 }
-
-func TestParsePassCredentialItemsFromTree(t *testing.T) {
-	output := strings.Join([]string{
-		"nssh",
-		"\u251c\u2500\u2500 groups",
-		"\u2502   \u2514\u2500\u2500 lab",
-		"\u2514\u2500\u2500 hosts",
-		"    \u251c\u2500\u2500 edge01",
-		"    \u2514\u2500\u2500 edge02",
-	}, "\n")
-
-	items := parsePassCredentialItems("nssh", output)
-	want := []credentialItem{
-		{Label: "nssh/groups/lab", Ref: "nssh/groups/lab"},
-		{Label: "nssh/hosts/edge01", Ref: "nssh/hosts/edge01"},
-		{Label: "nssh/hosts/edge02", Ref: "nssh/hosts/edge02"},
-	}
-	if !reflect.DeepEqual(items, want) {
-		t.Fatalf("items = %+v, want %+v", items, want)
-	}
-}

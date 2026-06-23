@@ -44,12 +44,12 @@ func NewInitCmd() *cobra.Command {
 	var opts InitOptions
 
 	cmd := &cobra.Command{
-		Use:   "init [pass|1password|bitwarden]",
+		Use:   "init [sops-age|1password|bitwarden]",
 		Short: "Initialize configuration",
 		Long: `Initialize nssh configuration.
 
-Credentials are resolved through configured providers such as Pass, 1Password,
-or Bitwarden. The runtime agent can broker provider sessions when configured.
+Credentials are resolved through configured providers such as SOPS+age, 1Password,
+or Bitwarden. The runtime agent brokers credential provider access.
 
 To start fresh, use 'nssh self reset'.`,
 		Args: validateInitArgs,
@@ -74,7 +74,7 @@ func validateInitArgs(_ *cobra.Command, args []string) error {
 		return nil
 	}
 	switch args[0] {
-	case config.CredentialProviderPass, config.CredentialProvider1Password, config.CredentialProviderBitwarden:
+	case config.CredentialProviderSOPSAge, config.CredentialProvider1Password, config.CredentialProviderBitwarden:
 		return nil
 	default:
 		return fmt.Errorf("unsupported credential provider %q", args[0])
@@ -160,7 +160,10 @@ func runInit(opts InitOptions) error {
 		if result == initConfigStop {
 			return nil
 		}
-		ui.Info("Credential provider authentication is owned by Pass, 1Password, or Bitwarden.")
+		if opts.CredentialProviderType != "" {
+			return nil
+		}
+		ui.Info("Credential provider authentication is owned by SOPS+age, 1Password, or Bitwarden.")
 	}
 
 	// Check dependencies
@@ -279,14 +282,12 @@ func ensureInitConfig(paths *config.Paths, opts InitOptions) (initConfigResult, 
 	var req initPlanRequest
 	var err error
 	if opts.CredentialProviderType != "" {
-		provider, promptErr := promptCredentialProvider(uiInitPrompter{}, opts.CredentialProviderType)
+		provider, promptErr := explicitCredentialProviderRequest(uiInitPrompter{}, opts.CredentialProviderType)
 		if promptErr != nil {
 			return initConfigStop, promptErr
 		}
 		req = initPlanRequest{
-			InventorySources:         []initInventorySourceRequest{{Type: initInventoryLocal, Groups: []string{"default"}}},
-			CredentialProviders:      []initCredentialProviderRequest{provider},
-			GroupCredentialProviders: map[string]string{config.FormatInventoryGroupID(config.ProviderLocal, "default"): provider.Name},
+			CredentialProviders: []initCredentialProviderRequest{provider},
 		}
 	} else {
 		req, err = promptInitPlanRequest(uiInitPrompter{}, nil)
@@ -303,6 +304,9 @@ func ensureInitConfig(paths *config.Paths, opts InitOptions) (initConfigResult, 
 	if opts.DryRun {
 		return initConfigContinue, nil
 	}
+	if err := prepareCredentialProviders(req.CredentialProviders, uiInitPrompter{}, opts.DryRun); err != nil {
+		return initConfigStop, err
+	}
 	if err := applyInitPlan(paths, plan); err != nil {
 		return initConfigStop, err
 	}
@@ -318,7 +322,7 @@ func isInitWarning(err error) bool {
 func showExistingInitNextCommands() {
 	ui.SubSection("Next Commands")
 	ui.NumberedList([]string{
-		"nssh self init pass",
+		"nssh self init sops-age",
 		"nssh self init 1password",
 		"nssh self init bitwarden",
 		"nssh inv set <host-or-group>",

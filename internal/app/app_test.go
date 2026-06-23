@@ -127,6 +127,30 @@ func TestRootCommandRegistersPublicCommands(t *testing.T) {
 	}
 }
 
+func TestAgentRestartRejectedByRootCommand(t *testing.T) {
+	err := execute(Options{Version: "test"}, []string{"agent", "restart"})
+	if err == nil {
+		t.Fatal("agent restart succeeded unexpectedly")
+	}
+	if !strings.Contains(err.Error(), `unknown command "restart"`) {
+		t.Fatalf("agent restart error = %v, want unknown command", err)
+	}
+}
+
+func TestLogArchiveCommandIsRegisteredWithoutOpportunisticFlag(t *testing.T) {
+	root := NewRootCmd(Options{Version: "test"})
+	cmd, _, err := root.Find([]string{"log", "archive"})
+	if err != nil {
+		t.Fatalf("find log archive: %v", err)
+	}
+	if cmd.Name() != "archive" {
+		t.Fatalf("log archive command name = %q", cmd.Name())
+	}
+	if flag := cmd.Flags().Lookup("opportunistic"); flag != nil {
+		t.Fatal("log archive must not expose --opportunistic")
+	}
+}
+
 func TestSelfHelpDoesNotTruncate(t *testing.T) {
 	root := NewRootCmd(Options{Version: "test"})
 	for _, path := range [][]string{

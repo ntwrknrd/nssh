@@ -38,8 +38,8 @@ inventory:
           match:
             domain_suffix: [.example.com]
           auth:
-            credential_provider: pass
-            password_ref: nssh/groups/lab
+            credential_provider: sops
+            password_ref: groups.lab.password
             username: local-admin
       hosts:
         local01.example.com:
@@ -58,8 +58,8 @@ inventory:
           match:
             provider: [customer]
           auth:
-            credential_provider: pass
-            password_ref: nssh/groups/customer
+            credential_provider: sops
+            password_ref: groups.customer.password
             username: netbox-admin
 `), 0600); err != nil {
 		t.Fatal(err)
@@ -122,7 +122,7 @@ include: [inventory.yaml]
 		"      config: ~/.config/nssh/inventory.yaml",
 		"        username: local-admin",
 		"        username ref: -",
-		"        password ref: nssh/groups/lab",
+		"        password ref: groups.lab.password",
 		"netbox-prod (netbox)",
 		"  cache: 7m error",
 		"  output: ~/.ssh/nssh.d/provider_netbox-prod.conf",
@@ -132,7 +132,7 @@ include: [inventory.yaml]
 		"      config: ~/.config/nssh/inventory.yaml",
 		"        username: netbox-admin",
 		"        username ref: -",
-		"        password ref: nssh/groups/customer",
+		"        password ref: groups.customer.password",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status tree missing %q:\n%s", want, text)
@@ -181,8 +181,8 @@ inventory:
           match:
             provider: [customer]
           auth:
-            credential_provider: pass
-            password_ref: nssh/groups/customer
+            credential_provider: sops
+            password_ref: groups.customer.password
             username: netbox-admin
 `), 0600); err != nil {
 		t.Fatal(err)
@@ -233,10 +233,10 @@ include: [inventory.yaml]
 		"        provider: customer",
 		"      auth:",
 		"        mode: -",
-		"        credential provider: pass",
+		"        credential provider: sops",
 		"        username: netbox-admin",
 		"        username ref: -",
-		"        password ref: nssh/groups/customer",
+		"        password ref: groups.customer.password",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status tree missing %q:\n%s", want, text)
@@ -276,10 +276,10 @@ func TestRenderStatusTreeAddsSubtleANSIStylesWithoutChangingText(t *testing.T) {
 			Match:      config.InventoryMatch{"provider": []string{"customer"}},
 			Auth: inventoryAuthView{
 				AuthMode:           "-",
-				CredentialProvider: "pass",
+				CredentialProvider: "sops",
 				Username:           "netbox-admin",
 				UsernameRef:        "-",
-				PasswordRef:        "nssh/groups/customer",
+				PasswordRef:        "groups.customer.password",
 			},
 		}},
 	}, true)

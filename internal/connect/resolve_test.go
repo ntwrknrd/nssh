@@ -86,13 +86,13 @@ func setTestGroupAuth(cfg *config.Config, group string, auth config.InventoryAut
 func TestResolveBoundCredentialHostBindingWinsOverGroupBinding(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{
-		"host-provider":  {Type: config.CredentialProviderPass},
-		"group-provider": {Type: config.CredentialProviderPass},
+		"host-provider":  {Type: config.CredentialProviderSOPSAge, File: "~/.local/share/nssh/credentials.sops.yaml"},
+		"group-provider": {Type: config.CredentialProviderSOPSAge, File: "~/.local/share/nssh/credentials.sops.yaml"},
 	}
 	cfg.Inventory.Host = map[string]config.InventoryHostConfig{
-		"edge01": {Auth: config.InventoryAuthConfig{CredentialProvider: "host-provider", PasswordRef: "nssh/hosts/edge01"}},
+		"edge01": {Auth: config.InventoryAuthConfig{CredentialProvider: "host-provider", PasswordRef: "hosts.edge01.password"}},
 	}
-	labGroup := setTestGroupAuth(cfg, "lab", config.InventoryAuthConfig{CredentialProvider: "group-provider", PasswordRef: "nssh/groups/lab"})
+	labGroup := setTestGroupAuth(cfg, "lab", config.InventoryAuthConfig{CredentialProvider: "group-provider", PasswordRef: "groups.lab.password"})
 	registry := fakeProviderRegistry{providers: map[string]credential.Provider{
 		"host-provider":  fakeCredentialProvider{hosts: map[string]*credential.Record{"edge01": {Username: "hostuser", Secret: secret.NewFromString("hostpass")}}},
 		"group-provider": fakeCredentialProvider{groups: map[string]*credential.Record{labGroup: {Username: "groupuser", Secret: secret.NewFromString("grouppass")}}},
@@ -110,13 +110,13 @@ func TestResolveBoundCredentialHostBindingWinsOverGroupBinding(t *testing.T) {
 func TestResolveBoundCredentialSelectsDifferentGroupProviders(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{
-		"pass":       {Type: config.CredentialProviderPass},
+		"sops":       {Type: config.CredentialProviderSOPSAge, File: "~/.local/share/nssh/credentials.sops.yaml"},
 		"op-network": {Type: config.CredentialProvider1Password, Config: config.CredentialProviderDetailConfig{Vault: "Network"}},
 	}
-	labGroup := setTestGroupAuth(cfg, "lab", config.InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/groups/lab"})
+	labGroup := setTestGroupAuth(cfg, "lab", config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "groups.lab.password"})
 	prodGroup := setTestGroupAuth(cfg, "prod", config.InventoryAuthConfig{CredentialProvider: "op-network", PasswordRef: "Network Shared Admin"})
 	registry := fakeProviderRegistry{providers: map[string]credential.Provider{
-		"pass":       fakeCredentialProvider{groups: map[string]*credential.Record{labGroup: {Username: "labuser", Secret: secret.NewFromString("labpass")}}},
+		"sops":       fakeCredentialProvider{groups: map[string]*credential.Record{labGroup: {Username: "labuser", Secret: secret.NewFromString("labpass")}}},
 		"op-network": fakeCredentialProvider{groups: map[string]*credential.Record{prodGroup: {Username: "produser", Secret: secret.NewFromString("prodpass")}}},
 	}}
 
@@ -138,7 +138,7 @@ func TestResolveBoundCredentialSkipsProviderWhenNoBinding(t *testing.T) {
 	cfg.Inventory.Host = nil
 	labGroup := setTestGroupAuth(cfg, "lab", config.InventoryAuthConfig{})
 	registry := fakeProviderRegistry{providers: map[string]credential.Provider{
-		"pass": fakeCredentialProvider{err: errors.New("provider unavailable")},
+		"sops": fakeCredentialProvider{err: errors.New("provider unavailable")},
 	}}
 
 	cred, err := resolveBoundCredential(cfg, registry, "edge01", labGroup, "")
@@ -191,14 +191,14 @@ func TestResolveBoundCredentialSkipsMismatchedExplicitUsername(t *testing.T) {
 func TestResolveBoundCredentialSkipsDisabledHostAuth(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{
-		"pass": {Type: config.CredentialProviderPass},
+		"sops": {Type: config.CredentialProviderSOPSAge, File: "~/.local/share/nssh/credentials.sops.yaml"},
 	}
 	cfg.Inventory.Host = map[string]config.InventoryHostConfig{
 		"edge01": {AuthDisabled: true},
 	}
-	labGroup := setTestGroupAuth(cfg, "lab", config.InventoryAuthConfig{CredentialProvider: "pass", PasswordRef: "nssh/groups/lab"})
+	labGroup := setTestGroupAuth(cfg, "lab", config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "groups.lab.password"})
 	registry := fakeProviderRegistry{providers: map[string]credential.Provider{
-		"pass": fakeCredentialProvider{groups: map[string]*credential.Record{labGroup: {Username: "admin", Secret: secret.NewFromString("secret")}}},
+		"sops": fakeCredentialProvider{groups: map[string]*credential.Record{labGroup: {Username: "admin", Secret: secret.NewFromString("secret")}}},
 	}}
 
 	cred, err := resolveBoundCredential(cfg, registry, "edge01", labGroup, "")
@@ -278,7 +278,7 @@ func TestResolveInventoryCredentialDefersDirectPasswordRefWithLiteralUsername(t 
 func TestResolveHostForConnectCarriesResolvedAuthMode(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{
-		"pass": {Type: config.CredentialProviderPass},
+		"sops": {Type: config.CredentialProviderSOPSAge, File: "~/.local/share/nssh/credentials.sops.yaml"},
 	}
 	cfg.Inventory.Provider = nil
 	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
@@ -286,8 +286,8 @@ func TestResolveHostForConnectCarriesResolvedAuthMode(t *testing.T) {
 			Type: config.ProviderLocal,
 			Groups: map[string]config.GroupConfig{
 				"customer": {Auth: config.InventoryAuthConfig{
-					CredentialProvider: "pass",
-					PasswordRef:        "nssh/groups/customer",
+					CredentialProvider: "sops",
+					PasswordRef:        "groups.customer.password",
 					Username:           "netops",
 					Mode:               config.AuthModePassword,
 				}},

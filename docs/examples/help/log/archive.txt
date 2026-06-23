@@ -1,8 +1,9 @@
-$ nssh agent doctor --help
+$ nssh log archive --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh agent doctor [flags]         Diagnose agent                           │
+│   nssh log archive [flags]          Archive old recordings                   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Flags ───────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │
 │   -V, --version                     Print command version                    │

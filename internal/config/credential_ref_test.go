@@ -10,8 +10,8 @@ func TestDefaultCredentialRef(t *testing.T) {
 		group    bool
 		want     string
 	}{
-		{name: "pass host", provider: "pass", target: "edge01", want: "nssh/hosts/edge01"},
-		{name: "pass group", provider: "pass", target: "local/default", group: true, want: "nssh/groups/local/default"},
+		{name: "sops host", provider: "sops", target: "edge01", want: "hosts.edge01.password"},
+		{name: "sops group", provider: "sops", target: "local/default", group: true, want: "groups.local.default.password"},
 		{name: "1password host", provider: "op-expedient", target: "edge01", want: "nssh host edge01"},
 		{name: "1password group", provider: "op-expedient", target: "netbox-prod/custcbb", group: true, want: "nssh group netbox-prod/custcbb"},
 		{name: "bitwarden host", provider: "bw-lab", target: "edge01", want: "nssh host edge01"},

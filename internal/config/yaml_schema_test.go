@@ -15,7 +15,6 @@ credential:
   provider:
     op-expedient:
       type: 1password
-      session: agent
       vault: Expedient
 inventory:
   providers:
@@ -71,6 +70,156 @@ ssh:
 	}
 	if got := cfg.Inventory.Providers["netbox-prod"].Groups["cbb"].SSH.Options["ProxyJump"].Scalar; got != "bastion" {
 		t.Fatalf("group ssh proxy_jump = %q, want bastion", got)
+	}
+}
+
+func TestCredentialProviderRejectsSessionField(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.yaml")
+	writeConfigFile(t, path, `
+credential:
+  provider:
+    op-expedient:
+      type: 1password
+      session: agent
+      vault: Expedient
+`)
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "session") {
+		t.Fatalf("Load error = %v, want stale session field rejection", err)
+	}
+}
+
+func TestCredentialProviderWarmSessionOnlyAllowedForBitwarden(t *testing.T) {
+	tests := []struct {
+		name         string
+		providerYAML string
+		wantErr      bool
+	}{
+		{
+			name: "bitwarden accepts warm session",
+			providerYAML: `
+    bw-work:
+      type: bitwarden
+      warm_session: true
+`,
+		},
+		{
+			name: "1password rejects warm session",
+			providerYAML: `
+    op-expedient:
+      type: 1password
+      vault: Expedient
+      warm_session: true
+`,
+			wantErr: true,
+		},
+		{
+			name: "sops rejects warm session",
+			providerYAML: `
+    sops:
+      type: sops-age
+      file: /tmp/credentials.sops.yaml
+      warm_session: true
+`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			path := filepath.Join(tmp, "config.yaml")
+			writeConfigFile(t, path, `
+credential:
+  provider:
+`+tt.providerYAML)
+			_, err := Load(path)
+			if tt.wantErr && err == nil {
+				t.Fatal("Load succeeded, want warm_session rejection")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+		})
+	}
+}
+
+func TestCredentialProviderKeepaliveOnlyAllowedForOnePassword(t *testing.T) {
+	tests := []struct {
+		name         string
+		providerYAML string
+		wantErr      bool
+	}{
+		{
+			name: "1password accepts keepalive",
+			providerYAML: `
+    op-expedient:
+      type: 1password
+      vault: Expedient
+      keepalive: true
+      keepalive_interval: 5m
+`,
+		},
+		{
+			name: "bitwarden rejects keepalive",
+			providerYAML: `
+    bw-work:
+      type: bitwarden
+      keepalive: true
+`,
+			wantErr: true,
+		},
+		{
+			name: "sops rejects keepalive interval",
+			providerYAML: `
+    sops:
+      type: sops-age
+      file: /tmp/credentials.sops.yaml
+      keepalive_interval: 5m
+`,
+			wantErr: true,
+		},
+		{
+			name: "1password rejects busy interval",
+			providerYAML: `
+    op-expedient:
+      type: 1password
+      vault: Expedient
+      keepalive: true
+      keepalive_interval: 30s
+`,
+			wantErr: true,
+		},
+		{
+			name: "1password rejects stale interval",
+			providerYAML: `
+    op-expedient:
+      type: 1password
+      vault: Expedient
+      keepalive: true
+      keepalive_interval: 10m
+`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			path := filepath.Join(tmp, "config.yaml")
+			writeConfigFile(t, path, `
+credential:
+  provider:
+`+tt.providerYAML)
+			_, err := Load(path)
+			if tt.wantErr && err == nil {
+				t.Fatal("Load succeeded, want keepalive rejection")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+		})
 	}
 }
 

@@ -423,6 +423,9 @@ func sparseConfigTable(cfg *Config) map[string]any {
 	if cfg.Agent.MaxLifetime.Duration() > 0 {
 		agent["max_lifetime"] = cfg.Agent.MaxLifetime.Duration().String()
 	}
+	if cfg.Agent.ProviderRequestTimeout.Duration() > 0 {
+		agent["provider_request_timeout"] = cfg.Agent.ProviderRequestTimeout.Duration().String()
+	}
 	if len(agent) > 0 {
 		table["agent"] = agent
 	}
@@ -470,11 +473,24 @@ func credentialProviderTable(cfg CredentialProviderConfig) map[string]any {
 	if cfg.Type != "" {
 		table["type"] = cfg.Type
 	}
-	addString(table, "session", cfg.Session)
 	addString(table, "account", cfg.Account)
 	addString(table, "vault", cfg.Vault)
 	addString(table, "command", cfg.Command)
 	addString(table, "prefix", cfg.Prefix)
+	addString(table, "file", cfg.File)
+	addString(table, "age_key_file", cfg.AgeKeyFile)
+	if cfg.WarmSession {
+		table["warm_session"] = cfg.WarmSession
+	}
+	if cfg.Keepalive {
+		table["keepalive"] = cfg.Keepalive
+	}
+	if cfg.KeepaliveInterval.Duration() > 0 {
+		table["keepalive_interval"] = cfg.KeepaliveInterval.Duration().String()
+	}
+	if cfg.KeepaliveTimeout.Duration() > 0 {
+		table["keepalive_timeout"] = cfg.KeepaliveTimeout.Duration().String()
+	}
 	return table
 }
 
@@ -484,7 +500,20 @@ func providerDetailTable(cfg CredentialProviderDetailConfig) map[string]any {
 	addString(table, "vault", cfg.Vault)
 	addString(table, "command", cfg.Command)
 	addString(table, "prefix", cfg.Prefix)
-	addString(table, "session", cfg.Session)
+	addString(table, "file", cfg.File)
+	addString(table, "age_key_file", cfg.AgeKeyFile)
+	if cfg.WarmSession {
+		table["warm_session"] = cfg.WarmSession
+	}
+	if cfg.Keepalive {
+		table["keepalive"] = cfg.Keepalive
+	}
+	if cfg.KeepaliveInterval.Duration() > 0 {
+		table["keepalive_interval"] = cfg.KeepaliveInterval.Duration().String()
+	}
+	if cfg.KeepaliveTimeout.Duration() > 0 {
+		table["keepalive_timeout"] = cfg.KeepaliveTimeout.Duration().String()
+	}
 	return table
 }
 
@@ -663,14 +692,8 @@ func loggingExportTable(cfg LoggingExportConfig) map[string]any {
 
 func sessionArchiveTable(cfg, defaults SessionArchiveConfig) map[string]any {
 	table := make(map[string]any)
-	if cfg.Enabled != defaults.Enabled {
-		table["enabled"] = cfg.Enabled
-	}
 	if cfg.Dir != "" && cfg.Dir != defaults.Dir {
 		table["dir"] = cfg.Dir
-	}
-	if cfg.Jitter.Duration() != defaults.Jitter.Duration() {
-		table["jitter"] = cfg.Jitter.Duration().String()
 	}
 	if cfg.MaxBundles != defaults.MaxBundles {
 		table["max_bundles"] = cfg.MaxBundles
@@ -680,6 +703,9 @@ func sessionArchiveTable(cfg, defaults SessionArchiveConfig) map[string]any {
 	}
 	if cfg.MinAge.Duration() != defaults.MinAge.Duration() {
 		table["min_age"] = cfg.MinAge.Duration().String()
+	}
+	if cfg.Timeout.Duration() != defaults.Timeout.Duration() {
+		table["timeout"] = cfg.Timeout.Duration().String()
 	}
 	return table
 }

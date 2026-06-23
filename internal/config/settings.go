@@ -36,6 +36,8 @@ type AgentConfig struct {
 	ActivityIncrement Duration `yaml:"activity_increment,omitempty"`
 	// MaxLifetime is the maximum lifetime of the agent regardless of activity (default 24h)
 	MaxLifetime Duration `yaml:"max_lifetime,omitempty"`
+	// ProviderRequestTimeout bounds each brokered credential-provider request (default 2m)
+	ProviderRequestTimeout Duration `yaml:"provider_request_timeout,omitempty"`
 }
 
 // ============================================================================
@@ -94,7 +96,7 @@ type SessionConfig struct {
 	TitleFormat string `yaml:"title_format,omitempty"`
 	// AutoExportTxt automatically exports recordings to plain text (.txt) when session ends
 	AutoExportTxt bool `yaml:"auto_export_txt,omitempty"`
-	// Archive holds automatic archival settings
+	// Archive holds recording archival settings
 	Archive SessionArchiveConfig `yaml:"archive,omitempty"`
 }
 
@@ -111,20 +113,18 @@ type GIFExportConfig struct {
 	FontSize int `yaml:"font_size,omitempty"`
 }
 
-// SessionArchiveConfig holds automatic session archival settings.
+// SessionArchiveConfig holds session archival settings.
 type SessionArchiveConfig struct {
 	// Dir is where monthly archives are stored (default: ~/.local/state/nssh/archives)
 	Dir string `yaml:"dir,omitempty"`
-	// Enabled enables automatic recording archiving (default: false)
-	Enabled bool `yaml:"enabled,omitempty"`
-	// Jitter introduces +/- jitter to the daily schedule (default: 30m)
-	Jitter Duration `yaml:"jitter,omitempty"`
 	// MaxBundles is how many monthly bundles to retain (default: 12)
 	MaxBundles int `yaml:"max_bundles,omitempty"`
 	// MaxRunBytes caps bytes processed per maintenance run (default: 0 = unlimited)
 	MaxRunBytes int64 `yaml:"max_run_bytes,omitempty"`
 	// MinAge is how old a .cast file must be before archiving (default: 30d)
 	MinAge Duration `yaml:"min_age,omitempty"`
+	// Timeout caps a manual archive maintenance pass (default: 30s)
+	Timeout Duration `yaml:"timeout,omitempty"`
 }
 
 // ============================================================================
@@ -196,10 +196,11 @@ func DefaultConfig() *Config {
 	paths := DefaultPaths()
 	return &Config{
 		Agent: AgentConfig{
-			AutoStart:         true,
-			IdleTimeout:       Duration(1 * time.Hour),
-			ActivityIncrement: Duration(15 * time.Minute),
-			MaxLifetime:       Duration(24 * time.Hour),
+			AutoStart:              true,
+			IdleTimeout:            Duration(1 * time.Hour),
+			ActivityIncrement:      Duration(15 * time.Minute),
+			MaxLifetime:            Duration(24 * time.Hour),
+			ProviderRequestTimeout: Duration(2 * time.Minute),
 		},
 		Host: HostConfig{
 			Defaults: HostDefaultsConfig{
@@ -208,13 +209,9 @@ func DefaultConfig() *Config {
 		},
 		Credential: CredentialConfig{
 			Provider: map[string]CredentialProviderConfig{
-				"pass": {
-					Type: CredentialProviderPass,
-					Config: CredentialProviderDetailConfig{
-						Command: "pass",
-						Prefix:  "nssh",
-						Session: ProviderSessionExternal,
-					},
+				"sops": {
+					Type: CredentialProviderSOPSAge,
+					File: "~/.local/share/nssh/credentials.sops.yaml",
 				},
 			},
 		},
@@ -224,12 +221,7 @@ func DefaultConfig() *Config {
 				ProviderLocal: {
 					Type: ProviderLocal,
 					Group: map[string]GroupConfig{
-						"default": {
-							Auth: InventoryAuthConfig{
-								CredentialProvider: "pass",
-								PasswordRef:        "nssh/groups/default",
-							},
-						},
+						"default": {},
 					},
 				},
 			},
@@ -237,12 +229,7 @@ func DefaultConfig() *Config {
 				ProviderLocal: {
 					Type: ProviderLocal,
 					Groups: map[string]GroupConfig{
-						"default": {
-							Auth: InventoryAuthConfig{
-								CredentialProvider: "pass",
-								PasswordRef:        "nssh/groups/default",
-							},
-						},
+						"default": {},
 					},
 				},
 			},
@@ -255,11 +242,10 @@ func DefaultConfig() *Config {
 			Session: SessionConfig{
 				Archive: SessionArchiveConfig{
 					Dir:         filepath.Join(paths.StateDir, "archives"),
-					Enabled:     false,
-					Jitter:      Duration(30 * time.Minute),
 					MaxBundles:  12,
 					MaxRunBytes: 0,
 					MinAge:      Duration(30 * 24 * time.Hour),
+					Timeout:     Duration(30 * time.Second),
 				},
 			},
 		},
@@ -337,12 +323,12 @@ func pruneImplicitCredentialDefaults(table map[string]any, cfg *Config) {
 		return
 	}
 	configDefinesProviders := tablePathDefined(table, "credential", "provider")
-	passExplicit := tablePathDefined(table, "credential", "provider", "pass")
-	if configDefinesProviders && !passExplicit {
-		delete(cfg.Credential.Provider, "pass")
+	sopsExplicit := tablePathDefined(table, "credential", "provider", "sops")
+	if configDefinesProviders && !sopsExplicit {
+		delete(cfg.Credential.Provider, "sops")
 		if defaultGroup, ok := cfg.Inventory.Provider[ProviderLocal].Group["default"]; ok &&
 			!tablePathDefined(table, "inventory", "provider", ProviderLocal, "group", "default", "auth") &&
-			defaultGroup.Auth.CredentialProvider == "pass" {
+			defaultGroup.Auth.CredentialProvider == "sops" {
 			defaultGroup.Auth = InventoryAuthConfig{}
 			localProvider := cfg.Inventory.Provider[ProviderLocal]
 			localProvider.Group["default"] = defaultGroup
@@ -520,6 +506,7 @@ func (c *AgentConfig) Validate() error {
 	idleTimeout := c.IdleTimeout.Duration()
 	activityIncrement := c.ActivityIncrement.Duration()
 	maxLifetime := c.MaxLifetime.Duration()
+	providerRequestTimeout := c.ProviderRequestTimeout.Duration()
 
 	// Validate idle timeout (min 1s, max 24h)
 	if idleTimeout < time.Second {
@@ -548,6 +535,17 @@ func (c *AgentConfig) Validate() error {
 	// Logical constraint: idle timeout should be <= max lifetime
 	if idleTimeout > maxLifetime {
 		return fmt.Errorf("agent.idle_timeout (%v) must be <= agent.max_lifetime (%v)", idleTimeout, maxLifetime)
+	}
+
+	if providerRequestTimeout == 0 {
+		c.ProviderRequestTimeout = Duration(2 * time.Minute)
+		providerRequestTimeout = c.ProviderRequestTimeout.Duration()
+	}
+	if providerRequestTimeout < 5*time.Second {
+		return fmt.Errorf("agent.provider_request_timeout must be >= 5s (got %v)", providerRequestTimeout)
+	}
+	if providerRequestTimeout > 10*time.Minute {
+		return fmt.Errorf("agent.provider_request_timeout must be <= 10m (got %v)", providerRequestTimeout)
 	}
 
 	return nil
@@ -580,9 +578,12 @@ func (c *SessionArchiveConfig) Validate() error {
 		return fmt.Errorf("logging.session.archive.max_run_bytes must be >= 0 (got %d)", c.MaxRunBytes)
 	}
 
-	// Validate jitter
-	if c.Jitter.Duration() < 0 {
-		return fmt.Errorf("logging.session.archive.jitter must be >= 0 (got %v)", c.Jitter.Duration())
+	if c.Timeout.Duration() < 0 {
+		return fmt.Errorf("logging.session.archive.timeout must be >= 0 (got %v)", c.Timeout.Duration())
+	}
+	// Default timeout if unset
+	if c.Timeout.Duration() == 0 {
+		c.Timeout = Duration(30 * time.Second)
 	}
 
 	return nil

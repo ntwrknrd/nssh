@@ -40,6 +40,15 @@ func TestDaemon_StartsAndListensOnSocket(t *testing.T) {
 	}
 }
 
+func TestOpenFDCountFallsBackToDescriptorProbe(t *testing.T) {
+	got := openFDCountFrom([]string{filepath.Join(t.TempDir(), "missing")}, 6, func(fd int) bool {
+		return fd == 0 || fd == 2 || fd == 5
+	})
+	if got != 3 {
+		t.Fatalf("open fd count = %d, want 3", got)
+	}
+}
+
 func TestDaemon_IdleTimeout(t *testing.T) {
 	socketPath := testSocketPath(t)
 	restore := SetSocketPathForTest(socketPath)

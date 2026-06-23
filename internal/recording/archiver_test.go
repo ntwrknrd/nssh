@@ -12,8 +12,11 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/ntwrknrd/nssh/internal/config"
 )
 
 type fakeClock struct {
@@ -137,13 +140,11 @@ func TestRecordingArchiverArchivesAndDeletes(t *testing.T) {
 	_ = createCast(t, recordingDir, "host-a/2025-02-01/session-002.cast", 64, newTime)
 
 	arch := NewArchiveRunner(ArchiveConfig{
-		Enabled:     true,
 		SourceDir:   recordingDir,
 		ArchiveDir:  archiveDir,
 		MinAge:      30 * 24 * time.Hour,
 		MaxBundles:  12,
 		MaxRunBytes: 0,
-		Jitter:      0,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)), clk)
 
 	summary, err := arch.RunOnce(context.Background())
@@ -181,6 +182,67 @@ func TestRecordingArchiverArchivesAndDeletes(t *testing.T) {
 	}
 }
 
+func TestRecordingArchiverRunOnceDoesNotRequireEnabledGate(t *testing.T) {
+	now := stripMonotonic(time.Now())
+	clk := newFakeClock(now)
+	recordingDir := t.TempDir()
+	archiveDir := t.TempDir()
+	oldTime := now.Add(-35 * 24 * time.Hour)
+	oldPath := createCast(t, recordingDir, "host-a/2025-01-01/session-000.cast", 128, oldTime)
+
+	arch := NewArchiveRunner(ArchiveConfig{
+		SourceDir:   recordingDir,
+		ArchiveDir:  archiveDir,
+		MinAge:      30 * 24 * time.Hour,
+		MaxBundles:  12,
+		MaxRunBytes: 0,
+	}, testLogger(), clk)
+
+	summary, err := arch.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce error: %v", err)
+	}
+	if summary.FilesArchived != 1 {
+		t.Fatalf("FilesArchived = %d, want 1", summary.FilesArchived)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("archived file still present: %v", err)
+	}
+}
+
+func TestRunArchiveSkipsWhenLockIsHeld(t *testing.T) {
+	recordingDir := t.TempDir()
+	archiveDir := t.TempDir()
+	stateDir := t.TempDir()
+	lockPath := filepath.Join(stateDir, "recording-archive.lock")
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("open lock: %v", err)
+	}
+	defer func() { _ = lockFile.Close() }()
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+	defer func() { _ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) }()
+
+	summary, err := RunArchive(context.Background(), ArchiveMaintenanceConfig{
+		Archive: config.SessionArchiveConfig{
+			Dir:        archiveDir,
+			MinAge:     config.Duration(30 * 24 * time.Hour),
+			MaxBundles: 12,
+			Timeout:    config.Duration(30 * time.Second),
+		},
+		RecordingDir: recordingDir,
+		StateDir:     stateDir,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("RunArchive error: %v", err)
+	}
+	if summary.SkippedReason != "archive already running" {
+		t.Fatalf("SkippedReason = %q, want archive already running", summary.SkippedReason)
+	}
+}
+
 func TestRecordingArchiverRetentionPrunesOldBundles(t *testing.T) {
 	recordingDir := t.TempDir()
 	archiveDir := t.TempDir()
@@ -199,13 +261,11 @@ func TestRecordingArchiverRetentionPrunesOldBundles(t *testing.T) {
 	}
 
 	arch := NewArchiveRunner(ArchiveConfig{
-		Enabled:     true,
 		SourceDir:   recordingDir,
 		ArchiveDir:  archiveDir,
 		MinAge:      24 * time.Hour,
 		MaxBundles:  2,
 		MaxRunBytes: 0,
-		Jitter:      0,
 	}, testLogger(), realClock{})
 
 	summary, err := arch.RunOnce(context.Background())
@@ -239,13 +299,11 @@ func TestRecordingArchiverFailureDoesNotDeleteSources(t *testing.T) {
 	}
 
 	arch := NewArchiveRunner(ArchiveConfig{
-		Enabled:     true,
 		SourceDir:   recordingDir,
 		ArchiveDir:  archiveDir,
 		MinAge:      30 * 24 * time.Hour,
 		MaxBundles:  12,
 		MaxRunBytes: 0,
-		Jitter:      0,
 	}, testLogger(), realClock{})
 
 	_, err := arch.RunOnce(context.Background())
@@ -273,13 +331,11 @@ func TestRecordingArchiverMaxRunBytes(t *testing.T) {
 	_ = createCast(t, recordingDir, "host-a/2024-01-01/session-002.cast", 300, old.Add(2*time.Minute))
 
 	arch := NewArchiveRunner(ArchiveConfig{
-		Enabled:     true,
 		SourceDir:   recordingDir,
 		ArchiveDir:  archiveDir,
 		MinAge:      24 * time.Hour,
 		MaxBundles:  12,
 		MaxRunBytes: 250,
-		Jitter:      0,
 	}, testLogger(), clk)
 
 	summary, err := arch.RunOnce(context.Background())

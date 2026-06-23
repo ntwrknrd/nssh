@@ -13,8 +13,8 @@ type Provider interface {
 	Close() error
 }
 
-// SessionProvider marks runtime providers that broker external credential
-// provider requests.
-type SessionProvider interface {
+// CredentialBroker marks runtime providers that broker credential provider
+// requests.
+type CredentialBroker interface {
 	HandleProviderRequest(ctx context.Context, req ProviderRequest) (ProviderResponse, error)
 }

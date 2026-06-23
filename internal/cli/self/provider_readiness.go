@@ -17,65 +17,36 @@ func credentialProviderReadiness(provider config.CredentialProviderConfig) (bool
 		return false, label + ": unsupported provider type"
 	}
 	if path, err := exec.LookPath(command); err == nil {
-		if provider.Type == config.CredentialProviderPass {
-			return passProviderReadiness(provider, path)
+		if provider.Type == config.CredentialProviderSOPSAge {
+			return sopsAgeProviderReadiness(provider, path)
 		}
-		return true, fmt.Sprintf("%s%s: ready (%s)", label, providerSessionSuffix(provider), AbbreviatePath(path))
+		return true, fmt.Sprintf("%s: ready (%s)", label, AbbreviatePath(path))
 	}
-	return false, fmt.Sprintf("%s%s: missing %s", label, providerSessionSuffix(provider), command)
+	return false, fmt.Sprintf("%s: missing %s", label, command)
 }
 
-func passProviderReadiness(provider config.CredentialProviderConfig, passPath string) (bool, string) {
-	label := "Pass" + providerSessionSuffix(provider)
-	if _, err := exec.LookPath("gpg"); err != nil {
-		return false, fmt.Sprintf("%s: missing gpg", label)
+func sopsAgeProviderReadiness(provider config.CredentialProviderConfig, sopsPath string) (bool, string) {
+	label := "SOPS+age"
+	file := strings.TrimSpace(provider.File)
+	if file == "" {
+		file = strings.TrimSpace(provider.Config.File)
 	}
-	if _, err := exec.LookPath("gpgconf"); err != nil {
-		return false, fmt.Sprintf("%s: missing gpgconf", label)
+	if file == "" {
+		return false, fmt.Sprintf("%s: missing file config", label)
 	}
-	if out, err := exec.Command("gpg", "--list-secret-keys", "--with-colons").Output(); err != nil || !hasGPGSecretKey(string(out)) {
-		return false, fmt.Sprintf("%s: no GPG secret key", label)
+	if info, err := os.Stat(expandSelfPath(file)); err != nil || info.IsDir() {
+		return false, fmt.Sprintf("%s: file missing (%s)", label, AbbreviatePath(file))
 	}
-	storeDir := passStoreDir()
-	if info, err := os.Stat(storeDir); err != nil || !info.IsDir() {
-		return false, fmt.Sprintf("%s: password store missing (%s)", label, AbbreviatePath(storeDir))
+	ageKeyFile := strings.TrimSpace(provider.AgeKeyFile)
+	if ageKeyFile == "" {
+		ageKeyFile = strings.TrimSpace(provider.Config.AgeKeyFile)
 	}
-	gpgID := filepath.Join(storeDir, ".gpg-id")
-	if info, err := os.Stat(gpgID); err != nil || info.IsDir() {
-		return false, fmt.Sprintf("%s: password store not initialized (.gpg-id missing)", label)
-	}
-	return true, fmt.Sprintf("%s: ready (%s)", label, AbbreviatePath(passPath))
-}
-
-func providerSessionSuffix(provider config.CredentialProviderConfig) string {
-	session := provider.Config.Session
-	if session == "" {
-		session = provider.Session
-	}
-	if session == "" {
-		return ""
-	}
-	return " " + session
-}
-
-func hasGPGSecretKey(output string) bool {
-	for _, line := range strings.Split(output, "\n") {
-		if strings.HasPrefix(line, "sec:") {
-			return true
+	if ageKeyFile != "" {
+		if info, err := os.Stat(expandSelfPath(ageKeyFile)); err != nil || info.IsDir() {
+			return false, fmt.Sprintf("%s: age key file missing (%s)", label, AbbreviatePath(ageKeyFile))
 		}
 	}
-	return false
-}
-
-func passStoreDir() string {
-	if dir := strings.TrimSpace(os.Getenv("PASSWORD_STORE_DIR")); dir != "" {
-		return dir
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return ".password-store"
-	}
-	return filepath.Join(home, ".password-store")
+	return true, fmt.Sprintf("%s: ready (%s)", label, AbbreviatePath(sopsPath))
 }
 
 func credentialProviderCommand(provider config.CredentialProviderConfig) string {
@@ -86,8 +57,8 @@ func credentialProviderCommand(provider config.CredentialProviderConfig) string 
 		return provider.Command
 	}
 	switch provider.Type {
-	case config.CredentialProviderPass:
-		return "pass"
+	case config.CredentialProviderSOPSAge:
+		return "sops"
 	case config.CredentialProvider1Password:
 		return "op"
 	case config.CredentialProviderBitwarden:
@@ -99,8 +70,8 @@ func credentialProviderCommand(provider config.CredentialProviderConfig) string 
 
 func credentialProviderStatusLabel(providerType string) string {
 	switch providerType {
-	case config.CredentialProviderPass:
-		return "Pass"
+	case config.CredentialProviderSOPSAge:
+		return "SOPS+age"
 	case config.CredentialProvider1Password:
 		return "1Password"
 	case config.CredentialProviderBitwarden:
@@ -108,4 +79,15 @@ func credentialProviderStatusLabel(providerType string) string {
 	default:
 		return providerType
 	}
+}
+
+func expandSelfPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "~" {
+		return homeDir()
+	}
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(homeDir(), strings.TrimPrefix(path, "~/"))
+	}
+	return path
 }

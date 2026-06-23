@@ -46,24 +46,18 @@ func TestRunStatusShowsCredentialProviderReadiness(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(binDir, "pass"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(binDir, "gpg"), []byte("#!/bin/sh\nprintf 'sec:u:4096:1:ABCDEF:0:0:::::::\\n'\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(binDir, "gpgconf"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	storeDir := filepath.Join(home, ".password-store")
-	if err := os.MkdirAll(storeDir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(storeDir, ".gpg-id"), []byte("ABCDEF\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(binDir, "sops"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 
 	cfg := config.DefaultConfig()
+	sops := cfg.Credential.Provider["sops"]
+	sops.File = filepath.Join(home, "credentials.sops.yaml")
+	sops.Config.File = sops.File
+	cfg.Credential.Provider["sops"] = sops
+	if err := os.WriteFile(sops.File, []byte("placeholder\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	paths := config.DefaultPaths()
 	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
 		t.Fatal(err)
@@ -78,7 +72,7 @@ func TestRunStatusShowsCredentialProviderReadiness(t *testing.T) {
 		}
 	})
 
-	for _, want := range []string{"Credential Providers", "pass", "ready"} {
+	for _, want := range []string{"Credential Providers", "sops", "ready"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status output missing %q:\n%s", want, got)
 		}

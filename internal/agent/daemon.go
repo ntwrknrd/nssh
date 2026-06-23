@@ -12,14 +12,14 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/recording"
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/sys/unix"
 )
 
 // Default timeout values for the agent.
@@ -41,34 +41,24 @@ const (
 // RuntimeConfig holds runtime configuration for the agent daemon.
 // Agent settings come from config.AgentConfig; runtime-only fields are separate.
 type RuntimeConfig struct {
-	Agent        *config.AgentConfig          // Timeout settings from config file
-	Archive      *config.SessionArchiveConfig // Archive settings from config file
-	Logger       *slog.Logger
-	ReadyPipe    *os.File      // Optional: pipe to signal readiness after socket creation
-	MaxSleep     time.Duration // Max sleep between deadline checks (0 = default 5m)
-	Clock        clock         // Optional clock (tests can inject fake); defaults to realClock
-	RecordingDir string        // Directory containing live .cast recordings
+	Agent     *config.AgentConfig // Timeout settings from config file
+	Logger    *slog.Logger
+	ReadyPipe *os.File      // Optional: pipe to signal readiness after socket creation
+	MaxSleep  time.Duration // Max sleep between deadline checks (0 = default 5m)
+	Clock     clock         // Optional clock (tests can inject fake); defaults to realClock
 }
 
 // DefaultRuntimeConfig returns a RuntimeConfig with default values.
 func DefaultRuntimeConfig() RuntimeConfig {
-	paths := config.DefaultPaths()
 	return RuntimeConfig{
 		Agent: &config.AgentConfig{
-			IdleTimeout:       config.Duration(DefaultIdleTimeout),
-			ActivityIncrement: config.Duration(15 * time.Minute),
-			MaxLifetime:       config.Duration(DefaultMaxLifetime),
+			IdleTimeout:            config.Duration(DefaultIdleTimeout),
+			ActivityIncrement:      config.Duration(15 * time.Minute),
+			MaxLifetime:            config.Duration(DefaultMaxLifetime),
+			ProviderRequestTimeout: config.Duration(2 * time.Minute),
 		},
-		Archive: &config.SessionArchiveConfig{
-			Dir:        filepath.Join(paths.StateDir, "archives"),
-			Enabled:    false,
-			Jitter:     config.Duration(30 * time.Minute),
-			MaxBundles: 12,
-			MinAge:     config.Duration(30 * 24 * time.Hour),
-		},
-		Logger:       slog.Default(),
-		Clock:        realClock{},
-		RecordingDir: paths.RecordingsDir,
+		Logger: slog.Default(),
+		Clock:  realClock{},
 	}
 }
 
@@ -81,6 +71,8 @@ type sessionState struct {
 	activityIncrement time.Duration // How much to extend on each activity
 	maxLifetime       time.Duration
 	clock             clock
+	providerRequests  int64
+	providerFailures  int64
 	mu                sync.RWMutex
 }
 
@@ -118,14 +110,18 @@ func (s *sessionState) extendIdleDeadline() {
 	}
 }
 
-func (s *sessionState) status(providerSessions int) StatusInfo {
+func (s *sessionState) status(credentialProviders int, sockPath string) StatusInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	now := s.clock.Now()
+	uptime := now.Sub(s.startTime)
 	remainingLife := s.maxLifetime - now.Sub(s.startTime)
 	remainingIdle := s.idleDeadline.Sub(now)
 
+	if uptime < 0 {
+		uptime = 0
+	}
 	if remainingLife < 0 {
 		remainingLife = 0
 	}
@@ -133,12 +129,32 @@ func (s *sessionState) status(providerSessions int) StatusInfo {
 		remainingIdle = 0
 	}
 
-	return StatusInfo{
-		IdleTimeout:      int64(s.idleTimeout.Seconds()),
-		MaxLifetime:      int64(s.maxLifetime.Seconds()),
-		RemainingLife:    int64(remainingLife.Seconds()),
-		RemainingIdle:    int64(remainingIdle.Seconds()),
-		ProviderSessions: providerSessions,
+	status := StatusInfo{
+		ProtocolVersion:     ProtocolVersion,
+		PID:                 os.Getpid(),
+		SocketPath:          sockPath,
+		PeerVerification:    peerVerificationMode(),
+		IdleTimeout:         int64(s.idleTimeout.Seconds()),
+		MaxLifetime:         int64(s.maxLifetime.Seconds()),
+		UptimeSeconds:       int64(uptime.Seconds()),
+		RemainingLife:       int64(remainingLife.Seconds()),
+		RemainingIdle:       int64(remainingIdle.Seconds()),
+		CredentialProviders: credentialProviders,
+		ProcessCount:        1,
+		DuplicateProcesses:  false,
+		ProviderRequests:    s.providerRequests,
+		ProviderFailures:    s.providerFailures,
+	}
+	fillResourceStatus(&status)
+	return status
+}
+
+func (s *sessionState) recordProviderRequest(success bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.providerRequests++
+	if !success {
+		s.providerFailures++
 	}
 }
 
@@ -163,27 +179,72 @@ func (s *sessionState) getIdleDeadline() time.Time {
 	return s.idleDeadline
 }
 
-type archiveClock struct {
-	clock clock
+func peerVerificationMode() string {
+	return "same_uid"
 }
 
-func (c archiveClock) Now() time.Time {
-	return c.clock.Now()
+func fillResourceStatus(status *StatusInfo) {
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	status.HeapAllocBytes = mem.HeapAlloc
+	status.Goroutines = runtime.NumGoroutine()
+	status.OpenFDs = openFDCount()
+	status.RSSBytes = rssBytes()
 }
 
-func (c archiveClock) NewTimer(d time.Duration) recording.ClockTimer {
-	return archiveTimer{timer: c.clock.NewTimer(d)}
+func openFDCount() int {
+	return openFDCountFrom([]string{"/proc/self/fd", "/dev/fd"}, openFDProbeLimit(), isFDOpen)
 }
 
-type archiveTimer struct {
-	timer clockTimer
+func openFDCountFrom(dirs []string, maxFD int, isOpen func(int) bool) int {
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err == nil {
+			return len(entries)
+		}
+	}
+	if maxFD <= 0 || isOpen == nil {
+		return -1
+	}
+	count := 0
+	for fd := 0; fd < maxFD; fd++ {
+		if isOpen(fd) {
+			count++
+		}
+	}
+	return count
 }
 
-func (t archiveTimer) C() <-chan time.Time { return t.timer.C() }
+func openFDProbeLimit() int {
+	var limit unix.Rlimit
+	if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &limit); err != nil || limit.Cur == 0 {
+		return 1024
+	}
+	if limit.Cur > 65536 {
+		return 65536
+	}
+	return int(limit.Cur)
+}
 
-func (t archiveTimer) Stop() bool { return t.timer.Stop() }
+func isFDOpen(fd int) bool {
+	_, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
+	return err == nil
+}
 
-func (t archiveTimer) Reset(d time.Duration) bool { return t.timer.Reset(d) }
+func rssBytes() uint64 {
+	var usage unix.Rusage
+	if err := unix.Getrusage(unix.RUSAGE_SELF, &usage); err != nil {
+		return 0
+	}
+	maxRSS := usage.Maxrss
+	if maxRSS <= 0 {
+		return 0
+	}
+	if runtime.GOOS == "darwin" {
+		return uint64(maxRSS)
+	}
+	return uint64(maxRSS) * 1024
+}
 
 // Run starts the agent daemon with the given provider and configuration.
 // The agent listens on a Unix socket and handles provider requests until:
@@ -214,7 +275,7 @@ func Run(provider Provider, cfg RuntimeConfig) error {
 // Handles multiple requests per connection until client disconnects or lock.
 // The activityCh is used to signal the main loop that activity occurred,
 // allowing it to reset the idle timer for long-lived connections.
-func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger, shutdown chan<- string, state *sessionState, activityCh chan<- struct{}) {
+func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger, shutdown chan<- string, state *sessionState, activityCh chan<- struct{}, providerRequestTimeout time.Duration) {
 	defer func() { _ = conn.Close() }()
 
 	// Verify peer credentials
@@ -284,22 +345,20 @@ func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger
 		switch req.Op {
 		case OpStatus:
 			// Status checks don't count as activity - they're just observing state
-			sessionCount := 0
-			var sessionNames []string
-			if p, ok := provider.(interface{ SessionCount() int }); ok {
-				sessionCount = p.SessionCount()
+			providerCount := 0
+			if p, ok := provider.(interface{ ProviderCount() int }); ok {
+				providerCount = p.ProviderCount()
 			}
-			if p, ok := provider.(interface{ SessionNames() []string }); ok {
-				sessionNames = p.SessionNames()
+			status := state.status(providerCount, SocketPath())
+			if p, ok := provider.(interface{ AccessStatus() []AccessStatus }); ok {
+				status.Access = p.AccessStatus()
 			}
-			status := state.status(sessionCount)
-			status.ProviderSessionNames = sessionNames
 			statusData, _ := json.Marshal(status)
 			resp = Response{ID: req.ID, OK: true, Data: statusData}
 
 		case OpProviderRequest:
 			signalActivity()
-			sessionProvider, ok := provider.(SessionProvider)
+			credentialBroker, ok := provider.(CredentialBroker)
 			if !ok {
 				resp = Response{ID: req.ID, OK: false, Err: "agent provider does not support provider requests"}
 				break
@@ -308,10 +367,18 @@ func handleConnection(conn *net.UnixConn, provider Provider, logger *slog.Logger
 				resp = Response{ID: req.ID, OK: false, Err: "provider request is required"}
 				break
 			}
-			providerResp, err := sessionProvider.HandleProviderRequest(context.Background(), *req.Provider)
+			reqCtx := context.Background()
+			cancel := func() {}
+			if providerRequestTimeout > 0 {
+				reqCtx, cancel = context.WithTimeout(reqCtx, providerRequestTimeout)
+			}
+			providerResp, err := credentialBroker.HandleProviderRequest(reqCtx, *req.Provider)
+			cancel()
 			if err != nil {
+				state.recordProviderRequest(false)
 				resp = Response{ID: req.ID, OK: false, Err: err.Error()}
 			} else {
+				state.recordProviderRequest(true)
 				resp = Response{ID: req.ID, OK: true, Provider: &providerResp}
 			}
 
@@ -415,6 +482,10 @@ func runAgent(ctx context.Context, provider Provider, cfg RuntimeConfig, extendS
 		maxLifetime:       cfg.Agent.MaxLifetime.Duration(),
 		clock:             clk,
 	}
+	providerRequestTimeout := cfg.Agent.ProviderRequestTimeout.Duration()
+	if providerRequestTimeout <= 0 {
+		providerRequestTimeout = 2 * time.Minute
+	}
 
 	// Compute lifetime deadline using wall clock (no monotonic component).
 	// This ensures time.Until() uses wall clock difference, correctly detecting
@@ -426,47 +497,6 @@ func runAgent(ctx context.Context, provider Provider, cfg RuntimeConfig, extendS
 	if maxSleep <= 0 {
 		maxSleep = DefaultMaxSleep
 	}
-
-	archiveSource := cfg.RecordingDir
-	if archiveSource == "" {
-		archiveSource = config.DefaultPaths().RecordingsDir
-	}
-
-	// Use archive config if provided, otherwise use defaults
-	archive := cfg.Archive
-	if archive == nil {
-		archive = &config.SessionArchiveConfig{
-			Dir:        filepath.Join(config.DefaultPaths().StateDir, "archives"),
-			Enabled:    false,
-			Jitter:     config.Duration(30 * time.Minute),
-			MaxBundles: 12,
-			MinAge:     config.Duration(30 * 24 * time.Hour),
-		}
-	}
-
-	archiver := recording.NewArchiveRunner(recording.ArchiveConfig{
-		Enabled:     archive.Enabled,
-		SourceDir:   archiveSource,
-		ArchiveDir:  archive.Dir,
-		MinAge:      archive.MinAge.Duration(),
-		MaxBundles:  archive.MaxBundles,
-		MaxRunBytes: archive.MaxRunBytes,
-		Jitter:      archive.Jitter.Duration(),
-	}, cfg.Logger, archiveClock{clock: clk})
-
-	archCtx, archCancel := context.WithCancel(ctx)
-	var archWG sync.WaitGroup
-	if archiver.Enabled() {
-		archWG.Add(1)
-		go func() {
-			defer archWG.Done()
-			archiver.RunLoop(archCtx)
-		}()
-	}
-	defer func() {
-		archCancel()
-		archWG.Wait()
-	}()
 
 	connSem := semaphore.NewWeighted(maxConcurrentConnections)
 	defer func() { _ = provider.Close() }()
@@ -575,7 +605,7 @@ func runAgent(ctx context.Context, provider Provider, cfg RuntimeConfig, extendS
 
 			go func(c *net.UnixConn) {
 				defer connSem.Release(1)
-				handleConnection(c, provider, cfg.Logger, shutdown, state, activityCh)
+				handleConnection(c, provider, cfg.Logger, shutdown, state, activityCh, providerRequestTimeout)
 			}(result.conn)
 		}
 	}

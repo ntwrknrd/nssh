@@ -73,17 +73,51 @@ node kinds.
 Source paths:
 
 - `internal/credential/provider.go`
-- `internal/credential/pass.go`
+- `internal/credential/sops_age.go`
+- `internal/credential/sopsdoc/doc.go`
 - `internal/credential/onepassword.go`
 - `internal/credential/bitwarden.go`
 - `internal/connect/resolve.go`
 
 Supported providers:
 
-- `pass`: local password-store compatible CLI, default provider name
-  `pass`.
-- `1password`: `op` CLI, with `session = "agent"` by default.
-- `bitwarden`: `bw` CLI, with provider auth state owned externally.
+- `sops-age`: `sops` CLI with age recipients. The default provider instance
+  name is `sops`, and the default file is
+  `~/.local/share/nssh/credentials.sops.yaml`.
+- `1password`: `op` CLI. Lookups run directly in the foreground unless
+  `keepalive: true` requires the runtime agent. If a user-driven lookup finds
+  the account signed out, nssh runs `op signin` once and retries the credential
+  command.
+- `bitwarden`: `bw` CLI, with lazy unlock. `BW_SESSION` is request-scoped unless
+  `warm_session: true` requires the runtime agent to retain it in memory.
+
+1Password keepalive is explicit per provider and disabled by default:
+
+```yaml
+credential:
+  provider:
+    op-expedient:
+      type: 1password
+      vault: Expedient
+      keepalive: false
+      keepalive_interval: 5m
+      keepalive_timeout: 10s
+```
+
+Bitwarden warm sessions are also explicit and disabled by default:
+
+```yaml
+credential:
+  provider:
+    bw-work:
+      type: bitwarden
+      warm_session: false
+```
+
+Do not enable either option unless the operator wants the agent to start and
+retain that provider access state in memory.
+
+1Password keepalive uses only `op whoami`; it does not run `op signin`.
 
 Auth mappings belong to inventory:
 
@@ -95,14 +129,14 @@ inventory:
       groups:
         default:
           auth:
-            credential_provider: pass
-            password_ref: nssh/groups/default
+            credential_provider: sops
+            password_ref: groups.local.default.password
       hosts:
         edge01:
           group: default
           auth:
             credential_provider: op-network
-            password_ref: nssh host edge01
+            password_ref: op://Network/edge01/password
             username: netops
 ```
 
@@ -110,12 +144,11 @@ Password-backed auth mappings need `credential_provider` plus `password_ref` or
 `username_ref`. `username` and `username_ref` are optional and mutually
 exclusive; key-mode mappings may set only `mode` and `username`.
 
-For faster password-auth connections, prefer a literal `username` plus a direct
-password field reference such as `op://Network/edge01/password`. Use
-`username_ref` when treating the SSH username as sensitive; it remains
-supported, but it costs an extra external provider call, so time to first
-prompt is slower. Item-base refs can also add provider calls. Each `op`,
-`pass`, or `bw` call adds connection time.
+For SOPS+age, use scalar key paths such as `groups.local.default.password`,
+`hosts.edge01.password`, or `expedient.password`. For 1Password, prefer a
+literal `username` plus a direct password field reference such as
+`op://Network/edge01/password`. Use `username_ref` when treating the SSH username
+as sensitive; it remains supported, but it may add provider lookup time.
 
 Resolution order:
 

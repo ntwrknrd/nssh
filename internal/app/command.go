@@ -281,6 +281,7 @@ func newLogCmd() *cobra.Command {
 	cmd.AddCommand(log.NewExportCmd())
 	cmd.AddCommand(log.NewAuthCmd())
 	cmd.AddCommand(log.NewSearchCmd())
+	cmd.AddCommand(log.NewArchiveCmd())
 
 	ui.ApplyStyledHelpRecursive(cmd)
 	return cmd

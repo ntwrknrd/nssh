@@ -7,16 +7,24 @@ import "strings"
 func DefaultCredentialRef(provider, target string, group bool) string {
 	if group {
 		switch {
+		case provider == "sops":
+			target = strings.ReplaceAll(target, "/", ".")
+			return "groups." + target + ".password"
 		case strings.HasPrefix(provider, "op-"), strings.HasPrefix(provider, "bw-"):
 			return "nssh group " + target
 		default:
-			return "nssh/groups/" + target
+			target = strings.ReplaceAll(target, "/", ".")
+			return "groups." + target + ".password"
 		}
 	}
 	switch {
+	case provider == "sops":
+		target = strings.ReplaceAll(target, "/", ".")
+		return "hosts." + target + ".password"
 	case strings.HasPrefix(provider, "op-"), strings.HasPrefix(provider, "bw-"):
 		return "nssh host " + target
 	default:
-		return "nssh/hosts/" + target
+		target = strings.ReplaceAll(target, "/", ".")
+		return "hosts." + target + ".password"
 	}
 }

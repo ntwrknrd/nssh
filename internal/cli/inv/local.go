@@ -705,7 +705,23 @@ func promptPasswordRef(cfg *config.Config, provider, target string, groupTarget 
 			return selected, nil
 		}
 	}
-	return promptInputWithBack(prompter, "Password ref", config.DefaultCredentialRef(provider, target, groupTarget), true)
+	return promptInputWithBack(prompter, credentialRefPromptTitle(cfg, provider, groupTarget), config.DefaultCredentialRef(provider, target, groupTarget), true)
+}
+
+func credentialRefPromptTitle(cfg *config.Config, provider string, groupTarget bool) string {
+	if cfg != nil {
+		if providerCfg, ok := cfg.Credential.Provider[provider]; ok {
+			switch providerCfg.Type {
+			case config.CredentialProviderSOPSAge:
+				return "SOPS key path"
+			case config.CredentialProvider1Password:
+				return "1Password ref"
+			case config.CredentialProviderBitwarden:
+				return "Bitwarden item/ref"
+			}
+		}
+	}
+	return "Credential ref"
 }
 
 func resolveLocalHostCredentialSecret(cfg *config.Config, patch hostPatch) (*secret.Secret, error) {

@@ -15,7 +15,6 @@ credential:
   provider:
     op-expedient:
       type: 1password
-      session: agent
       vault: Expedient
 `)
 	writeConfigFile(t, filepath.Join(tmp, "inventory", "local.yaml"), `

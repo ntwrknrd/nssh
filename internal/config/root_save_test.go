@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSaveSparseWritesYAMLIncludesAndProviderHosts(t *testing.T) {
@@ -107,5 +108,36 @@ inventory:
 		if !strings.Contains(text, want) {
 			t.Fatalf("saved provider missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestMarshalSparseWritesArchiveTimeoutAndOmitsSchedulerFields(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Logging.Session.Archive.Timeout = Duration(45 * time.Second)
+
+	got, err := MarshalSparse(cfg)
+	if err != nil {
+		t.Fatalf("MarshalSparse: %v", err)
+	}
+	if !strings.Contains(got, "timeout: 45s") {
+		t.Fatalf("sparse config missing archive timeout:\n%s", got)
+	}
+	for _, reject := range []string{"archive:\n        enabled:", "archive:\n        jitter:", "archive:\n        min_interval:", "jitter:", "min_interval:"} {
+		if strings.Contains(got, reject) {
+			t.Fatalf("sparse config should omit obsolete archive field %q:\n%s", reject, got)
+		}
+	}
+}
+
+func TestMarshalSparseWritesProviderRequestTimeout(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Agent.ProviderRequestTimeout = Duration(90 * time.Second)
+
+	got, err := MarshalSparse(cfg)
+	if err != nil {
+		t.Fatalf("MarshalSparse: %v", err)
+	}
+	if !strings.Contains(got, "provider_request_timeout: 1m30s") {
+		t.Fatalf("sparse config missing provider_request_timeout:\n%s", got)
 	}
 }

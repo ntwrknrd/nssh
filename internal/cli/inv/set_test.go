@@ -10,11 +10,11 @@ import (
 )
 
 func TestBuildSetAuthPatchInfersPasswordRef(t *testing.T) {
-	patch, err := buildSetAuthPatch("", "pass", "edge01", false)
+	patch, err := buildSetAuthPatch("", "sops", "edge01", false)
 	if err != nil {
 		t.Fatalf("buildSetAuthPatch: %v", err)
 	}
-	if patch.Auth.Mode != config.AuthModePassword || patch.Auth.CredentialProvider != "pass" || patch.Auth.PasswordRef != "nssh/hosts/edge01" {
+	if patch.Auth.Mode != config.AuthModePassword || patch.Auth.CredentialProvider != "sops" || patch.Auth.PasswordRef != "hosts.edge01.password" {
 		t.Fatalf("patch = %+v", patch)
 	}
 
@@ -149,30 +149,110 @@ func runSetGroupCompactCredentialHelper(t *testing.T) {
 	}
 }
 
+func TestRunSetGroupCredentialPatchPreservesExistingUsername(t *testing.T) {
+	if os.Getenv("NSSH_TEST_RUN_SET_GROUP_PRESERVE_USERNAME") == "1" {
+		runSetGroupPreserveUsernameHelper(t)
+		return
+	}
+
+	home := t.TempDir()
+	cmd := exec.Command(os.Args[0], "-test.run", "^TestRunSetGroupCredentialPatchPreservesExistingUsername$")
+	cmd.Env = append(os.Environ(),
+		"NSSH_TEST_RUN_SET_GROUP_PRESERVE_USERNAME=1",
+		"HOME="+home,
+		"XDG_CONFIG_HOME="+filepath.Join(home, "config"),
+		"XDG_DATA_HOME="+filepath.Join(home, "data"),
+		"XDG_STATE_HOME="+filepath.Join(home, "state"),
+		"PATH="+t.TempDir(),
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helper failed: %v\n%s", err, output)
+	}
+}
+
+func runSetGroupPreserveUsernameHelper(t *testing.T) {
+	t.Helper()
+
+	home := os.Getenv("HOME")
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	t.Setenv("PATH", t.TempDir())
+
+	cfg := config.DefaultConfig()
+	cfg.Credential.Provider["sops"] = config.CredentialProviderConfig{Type: config.CredentialProviderSOPSAge, File: "~/.local/share/nssh/credentials.sops.yaml"}
+	cfg.Credential.Provider["op-expedient"] = config.CredentialProviderConfig{
+		Type:   config.CredentialProvider1Password,
+		Config: config.CredentialProviderDetailConfig{Vault: "Expedient"},
+	}
+	cfg.Inventory.Provider["netbox-prod"] = config.InventoryProviderConfig{
+		Type: config.ProviderNetBox,
+		Group: map[string]config.GroupConfig{
+			"custcbb": {
+				Auth: config.InventoryAuthConfig{
+					Mode:               config.AuthModePassword,
+					CredentialProvider: "op-expedient",
+					PasswordRef:        "op://Expedient/item/password",
+					Username:           "chris.jones",
+				},
+			},
+		},
+	}
+	paths := config.DefaultPaths()
+	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Save(paths.ConfigFile, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	patch, err := buildSetAuthPatch("password", "sops:expedient.password", "netbox-prod/custcbb", true)
+	if err != nil {
+		t.Fatalf("buildSetAuthPatch: %v", err)
+	}
+	if err := runSetGroup("netbox-prod/custcbb", patch); err != nil {
+		t.Fatalf("runSetGroup: %v", err)
+	}
+
+	loaded, err := config.Load(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	auth := loaded.Inventory.Provider["netbox-prod"].Group["custcbb"].Auth
+	if auth.CredentialProvider != "sops" || auth.PasswordRef != "expedient.password" {
+		t.Fatalf("group credential = %+v", auth)
+	}
+	if auth.Username != "chris.jones" {
+		t.Fatalf("group username = %q, want preserved chris.jones; auth=%+v", auth.Username, auth)
+	}
+}
+
 func TestPromptGroupAuthPatchUsesCredentialItemPicker(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{
-		"pass": {Type: config.CredentialProviderPass},
+		"sops": {Type: config.CredentialProviderSOPSAge, File: "~/.local/share/nssh/credentials.sops.yaml"},
 	}
 
 	oldList := listCredentialItems
 	listCredentialItems = func(*config.Config, string) ([]credentialItem, error) {
-		return []credentialItem{{Label: "default group", Ref: "nssh/groups/local/default"}}, nil
+		return []credentialItem{{Label: "default group", Ref: "groups.local.default.password"}}, nil
 	}
 	defer func() { listCredentialItems = oldList }()
 
 	prompter := &fakeLocalHostAddPrompter{
 		selects: map[string]string{
 			"Authentication":      config.AuthModePassword,
-			"Credential provider": "pass",
-			"Credential item":     "nssh/groups/local/default",
+			"Credential provider": "sops",
+			"Credential item":     "groups.local.default.password",
 		},
 	}
 	patch, err := promptGroupAuthPatchWithPrompter(cfg, "local/default", prompter)
 	if err != nil {
 		t.Fatalf("promptGroupAuthPatchWithPrompter: %v", err)
 	}
-	if patch.Auth.Mode != config.AuthModePassword || patch.Auth.CredentialProvider != "pass" || patch.Auth.PasswordRef != "nssh/groups/local/default" {
+	if patch.Auth.Mode != config.AuthModePassword || patch.Auth.CredentialProvider != "sops" || patch.Auth.PasswordRef != "groups.local.default.password" {
 		t.Fatalf("patch = %+v", patch)
 	}
 }

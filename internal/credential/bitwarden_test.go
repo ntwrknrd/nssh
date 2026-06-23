@@ -1,65 +1,47 @@
 package credential
 
 import (
-	"context"
 	"errors"
-	"strings"
 	"testing"
 
+	"github.com/ntwrknrd/nssh/internal/agent"
 	"github.com/ntwrknrd/nssh/internal/config"
 )
 
-type fakeBWRunner struct {
-	calls []fakeBWCall
-	outs  []fakeBWOut
-}
+func TestBitwardenGetHostUsesConfiguredRefThroughAgent(t *testing.T) {
+	client := stubProviderAgent(t, &agent.ProviderResponse{
+		Found:    true,
+		Username: "admin",
+		Secret:   []byte("secret"),
+		Ref:      "Existing Edge Item",
+	})
 
-type fakeBWCall struct {
-	args  []string
-	stdin string
-}
-
-type fakeBWOut struct {
-	data string
-	err  error
-}
-
-func (f *fakeBWRunner) Run(_ context.Context, stdin []byte, args ...string) ([]byte, error) {
-	f.calls = append(f.calls, fakeBWCall{args: append([]string(nil), args...), stdin: string(stdin)})
-	if len(f.outs) == 0 {
-		return nil, nil
-	}
-	out := f.outs[0]
-	f.outs = f.outs[1:]
-	return []byte(out.data), out.err
-}
-
-func TestBitwardenGetHostReadsConfiguredRef(t *testing.T) {
-	runner := &fakeBWRunner{outs: []fakeBWOut{{
-		data: `{"name":"Existing Edge Item","login":{"username":"admin","password":"secret"}}`,
-	}}}
 	provider := &bitwardenProvider{
+		name: "bw-lab",
 		hostRefs: map[string]config.CredentialRefConfig{
 			"edge01": {Ref: "Existing Edge Item"},
 		},
-		runner: runner,
 	}
 
 	got, err := provider.GetHost("edge01")
 	if err != nil {
 		t.Fatalf("GetHost: %v", err)
 	}
-	if got == nil || got.Ref != "Existing Edge Item" {
+	if got == nil || got.Ref != "Existing Edge Item" || got.Username != "admin" {
 		t.Fatalf("record = %+v", got)
 	}
-	if strings.Join(runner.calls[0].args, " ") != "get item Existing Edge Item" {
-		t.Fatalf("args = %#v", runner.calls[0].args)
+	if len(client.reqs) != 1 {
+		t.Fatalf("requests = %d, want 1", len(client.reqs))
+	}
+	req := client.reqs[0]
+	if req.Provider != "bw-lab" || req.Action != "get" || req.Scope != "host" || req.Name != "edge01" || req.Ref != "Existing Edge Item" {
+		t.Fatalf("request = %+v", req)
 	}
 }
 
 func TestBitwardenGetHostWithoutConfiguredRefReturnsNil(t *testing.T) {
-	runner := &fakeBWRunner{}
-	provider := &bitwardenProvider{runner: runner}
+	client := stubProviderAgent(t, &agent.ProviderResponse{Found: true})
+	provider := &bitwardenProvider{name: "bw-lab"}
 
 	got, err := provider.GetHost("edge01")
 	if err != nil {
@@ -68,17 +50,19 @@ func TestBitwardenGetHostWithoutConfiguredRefReturnsNil(t *testing.T) {
 	if got != nil {
 		t.Fatalf("record = %+v, want nil", got)
 	}
-	if len(runner.calls) != 0 {
-		t.Fatalf("calls = %d, want 0", len(runner.calls))
+	if len(client.reqs) != 0 {
+		t.Fatalf("requests = %d, want 0", len(client.reqs))
 	}
 }
 
 func TestBitwardenMissingItemReturnsNil(t *testing.T) {
-	runner := &fakeBWRunner{outs: []fakeBWOut{{
-		data: "Not found.",
-		err:  errors.New("exit status 1"),
-	}}}
-	provider := &bitwardenProvider{runner: runner}
+	stubProviderAgent(t, &agent.ProviderResponse{Found: false})
+	provider := &bitwardenProvider{
+		name: "bw-lab",
+		hostRefs: map[string]config.CredentialRefConfig{
+			"edge01": {Ref: "missing item"},
+		},
+	}
 
 	got, err := provider.GetHost("edge01")
 	if err != nil {
@@ -86,5 +70,64 @@ func TestBitwardenMissingItemReturnsNil(t *testing.T) {
 	}
 	if got != nil {
 		t.Fatalf("record = %+v, want nil", got)
+	}
+}
+
+func TestBitwardenLookupUnlocksAndRetriesWhenAgentNeedsSession(t *testing.T) {
+	oldConnect := connectProviderAgent
+	oldSpawn := spawnRuntimeAgent
+	oldUnlock := unlockBitwardenProvider
+	defer func() {
+		connectProviderAgent = oldConnect
+		spawnRuntimeAgent = oldSpawn
+		unlockBitwardenProvider = oldUnlock
+	}()
+
+	client := &fakeAgentProviderClient{
+		errs: []error{
+			errors.New(agent.ErrBitwardenNotAuthenticated),
+		},
+		responses: []*agent.ProviderResponse{
+			{
+				Found:    true,
+				Username: "admin",
+				Secret:   []byte("secret"),
+				Ref:      "Existing Edge Item",
+			},
+		},
+	}
+	connectProviderAgent = func() (agentProviderClient, error) { return client, nil }
+	spawnRuntimeAgent = func() error { t.Fatal("unexpected agent spawn"); return nil }
+
+	var unlockCalls int
+	unlockBitwardenProvider = func() (string, error) {
+		unlockCalls++
+		return "bw-session-token", nil
+	}
+
+	provider := &bitwardenProvider{
+		name: "bw-lab",
+		hostRefs: map[string]config.CredentialRefConfig{
+			"edge01": {Ref: "Existing Edge Item"},
+		},
+	}
+	got, err := provider.GetHost("edge01")
+	if err != nil {
+		t.Fatalf("GetHost: %v", err)
+	}
+	if got == nil || got.Username != "admin" || revealTestSecret(t, got) != "secret" {
+		t.Fatalf("record = %+v secret=%q", got, revealTestSecret(t, got))
+	}
+	if unlockCalls != 1 {
+		t.Fatalf("unlock calls = %d, want 1", unlockCalls)
+	}
+	if len(client.reqs) != 2 {
+		t.Fatalf("requests = %+v, want get/get", client.reqs)
+	}
+	if client.reqs[0].Action != "get" || client.reqs[1].Action != "get" {
+		t.Fatalf("request order = %+v", client.reqs)
+	}
+	if client.reqs[1].Provider != "bw-lab" || client.reqs[1].Session != "bw-session-token" {
+		t.Fatalf("request-scoped get = %+v", client.reqs[1])
 	}
 }

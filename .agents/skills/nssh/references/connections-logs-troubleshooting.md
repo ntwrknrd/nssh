@@ -47,13 +47,11 @@ Commands:
 ```bash
 nssh agent status
 nssh agent stop
-nssh agent restart
-nssh agent doctor
+nssh agent reset
 ```
 
-The agent is a Unix socket daemon used for provider-session requests and
-background archive maintenance. It is not a password cache and does not lock or
-unlock external password managers.
+The agent is a Unix socket daemon used for credential-provider requests. It must
+not own recording archive maintenance or general background jobs.
 
 Relevant config:
 
@@ -63,10 +61,20 @@ agent:
   idle_timeout: 1h
   activity_increment: 15m
   max_lifetime: 24h
+  provider_request_timeout: 2m
 ```
 
-If a `session = "agent"` provider cannot connect to the agent and
-`agent.auto_start` is true, nssh starts the runtime automatically.
+Credential lookups run directly in the foreground unless the provider config
+requires retained access. If a retained-access provider needs the agent and
+`agent.auto_start` is true, nssh starts it automatically. `nssh agent reset`
+stops any running daemon and clears retained access state; it does not start a
+new daemon. Provider requests are bounded by `agent.provider_request_timeout`.
+
+`nssh agent status` reports retained provider access state, not configured
+provider inventory. SOPS+age should not appear there. 1Password appears only
+when keepalive is configured; Bitwarden appears only when `warm_session` is
+configured. Status must not expose refs, provider stdout/stderr, usernames,
+passwords, or `BW_SESSION`.
 
 ## Host Keys And Legacy SSH
 
@@ -100,6 +108,7 @@ nssh log export <id>
 nssh log upload <id>
 nssh log delete <id>
 nssh log auth
+nssh log archive
 ```
 
 Recording config lives under `logging.session`. Recording is disabled by
@@ -107,7 +116,8 @@ default. When enabled, nssh wraps the outer command with asciinema and guards th
 inner connection with `NSSH_RECORDING_INNER=1`.
 
 Recording files default to `~/.local/state/nssh/casts`. Archive maintenance is
-configured under `logging.session.archive` and executed by the agent runtime.
+configured under `logging.session.archive` and runs only when an operator invokes
+`nssh log archive`. Use cron, launchd, or systemd timers for automation.
 
 Audit logging is separate from session recording and lives under
 `logging.audit`.
@@ -121,7 +131,6 @@ nssh self status
 nssh inv status
 nssh inv refresh local
 nssh agent status
-nssh agent doctor
 nssh -v <command>
 NSSH_DEBUG=1 nssh <host>
 ```

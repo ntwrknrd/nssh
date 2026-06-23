@@ -3,6 +3,7 @@ $ nssh log --help
 │   nssh log [flags]                  Manage session recordings                │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
+│   archive                           Archive old recordings                   │
 │   auth                              Authenticate with asciinema              │
 │   delete                            Delete recordings                        │
 │   export                            Export recording                         │
