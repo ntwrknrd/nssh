@@ -109,6 +109,14 @@ func (c *Connector) filterOutput(data []byte, suppressPrompt bool) []byte {
 	return result
 }
 
+func (c *Connector) prepareDisplayOutput(data []byte, suppressPrompt bool) []byte {
+	output := c.filterOutput(data, suppressPrompt)
+	if len(output) == 0 || c.highlighter == nil {
+		return output
+	}
+	return c.highlighter.Highlight(output)
+}
+
 // removePasswordPromptLines filters out lines containing password prompts.
 func removePasswordPromptLines(data []byte) []byte {
 	lines := bytes.Split(data, []byte("\n"))

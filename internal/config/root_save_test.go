@@ -12,6 +12,9 @@ func TestSaveSparseWritesYAMLIncludesAndProviderHosts(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.yaml")
 	cfg := DefaultConfig()
+	highlightEnabled := true
+	highlightDisabled := false
+	cfg.Highlight = HighlightConfig{Profile: HighlightProfileNone}
 	cfg.Include = []string{"credential/*.yaml", "inventory/*.yaml"}
 	cfg.Inventory.Provider = nil
 	cfg.Inventory.Providers = map[string]InventoryProviderConfig{
@@ -19,12 +22,13 @@ func TestSaveSparseWritesYAMLIncludesAndProviderHosts(t *testing.T) {
 			Type: ProviderLocal,
 			Groups: map[string]GroupConfig{
 				"homelab": {
-					Auth: InventoryAuthConfig{Mode: AuthModeKey, Username: "cj"},
-					SSH:  SSHHostConfig{Options: SSHOptions{"ProxyJump": NewSSHOptionString("bastion")}},
+					Auth:      InventoryAuthConfig{Mode: AuthModeKey, Username: "cj"},
+					SSH:       SSHHostConfig{Options: SSHOptions{"ProxyJump": NewSSHOptionString("bastion")}},
+					Highlight: HighlightConfig{Enabled: &highlightEnabled, Profile: HighlightProfileJunos},
 				},
 			},
 			Hosts: map[string]InventoryHostConfig{
-				"rpi-a.lan": {Group: "homelab", Aliases: []string{"rpi-a"}},
+				"rpi-a.lan": {Group: "homelab", Aliases: []string{"rpi-a"}, Highlight: HighlightConfig{Enabled: &highlightDisabled}},
 			},
 		},
 	}
@@ -45,6 +49,10 @@ func TestSaveSparseWritesYAMLIncludesAndProviderHosts(t *testing.T) {
 		"- rpi-a",
 		"group: homelab",
 		"ProxyJump: bastion",
+		"highlight:",
+		"profile: none",
+		"profile: junos",
+		"enabled: false",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("saved config missing %q:\n%s", want, text)

@@ -235,6 +235,60 @@ func TestCatalogMergesSSHDefaultsGroupAndProviderOverlay(t *testing.T) {
 	}
 }
 
+func TestCatalogMergesHighlightDefaultsGroupAndProviderOverlay(t *testing.T) {
+	enabled := true
+	disabled := false
+	cfg := config.DefaultConfig()
+	cfg.Highlight = config.HighlightConfig{Profile: config.HighlightProfileNone}
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		"netbox-prod": {
+			Type: config.ProviderNetBox,
+			Groups: map[string]config.GroupConfig{
+				"core": {
+					Highlight: config.HighlightConfig{Enabled: &enabled, Profile: config.HighlightProfileJunos},
+				},
+			},
+			Hosts: map[string]config.InventoryHostConfig{
+				"edge01.example.com": {
+					Group: "core",
+				},
+				"edge02.example.com": {
+					Group:     "core",
+					Highlight: config.HighlightConfig{Enabled: &disabled},
+				},
+			},
+		},
+	}
+	state := &inventory.ProviderState{
+		Provider: "netbox-prod",
+		Type:     config.ProviderNetBox,
+		Objects: map[string]*inventory.ProviderHost{
+			"1": {ObjectID: "1", Host: "edge01.example.com", HostName: "edge01.example.com", Group: "netbox-prod/core"},
+			"2": {ObjectID: "2", Host: "edge02.example.com", HostName: "edge02.example.com", Group: "netbox-prod/core"},
+		},
+	}
+
+	cat := buildCatalogForTest(t, cfg, []*inventory.ProviderState{state})
+	inherited, ok := cat.Find("edge01.example.com")
+	if !ok {
+		t.Fatalf("Find(edge01.example.com) failed")
+	}
+	if inherited.Highlight.Enabled == nil || !*inherited.Highlight.Enabled || inherited.Highlight.Profile != config.HighlightProfileJunos {
+		t.Fatalf("inherited highlight = %+v, want enabled junos", inherited.Highlight)
+	}
+	overridden, ok := cat.Find("edge02.example.com")
+	if !ok {
+		t.Fatalf("Find(edge02.example.com) failed")
+	}
+	if overridden.Highlight.Enabled == nil || *overridden.Highlight.Enabled {
+		t.Fatalf("overridden highlight enabled = %v, want explicit false", overridden.Highlight.Enabled)
+	}
+	if overridden.Highlight.Profile != config.HighlightProfileJunos {
+		t.Fatalf("overridden highlight profile = %q, want inherited junos", overridden.Highlight.Profile)
+	}
+}
+
 func TestCatalogCarriesProviderStateProxyJump(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.SSH.Defaults = config.SSHHostConfig{Options: config.SSHOptions{

@@ -272,8 +272,9 @@ func (c *Connector) relay(ctx context.Context) error {
 		}
 		c.mu.Unlock()
 
-		// Filter and write output
-		output := c.filterOutput(buf, suppressPrompt)
+		// Filter, decorate, and write display output. Raw PTY bytes already fed
+		// prompt detection and LastOutput via the ring buffer above.
+		output := c.prepareDisplayOutput(buf, suppressPrompt)
 		if len(output) > 0 {
 			if _, err := os.Stdout.Write(output); err != nil {
 				slog.Debug("failed to write to stdout", "err", err)

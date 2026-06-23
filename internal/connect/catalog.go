@@ -26,6 +26,7 @@ type ResolvedHostData struct {
 	Username  string
 	Auth      config.InventoryAuthConfig
 	SSH       config.SSHHostConfig
+	Highlight config.HighlightConfig
 }
 
 func BuildHostCatalog(cfg *config.Config) (*HostCatalog, error) {
@@ -104,6 +105,7 @@ func (c *HostCatalog) addLocalHosts(cfg *config.Config, providerName string, pro
 		}
 		auth := cfg.ResolveInventoryAuth(config.InventoryAuthContext{Host: name, Provider: providerName, Group: config.FormatInventoryGroupID(providerName, host.Group)})
 		ssh := mergeCatalogSSH(cfg, provider, host.Group, host.SSH)
+		highlight := mergeCatalogHighlight(cfg, provider, host.Group, host.Highlight)
 		c.add(&ResolvedHostData{
 			Canonical: name,
 			Hostname:  name,
@@ -114,6 +116,7 @@ func (c *HostCatalog) addLocalHosts(cfg *config.Config, providerName string, pro
 			Username:  auth.Username,
 			Auth:      host.Auth,
 			SSH:       ssh,
+			Highlight: highlight,
 		})
 	}
 	return nil
@@ -143,6 +146,7 @@ func resolvedHostFromState(cfg *config.Config, state *inventory.ProviderState, p
 	aliases = appendUnique(aliases, overlay.Aliases...)
 	ssh := mergeProviderStateSSH(cfg, state, provider, group, overlay.SSH)
 	ssh = applyProviderStateSSH(ssh, host, state, cat)
+	highlight := mergeCatalogHighlight(cfg, provider, group, overlay.Highlight)
 	canonical := firstNonEmpty(host.Host, firstString(aliases), host.HostName)
 	return &ResolvedHostData{
 		Canonical: canonical,
@@ -154,6 +158,7 @@ func resolvedHostFromState(cfg *config.Config, state *inventory.ProviderState, p
 		Username:  auth.Username,
 		Auth:      overlay.Auth,
 		SSH:       ssh,
+		Highlight: highlight,
 	}
 }
 
@@ -177,6 +182,17 @@ func mergeProviderStateSSH(cfg *config.Config, state *inventory.ProviderState, p
 		return config.MergeSSH(ssh, host)
 	}
 	return mergeCatalogSSH(cfg, provider, group, host)
+}
+
+func mergeCatalogHighlight(cfg *config.Config, provider config.InventoryProviderConfig, group string, host config.HighlightConfig) config.HighlightConfig {
+	highlight := config.HighlightConfig{}
+	if cfg != nil {
+		highlight = config.MergeHighlight(highlight, cfg.Highlight)
+	}
+	if groupCfg, ok := provider.Groups[group]; ok {
+		highlight = config.MergeHighlight(highlight, groupCfg.Highlight)
+	}
+	return config.MergeHighlight(highlight, host)
 }
 
 func applyProviderStateSSH(ssh config.SSHHostConfig, host *inventory.ProviderHost, state *inventory.ProviderState, cat *HostCatalog) config.SSHHostConfig {

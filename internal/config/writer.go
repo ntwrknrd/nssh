@@ -463,6 +463,10 @@ func sparseConfigTable(cfg *Config) map[string]any {
 	if len(ssh) > 0 {
 		table["ssh"] = ssh
 	}
+	highlight := highlightTable(cfg.Highlight)
+	if len(highlight) > 0 {
+		table["highlight"] = highlight
+	}
 
 	return table
 }
@@ -533,6 +537,10 @@ func groupTable(cfg GroupConfig) map[string]any {
 	if len(ssh) > 0 {
 		table["ssh"] = ssh
 	}
+	highlight := highlightTable(cfg.Highlight)
+	if len(highlight) > 0 {
+		table["highlight"] = highlight
+	}
 	return table
 }
 
@@ -556,6 +564,19 @@ func inventoryHostTable(cfg InventoryHostConfig) map[string]any {
 	if len(ssh) > 0 {
 		table["ssh"] = ssh
 	}
+	highlight := highlightTable(cfg.Highlight)
+	if len(highlight) > 0 {
+		table["highlight"] = highlight
+	}
+	return table
+}
+
+func highlightTable(cfg HighlightConfig) map[string]any {
+	table := make(map[string]any)
+	if cfg.Enabled != nil {
+		table["enabled"] = *cfg.Enabled
+	}
+	addString(table, "profile", cfg.Profile)
 	return table
 }
 

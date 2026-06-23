@@ -15,6 +15,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
+	"github.com/ntwrknrd/nssh/internal/ssh/highlight"
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
 
@@ -350,6 +351,7 @@ func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArg
 	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 	conn.SetTimeouts(&cfg.SSH.Connection)
 	conn.SetSSHVerbosity(opts.SSHVerbosity)
+	conn.SetHighlightOptions(highlightOptionsFromConfig(resolved.Highlight))
 	conn.SetResolvedEndpoint(resolved.Hostname, fmt.Sprintf("%d", resolved.Port))
 	return conn.Run(ctx)
 }
@@ -367,10 +369,18 @@ func newConnector(resolved *ResolvedHost, sshArgs []string, cfg *config.Config, 
 	conn.SetHostKeyPromptFunc(newHostKeyPromptFunc())
 	conn.SetSSHOptions(resolved.SSH)
 	conn.SetSSHVerbosity(opts.SSHVerbosity)
+	conn.SetHighlightOptions(highlightOptionsFromConfig(resolved.Highlight))
 	conn.SetResolvedEndpoint(resolved.Hostname, fmt.Sprintf("%d", resolved.Port))
 	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 	conn.SetTimeouts(&cfg.SSH.Connection)
 	return conn
+}
+
+func highlightOptionsFromConfig(cfg config.HighlightConfig) highlight.Options {
+	return highlight.Options{
+		Enabled: cfg.EnabledValue(),
+		Profile: cfg.EffectiveProfile(),
+	}
 }
 
 func isCompatibilityError(err error) bool {

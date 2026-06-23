@@ -41,6 +41,7 @@ type ResolvedHost struct {
 	Group       string
 	Aliases     []string
 	SSH         config.SSHHostConfig
+	Highlight   config.HighlightConfig
 	IncludeFile string
 	HostEntry   *sshconfig.HostEntry
 	Credential  *ResolvedCredential
@@ -116,6 +117,7 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 		Group:      hostData.Group,
 		Aliases:    hostData.Aliases,
 		SSH:        hostData.SSH,
+		Highlight:  hostData.Highlight,
 		Credential: cred,
 		Config:     c,
 	}, nil
@@ -162,6 +164,7 @@ func ResolveLiteralHostForConnect(query, explicitUser string, cfg ...*config.Con
 		Port:      22,
 		Username:  explicitUser,
 		SSH:       config.MergeSSH(config.SSHHostConfig{}, c.SSH.Defaults),
+		Highlight: config.MergeHighlight(config.HighlightConfig{}, c.Highlight),
 		Config:    c,
 	}, nil
 }

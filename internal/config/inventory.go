@@ -111,6 +111,7 @@ type InventoryHostConfig struct {
 	Port         int                 `yaml:"port,omitempty"`
 	Auth         InventoryAuthConfig `yaml:"auth,omitempty"`
 	SSH          SSHHostConfig       `yaml:"ssh,omitempty"`
+	Highlight    HighlightConfig     `yaml:"highlight,omitempty"`
 	AuthDisabled bool                `yaml:"auth_disabled,omitempty"`
 }
 
@@ -140,6 +141,7 @@ type GroupConfig struct {
 	Auth         InventoryAuthConfig `yaml:"auth,omitempty"`
 	Match        InventoryMatch      `yaml:"match,omitempty"`
 	SSH          SSHHostConfig       `yaml:"ssh,omitempty"`
+	Highlight    HighlightConfig     `yaml:"highlight,omitempty"`
 }
 
 // InventoryProviderDetailConfig holds implementation-specific provider config.

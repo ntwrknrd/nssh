@@ -15,6 +15,7 @@ type Config struct {
 	Inventory InventoryConfig `yaml:"inventory,omitempty"`
 	Logging   LoggingConfig   `yaml:"logging,omitempty"`
 	SSH       SSHConfig       `yaml:"ssh,omitempty"`
+	Highlight HighlightConfig `yaml:"highlight,omitempty"`
 
 	Credential CredentialConfig `yaml:"credential,omitempty"`
 	Host       HostConfig       `yaml:"host,omitempty"`
@@ -125,6 +126,63 @@ type SessionArchiveConfig struct {
 	MinAge Duration `yaml:"min_age,omitempty"`
 	// Timeout caps a manual archive maintenance pass (default: 30s)
 	Timeout Duration `yaml:"timeout,omitempty"`
+}
+
+// ============================================================================
+// Highlight Configuration
+// ============================================================================
+
+const (
+	HighlightProfileNone  = "none"
+	HighlightProfileJunos = "junos"
+)
+
+// HighlightConfig controls display-only terminal highlighting.
+type HighlightConfig struct {
+	Enabled *bool  `yaml:"enabled,omitempty"`
+	Profile string `yaml:"profile,omitempty"`
+}
+
+// MergeHighlight applies nssh highlight inheritance. Values in override
+// replace base only when explicitly configured.
+func MergeHighlight(base, override HighlightConfig) HighlightConfig {
+	out := base
+	if override.Enabled != nil {
+		enabled := *override.Enabled
+		out.Enabled = &enabled
+	}
+	if strings.TrimSpace(override.Profile) != "" {
+		out.Profile = strings.ToLower(strings.TrimSpace(override.Profile))
+	}
+	return out
+}
+
+// EffectiveProfile returns the normalized configured profile.
+func (c HighlightConfig) EffectiveProfile() string {
+	profile := strings.ToLower(strings.TrimSpace(c.Profile))
+	if profile == "" {
+		return HighlightProfileNone
+	}
+	return profile
+}
+
+// EnabledValue returns true only when highlighting was explicitly enabled.
+func (c HighlightConfig) EnabledValue() bool {
+	return c.Enabled != nil && *c.Enabled
+}
+
+// Validate checks one highlight config scope.
+func (c HighlightConfig) Validate(scope string) error {
+	profile := c.EffectiveProfile()
+	switch profile {
+	case HighlightProfileNone, HighlightProfileJunos:
+	default:
+		return fmt.Errorf("%s.profile has unsupported highlight profile %q", scope, profile)
+	}
+	if c.EnabledValue() && profile == HighlightProfileNone {
+		return fmt.Errorf("%s.profile must not be none when %s.enabled is true", scope, scope)
+	}
+	return nil
 }
 
 // ============================================================================
@@ -407,6 +465,9 @@ func (c *Config) Validate() error {
 	if err := c.validateSSHHostConfigs(); err != nil {
 		return err
 	}
+	if err := c.validateHighlightConfigs(); err != nil {
+		return err
+	}
 	if err := c.validateInventoryAuthProviders(); err != nil {
 		return err
 	}
@@ -418,6 +479,30 @@ func (c *Config) Validate() error {
 	}
 	if err := c.SSH.Security.Validate(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (c *Config) validateHighlightConfigs() error {
+	if err := c.Highlight.Validate("highlight"); err != nil {
+		return err
+	}
+	for hostName, host := range c.Inventory.Host {
+		if err := host.Highlight.Validate("inventory.host." + hostName + ".highlight"); err != nil {
+			return err
+		}
+	}
+	for providerName, provider := range c.Inventory.Provider {
+		for groupName, group := range provider.Group {
+			if err := group.Highlight.Validate("inventory.provider." + providerName + ".group." + groupName + ".highlight"); err != nil {
+				return err
+			}
+		}
+		for hostName, host := range provider.Hosts {
+			if err := host.Highlight.Validate("inventory.provider." + providerName + ".hosts." + hostName + ".highlight"); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

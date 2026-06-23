@@ -71,6 +71,53 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestHighlightConfigValidate(t *testing.T) {
+	trueValue := true
+	tests := []struct {
+		name      string
+		highlight HighlightConfig
+		wantErr   string
+	}{
+		{name: "none disabled", highlight: HighlightConfig{Profile: HighlightProfileNone}},
+		{name: "junos enabled", highlight: HighlightConfig{Enabled: &trueValue, Profile: HighlightProfileJunos}},
+		{name: "unknown profile", highlight: HighlightConfig{Profile: "slow-regex"}, wantErr: `unsupported highlight profile "slow-regex"`},
+		{name: "enabled none rejected", highlight: HighlightConfig{Enabled: &trueValue, Profile: HighlightProfileNone}, wantErr: "highlight.profile must not be none when highlight.enabled is true"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.highlight.Validate("highlight")
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() unexpected error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestMergeHighlightAllowsHostDisableOverride(t *testing.T) {
+	trueValue := true
+	falseValue := false
+
+	got := MergeHighlight(
+		HighlightConfig{Profile: HighlightProfileNone},
+		HighlightConfig{Enabled: &trueValue, Profile: HighlightProfileJunos},
+	)
+	got = MergeHighlight(got, HighlightConfig{Enabled: &falseValue})
+
+	if got.Enabled == nil || *got.Enabled {
+		t.Fatalf("enabled = %v, want explicit false", got.Enabled)
+	}
+	if got.Profile != HighlightProfileJunos {
+		t.Fatalf("profile = %q, want %q", got.Profile, HighlightProfileJunos)
+	}
+}
+
 func TestLoad_NonexistentFile(t *testing.T) {
 	cfg, err := Load("/nonexistent/path/config.yaml")
 	if err != nil {

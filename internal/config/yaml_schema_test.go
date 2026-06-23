@@ -25,6 +25,9 @@ inventory:
         token_env: NETBOX_TOKEN
       groups:
         cbb:
+          highlight:
+            enabled: true
+            profile: junos
           ssh:
             options:
               ProxyJump: bastion
@@ -39,6 +42,8 @@ inventory:
         701-sw37r103c608.expedient.com:
           group: cbb
           aliases: [701-sw37]
+          highlight:
+            enabled: false
           ssh:
             compatibility:
               kex: diffie-hellman-group14-sha1
@@ -53,6 +58,8 @@ ssh:
       IdentityAgent: ~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock
       IdentityFile:
         - ~/.ssh/ed25519-1Password-Personal.pub
+highlight:
+  profile: none
 `)
 	cfg, err := Load(path)
 	if err != nil {
@@ -70,6 +77,14 @@ ssh:
 	}
 	if got := cfg.Inventory.Providers["netbox-prod"].Groups["cbb"].SSH.Options["ProxyJump"].Scalar; got != "bastion" {
 		t.Fatalf("group ssh proxy_jump = %q, want bastion", got)
+	}
+	groupHighlight := cfg.Inventory.Providers["netbox-prod"].Groups["cbb"].Highlight
+	if groupHighlight.Enabled == nil || !*groupHighlight.Enabled || groupHighlight.Profile != HighlightProfileJunos {
+		t.Fatalf("group highlight = %+v, want enabled junos", groupHighlight)
+	}
+	hostHighlight := host.Highlight
+	if hostHighlight.Enabled == nil || *hostHighlight.Enabled {
+		t.Fatalf("host highlight enabled = %v, want explicit false", hostHighlight.Enabled)
 	}
 }
 
