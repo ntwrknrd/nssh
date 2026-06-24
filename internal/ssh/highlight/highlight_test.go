@@ -78,6 +78,34 @@ func TestJunosHighlightProfileContractColorsOnlyBroadCategories(t *testing.T) {
 	if actionStyle == hierarchyStyle || actionStyle == protocolStyle || hierarchyStyle == protocolStyle {
 		t.Fatalf("category styles should differ: action=%q hierarchy=%q protocol=%q", actionStyle, hierarchyStyle, protocolStyle)
 	}
+	if actionStyle != "\x1b[93m" {
+		t.Fatalf("action style should be visually distinct bright yellow, got %q", actionStyle)
+	}
+}
+
+func TestJunosHighlightColorsMajorSetHierarchies(t *testing.T) {
+	input := "set version 23.4R2-S7.4\n" +
+		"set groups re0 system host-name acm-lab-core1-re0\n" +
+		"set apply-groups re0\n" +
+		"set services ssh root-login deny\n" +
+		"set security zones security-zone trust\n" +
+		"set snmp community public authorization read-only\n" +
+		"set forwarding-options storm-control-profiles default\n" +
+		"set event-options policy link-down\n" +
+		"set accounting-options file interactive-commands\n"
+
+	out := string(New(Options{Enabled: true, Profile: ProfileJunos}).Highlight([]byte(input)))
+	if stripANSI(out) != input {
+		t.Fatalf("stripANSI(output) = %q, want original input", stripANSI(out))
+	}
+	for _, token := range []string{"version", "groups", "apply-groups", "services", "security", "snmp", "forwarding-options", "event-options", "accounting-options"} {
+		if !tokenHighlighted(out, token) {
+			t.Fatalf("major hierarchy token %q was not highlighted in %q", token, out)
+		}
+		if tokenStyle(out, token) != tokenStyle(out, "version") {
+			t.Fatalf("major hierarchy token %q has style %q, want %q", token, tokenStyle(out, token), tokenStyle(out, "version"))
+		}
+	}
 }
 
 func TestJunosHighlightGatesHierarchyAndProtocolsByLineContext(t *testing.T) {

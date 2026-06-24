@@ -113,7 +113,9 @@ Allowed major hierarchy words:
 
 ```text
 interfaces, protocols, routing-options, policy-options, firewall,
-class-of-service, routing-instances, vlans, bridge-domains, system, chassis
+class-of-service, routing-instances, vlans, bridge-domains, system, chassis,
+version, groups, apply-groups, services, security, snmp, forwarding-options,
+event-options, accounting-options
 ```
 
 ### Protocols And Routing Families
@@ -202,7 +204,8 @@ must not color `group`, `neighbor`, or `peer-as`.
 
 Colors should express broad meaning:
 
-- actions: one distinct command/action style
+- actions: one visually distinct command/action style, not a near-match for
+  hierarchy coloring
 - major hierarchies: one hierarchy style
 - protocols and routing families: one protocol style
 - identifiers: existing identifier styles, with interfaces separate from

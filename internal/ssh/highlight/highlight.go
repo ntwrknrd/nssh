@@ -26,8 +26,8 @@ const (
 	StyleCyan
 	StyleBlue
 	StyleMagenta
-	StyleBrightMagenta
 	StyleBrightBlue
+	StyleBrightYellow
 )
 
 type Span struct {
@@ -223,7 +223,7 @@ func classifyWord(ctx lineContext, token []byte) (Style, bool) {
 	case matchAny(token, "inactive", "pending", "hold", "stale", "hidden", "suppressed", "flapping", "degraded"):
 		return StyleYellow, true
 	case ctx == lineContextConfig && isActionWord(token):
-		return StyleBrightMagenta, true
+		return StyleBrightYellow, true
 	case ctx == lineContextConfig && isHierarchyWord(token):
 		return StyleMagenta, true
 	case ctx == lineContextConfig && isProtocolWord(token):
@@ -238,7 +238,7 @@ func isActionWord(token []byte) bool {
 }
 
 func isHierarchyWord(token []byte) bool {
-	return matchAny(token, "interfaces", "protocols", "routing-options", "policy-options", "firewall", "class-of-service", "routing-instances", "vlans", "bridge-domains", "system", "chassis")
+	return matchAny(token, "interfaces", "protocols", "routing-options", "policy-options", "firewall", "class-of-service", "routing-instances", "vlans", "bridge-domains", "system", "chassis", "version", "groups", "apply-groups", "services", "security", "snmp", "forwarding-options", "event-options", "accounting-options")
 }
 
 func isProtocolWord(token []byte) bool {
@@ -447,10 +447,10 @@ func styleStart(style Style) string {
 		return "\x1b[34m"
 	case StyleMagenta:
 		return "\x1b[35m"
-	case StyleBrightMagenta:
-		return "\x1b[95m"
 	case StyleBrightBlue:
 		return "\x1b[94m"
+	case StyleBrightYellow:
+		return "\x1b[93m"
 	default:
 		return ""
 	}
