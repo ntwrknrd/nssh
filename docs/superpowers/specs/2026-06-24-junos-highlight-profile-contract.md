@@ -47,10 +47,10 @@ It must not depend on:
 - user-defined rules
 - heap-heavy parsing
 
-The live highlighter may carry only the current open line's cheap context across
-PTY display chunks. It must not buffer output waiting for a newline, and it must
-reset that carried context when a newline, bypass, unsafe chunk, or oversized
-line is seen.
+The live highlighter may carry only the current open line's cheap context and a
+bounded unfinished trailing token across PTY display chunks. It must not buffer
+whole lines waiting for a newline, and it must reset carried context when a
+newline, bypass, unsafe chunk, or oversized line is seen.
 
 Broad word categories must be gated by line shape. Actions, major hierarchies,
 protocols, and routing families may be colored only when the current line looks
