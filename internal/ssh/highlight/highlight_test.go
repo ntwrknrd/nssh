@@ -30,7 +30,9 @@ func TestHighlightBypassesANSIControlAndLongLines(t *testing.T) {
 
 func TestJunosHighlightTokensAndPreservesText(t *testing.T) {
 	input := "set interfaces ge-0/0/0 unit 0 family inet address 192.0.2.1/32\n" +
+		"set interfaces lo0 unit 0 family inet6 address 2607:f4d0:1100::1/128\n" +
 		"set protocols bgp group transit peer-as AS64512 route-target target:64512:100\n" +
+		"set protocols bgp group ip6-border neighbor 2607:f4d0:1100::3\n" +
 		"ae0.10 up 00:11:22:33:44:55 vlan-id 100 active\n" +
 		"set routing-options static route 0.0.0.0/0 discard rejected inactive\n"
 
@@ -38,7 +40,7 @@ func TestJunosHighlightTokensAndPreservesText(t *testing.T) {
 	if stripANSI(out) != input {
 		t.Fatalf("stripANSI(output) = %q, want original input", stripANSI(out))
 	}
-	for _, token := range []string{"set", "interfaces", "ge-0/0/0", "192.0.2.1/32", "bgp", "AS64512", "target:64512:100", "ae0.10", "00:11:22:33:44:55", "up", "active", "discard", "rejected", "inactive", "routing-options"} {
+	for _, token := range []string{"set", "interfaces", "ge-0/0/0", "192.0.2.1/32", "2607:f4d0:1100::1/128", "2607:f4d0:1100::3", "bgp", "AS64512", "target:64512:100", "ae0.10", "00:11:22:33:44:55", "up", "active", "discard", "rejected", "inactive", "routing-options"} {
 		if !tokenHighlighted(out, token) {
 			t.Fatalf("token %q was not highlighted in %q", token, out)
 		}

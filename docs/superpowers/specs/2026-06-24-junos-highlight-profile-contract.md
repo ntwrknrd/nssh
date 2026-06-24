@@ -143,12 +143,15 @@ lines.
 Allowed identifier shapes:
 
 - IPv4 addresses and prefixes
+- IPv6 addresses and prefixes
 - MAC addresses
 - ASNs in `AS64512` form
 - route targets and route distinguishers in compact numeric forms
 - Junos interface names, including logical units
 
-IPv6 can be added later if the scanner can do it cheaply and safely.
+IPv6 matching should remain conservative: plain hextet and `::` compressed
+forms are allowed, but IPv4-embedded IPv6 forms can wait until there is a real
+operator need.
 
 ### States
 

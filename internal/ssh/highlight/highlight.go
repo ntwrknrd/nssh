@@ -230,7 +230,7 @@ func opensConfigStanza(rest []byte) bool {
 
 func classifyToken(ctx lineContext, token []byte) (Style, bool) {
 	switch {
-	case isMAC(token), isIPv4Token(token), isASN(token), isRouteTarget(token):
+	case isMAC(token), isIPv4Token(token), isIPv6Token(token), isASN(token), isRouteTarget(token):
 		return StyleCyan, true
 	case isInterface(token):
 		return StyleBlue, true
@@ -330,6 +330,66 @@ func isIPv4Token(token []byte) bool {
 		}
 	}
 	return octets == 4
+}
+
+func isIPv6Token(token []byte) bool {
+	if len(token) < 2 || indexByte(token, ':') < 0 {
+		return false
+	}
+	addrEnd := len(token)
+	if slash := indexByte(token, '/'); slash >= 0 {
+		addrEnd = slash
+		if slash == len(token)-1 || !parseRange(token[slash+1:], 0, 128) {
+			return false
+		}
+	}
+	addr := token[:addrEnd]
+	if len(addr) < 2 || indexByte(addr, '.') >= 0 {
+		return false
+	}
+
+	i := 0
+	groups := 0
+	compressed := false
+	if len(addr) >= 2 && addr[0] == ':' && addr[1] == ':' {
+		compressed = true
+		i = 2
+	}
+	for i < len(addr) {
+		start := i
+		for i < len(addr) && addr[i] != ':' {
+			if !isHex(addr[i]) {
+				return false
+			}
+			i++
+		}
+		if i == start || i-start > 4 {
+			return false
+		}
+		groups++
+		if groups > 8 {
+			return false
+		}
+		if i == len(addr) {
+			break
+		}
+		if i+1 < len(addr) && addr[i+1] == ':' {
+			if compressed {
+				return false
+			}
+			compressed = true
+			i += 2
+			continue
+		}
+		i++
+		if i == len(addr) {
+			return false
+		}
+	}
+	if compressed {
+		return groups < 8
+	}
+	return groups == 8
 }
 
 func parseRange(token []byte, minValue, maxValue int) bool {
