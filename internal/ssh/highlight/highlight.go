@@ -53,6 +53,9 @@ type Highlighter struct {
 	windowStart time.Time
 	windowBytes int
 	bypassUntil time.Time
+
+	lineContext lineContext
+	lineOpen    bool
 }
 
 type JunosProfile struct{}
@@ -74,6 +77,7 @@ func (h *Highlighter) Highlight(data []byte) []byte {
 		return data
 	}
 	if h.shouldBypassRate(len(data)) || containsUnsafe(data) {
+		h.resetLineContext()
 		return data
 	}
 
@@ -88,10 +92,14 @@ func (h *Highlighter) Highlight(data []byte) []byte {
 			lineEnd++
 		}
 		line := data[lineStart:lineEnd]
+		ctx := detectLineContext(line)
+		if lineStart == 0 && h.lineOpen {
+			ctx = h.lineContext
+		}
 		var spans []Span
 		if len(line) <= maxLineLength {
 			var stack [64]Span
-			spans = scanJunos(line, stack[:0])
+			spans = scanJunosWithContext(ctx, line, stack[:0])
 		}
 		if len(spans) > 0 && out == nil {
 			out = make([]byte, 0, len(data)+len(spans)*12)
@@ -104,12 +112,25 @@ func (h *Highlighter) Highlight(data []byte) []byte {
 				out = append(out, line...)
 			}
 		}
+		if len(line) > maxLineLength {
+			h.resetLineContext()
+		} else if len(line) > 0 && line[len(line)-1] == '\n' {
+			h.resetLineContext()
+		} else {
+			h.lineContext = ctx
+			h.lineOpen = true
+		}
 		lineStart = lineEnd
 	}
 	if out == nil {
 		return data
 	}
 	return out
+}
+
+func (h *Highlighter) resetLineContext() {
+	h.lineContext = lineContextFree
+	h.lineOpen = false
 }
 
 func (h *Highlighter) shouldBypassRate(n int) bool {
@@ -151,7 +172,10 @@ func (JunosProfile) Scan(line []byte) []Span {
 }
 
 func scanJunos(line []byte, spans []Span) []Span {
-	ctx := detectLineContext(line)
+	return scanJunosWithContext(detectLineContext(line), line, spans)
+}
+
+func scanJunosWithContext(ctx lineContext, line []byte, spans []Span) []Span {
 	for i := 0; i < len(line); {
 		if !isTokenByte(line[i]) {
 			i++

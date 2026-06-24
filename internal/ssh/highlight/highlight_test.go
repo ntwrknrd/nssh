@@ -136,6 +136,30 @@ func TestJunosHighlightGatesHierarchyAndProtocolsByLineContext(t *testing.T) {
 	}
 }
 
+func TestHighlighterCarriesConfigContextAcrossChunks(t *testing.T) {
+	h := New(Options{Enabled: true, Profile: ProfileJunos})
+	first := string(h.Highlight([]byte("set protocols ")))
+	second := string(h.Highlight([]byte("bgp group edge\n")))
+	third := string(h.Highlight([]byte("This system is monitored.\n")))
+
+	if stripANSI(first+second+third) != "set protocols bgp group edge\nThis system is monitored.\n" {
+		t.Fatalf("highlighting changed text: %q", stripANSI(first+second+third))
+	}
+	if !tokenHighlighted(second, "bgp") {
+		t.Fatalf("continued config chunk should highlight protocol context: %q", second)
+	}
+	if tokenHighlighted(third, "system") {
+		t.Fatalf("context should reset after newline: %q", third)
+	}
+
+	h = New(Options{Enabled: true, Profile: ProfileJunos})
+	_ = h.Highlight([]byte("set "))
+	out := string(h.Highlight([]byte("event-options policy STORM_CTL events l2ald_st_ctl_in_effect\n")))
+	if !tokenHighlighted(out, "event-options") {
+		t.Fatalf("continued config chunk should highlight hierarchy context: %q", out)
+	}
+}
+
 func TestJunosScanProducesDeterministicNonOverlappingSpans(t *testing.T) {
 	spans := JunosProfile{}.Scan([]byte("ge-0/0/0 192.0.2.1 down"))
 	if len(spans) != 3 {
