@@ -38,26 +38,45 @@ func TestJunosHighlightTokensAndPreservesText(t *testing.T) {
 	if stripANSI(out) != input {
 		t.Fatalf("stripANSI(output) = %q, want original input", stripANSI(out))
 	}
-	for _, want := range []string{
-		"\x1b[35mset\x1b[0m",
-		"\x1b[35minterfaces\x1b[0m",
-		"\x1b[34mge-0/0/0\x1b[0m",
-		"\x1b[36m192.0.2.1/32\x1b[0m",
-		"\x1b[35mbgp\x1b[0m",
-		"\x1b[36mAS64512\x1b[0m",
-		"\x1b[36mtarget:64512:100\x1b[0m",
-		"\x1b[34mae0.10\x1b[0m",
-		"\x1b[36m00:11:22:33:44:55\x1b[0m",
-		"\x1b[32mup\x1b[0m",
-		"\x1b[32mactive\x1b[0m",
-		"\x1b[31mdiscard\x1b[0m",
-		"\x1b[31mrejected\x1b[0m",
-		"\x1b[33minactive\x1b[0m",
-		"\x1b[35mrouting-options\x1b[0m",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("output missing %q in %q", want, out)
+	for _, token := range []string{"set", "interfaces", "ge-0/0/0", "192.0.2.1/32", "bgp", "AS64512", "target:64512:100", "ae0.10", "00:11:22:33:44:55", "up", "active", "discard", "rejected", "inactive", "routing-options"} {
+		if !tokenHighlighted(out, token) {
+			t.Fatalf("token %q was not highlighted in %q", token, out)
 		}
+	}
+}
+
+func TestJunosHighlightProfileContractColorsOnlyBroadCategories(t *testing.T) {
+	input := "set protocols bgp group ebgp neighbor 100.64.128.1 peer-as 65551\n" +
+		"set protocols ospf3 area 0.0.0.0 interface xe-8/0/0.0 bfd-liveness-detection minimum-interval 999\n" +
+		"set protocols mpls interface lo0.0\n" +
+		"set protocols lldp interface all\n" +
+		"set protocols l2-learning global-mac-table-aging-time 14700\n"
+
+	out := string(New(Options{Enabled: true, Profile: ProfileJunos}).Highlight([]byte(input)))
+	if stripANSI(out) != input {
+		t.Fatalf("stripANSI(output) = %q, want original input", stripANSI(out))
+	}
+
+	for _, token := range []string{"set", "protocols", "bgp", "ospf3", "mpls", "lldp", "l2-learning", "100.64.128.1", "xe-8/0/0.0", "lo0.0"} {
+		if !tokenHighlighted(out, token) {
+			t.Fatalf("token %q was not highlighted in %q", token, out)
+		}
+	}
+
+	for _, token := range []string{"group", "neighbor", "peer-as", "area", "interface", "bfd-liveness-detection", "minimum-interval", "global-mac-table-aging-time"} {
+		if tokenHighlighted(out, token) {
+			t.Fatalf("token %q should not be highlighted in %q", token, out)
+		}
+	}
+
+	actionStyle := tokenStyle(out, "set")
+	hierarchyStyle := tokenStyle(out, "protocols")
+	protocolStyle := tokenStyle(out, "bgp")
+	if actionStyle == "" || hierarchyStyle == "" || protocolStyle == "" {
+		t.Fatalf("missing category style: action=%q hierarchy=%q protocol=%q", actionStyle, hierarchyStyle, protocolStyle)
+	}
+	if actionStyle == hierarchyStyle || actionStyle == protocolStyle || hierarchyStyle == protocolStyle {
+		t.Fatalf("category styles should differ: action=%q hierarchy=%q protocol=%q", actionStyle, hierarchyStyle, protocolStyle)
 	}
 }
 
@@ -71,6 +90,23 @@ func TestJunosScanProducesDeterministicNonOverlappingSpans(t *testing.T) {
 			t.Fatalf("spans overlap: %#v", spans)
 		}
 	}
+}
+
+func tokenHighlighted(s, token string) bool {
+	return tokenStyle(s, token) != ""
+}
+
+func tokenStyle(s, token string) string {
+	target := token + "\x1b[0m"
+	idx := strings.Index(s, target)
+	if idx == -1 {
+		return ""
+	}
+	start := strings.LastIndex(s[:idx], "\x1b[")
+	if start == -1 {
+		return ""
+	}
+	return s[start:idx]
 }
 
 func stripANSI(s string) string {

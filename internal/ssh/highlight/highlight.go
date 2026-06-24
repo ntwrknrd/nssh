@@ -26,6 +26,8 @@ const (
 	StyleCyan
 	StyleBlue
 	StyleMagenta
+	StyleBrightMagenta
+	StyleBrightBlue
 )
 
 type Span struct {
@@ -176,12 +178,12 @@ func classifyWord(token []byte) (Style, bool) {
 		return StyleRed, true
 	case matchAny(token, "inactive", "pending", "hold", "stale", "hidden", "suppressed", "flapping", "degraded"):
 		return StyleYellow, true
-	case matchAny(token, "static", "direct", "local", "bgp", "ospf", "isis", "evpn", "ldp", "rsvp", "aggregate"):
-		return StyleMagenta, true
 	case matchAny(token, "set", "delete", "deleted", "deactivate", "activate", "annotate", "replace", "commit", "rollback", "changed"):
-		return StyleMagenta, true
+		return StyleBrightMagenta, true
 	case matchAny(token, "interfaces", "protocols", "routing-options", "policy-options", "firewall", "class-of-service", "routing-instances", "vlans", "bridge-domains", "system", "chassis"):
 		return StyleMagenta, true
+	case matchAny(token, "bgp", "ospf", "ospf3", "isis", "evpn", "ldp", "mpls", "rsvp", "lldp", "l2-learning", "static", "direct", "local", "aggregate"):
+		return StyleBrightBlue, true
 	default:
 		return 0, false
 	}
@@ -389,6 +391,10 @@ func styleStart(style Style) string {
 		return "\x1b[34m"
 	case StyleMagenta:
 		return "\x1b[35m"
+	case StyleBrightMagenta:
+		return "\x1b[95m"
+	case StyleBrightBlue:
+		return "\x1b[94m"
 	default:
 		return ""
 	}
