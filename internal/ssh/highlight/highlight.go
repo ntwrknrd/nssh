@@ -36,6 +36,13 @@ type Span struct {
 	Style Style
 }
 
+type lineContext uint8
+
+const (
+	lineContextFree lineContext = iota
+	lineContextConfig
+)
+
 type Profile interface {
 	Scan(line []byte) []Span
 }
@@ -144,6 +151,7 @@ func (JunosProfile) Scan(line []byte) []Span {
 }
 
 func scanJunos(line []byte, spans []Span) []Span {
+	ctx := detectLineContext(line)
 	for i := 0; i < len(line); {
 		if !isTokenByte(line[i]) {
 			i++
@@ -153,24 +161,60 @@ func scanJunos(line []byte, spans []Span) []Span {
 		for i < len(line) && isTokenByte(line[i]) {
 			i++
 		}
-		if style, ok := classifyToken(line[start:i]); ok {
+		if style, ok := classifyToken(ctx, line[start:i]); ok {
 			spans = append(spans, Span{Start: start, End: i, Style: style})
 		}
 	}
 	return spans
 }
 
-func classifyToken(token []byte) (Style, bool) {
+func detectLineContext(line []byte) lineContext {
+	i := 0
+	for i < len(line) && !isTokenByte(line[i]) {
+		i++
+	}
+	if i == len(line) {
+		return lineContextFree
+	}
+	start := i
+	for i < len(line) && isTokenByte(line[i]) {
+		i++
+	}
+	token := line[start:i]
+	if isActionWord(token) {
+		return lineContextConfig
+	}
+	if (isHierarchyWord(token) || isProtocolWord(token)) && opensConfigStanza(line[i:]) {
+		return lineContextConfig
+	}
+	return lineContextFree
+}
+
+func opensConfigStanza(rest []byte) bool {
+	for _, b := range rest {
+		switch b {
+		case ' ', '\t':
+			continue
+		case '{':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func classifyToken(ctx lineContext, token []byte) (Style, bool) {
 	switch {
 	case isMAC(token), isIPv4Token(token), isASN(token), isRouteTarget(token):
 		return StyleCyan, true
 	case isInterface(token):
 		return StyleBlue, true
 	}
-	return classifyWord(token)
+	return classifyWord(ctx, token)
 }
 
-func classifyWord(token []byte) (Style, bool) {
+func classifyWord(ctx lineContext, token []byte) (Style, bool) {
 	switch {
 	case matchAny(token, "up", "enabled", "established", "active", "selected", "forwarding", "reachable"):
 		return StyleGreen, true
@@ -178,15 +222,27 @@ func classifyWord(token []byte) (Style, bool) {
 		return StyleRed, true
 	case matchAny(token, "inactive", "pending", "hold", "stale", "hidden", "suppressed", "flapping", "degraded"):
 		return StyleYellow, true
-	case matchAny(token, "set", "delete", "deleted", "deactivate", "activate", "annotate", "replace", "commit", "rollback", "changed"):
+	case ctx == lineContextConfig && isActionWord(token):
 		return StyleBrightMagenta, true
-	case matchAny(token, "interfaces", "protocols", "routing-options", "policy-options", "firewall", "class-of-service", "routing-instances", "vlans", "bridge-domains", "system", "chassis"):
+	case ctx == lineContextConfig && isHierarchyWord(token):
 		return StyleMagenta, true
-	case matchAny(token, "bgp", "ospf", "ospf3", "isis", "evpn", "ldp", "mpls", "rsvp", "lldp", "l2-learning", "static", "direct", "local", "aggregate"):
+	case ctx == lineContextConfig && isProtocolWord(token):
 		return StyleBrightBlue, true
 	default:
 		return 0, false
 	}
+}
+
+func isActionWord(token []byte) bool {
+	return matchAny(token, "set", "delete", "deleted", "deactivate", "activate", "annotate", "replace", "commit", "rollback", "changed")
+}
+
+func isHierarchyWord(token []byte) bool {
+	return matchAny(token, "interfaces", "protocols", "routing-options", "policy-options", "firewall", "class-of-service", "routing-instances", "vlans", "bridge-domains", "system", "chassis")
+}
+
+func isProtocolWord(token []byte) bool {
+	return matchAny(token, "bgp", "ospf", "ospf3", "isis", "evpn", "ldp", "mpls", "rsvp", "lldp", "l2-learning", "static", "direct", "local", "aggregate")
 }
 
 func isTokenByte(b byte) bool {

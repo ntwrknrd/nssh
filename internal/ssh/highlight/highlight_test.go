@@ -30,9 +30,9 @@ func TestHighlightBypassesANSIControlAndLongLines(t *testing.T) {
 
 func TestJunosHighlightTokensAndPreservesText(t *testing.T) {
 	input := "set interfaces ge-0/0/0 unit 0 family inet address 192.0.2.1/32\n" +
-		"protocols bgp group transit peer-as AS64512 route-target target:64512:100\n" +
+		"set protocols bgp group transit peer-as AS64512 route-target target:64512:100\n" +
 		"ae0.10 up 00:11:22:33:44:55 vlan-id 100 active\n" +
-		"discard rejected inactive routing-options\n"
+		"set routing-options static route 0.0.0.0/0 discard rejected inactive\n"
 
 	out := string(New(Options{Enabled: true, Profile: ProfileJunos}).Highlight([]byte(input)))
 	if stripANSI(out) != input {
@@ -77,6 +77,34 @@ func TestJunosHighlightProfileContractColorsOnlyBroadCategories(t *testing.T) {
 	}
 	if actionStyle == hierarchyStyle || actionStyle == protocolStyle || hierarchyStyle == protocolStyle {
 		t.Fatalf("category styles should differ: action=%q hierarchy=%q protocol=%q", actionStyle, hierarchyStyle, protocolStyle)
+	}
+}
+
+func TestJunosHighlightGatesHierarchyAndProtocolsByLineContext(t *testing.T) {
+	input := "This system is for the use of authorized individuals only.\n" +
+		"Last login: Tue Apr 29 02:54:36 2025 from re1\n" +
+		"system use is monitored.\n" +
+		"set system host-name acm-lab-core1\n" +
+		"system {\n" +
+		"set protocols bgp group edge neighbor 100.64.128.1\n"
+
+	out := string(New(Options{Enabled: true, Profile: ProfileJunos}).Highlight([]byte(input)))
+	if stripANSI(out) != input {
+		t.Fatalf("stripANSI(output) = %q, want original input", stripANSI(out))
+	}
+	if firstLine := strings.SplitN(out, "\n", 2)[0]; tokenHighlighted(firstLine, "system") {
+		t.Fatalf("banner system should not be highlighted: %q", firstLine)
+	}
+	if loginLine := strings.Split(out, "\n")[1]; tokenHighlighted(loginLine, "from") {
+		t.Fatalf("login banner should not highlight free text: %q", loginLine)
+	}
+	if systemStartLine := strings.Split(out, "\n")[2]; tokenHighlighted(systemStartLine, "system") {
+		t.Fatalf("free text starting with system should not be highlighted: %q", systemStartLine)
+	}
+	for _, token := range []string{"set", "system", "protocols", "bgp", "100.64.128.1"} {
+		if !tokenHighlighted(out, token) {
+			t.Fatalf("token %q was not highlighted in config context: %q", token, out)
+		}
 	}
 }
 

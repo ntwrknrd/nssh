@@ -35,6 +35,7 @@ lines. It must not use regular expressions in the hot path.
 The scanner may classify a token using only:
 
 - the token bytes
+- the current line's cheap config-shape context
 - fixed built-in token sets
 - cheap token-shape checks
 
@@ -45,6 +46,22 @@ It must not depend on:
 - terminal cursor position
 - user-defined rules
 - heap-heavy parsing
+
+Broad word categories must be gated by line shape. Actions, major hierarchies,
+protocols, and routing families may be colored only when the current line looks
+like Junos configuration.
+
+For v1, a config-shaped line is one of:
+
+- a line whose first token is an allowed action word, such as `set` or `delete`
+- a stanza opener whose first token is an allowed major hierarchy, protocol, or
+  routing-family word followed by `{`
+
+Free text, login banners, MOTD text, shell prompts, and command output prose
+must not color broad Junos words just because the word appears in the text. For
+example, `This system is for authorized users only` must not color `system`.
+Identifier shapes and operational states may still be colored outside config
+shape because they carry useful signal in command output.
 
 ## Safety Contract
 
@@ -199,6 +216,8 @@ should prefer omission over low-value coloring.
 
 Tests for this profile must verify:
 
+- broad Junos words are gated by config-shaped lines
+- login banners and free text do not color broad Junos words
 - omitted words remain uncolored in realistic Junos `set` lines
 - actions, major hierarchies, protocols, identifiers, and states are colored
 - original text is preserved after stripping ANSI sequences
