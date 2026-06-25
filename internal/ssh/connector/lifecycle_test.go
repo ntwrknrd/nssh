@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -49,6 +50,34 @@ func TestStartPTYInheritsCurrentTerminalSizeBeforeChildRuns(t *testing.T) {
 
 	if got := strings.TrimSpace(string(out)); got != "33 132" {
 		t.Fatalf("child stty size = %q, want 33 132", got)
+	}
+}
+
+func TestHostKeyPreparationRendersTemporaryKnownHostsArgs(t *testing.T) {
+	prep := HostKeyPreparation{TempKnownHosts: "/tmp/nssh-known-hosts-test"}
+	want := []string{
+		"-o", "UserKnownHostsFile=/tmp/nssh-known-hosts-test",
+		"-o", "StrictHostKeyChecking=yes",
+	}
+	if got := prep.SSHArgs(); !slices.Equal(got, want) {
+		t.Fatalf("SSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestHostKeyPreparationCleanupRemovesTemporaryKnownHosts(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "known-hosts-*")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	path := f.Name()
+	if err := f.Close(); err != nil {
+		t.Fatalf("close temp file: %v", err)
+	}
+
+	HostKeyPreparation{TempKnownHosts: path}.Cleanup()
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("temp known_hosts still exists or stat failed with unexpected error: %v", err)
 	}
 }
 

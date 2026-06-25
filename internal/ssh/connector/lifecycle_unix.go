@@ -18,6 +18,39 @@ import (
 // errRestartRequired is a sentinel error indicating the connection should restart
 // with different SSH arguments (e.g., temp known_hosts for AcceptOnce).
 var errRestartRequired = errors.New("restart required")
+var errHostKeyPrepared = errors.New("host key prepared")
+
+type HostKeyPreparation struct {
+	TempKnownHosts string
+}
+
+func (p HostKeyPreparation) SSHArgs() []string {
+	if p.TempKnownHosts == "" {
+		return nil
+	}
+	return []string{
+		"-o", "UserKnownHostsFile=" + p.TempKnownHosts,
+		"-o", "StrictHostKeyChecking=yes",
+	}
+}
+
+func (p HostKeyPreparation) Cleanup() {
+	if p.TempKnownHosts != "" {
+		_ = os.Remove(p.TempKnownHosts)
+	}
+}
+
+func (c *Connector) PrepareHostKey(ctx context.Context) (*HostKeyPreparation, error) {
+	c.hostKeyPrepareOnly = true
+	c.preserveTempKnownHosts = true
+	err := c.Run(ctx)
+	if !errors.Is(err, errHostKeyPrepared) {
+		return nil, err
+	}
+	prep := &HostKeyPreparation{TempKnownHosts: c.tempKnownHosts}
+	c.tempKnownHosts = ""
+	return prep, nil
+}
 
 // Run is the main entry point for the connector. It handles the full lifecycle
 // including host key restart if needed.
@@ -62,7 +95,9 @@ func (c *Connector) Run(ctx context.Context) error {
 		}
 
 		c.closeSession()
-		c.cleanupTempFiles()
+		if !(errors.Is(err, errHostKeyPrepared) && c.preserveTempKnownHosts) {
+			c.cleanupTempFiles()
+		}
 		return err
 	}
 }
@@ -155,6 +190,18 @@ func (c *Connector) closeSession() {
 			slog.Debug("failed to close pty", "err", err)
 		}
 		c.ptyFile = nil
+	}
+}
+
+func (c *Connector) terminateChild() {
+	if c.sshCmd == nil || c.sshCmd.Process == nil {
+		return
+	}
+	if err := c.sshCmd.Process.Kill(); err != nil {
+		slog.Debug("failed to kill ssh child", "err", err)
+	}
+	if _, err := c.sshCmd.Process.Wait(); err != nil {
+		slog.Debug("failed to wait for killed ssh child", "err", err)
 	}
 }
 

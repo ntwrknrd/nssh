@@ -177,6 +177,9 @@ func (c *Connector) relay(ctx context.Context) error {
 		case <-stdinFallbackTimer.C:
 			// No PTY output received within the fallback window.
 			// Start stdin relay to handle commands that wait for input first.
+			if c.hostKeyPrepareOnly {
+				continue
+			}
 			c.hostKeyHandled = true
 			startStdinRelay()
 			continue
@@ -242,33 +245,23 @@ func (c *Connector) relay(ctx context.Context) error {
 			}
 		}
 
-		// PTY password injection is intentionally disabled while interactive
-		// askpass handles configured password auth. Keep this fallback recoverable
-		// for devices where OpenSSH askpass cannot satisfy the auth exchange.
 		suppressPrompt := false
-		if passwordPromptInjectionEnabled() && !c.passwordSent && matchPasswordPrompt(linearBuf) {
-			// Password prompt means we're past host key phase
+		if c.hostKeyPrepareOnly && matchPasswordPrompt(linearBuf) {
 			c.hostKeyHandled = true
 			EmitWithValue(TimingPasswordPrompt, time.Since(c.sessionStart))
-
-			if c.hasPasswordSource() {
-				// We have a password - inject it once
-				passwordTimer := StartTiming(TimingPasswordSent)
-				if err := c.injectPassword(ctx); err != nil {
-					slog.Debug("password injection failed", "err", err)
-				} else {
-					passwordTimer.Emit()
-					c.passwordSent = true
-					suppressPrompt = true
-				}
+			c.mu.Unlock()
+			c.terminateChild()
+			if currentResult.pooled {
+				poolBuf := currentResult.data[:cap(currentResult.data)]
+				bufferPool.Put(&poolBuf)
 			}
-			// If no password, let prompt through so user can type manually
+			return errHostKeyPrepared
 		}
 
 		// Start stdin relay once we're past host key handling phase.
 		// For known hosts with key auth, we never see a prompt, so start
 		// relay after first output that isn't a host key prompt.
-		if c.hostKeyHandled || (!matchUnknownHost(linearBuf) && !matchHostKeyChanged(linearBuf)) {
+		if !c.hostKeyPrepareOnly && (c.hostKeyHandled || (!matchUnknownHost(linearBuf) && !matchHostKeyChanged(linearBuf))) {
 			c.hostKeyHandled = true
 			startStdinRelay()
 		}

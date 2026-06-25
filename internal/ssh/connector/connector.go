@@ -56,6 +56,8 @@ type Connector struct {
 
 	useTemporaryKnownHosts bool   // Set by AcceptOnce, triggers restart with temp file
 	tempKnownHosts         string // Path to temp known_hosts, cleaned up on exit
+	hostKeyPrepareOnly     bool
+	preserveTempKnownHosts bool
 
 	// Terminal state for restoration
 	oldState *term.State
