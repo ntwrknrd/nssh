@@ -19,8 +19,8 @@ import (
 type RuntimeProvider struct {
 	mu          sync.RWMutex
 	executor    *providerexec.Executor
-	onePassword map[string]*OnePasswordProviderConfig
-	bitwarden   map[string]*BitwardenProviderConfig
+	onePassword map[string]*onePasswordProviderRuntime
+	bitwarden   map[string]*bitwardenProviderRuntime
 }
 
 type OnePasswordProviderConfig struct {
@@ -30,7 +30,10 @@ type OnePasswordProviderConfig struct {
 	Keepalive         bool
 	KeepaliveInterval time.Duration
 	KeepaliveTimeout  time.Duration
+}
 
+type onePasswordProviderRuntime struct {
+	OnePasswordProviderConfig
 	mu                   sync.RWMutex
 	keepaliveState       string
 	keepaliveCancel      context.CancelFunc
@@ -46,8 +49,12 @@ type SOPSAgeProviderConfig = providerexec.SOPSAgeProviderConfig
 type BitwardenProviderConfig struct {
 	Runner      BitwardenRunner
 	WarmSession bool
-	Session     string
-	mu          sync.RWMutex
+}
+
+type bitwardenProviderRuntime struct {
+	BitwardenProviderConfig
+	mu      sync.RWMutex
+	session string
 }
 
 type BitwardenRunner = providerexec.BitwardenRunner
@@ -78,8 +85,8 @@ type AccessStatus struct {
 func NewRuntimeProvider() *RuntimeProvider {
 	return &RuntimeProvider{
 		executor:    providerexec.NewExecutor(),
-		onePassword: make(map[string]*OnePasswordProviderConfig),
-		bitwarden:   make(map[string]*BitwardenProviderConfig),
+		onePassword: make(map[string]*onePasswordProviderRuntime),
+		bitwarden:   make(map[string]*bitwardenProviderRuntime),
 	}
 }
 
@@ -122,7 +129,7 @@ func (p *RuntimeProvider) Register1Password(name string, cfg OnePasswordProvider
 		p.executor = providerexec.NewExecutor()
 	}
 	if p.onePassword == nil {
-		p.onePassword = make(map[string]*OnePasswordProviderConfig)
+		p.onePassword = make(map[string]*onePasswordProviderRuntime)
 	}
 	if cfg.Runner == nil {
 		cfg.Runner = opCLIRunner{}
@@ -133,17 +140,19 @@ func (p *RuntimeProvider) Register1Password(name string, cfg OnePasswordProvider
 	if cfg.KeepaliveTimeout == 0 {
 		cfg.KeepaliveTimeout = 10 * time.Second
 	}
-	if cfg.Keepalive {
-		cfg.keepaliveState = onePasswordKeepaliveIdle
-	} else {
-		cfg.keepaliveState = onePasswordKeepaliveDisabled
-	}
 	p.executor.Register1Password(name, providerexec.OnePasswordProviderConfig{
 		Account: cfg.Account,
 		Vault:   cfg.Vault,
 		Runner:  cfg.Runner,
 	})
-	p.onePassword[name] = &cfg
+	runtimeCfg := &onePasswordProviderRuntime{
+		OnePasswordProviderConfig: cfg,
+		keepaliveState:            onePasswordKeepaliveDisabled,
+	}
+	if cfg.Keepalive {
+		runtimeCfg.keepaliveState = onePasswordKeepaliveIdle
+	}
+	p.onePassword[name] = runtimeCfg
 }
 
 func (p *RuntimeProvider) RegisterSOPSAge(name string, cfg SOPSAgeProviderConfig) {
@@ -162,7 +171,7 @@ func (p *RuntimeProvider) RegisterBitwarden(name string, cfg BitwardenProviderCo
 		p.executor = providerexec.NewExecutor()
 	}
 	if p.bitwarden == nil {
-		p.bitwarden = make(map[string]*BitwardenProviderConfig)
+		p.bitwarden = make(map[string]*bitwardenProviderRuntime)
 	}
 	if cfg.Runner == nil {
 		cfg.Runner = bwAgentCLIRunner{}
@@ -170,7 +179,7 @@ func (p *RuntimeProvider) RegisterBitwarden(name string, cfg BitwardenProviderCo
 	p.executor.RegisterBitwarden(name, providerexec.BitwardenProviderConfig{
 		Runner: cfg.Runner,
 	})
-	p.bitwarden[name] = &cfg
+	p.bitwarden[name] = &bitwardenProviderRuntime{BitwardenProviderConfig: cfg}
 }
 
 func (p *RuntimeProvider) HandleProviderRequest(ctx context.Context, req ProviderRequest) (ProviderResponse, error) {
@@ -194,7 +203,7 @@ func (p *RuntimeProvider) HandleProviderRequest(ctx context.Context, req Provide
 	case "get":
 		if bwCfg != nil && strings.TrimSpace(req.Session) == "" {
 			bwCfg.mu.RLock()
-			req.Session = strings.TrimSpace(bwCfg.Session)
+			req.Session = strings.TrimSpace(bwCfg.session)
 			bwCfg.mu.RUnlock()
 		}
 		resp, err := executor.HandleProviderRequest(ctx, req)
@@ -215,7 +224,7 @@ func (p *RuntimeProvider) Close() error {
 			continue
 		}
 		cfg.mu.Lock()
-		cfg.Session = ""
+		cfg.session = ""
 		cfg.mu.Unlock()
 	}
 	for _, cfg := range p.onePassword {
@@ -260,7 +269,7 @@ func (p *RuntimeProvider) AccessStatus() []AccessStatus {
 			continue
 		}
 		cfg.mu.RLock()
-		sessionActive := strings.TrimSpace(cfg.Session) != ""
+		sessionActive := strings.TrimSpace(cfg.session) != ""
 		cfg.mu.RUnlock()
 		entries = append(entries, AccessStatus{
 			Name:                 name,
@@ -273,7 +282,7 @@ func (p *RuntimeProvider) AccessStatus() []AccessStatus {
 	return entries
 }
 
-func (p *RuntimeProvider) handleBitwardenAuth(cfg *BitwardenProviderConfig, req ProviderRequest) (ProviderResponse, error) {
+func (p *RuntimeProvider) handleBitwardenAuth(cfg *bitwardenProviderRuntime, req ProviderRequest) (ProviderResponse, error) {
 	if cfg == nil {
 		return ProviderResponse{}, errors.New("credential provider is nil")
 	}
@@ -286,11 +295,11 @@ func (p *RuntimeProvider) handleBitwardenAuth(cfg *BitwardenProviderConfig, req 
 	}
 	cfg.mu.Lock()
 	defer cfg.mu.Unlock()
-	cfg.Session = session
+	cfg.session = session
 	return ProviderResponse{Found: true}, nil
 }
 
-func (cfg *OnePasswordProviderConfig) armKeepalive() {
+func (cfg *onePasswordProviderRuntime) armKeepalive() {
 	if cfg == nil || !cfg.Keepalive {
 		return
 	}
@@ -310,7 +319,7 @@ func (cfg *OnePasswordProviderConfig) armKeepalive() {
 	go cfg.runKeepalive(ctx)
 }
 
-func (cfg *OnePasswordProviderConfig) stopKeepalive() {
+func (cfg *onePasswordProviderRuntime) stopKeepalive() {
 	cfg.mu.Lock()
 	defer cfg.mu.Unlock()
 	if cfg.keepaliveCancel != nil {
@@ -319,7 +328,7 @@ func (cfg *OnePasswordProviderConfig) stopKeepalive() {
 	}
 }
 
-func (cfg *OnePasswordProviderConfig) runKeepalive(ctx context.Context) {
+func (cfg *onePasswordProviderRuntime) runKeepalive(ctx context.Context) {
 	for {
 		cfg.mu.RLock()
 		interval := cfg.KeepaliveInterval
@@ -348,7 +357,7 @@ func (cfg *OnePasswordProviderConfig) runKeepalive(ctx context.Context) {
 	}
 }
 
-func (cfg *OnePasswordProviderConfig) runKeepaliveTick(parent context.Context) error {
+func (cfg *onePasswordProviderRuntime) runKeepaliveTick(parent context.Context) error {
 	timeout := cfg.KeepaliveTimeout
 	if timeout <= 0 {
 		timeout = 10 * time.Second
@@ -363,7 +372,7 @@ func (cfg *OnePasswordProviderConfig) runKeepaliveTick(parent context.Context) e
 	return err
 }
 
-func (cfg *OnePasswordProviderConfig) accessStatus(name string) AccessStatus {
+func (cfg *onePasswordProviderRuntime) accessStatus(name string) AccessStatus {
 	cfg.mu.RLock()
 	defer cfg.mu.RUnlock()
 	status := AccessStatus{
