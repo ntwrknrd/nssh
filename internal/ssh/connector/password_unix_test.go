@@ -105,6 +105,12 @@ func TestInjectPasswordEmitsPasswordWriteTiming(t *testing.T) {
 	}
 }
 
+func TestPasswordPromptInjectionDisabledByDefault(t *testing.T) {
+	if passwordPromptInjectionEnabled() {
+		t.Fatal("PTY password prompt injection enabled by default")
+	}
+}
+
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 

@@ -77,6 +77,9 @@ func (c *Connector) start(ctx context.Context) error {
 	}
 	logOpenSSHCommand(args)
 	c.sshCmd = exec.CommandContext(ctx, "ssh", args...)
+	if len(c.env) > 0 {
+		c.sshCmd.Env = append(os.Environ(), c.env...)
+	}
 
 	ptyFile, err := startPTYWithInheritedSize(c.sshCmd)
 	if err != nil {

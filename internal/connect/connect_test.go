@@ -351,6 +351,62 @@ func TestRunResolvedRemoteCommandRequiresAskpassHelperForPassword(t *testing.T) 
 	}
 }
 
+func TestStartAskpassServerEnvUsesHelperEnvironment(t *testing.T) {
+	oldAskpassHelperPath := askpassHelperPathFunc
+	defer func() { askpassHelperPathFunc = oldAskpassHelperPath }()
+	askpassHelperPathFunc = func() (string, error) {
+		return "/tmp/nssh-askpass", nil
+	}
+
+	server, cancel, done, env, err := startAskpassServerEnv(context.Background(), func(context.Context) (*secret.Secret, error) {
+		return secret.NewFromString("secret"), nil
+	})
+	if err != nil {
+		t.Fatalf("startAskpassServerEnv: %v", err)
+	}
+	stopAskpassServer(server, cancel, done)
+
+	joined := strings.Join(env, "\n")
+	for _, want := range []string{
+		"SSH_ASKPASS=/tmp/nssh-askpass",
+		"SSH_ASKPASS_REQUIRE=force",
+		"DISPLAY=nssh-askpass",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("env = %q, want %q", joined, want)
+		}
+	}
+}
+
+func TestInteractiveAskpassEnabledByDefault(t *testing.T) {
+	t.Setenv("NSSH_EXPERIMENT_INTERACTIVE_ASKPASS", "")
+	if !interactiveAskpassEnabled() {
+		t.Fatal("interactive askpass disabled by default")
+	}
+}
+
+func TestInteractiveAskpassResolverUsesImmediatePassword(t *testing.T) {
+	password := secret.NewFromString("secret")
+	resolved := &ResolvedHost{
+		AuthMode: config.AuthModePassword,
+		Credential: &ResolvedCredential{
+			Password: password,
+		},
+	}
+
+	resolve := interactiveAskpassResolver(resolved, nil)
+	if resolve == nil {
+		t.Fatal("interactive askpass resolver is nil")
+	}
+	got, err := resolve(context.Background())
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != password {
+		t.Fatal("resolver did not return immediate password")
+	}
+}
+
 func TestRunResolvedRemoteCommandHotMuxSkipsAskpassAndPasswordResolver(t *testing.T) {
 	oldRunCapturedCommand := runCapturedCommandFunc
 	oldAskpassHelperPath := askpassHelperPathFunc

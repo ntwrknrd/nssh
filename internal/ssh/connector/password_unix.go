@@ -12,6 +12,10 @@ import (
 	"github.com/ntwrknrd/nssh/internal/secret"
 )
 
+func passwordPromptInjectionEnabled() bool {
+	return false
+}
+
 func (c *Connector) hasPasswordSource() bool {
 	c.passwordMu.Lock()
 	defer c.passwordMu.Unlock()

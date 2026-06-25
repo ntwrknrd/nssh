@@ -242,9 +242,11 @@ func (c *Connector) relay(ctx context.Context) error {
 			}
 		}
 
-		// Check for password prompts (only if we haven't already sent password)
+		// PTY password injection is intentionally disabled while interactive
+		// askpass handles configured password auth. Keep this fallback recoverable
+		// for devices where OpenSSH askpass cannot satisfy the auth exchange.
 		suppressPrompt := false
-		if !c.passwordSent && matchPasswordPrompt(linearBuf) {
+		if passwordPromptInjectionEnabled() && !c.passwordSent && matchPasswordPrompt(linearBuf) {
 			// Password prompt means we're past host key phase
 			c.hostKeyHandled = true
 			EmitWithValue(TimingPasswordPrompt, time.Since(c.sessionStart))

@@ -31,6 +31,7 @@ type Connector struct {
 	sshOptions       config.SSHHostConfig
 	sshVerbosity     int
 	acceptOnceMode   string
+	env              []string
 
 	passwordMu sync.Mutex
 
@@ -93,6 +94,10 @@ func (c *Connector) SetSSHOptions(opts config.SSHHostConfig) {
 
 func (c *Connector) SetSSHVerbosity(level int) {
 	c.sshVerbosity = level
+}
+
+func (c *Connector) SetEnv(env []string) {
+	c.env = append([]string(nil), env...)
 }
 
 func (c *Connector) LastOutput() string {
