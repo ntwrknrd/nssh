@@ -1,7 +1,9 @@
 package config
 
-import configexample "github.com/ntwrknrd/nssh/docs/examples/config"
+import _ "embed"
 
-// ExampleConfig contains the example configuration file.
+// ExampleConfig contains the commented initial configuration template.
 // This is copied during `nssh self init` if no config exists.
-var ExampleConfig = configexample.ExampleConfig
+//
+//go:embed example_config.yaml
+var ExampleConfig string

@@ -162,42 +162,11 @@ func TestHighlighterCarriesConfigContextAcrossChunks(t *testing.T) {
 	}
 }
 
-func TestHighlighterCarriesSplitTokensAcrossChunks(t *testing.T) {
+func TestHighlighterDoesNotWithholdTrailingTokens(t *testing.T) {
 	h := New(Options{Enabled: true, Profile: ProfileJunos})
-	first := string(h.Highlight([]byte("set protocols os")))
-	second := string(h.Highlight([]byte("pf3 area 0.0.0.0 interface xe-8/0/0.0\n")))
-
-	out := first + second
-	want := "set protocols ospf3 area 0.0.0.0 interface xe-8/0/0.0\n"
-	if stripANSI(out) != want {
-		t.Fatalf("stripANSI(output) = %q, want %q", stripANSI(out), want)
-	}
-	for _, token := range []string{"set", "protocols", "ospf3", "0.0.0.0", "xe-8/0/0.0"} {
-		if !tokenHighlighted(out, token) {
-			t.Fatalf("split token output missing highlight for %q: %q", token, out)
-		}
-	}
-
-	h = New(Options{Enabled: true, Profile: ProfileJunos})
-	first = string(h.Highlight([]byte("set protocols bgp group ip6-border bfd-liveness-detection m")))
-	second = string(h.Highlight([]byte("ultiplier 5\n")))
-	out = first + second
-	if stripANSI(out) != "set protocols bgp group ip6-border bfd-liveness-detection multiplier 5\n" {
-		t.Fatalf("split uncolored token changed text: %q", stripANSI(out))
-	}
-	if !tokenHighlighted(out, "set") || !tokenHighlighted(out, "protocols") || !tokenHighlighted(out, "bgp") {
-		t.Fatalf("split line lost earlier highlights: %q", out)
-	}
-
-	h = New(Options{Enabled: true, Profile: ProfileJunos})
-	first = string(h.Highlight([]byte("s")))
-	second = string(h.Highlight([]byte("et protocols bgp group ip6-border bfd-liveness-detection multiplier 5\n")))
-	out = first + second
-	if stripANSI(out) != "set protocols bgp group ip6-border bfd-liveness-detection multiplier 5\n" {
-		t.Fatalf("split leading token changed text: %q", stripANSI(out))
-	}
-	if !tokenHighlighted(out, "set") || !tokenHighlighted(out, "protocols") || !tokenHighlighted(out, "bgp") {
-		t.Fatalf("split leading token lost line context: %q", out)
+	out := string(h.Highlight([]byte("s")))
+	if out != "s" {
+		t.Fatalf("Highlight(%q) = %q, want immediate passthrough", "s", out)
 	}
 }
 

@@ -3,11 +3,13 @@ package connect
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/credential"
 	"github.com/ntwrknrd/nssh/internal/secret"
+	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 )
 
 type fakeCredentialProvider struct {
@@ -81,6 +83,46 @@ func setTestGroupAuth(cfg *config.Config, group string, auth config.InventoryAut
 	localProvider.Group[group] = config.GroupConfig{Auth: auth}
 	cfg.Inventory.Provider[config.ProviderLocal] = localProvider
 	return config.FormatInventoryGroupID(config.ProviderLocal, group)
+}
+
+func TestResolveHostForConnectEmitsPreSSHTimings(t *testing.T) {
+	t.Setenv("NSSH_DEBUG", "1")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type: config.ProviderLocal,
+			Hosts: map[string]config.InventoryHostConfig{
+				"edge01": {},
+			},
+		},
+	}
+
+	_, stderr := captureOutput(t, func() {
+		resolved, err := ResolveHostForConnect("edge01", "", cfg)
+		if err != nil {
+			t.Fatalf("ResolveHostForConnect: %v", err)
+		}
+		if resolved.Hostname != "edge01" {
+			t.Fatalf("hostname = %q, want edge01", resolved.Hostname)
+		}
+	})
+
+	for _, stage := range []string{
+		connector.TimingCatalogTotal,
+		connector.TimingProviderStateList,
+		connector.TimingProviderStateLoad,
+		connector.TimingCatalogLocalHosts,
+		connector.TimingCatalogProviderHosts,
+		connector.TimingAuthResolve,
+		connector.TimingCredentialRegistry,
+		connector.TimingCredentialLookup,
+	} {
+		if !strings.Contains(stderr, "NSSH_TIMING:"+stage+":") {
+			t.Fatalf("stderr = %q, want %s timing", stderr, stage)
+		}
+	}
 }
 
 func TestResolveBoundCredentialHostBindingWinsOverGroupBinding(t *testing.T) {
@@ -304,6 +346,34 @@ func TestResolveHostForConnectCarriesResolvedAuthMode(t *testing.T) {
 	}
 	if resolved.AuthMode != config.AuthModePassword {
 		t.Fatalf("auth mode = %q, want %q", resolved.AuthMode, config.AuthModePassword)
+	}
+}
+
+func TestResolveHostForConnectDoesNotUseGroupAuthForUngroupedLocalHost(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type: config.ProviderLocal,
+			Auth: config.InventoryAuthConfig{Mode: config.AuthModePassword, Username: "provider-user"},
+			Groups: map[string]config.GroupConfig{
+				"local": {Auth: config.InventoryAuthConfig{Username: "group-user"}},
+			},
+			Hosts: map[string]config.InventoryHostConfig{
+				"edge01.example.com": {Aliases: []string{"edge01"}},
+			},
+		},
+	}
+
+	resolved, err := ResolveHostForConnect("edge01", "", cfg)
+	if err != nil {
+		t.Fatalf("ResolveHostForConnect: %v", err)
+	}
+	if resolved.Group != "" {
+		t.Fatalf("group = %q, want empty", resolved.Group)
+	}
+	if resolved.Username != "provider-user" {
+		t.Fatalf("username = %q, want provider-user", resolved.Username)
 	}
 }
 

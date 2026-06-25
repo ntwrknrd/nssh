@@ -51,7 +51,7 @@ func runGet(hostName string) error {
 		inventoryHostSSHDisplayRows(host.Host, host.HostName, valueOrDash(host.User()), host.Port()),
 		append([]inventoryDisplayRow{
 			{Label: "Provider", Value: meta.Owner},
-			{Label: "Group", Value: meta.Group},
+			{Label: "Group", Value: valueOrDash(meta.Group)},
 		}, inventoryAuthDisplayRows(auth)...),
 	))
 	return nil

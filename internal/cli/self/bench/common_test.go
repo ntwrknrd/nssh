@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,6 +52,85 @@ func TestSortStageNamesOrdersLazyCredentialLookupAfterPasswordPrompt(t *testing.
 		connector.TimingPasswordSent,
 	}
 
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("sortStageNames = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestParseTimingOutputKeepsEnhancedDebugStages(t *testing.T) {
+	got := parseTimingOutput(strings.Join([]string{
+		"NSSH_TIMING:config_load:1.250",
+		"NSSH_TIMING:catalog_total:2.500",
+		"NSSH_TIMING:ssh_process_total:20.000",
+		"debug1: unrelated ssh output",
+	}, "\n"))
+
+	if got[connector.TimingConfigLoad] != 1250*time.Microsecond {
+		t.Fatalf("config_load = %s, want 1.25ms", got[connector.TimingConfigLoad])
+	}
+	if got[connector.TimingCatalogTotal] != 2500*time.Microsecond {
+		t.Fatalf("catalog_total = %s, want 2.5ms", got[connector.TimingCatalogTotal])
+	}
+	if got[connector.TimingSSHProcessTotal] != 20*time.Millisecond {
+		t.Fatalf("ssh_process_total = %s, want 20ms", got[connector.TimingSSHProcessTotal])
+	}
+}
+
+func TestParseTimingOutputAggregatesDuplicateStages(t *testing.T) {
+	got := parseTimingOutput(strings.Join([]string{
+		"NSSH_TIMING:config_load:1.000",
+		"NSSH_TIMING:config_load:2.500",
+	}, "\n"))
+
+	if got[connector.TimingConfigLoad] != 3500*time.Microsecond {
+		t.Fatalf("config_load = %s, want aggregate 3.5ms", got[connector.TimingConfigLoad])
+	}
+}
+
+func TestEnhancedTimingStagesHaveDescriptionsAndOrder(t *testing.T) {
+	stages := []string{
+		connector.TimingConfigLoad,
+		connector.TimingCatalogTotal,
+		connector.TimingProviderStateList,
+		connector.TimingProviderStateLoad,
+		connector.TimingCatalogLocalHosts,
+		connector.TimingCatalogProviderHosts,
+		connector.TimingAuthResolve,
+		connector.TimingCredentialRegistry,
+		connector.TimingCredentialLookup,
+		connector.TimingAskpassSetup,
+		connector.TimingSSHArgsBuild,
+		connector.TimingSSHProcessStart,
+		connector.TimingSSHProcessWait,
+		connector.TimingSSHProcessTotal,
+	}
+
+	for _, stage := range stages {
+		if StageDescriptions[stage] == "" {
+			t.Fatalf("missing description for %s", stage)
+		}
+	}
+
+	got := sortStageNames([]string{
+		connector.TimingSSHProcessTotal,
+		connector.TimingCredentialLookup,
+		connector.TimingConfigLoad,
+		connector.TimingCatalogTotal,
+		connector.TimingAskpassSetup,
+		connector.TimingSSHArgsBuild,
+		connector.TimingSSHProcessStart,
+	})
+	want := []string{
+		connector.TimingConfigLoad,
+		connector.TimingCatalogTotal,
+		connector.TimingCredentialLookup,
+		connector.TimingAskpassSetup,
+		connector.TimingSSHArgsBuild,
+		connector.TimingSSHProcessStart,
+		connector.TimingSSHProcessTotal,
+	}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("sortStageNames = %v, want %v", got, want)

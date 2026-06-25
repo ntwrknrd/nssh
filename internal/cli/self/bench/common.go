@@ -189,7 +189,7 @@ func parseTimingOutput(output string) map[string]time.Duration {
 			continue
 		}
 
-		timings[name] = time.Duration(ms * float64(time.Millisecond))
+		timings[name] += time.Duration(ms * float64(time.Millisecond))
 	}
 
 	return timings
@@ -410,7 +410,19 @@ func formatDuration(d time.Duration) string {
 // TimingStageOrder defines the logical order of timing stages for display.
 var TimingStageOrder = []string{
 	connector.TimingConfigLoad,
+	connector.TimingCatalogTotal,
+	connector.TimingProviderStateList,
+	connector.TimingProviderStateLoad,
+	connector.TimingCatalogLocalHosts,
+	connector.TimingCatalogProviderHosts,
+	connector.TimingAuthResolve,
+	connector.TimingCredentialRegistry,
 	connector.TimingCredentialLookup,
+	connector.TimingAskpassSetup,
+	connector.TimingSSHArgsBuild,
+	connector.TimingSSHProcessStart,
+	connector.TimingSSHProcessWait,
+	connector.TimingSSHProcessTotal,
 	connector.TimingPTYStart,
 	connector.TimingFirstRead,
 	connector.TimingPasswordPrompt,
@@ -424,7 +436,19 @@ var TimingStageOrder = []string{
 // StageDescriptions provides human-readable descriptions for timing stages.
 var StageDescriptions = map[string]string{
 	connector.TimingConfigLoad:           "Load config.yaml",
+	connector.TimingCatalogTotal:         "Build host catalog",
+	connector.TimingProviderStateList:    "List provider state files",
+	connector.TimingProviderStateLoad:    "Load provider state JSON files",
+	connector.TimingCatalogLocalHosts:    "Add local inventory hosts to catalog",
+	connector.TimingCatalogProviderHosts: "Add provider-backed hosts to catalog",
+	connector.TimingAuthResolve:          "Resolve inventory auth inheritance",
+	connector.TimingCredentialRegistry:   "Build credential provider registry",
 	connector.TimingCredentialLookup:     "Provider credential resolution",
+	connector.TimingAskpassSetup:         "Resolve password and start askpass helper",
+	connector.TimingSSHArgsBuild:         "Build OpenSSH argv",
+	connector.TimingSSHProcessStart:      "Start ssh subprocess",
+	connector.TimingSSHProcessWait:       "Drain ssh output and wait for exit",
+	connector.TimingSSHProcessTotal:      "Total ssh subprocess lifetime",
 	connector.TimingPTYStart:             "Spawn PTY + SSH process",
 	connector.TimingFirstRead:            "Time to first SSH data (banner/prompt)",
 	connector.TimingPasswordPrompt:       "Time to password prompt (from session start)",

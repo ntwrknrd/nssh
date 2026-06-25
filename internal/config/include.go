@@ -282,6 +282,10 @@ func (c *Config) InventoryProviderSource(provider string) string {
 	return source
 }
 
+func (c *Config) CredentialProviderSource(provider string) string {
+	return c.sourceFor("credential", "provider", provider)
+}
+
 func (c *Config) InventoryHostSource(name string) string {
 	source := c.sourceFor("inventory", "hosts", name)
 	if source == "" {

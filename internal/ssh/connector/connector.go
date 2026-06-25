@@ -12,7 +12,6 @@ import (
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/secret"
-	"github.com/ntwrknrd/nssh/internal/ssh/highlight"
 	"golang.org/x/term"
 )
 
@@ -32,7 +31,6 @@ type Connector struct {
 	sshOptions       config.SSHHostConfig
 	sshVerbosity     int
 	acceptOnceMode   string
-	highlighter      *highlight.Highlighter
 
 	passwordMu sync.Mutex
 
@@ -95,10 +93,6 @@ func (c *Connector) SetSSHOptions(opts config.SSHHostConfig) {
 
 func (c *Connector) SetSSHVerbosity(level int) {
 	c.sshVerbosity = level
-}
-
-func (c *Connector) SetHighlightOptions(options highlight.Options) {
-	c.highlighter = highlight.New(options)
 }
 
 func (c *Connector) LastOutput() string {

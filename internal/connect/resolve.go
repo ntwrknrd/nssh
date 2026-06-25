@@ -11,6 +11,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/credential"
 	"github.com/ntwrknrd/nssh/internal/secret"
+	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 )
 
@@ -58,7 +59,9 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 		c = cfg[0]
 	} else {
 		var err error
+		configTimer := connector.StartTiming(connector.TimingConfigLoad)
 		c, err = config.LoadDefault()
+		configTimer.Emit()
 		if err != nil {
 			return nil, err
 		}
@@ -85,18 +88,24 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 	authCtx := config.InventoryAuthContext{
 		Host:     hostData.Canonical,
 		Provider: hostData.Provider,
-		Group:    config.FormatInventoryGroupID(hostData.Provider, hostData.Group),
+		Group:    catalogGroupID(hostData.Provider, hostData.Group),
 	}
+	authTimer := connector.StartTiming(connector.TimingAuthResolve)
 	auth := c.ResolveInventoryAuth(authCtx)
+	authTimer.Emit()
 
 	// Resolve credentials
 	var cred *ResolvedCredential
 	credentialUser := auth.Username
+	registryTimer := connector.StartTiming(connector.TimingCredentialRegistry)
 	registry, err := credential.NewRegistry(c)
+	registryTimer.Emit()
 	if err != nil {
 		slog.Debug("credential registry not available", "err", err)
 	} else {
+		lookupTimer := connector.StartTiming(connector.TimingCredentialLookup)
 		cred, err = resolveInventoryCredential(registry, auth, explicitUser)
+		lookupTimer.Emit()
 		if err != nil {
 			slog.Warn("credential resolution failed", "err", err)
 		} else if cred != nil && credentialUser == "" {
@@ -132,7 +141,9 @@ func ResolveLiteralHostForConnect(query, explicitUser string, cfg ...*config.Con
 		c = cfg[0]
 	} else {
 		var err error
+		configTimer := connector.StartTiming(connector.TimingConfigLoad)
 		c, err = config.LoadDefault()
+		configTimer.Emit()
 		if err != nil {
 			return nil, err
 		}

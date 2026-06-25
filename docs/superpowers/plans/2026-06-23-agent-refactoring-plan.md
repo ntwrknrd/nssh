@@ -459,7 +459,7 @@ go test ./internal/agent ./internal/credential
 Manual check:
 
 ```shell
-nssh self init bitwarden
+nssh self init --cred bitwarden
 nssh self bench ssh <bitwarden-backed-host>
 ```
 

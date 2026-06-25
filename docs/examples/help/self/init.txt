@@ -1,9 +1,11 @@
 $ nssh self init --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh self init [sops-age|1password|bitwarden] [flags]                      │
+│   nssh self init [flags]            Initialize configuration                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Flags ──────────────────────────────────────────────────────────────────────╮
+│   --cred STRINGARRAY                add credential provider (sops-age, ...   │
 │   --dry-run                         preview changes without applying         │
+│   --inv STRINGARRAY                 add inventory provider (local, netb...   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

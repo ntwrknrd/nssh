@@ -236,6 +236,7 @@ func runReinstallDev() error {
 	// Build and install to ~/.local/bin
 	installDir := filepath.Join(homeDir(), ".local", "bin")
 	binPath := filepath.Join(installDir, "nssh")
+	askpassPath := filepath.Join(installDir, "nssh-askpass")
 
 	if err := os.MkdirAll(installDir, 0755); err != nil {
 		ui.Error("Failed to create install dir: %v", err)
@@ -244,11 +245,22 @@ func runReinstallDev() error {
 
 	var buildOutput []byte
 	err := ui.RunWithSpinner("", func() error {
-		buildCmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", binPath, "./cmd/nssh")
-		buildCmd.Dir = projectRoot
-		var runErr error
-		buildOutput, runErr = buildCmd.CombinedOutput()
-		return runErr
+		for _, target := range []struct {
+			output string
+			pkg    string
+		}{
+			{output: binPath, pkg: "./cmd/nssh"},
+			{output: askpassPath, pkg: "./cmd/nssh-askpass"},
+		} {
+			buildCmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", target.output, target.pkg)
+			buildCmd.Dir = projectRoot
+			out, runErr := buildCmd.CombinedOutput()
+			buildOutput = append(buildOutput, out...)
+			if runErr != nil {
+				return runErr
+			}
+		}
+		return nil
 	})
 	if len(buildOutput) > 0 {
 		fmt.Fprint(os.Stderr, string(buildOutput))
@@ -258,6 +270,7 @@ func runReinstallDev() error {
 		return &exit.ExitError{Code: 1}
 	}
 	fmt.Printf("Built %s\n", AbbreviatePath(binPath))
+	fmt.Printf("Built %s\n", AbbreviatePath(askpassPath))
 
 	// Check if ~/.local/bin is on PATH
 	if FindBinary() == "" {

@@ -11,7 +11,8 @@ generated OpenSSH config. That allowed nssh credential resolution to be current
 while host lookup, routing, auth policy, compatibility fixes, or OpenSSH defaults
 could still come from stale generated files.
 
-The maintained schema example is `docs/examples/config/config.example.yaml`.
+The maintained first-run config template is
+`internal/config/example_config.yaml`.
 
 ## Decision
 

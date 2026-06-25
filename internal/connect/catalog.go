@@ -30,6 +30,9 @@ type ResolvedHostData struct {
 }
 
 func BuildHostCatalog(cfg *config.Config) (*HostCatalog, error) {
+	timer := connector.StartTiming(connector.TimingCatalogTotal)
+	defer timer.Emit()
+
 	states, err := loadProviderStates()
 	if err != nil {
 		return nil, err
@@ -38,10 +41,15 @@ func BuildHostCatalog(cfg *config.Config) (*HostCatalog, error) {
 }
 
 func loadProviderStates() ([]*inventory.ProviderState, error) {
+	listTimer := connector.StartTiming(connector.TimingProviderStateList)
 	names, err := inventory.ListProviderStates()
+	listTimer.Emit()
 	if err != nil {
 		return nil, err
 	}
+	loadTimer := connector.StartTiming(connector.TimingProviderStateLoad)
+	defer loadTimer.Emit()
+
 	states := make([]*inventory.ProviderState, 0, len(names))
 	for _, name := range names {
 		state, err := inventory.LoadProviderState(name)
@@ -67,14 +75,19 @@ func buildHostCatalog(cfg *config.Config, states []*inventory.ProviderState) (*H
 	if len(providers) == 0 {
 		providers = cfg.Inventory.Provider
 	}
+	localTimer := connector.StartTiming(connector.TimingCatalogLocalHosts)
 	for providerName, provider := range providers {
 		provider = normalizeCatalogProvider(provider)
 		if provider.Type == config.ProviderLocal {
 			if err := cat.addLocalHosts(cfg, providerName, provider); err != nil {
+				localTimer.Emit()
 				return nil, err
 			}
 		}
 	}
+	localTimer.Emit()
+
+	providerTimer := connector.StartTiming(connector.TimingCatalogProviderHosts)
 	for _, state := range states {
 		if state == nil {
 			continue
@@ -92,19 +105,20 @@ func buildHostCatalog(cfg *config.Config, states []*inventory.ProviderState) (*H
 			cat.add(data)
 		}
 	}
+	providerTimer.Emit()
 	return cat, nil
 }
 
 func (c *HostCatalog) addLocalHosts(cfg *config.Config, providerName string, provider config.InventoryProviderConfig) error {
 	for name, host := range provider.Hosts {
-		if strings.TrimSpace(host.Group) == "" {
-			return fmt.Errorf("inventory.providers.%s.hosts.%s.group is required", providerName, name)
+		if strings.TrimSpace(host.Group) != "" {
+			if _, ok := provider.Groups[host.Group]; !ok {
+				return fmt.Errorf("inventory.providers.%s.hosts.%s.group references unknown group %q", providerName, name, host.Group)
+			}
 		}
-		if _, ok := provider.Groups[host.Group]; !ok {
-			return fmt.Errorf("inventory.providers.%s.hosts.%s.group references unknown group %q", providerName, name, host.Group)
-		}
-		auth := cfg.ResolveInventoryAuth(config.InventoryAuthContext{Host: name, Provider: providerName, Group: config.FormatInventoryGroupID(providerName, host.Group)})
+		auth := cfg.ResolveInventoryAuth(config.InventoryAuthContext{Host: name, Provider: providerName, Group: catalogGroupID(providerName, host.Group)})
 		ssh := mergeCatalogSSH(cfg, provider, host.Group, host.SSH)
+		ssh = applyAuthModeSSH(ssh, auth.AuthMode)
 		highlight := mergeCatalogHighlight(cfg, provider, host.Group, host.Highlight)
 		c.add(&ResolvedHostData{
 			Canonical: name,
@@ -120,6 +134,13 @@ func (c *HostCatalog) addLocalHosts(cfg *config.Config, providerName string, pro
 		})
 	}
 	return nil
+}
+
+func catalogGroupID(providerName, group string) string {
+	if strings.TrimSpace(group) == "" {
+		return ""
+	}
+	return config.FormatInventoryGroupID(providerName, group)
 }
 
 func resolvedHostFromState(cfg *config.Config, state *inventory.ProviderState, provider config.InventoryProviderConfig, host *inventory.ProviderHost, cat *HostCatalog) *ResolvedHostData {
@@ -140,12 +161,13 @@ func resolvedHostFromState(cfg *config.Config, state *inventory.ProviderState, p
 	auth := cfg.ResolveInventoryAuth(config.InventoryAuthContext{
 		Host:     host.HostName,
 		Provider: providerName,
-		Group:    config.FormatInventoryGroupID(providerName, group),
+		Group:    catalogGroupID(providerName, group),
 	})
 	aliases := slices.Clone(host.Patterns)
 	aliases = appendUnique(aliases, overlay.Aliases...)
 	ssh := mergeProviderStateSSH(cfg, state, provider, group, overlay.SSH)
 	ssh = applyProviderStateSSH(ssh, host, state, cat)
+	ssh = applyAuthModeSSH(ssh, auth.AuthMode)
 	highlight := mergeCatalogHighlight(cfg, provider, group, overlay.Highlight)
 	canonical := firstNonEmpty(host.Host, firstString(aliases), host.HostName)
 	return &ResolvedHostData{
@@ -182,6 +204,18 @@ func mergeProviderStateSSH(cfg *config.Config, state *inventory.ProviderState, p
 		return config.MergeSSH(ssh, host)
 	}
 	return mergeCatalogSSH(cfg, provider, group, host)
+}
+
+func applyAuthModeSSH(ssh config.SSHHostConfig, authMode string) config.SSHHostConfig {
+	if authMode != config.AuthModePassword {
+		return ssh
+	}
+	if ssh.Options == nil {
+		ssh.Options = make(config.SSHOptions)
+	}
+	ssh.Options["PreferredAuthentications"] = config.NewSSHOptionString("keyboard-interactive,password")
+	ssh.Options["PubkeyAuthentication"] = config.NewSSHOptionBool(false)
+	return ssh
 }
 
 func mergeCatalogHighlight(cfg *config.Config, provider config.InventoryProviderConfig, group string, host config.HighlightConfig) config.HighlightConfig {

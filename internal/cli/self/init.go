@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ui"
@@ -19,9 +20,10 @@ import (
 
 // InitOptions configures the behavior of runInit.
 type InitOptions struct {
-	DryRun                 bool   // preview mode, no changes made
-	Quiet                  bool   // minimal output
-	CredentialProviderType string // optional provider setup target
+	DryRun                  bool     // preview mode, no changes made
+	Quiet                   bool     // minimal output
+	CredentialProviderTypes []string // optional credential provider setup targets
+	InventoryProviderTypes  []string // optional inventory provider setup targets
 }
 
 type initWarningError struct {
@@ -34,6 +36,11 @@ func (e initWarningError) Error() string {
 
 type initConfigResult int
 
+type initConfigOutcome struct {
+	result             initConfigResult
+	inventoryProviders []initInventoryProviderRequest
+}
+
 const (
 	initConfigContinue initConfigResult = iota
 	initConfigStop
@@ -44,7 +51,7 @@ func NewInitCmd() *cobra.Command {
 	var opts InitOptions
 
 	cmd := &cobra.Command{
-		Use:   "init [sops-age|1password|bitwarden]",
+		Use:   "init [flags]",
 		Short: "Initialize configuration",
 		Long: `Initialize nssh configuration.
 
@@ -52,37 +59,48 @@ Credentials are resolved through configured providers such as SOPS+age, 1Passwor
 or Bitwarden. The runtime agent brokers credential provider access.
 
 To start fresh, use 'nssh self reset'.`,
-		Args: validateInitArgs,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 {
-				opts.CredentialProviderType = args[0]
+			_ = args
+			if err := validateInitProviderFlags(opts); err != nil {
+				return err
 			}
 			return runInit(opts)
 		},
 	}
 
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "preview changes without applying")
+	cmd.Flags().StringArrayVar(&opts.CredentialProviderTypes, "cred", nil, "add credential provider (sops-age, 1password, bitwarden)")
+	cmd.Flags().StringArrayVar(&opts.InventoryProviderTypes, "inv", nil, "add inventory provider (local, netbox, containerlab)")
 
 	return cmd
 }
 
-func validateInitArgs(_ *cobra.Command, args []string) error {
-	if len(args) > 1 {
-		return fmt.Errorf("accepts at most one provider argument")
+func validateInitProviderFlags(opts InitOptions) error {
+	for _, providerType := range opts.CredentialProviderTypes {
+		switch providerType {
+		case config.CredentialProviderSOPSAge, config.CredentialProvider1Password, config.CredentialProviderBitwarden:
+		default:
+			return fmt.Errorf("unsupported credential provider %q", providerType)
+		}
 	}
-	if len(args) == 0 {
-		return nil
+	for _, providerType := range opts.InventoryProviderTypes {
+		switch providerType {
+		case config.ProviderLocal, config.ProviderNetBox, config.ProviderContainerlab:
+		default:
+			return fmt.Errorf("unsupported inventory provider %q", providerType)
+		}
 	}
-	switch args[0] {
-	case config.CredentialProviderSOPSAge, config.CredentialProvider1Password, config.CredentialProviderBitwarden:
-		return nil
-	default:
-		return fmt.Errorf("unsupported credential provider %q", args[0])
-	}
+	return nil
+}
+
+func (o InitOptions) hasProviderSetup() bool {
+	return len(o.CredentialProviderTypes) > 0 || len(o.InventoryProviderTypes) > 0
 }
 
 func runInit(opts InitOptions) error {
 	paths := config.DefaultPaths()
+	initOutcome := initConfigOutcome{result: initConfigContinue}
 
 	// Header (skip in quiet mode)
 	if !opts.Quiet {
@@ -109,24 +127,21 @@ func runInit(opts InitOptions) error {
 			// Build from source and install to ~/.local/bin
 			ui.Info("Binary not on PATH, building from source...")
 			installDir := filepath.Join(homeDir(), ".local", "bin")
-			binaryPath = filepath.Join(installDir, "nssh")
 
 			if !opts.DryRun {
-				if err := os.MkdirAll(installDir, 0755); err != nil {
-					return fmt.Errorf("create install dir: %w", err)
-				}
-
-				buildCmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/nssh")
-				buildCmd.Dir = projectRoot
-				buildCmd.Stdout = os.Stdout
-				buildCmd.Stderr = os.Stderr
-
-				if err := buildCmd.Run(); err != nil {
+				builtNSSH, builtAskpass, err := buildSourceInstall(projectRoot, installDir)
+				if err != nil {
 					ui.Error("Build failed: %v", err)
 					return fmt.Errorf("build failed: %w", err)
 				}
+				binaryPath = builtNSSH
+				ui.Success("Installed: %s", AbbreviatePath(binaryPath))
+				ui.Success("Installed: %s", AbbreviatePath(builtAskpass))
+			} else {
+				binaryPath = filepath.Join(installDir, "nssh")
+				ui.Success("Installed: %s", AbbreviatePath(binaryPath))
+				ui.Success("Installed: %s", AbbreviatePath(filepath.Join(installDir, "nssh-askpass")))
 			}
-			ui.Success("Installed: %s", AbbreviatePath(binaryPath))
 
 			// Check if ~/.local/bin is on PATH
 			if FindBinary() == "" && !opts.DryRun {
@@ -149,7 +164,7 @@ func runInit(opts InitOptions) error {
 
 	// Install example config if none exists (skip in quiet mode)
 	if !opts.Quiet {
-		result, err := ensureInitConfig(paths, opts)
+		outcome, err := ensureInitConfig(paths, opts)
 		if err != nil {
 			if isInitWarning(err) || ui.IsUserAbort(err) {
 				ui.Warning("%v", err)
@@ -157,10 +172,11 @@ func runInit(opts InitOptions) error {
 			}
 			return err
 		}
-		if result == initConfigStop {
+		initOutcome = outcome
+		if outcome.result == initConfigStop {
 			return nil
 		}
-		if opts.CredentialProviderType != "" {
+		if opts.hasProviderSetup() {
 			return nil
 		}
 		ui.Info("Credential provider authentication is owned by SOPS+age, 1Password, or Bitwarden.")
@@ -238,7 +254,7 @@ func runInit(opts InitOptions) error {
 
 	// Show next steps for new users (skip in quiet mode)
 	if !opts.Quiet && finalStatus == ui.StatusSuccess {
-		showNextSteps()
+		showNextSteps(paths, initOutcome.inventoryProviders)
 	}
 
 	// Footer (skip in quiet mode)
@@ -248,86 +264,142 @@ func runInit(opts InitOptions) error {
 	return nil
 }
 
+func buildSourceInstall(projectRoot, installDir string) (string, string, error) {
+	if err := os.MkdirAll(installDir, 0755); err != nil {
+		return "", "", fmt.Errorf("create install dir: %w", err)
+	}
+	binPath := filepath.Join(installDir, "nssh")
+	askpassPath := filepath.Join(installDir, "nssh-askpass")
+	for _, target := range []struct {
+		output string
+		pkg    string
+	}{
+		{output: binPath, pkg: "./cmd/nssh"},
+		{output: askpassPath, pkg: "./cmd/nssh-askpass"},
+	} {
+		buildCmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", target.output, target.pkg)
+		buildCmd.Dir = projectRoot
+		buildCmd.Stdout = os.Stdout
+		buildCmd.Stderr = os.Stderr
+		if err := buildCmd.Run(); err != nil {
+			return "", "", err
+		}
+	}
+	return binPath, askpassPath, nil
+}
+
 // showNextSteps displays guidance for new users after successful init.
-func showNextSteps() {
+func showNextSteps(paths *config.Paths, inventoryProviders []initInventoryProviderRequest) {
 	ui.SubSection("Next Steps")
 
-	steps := []string{
-		"Create a group: nssh inv set local/<name>",
-		"Add your first host: nssh inv set <host>",
-		"Connect: nssh <hostname>",
-	}
+	steps := initNextSteps(paths, inventoryProviders)
 
 	ui.NumberedList(steps)
 	fmt.Println()
 	ui.Info("Run 'nssh --help' for more commands")
 }
 
-func ensureInitConfig(paths *config.Paths, opts InitOptions) (initConfigResult, error) {
+func initNextSteps(paths *config.Paths, inventoryProviders []initInventoryProviderRequest) []string {
+	configFile := "~/.config/nssh/config.yaml"
+	configDir := "~/.config/nssh"
+	if paths != nil {
+		configFile = AbbreviatePath(paths.ConfigFile)
+		configDir = AbbreviatePath(paths.ConfigDir)
+	}
+
+	steps := []string{
+		"Review " + configFile + " and uncomment only the root examples you want active.",
+	}
+	if len(inventoryProviders) == 0 {
+		return append(steps,
+			"Add inventory later with nssh self init --inv local, --inv netbox, or --inv containerlab.",
+			"Connect after inventory exists: nssh <hostname>.",
+		)
+	}
+
+	for _, provider := range inventoryProviders {
+		path := providerConfigDisplayPath(configDir, "inventory", provider.Name)
+		switch provider.Type {
+		case config.ProviderLocal:
+			steps = append(steps,
+				"Local inventory: edit "+path+" to create groups/hosts, or use nssh inv set -g local/<group> and nssh inv set <host>.",
+			)
+		case config.ProviderNetBox:
+			steps = append(steps,
+				"NetBox inventory: edit "+path+" to create match groups, export the configured URL/token env vars, then run nssh inv refresh "+provider.Name+".",
+			)
+		case config.ProviderContainerlab:
+			steps = append(steps,
+				"Containerlab inventory: edit "+path+" to set kind/state match groups and verify jump_host, then run nssh inv refresh "+provider.Name+".",
+			)
+		}
+	}
+	steps = append(steps, "Inspect resolved inventory with nssh inv list and nssh inv get <host> before connecting.")
+	return steps
+}
+
+func providerConfigDisplayPath(configDir, subdir, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "provider"
+	}
+	return filepath.Join(configDir, subdir, name+".yaml")
+}
+
+func ensureInitConfig(paths *config.Paths, opts InitOptions) (initConfigOutcome, error) {
 	if _, err := os.Stat(paths.ConfigFile); err == nil {
-		cfg, loadErr := config.Load(paths.ConfigFile)
-		if loadErr != nil {
-			return initConfigStop, loadErr
+		if opts.hasProviderSetup() {
+			cfg, loadErr := config.Load(paths.ConfigFile)
+			if loadErr != nil {
+				return initConfigOutcome{result: initConfigStop}, loadErr
+			}
+			if err := applyProviderSetups(paths, cfg, opts, uiInitPrompter{}); err != nil {
+				return initConfigOutcome{result: initConfigStop}, err
+			}
+			return initConfigOutcome{result: initConfigContinue}, nil
 		}
-		if opts.CredentialProviderType != "" {
-			return initConfigContinue, applyCredentialProviderSetup(paths, cfg, opts.CredentialProviderType, uiInitPrompter{}, opts.DryRun)
-		}
-		ui.Success("Config file: %s", AbbreviatePath(paths.ConfigFile))
-		showExistingInitNextCommands()
-		return initConfigStop, nil
+		ui.Warning("Config file exists, skipping init: %s", AbbreviatePath(paths.ConfigFile))
+		ui.Info("Run 'nssh self reset' to start fresh.")
+		return initConfigOutcome{result: initConfigStop}, nil
 	} else if err != nil && !os.IsNotExist(err) {
-		return initConfigStop, err
+		return initConfigOutcome{result: initConfigStop}, err
 	}
 
 	var req initPlanRequest
 	var err error
-	if opts.CredentialProviderType != "" {
-		provider, promptErr := explicitCredentialProviderRequest(uiInitPrompter{}, opts.CredentialProviderType)
-		if promptErr != nil {
-			return initConfigStop, promptErr
-		}
-		req = initPlanRequest{
-			CredentialProviders: []initCredentialProviderRequest{provider},
+	if opts.hasProviderSetup() {
+		req, err = explicitInitPlanRequest(uiInitPrompter{}, opts)
+		if err != nil {
+			return initConfigOutcome{result: initConfigStop}, err
 		}
 	} else {
 		req, err = promptInitPlanRequest(uiInitPrompter{}, nil)
 		if err != nil {
-			return initConfigStop, err
+			return initConfigOutcome{result: initConfigStop}, err
 		}
 	}
 	plan, err := buildInitPlan(req)
 	if err != nil {
-		return initConfigStop, err
+		return initConfigOutcome{result: initConfigStop}, err
 	}
 
 	ui.Info("%s", plan.Summary())
 	if opts.DryRun {
-		return initConfigContinue, nil
+		return initConfigOutcome{result: initConfigContinue, inventoryProviders: plan.InventoryProviders}, nil
 	}
 	if err := prepareCredentialProviders(req.CredentialProviders, uiInitPrompter{}, opts.DryRun); err != nil {
-		return initConfigStop, err
+		return initConfigOutcome{result: initConfigStop}, err
 	}
 	if err := applyInitPlan(paths, plan); err != nil {
-		return initConfigStop, err
+		return initConfigOutcome{result: initConfigStop}, err
 	}
 	ui.Success("Config file: %s", AbbreviatePath(paths.ConfigFile))
-	return initConfigContinue, nil
+	return initConfigOutcome{result: initConfigContinue, inventoryProviders: plan.InventoryProviders}, nil
 }
 
 func isInitWarning(err error) bool {
 	_, ok := err.(initWarningError)
 	return ok
-}
-
-func showExistingInitNextCommands() {
-	ui.SubSection("Next Commands")
-	ui.NumberedList([]string{
-		"nssh self init sops-age",
-		"nssh self init 1password",
-		"nssh self init bitwarden",
-		"nssh inv set <host-or-group>",
-	})
-	fmt.Println()
 }
 
 // getLatestGitHubRelease fetches the latest release version from GitHub API.

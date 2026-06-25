@@ -10,7 +10,6 @@ const (
 	rateWindow          = 100 * time.Millisecond
 	rateBypassDuration  = 250 * time.Millisecond
 	rateWindowByteLimit = 64 << 20
-	maxPendingToken     = 256
 )
 
 type Options struct {
@@ -57,9 +56,6 @@ type Highlighter struct {
 
 	lineContext lineContext
 	lineOpen    bool
-
-	pendingToken    [maxPendingToken]byte
-	pendingTokenLen int
 }
 
 type JunosProfile struct{}
@@ -77,18 +73,13 @@ func New(options Options) *Highlighter {
 }
 
 func (h *Highlighter) Highlight(data []byte) []byte {
-	if h == nil || h.profile == nil {
-		return data
-	}
-	data = h.prependPendingToken(data)
-	if len(data) == 0 {
+	if h == nil || h.profile == nil || len(data) == 0 {
 		return data
 	}
 	if h.shouldBypassRate(len(data)) || containsUnsafe(data) {
 		h.resetLineContext()
 		return data
 	}
-	data = h.holdTrailingToken(data)
 
 	var out []byte
 	lineStart := 0
@@ -140,34 +131,6 @@ func (h *Highlighter) Highlight(data []byte) []byte {
 func (h *Highlighter) resetLineContext() {
 	h.lineContext = lineContextFree
 	h.lineOpen = false
-}
-
-func (h *Highlighter) prependPendingToken(data []byte) []byte {
-	if h.pendingTokenLen == 0 {
-		return data
-	}
-	combined := make([]byte, h.pendingTokenLen+len(data))
-	copy(combined, h.pendingToken[:h.pendingTokenLen])
-	copy(combined[h.pendingTokenLen:], data)
-	h.pendingTokenLen = 0
-	return combined
-}
-
-func (h *Highlighter) holdTrailingToken(data []byte) []byte {
-	if len(data) == 0 || !isTokenByte(data[len(data)-1]) {
-		return data
-	}
-	start := len(data) - 1
-	for start > 0 && isTokenByte(data[start-1]) {
-		start--
-	}
-	tokenLen := len(data) - start
-	if tokenLen > maxPendingToken {
-		return data
-	}
-	copy(h.pendingToken[:], data[start:])
-	h.pendingTokenLen = tokenLen
-	return data[:start]
 }
 
 func (h *Highlighter) shouldBypassRate(n int) bool {

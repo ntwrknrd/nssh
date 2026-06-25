@@ -1,11 +1,13 @@
 package app
 
 import (
+	"context"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/ntwrknrd/nssh/internal/connect"
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
 
@@ -124,6 +126,62 @@ func TestRootCommandRegistersPublicCommands(t *testing.T) {
 	want := []string{"agent", "cp", "inv", "log", "self"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("public commands = %v, want %v", got, want)
+	}
+}
+
+func TestSmartConnectPassesRemoteCommandAsParsedRequest(t *testing.T) {
+	oldConnectRequest := connectRequestFunc
+	defer func() { connectRequestFunc = oldConnectRequest }()
+
+	var got connect.Request
+	connectRequestFunc = func(_ context.Context, req connect.Request) error {
+		got = req
+		return nil
+	}
+
+	err := execute(Options{Version: "test"}, []string{"edge01", "show", "version"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if got.Host != "edge01" {
+		t.Fatalf("host = %q, want edge01", got.Host)
+	}
+	if got.LiteralTarget {
+		t.Fatal("literal target should be false")
+	}
+	if len(got.SSHArgs) != 0 {
+		t.Fatalf("ssh args = %#v, want none", got.SSHArgs)
+	}
+	if len(got.RemoteCommand) != 2 || got.RemoteCommand[0] != "show" || got.RemoteCommand[1] != "version" {
+		t.Fatalf("remote command = %#v", got.RemoteCommand)
+	}
+}
+
+func TestSmartConnectPreservesLiteralTargetAndSSHArgsInParsedRequest(t *testing.T) {
+	oldConnectRequest := connectRequestFunc
+	defer func() { connectRequestFunc = oldConnectRequest }()
+
+	var got connect.Request
+	connectRequestFunc = func(_ context.Context, req connect.Request) error {
+		got = req
+		return nil
+	}
+
+	err := execute(Options{Version: "test"}, []string{"-p", "2222", "--target", "log", "show", "version"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if got.Host != "log" {
+		t.Fatalf("host = %q, want log", got.Host)
+	}
+	if !got.LiteralTarget {
+		t.Fatal("literal target should be true")
+	}
+	if len(got.SSHArgs) != 2 || got.SSHArgs[0] != "-p" || got.SSHArgs[1] != "2222" {
+		t.Fatalf("ssh args = %#v", got.SSHArgs)
+	}
+	if len(got.RemoteCommand) != 2 || got.RemoteCommand[0] != "show" || got.RemoteCommand[1] != "version" {
+		t.Fatalf("remote command = %#v", got.RemoteCommand)
 	}
 }
 

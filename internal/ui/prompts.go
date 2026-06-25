@@ -74,6 +74,41 @@ func Select(title string, options []SelectOption) (string, error) {
 	return selected, nil
 }
 
+// SelectMulti shows a multi-select prompt and returns selected values.
+// Returns an empty slice if nothing is selected.
+func SelectMulti(title string, options []SelectOption) ([]string, error) {
+	if len(options) == 0 {
+		return nil, nil
+	}
+
+	fuzzyOptions := make([]FuzzySelectOption, len(options))
+	for i, opt := range options {
+		val := opt.Value
+		if val == "" {
+			val = opt.Label
+		}
+		fuzzyOptions[i] = FuzzySelectOption{
+			Label: opt.Label,
+			Value: val,
+		}
+	}
+
+	indices, err := FuzzySelectMulti(title, fuzzyOptions)
+	if err != nil {
+		return nil, err
+	}
+	selected := make([]string, 0, len(indices))
+	for _, idx := range indices {
+		if idx < 0 || idx >= len(fuzzyOptions) {
+			continue
+		}
+		if value, ok := fuzzyOptions[idx].Value.(string); ok {
+			selected = append(selected, value)
+		}
+	}
+	return selected, nil
+}
+
 // SelectIndex shows a select prompt and returns the selected index.
 // Returns -1 if canceled.
 func SelectIndex(title string, options []string, input io.Reader) (int, error) {

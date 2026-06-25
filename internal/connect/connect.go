@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -13,13 +15,23 @@ import (
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/secret"
+	"github.com/ntwrknrd/nssh/internal/ssh/askpass"
+	"github.com/ntwrknrd/nssh/internal/ssh/captured"
 	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
-	"github.com/ntwrknrd/nssh/internal/ssh/highlight"
+	sshhighlight "github.com/ntwrknrd/nssh/internal/ssh/highlight"
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
 
 const maxCompatibilityFixIterations = 5
+
+type Request struct {
+	Host          string
+	LiteralTarget bool
+	SSHArgs       []string
+	RemoteCommand []string
+	Options       Options
+}
 
 type connectionResult struct {
 	Err    error
@@ -30,6 +42,40 @@ type connectionResult struct {
 type Options struct {
 	Verbosity    int
 	SSHVerbosity int
+}
+
+var (
+	resolveHostnameFunc         = ResolveHostname
+	connectHostFunc             = ConnectHost
+	connectLiteralHostFunc      = ConnectLiteralHost
+	runRemoteCommandFunc        = RunRemoteCommand
+	runLiteralRemoteCommandFunc = RunLiteralRemoteCommand
+	runCapturedCommandFunc      = func(ctx context.Context, req captured.Request) (captured.Result, error) {
+		return captured.Runner{}.Run(ctx, req)
+	}
+	askpassHelperPathFunc = defaultAskpassHelperPath
+)
+
+func ConnectRequest(ctx context.Context, req Request) error {
+	if len(req.RemoteCommand) > 0 {
+		if req.LiteralTarget {
+			return runLiteralRemoteCommandFunc(ctx, req.Host, req.SSHArgs, req.RemoteCommand, req.Options)
+		}
+		hostname, err := resolveHostnameFunc(req.Host)
+		if err != nil {
+			return err
+		}
+		return runRemoteCommandFunc(ctx, hostname, req.SSHArgs, req.RemoteCommand, req.Options)
+	}
+
+	if req.LiteralTarget {
+		return connectLiteralHostFunc(ctx, req.Host, req.SSHArgs, req.Options)
+	}
+	hostname, err := resolveHostnameFunc(req.Host)
+	if err != nil {
+		return err
+	}
+	return connectHostFunc(ctx, hostname, req.SSHArgs, req.Options)
 }
 
 func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ...Options) error {
@@ -45,14 +91,12 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ..
 		return nil
 	}
 
-	configTimer := connector.StartTiming(connector.TimingConfigLoad)
 	explicitUser := extractExplicitUser(hostname, sshArgs)
 	resolved, err := ResolveHostForConnect(hostname, explicitUser)
 	if err != nil {
 		return fmt.Errorf("resolve host: %w", err)
 	}
 	cfg := resolved.Config
-	configTimer.Emit()
 
 	audit := newConnectAudit(cfg)
 	if audit != nil {
@@ -79,6 +123,222 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ..
 	return result.Err
 }
 
+func RunRemoteCommand(ctx context.Context, hostname string, sshArgs, command []string, opts ...Options) error {
+	var options Options
+	if len(opts) > 0 {
+		options = opts[0]
+	}
+	explicitUser := extractExplicitUser(hostname, sshArgs)
+	resolved, err := ResolveHostForConnect(hostname, explicitUser)
+	if err != nil {
+		return fmt.Errorf("resolve host: %w", err)
+	}
+	cfg := resolved.Config
+
+	audit := newConnectAudit(cfg)
+	if audit != nil {
+		defer func() { _ = audit.Close() }()
+		audit.Info("ssh_remote_command_start", "host", resolved.Hostname, "ssh_args", sshArgs, "command", command)
+	}
+	err = runResolvedRemoteCommand(ctx, resolved, sshArgs, command, cfg, options)
+	if audit != nil {
+		if err == nil {
+			audit.Info("ssh_remote_command_end", "host", resolved.Hostname, "status", "success")
+		} else {
+			exitCode := 1
+			var exitErr *exit.ExitError
+			if errors.As(err, &exitErr) {
+				exitCode = exitErr.Code
+			}
+			audit.Info("ssh_remote_command_end", "host", resolved.Hostname, "status", "error", "exit_code", exitCode, "error", err.Error())
+		}
+	}
+	return err
+}
+
+func RunLiteralRemoteCommand(ctx context.Context, hostname string, sshArgs, command []string, opts ...Options) error {
+	var options Options
+	if len(opts) > 0 {
+		options = opts[0]
+	}
+	explicitUser := extractExplicitUser(hostname, sshArgs)
+	resolved, err := ResolveLiteralHostForConnect(hostname, explicitUser)
+	if err != nil {
+		return fmt.Errorf("resolve literal host: %w", err)
+	}
+	cfg := resolved.Config
+
+	audit := newConnectAudit(cfg)
+	if audit != nil {
+		defer func() { _ = audit.Close() }()
+		audit.Info("ssh_remote_command_start", "host", resolved.Hostname, "ssh_args", sshArgs, "command", command)
+	}
+	err = runResolvedRemoteCommand(ctx, resolved, sshArgs, command, cfg, options)
+	if audit != nil {
+		if err == nil {
+			audit.Info("ssh_remote_command_end", "host", resolved.Hostname, "status", "success")
+		} else {
+			exitCode := 1
+			var exitErr *exit.ExitError
+			if errors.As(err, &exitErr) {
+				exitCode = exitErr.Code
+			}
+			audit.Info("ssh_remote_command_end", "host", resolved.Hostname, "status", "error", "exit_code", exitCode, "error", err.Error())
+		}
+	}
+	return err
+}
+
+func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshArgs, command []string, cfg *config.Config, opts Options) error {
+	if resolved == nil {
+		return fmt.Errorf("resolved host is required")
+	}
+	req := captured.Request{
+		Hostname:      resolved.Hostname,
+		Username:      resolved.Username,
+		Port:          resolved.Port,
+		SSHOptions:    resolved.SSH,
+		SSHVerbosity:  opts.SSHVerbosity,
+		SSHArgs:       sshArgs,
+		RemoteCommand: command,
+	}
+	if cfg != nil && cfg.SSH.Connection.Timeout.Duration() > 0 {
+		req.Timeout = cfg.SSH.Connection.Timeout.Duration()
+	}
+	var askpassServer *askpass.Server
+	var askpassCancel context.CancelFunc
+	var askpassDone chan error
+	if resolved.Credential != nil {
+		askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
+		password, err := remoteCommandPassword(ctx, resolved.Credential)
+		if err != nil {
+			askpassTimer.Emit()
+			return err
+		}
+		if password != nil {
+			defer password.Destroy()
+			helper, err := askpassHelperPathFunc()
+			if err != nil {
+				askpassTimer.Emit()
+				return err
+			}
+			askpassServer, err = askpass.NewServer(password)
+			if err != nil {
+				askpassTimer.Emit()
+				return err
+			}
+			req.Env = append(req.Env, askpassServer.Env(helper)...)
+			askpassCtx, cancel := context.WithCancel(ctx)
+			askpassCancel = cancel
+			askpassDone = make(chan error, 1)
+			go func() {
+				askpassDone <- askpassServer.ServeOnce(askpassCtx)
+			}()
+		}
+		askpassTimer.Emit()
+	}
+	if askpassServer != nil {
+		defer func() {
+			askpassCancel()
+			_ = askpassServer.Close()
+			select {
+			case err := <-askpassDone:
+				if err != nil {
+					slog.Debug("askpass server stopped", "err", err)
+				}
+			case <-time.After(time.Second):
+				slog.Debug("askpass server did not stop within timeout")
+			}
+		}()
+	}
+
+	result, err := runCapturedCommandFunc(ctx, req)
+	writeCapturedCommandOutput(result, resolved.Highlight)
+	return err
+}
+
+func writeCapturedCommandOutput(result captured.Result, cfg config.HighlightConfig) {
+	if len(result.Output) == 0 {
+		stdout := applyRemoteCommandHighlight(result.Stdout, cfg)
+		if len(stdout) > 0 {
+			if _, writeErr := os.Stdout.Write(stdout); writeErr != nil {
+				slog.Debug("failed to write remote stdout", "err", writeErr)
+			}
+		}
+		if len(result.Stderr) > 0 {
+			if _, writeErr := os.Stderr.Write(result.Stderr); writeErr != nil {
+				slog.Debug("failed to write remote stderr", "err", writeErr)
+			}
+		}
+		return
+	}
+
+	highlighter := sshhighlight.New(sshhighlight.Options{
+		Enabled: cfg.EnabledValue(),
+		Profile: cfg.EffectiveProfile(),
+	})
+	for _, event := range result.Output {
+		switch event.Stream {
+		case captured.StreamStdout:
+			data := event.Data
+			if highlighter != nil {
+				data = highlighter.Highlight(data)
+			}
+			if len(data) > 0 {
+				if _, writeErr := os.Stdout.Write(data); writeErr != nil {
+					slog.Debug("failed to write remote stdout", "err", writeErr)
+				}
+			}
+		case captured.StreamStderr:
+			if len(event.Data) > 0 {
+				if _, writeErr := os.Stderr.Write(event.Data); writeErr != nil {
+					slog.Debug("failed to write remote stderr", "err", writeErr)
+				}
+			}
+		}
+	}
+}
+
+func remoteCommandPassword(ctx context.Context, cred *ResolvedCredential) (*secret.Secret, error) {
+	if cred == nil {
+		return nil, nil
+	}
+	if cred.Password != nil {
+		return cred.Password, nil
+	}
+	if cred.PasswordResolver == nil {
+		return nil, nil
+	}
+	password, err := cred.PasswordResolver(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return password, nil
+}
+
+func applyRemoteCommandHighlight(data []byte, cfg config.HighlightConfig) []byte {
+	highlighter := sshhighlight.New(sshhighlight.Options{
+		Enabled: cfg.EnabledValue(),
+		Profile: cfg.EffectiveProfile(),
+	})
+	if highlighter == nil {
+		return data
+	}
+	return highlighter.Highlight(data)
+}
+
+func defaultAskpassHelperPath() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("locate nssh executable: %w", err)
+	}
+	helper := filepath.Join(filepath.Dir(exe), "nssh-askpass")
+	if _, err := os.Stat(helper); err != nil {
+		return "", fmt.Errorf("nssh-askpass not found beside nssh: %w", err)
+	}
+	return helper, nil
+}
+
 func ConnectLiteralHost(ctx context.Context, hostname string, sshArgs []string, opts ...Options) error {
 	var options Options
 	if len(opts) > 0 {
@@ -92,14 +352,12 @@ func ConnectLiteralHost(ctx context.Context, hostname string, sshArgs []string, 
 		return nil
 	}
 
-	configTimer := connector.StartTiming(connector.TimingConfigLoad)
 	explicitUser := extractExplicitUser(hostname, sshArgs)
 	resolved, err := ResolveLiteralHostForConnect(hostname, explicitUser)
 	if err != nil {
 		return fmt.Errorf("resolve literal host: %w", err)
 	}
 	cfg := resolved.Config
-	configTimer.Emit()
 
 	audit := newConnectAudit(cfg)
 	if audit != nil {
@@ -351,7 +609,6 @@ func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArg
 	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 	conn.SetTimeouts(&cfg.SSH.Connection)
 	conn.SetSSHVerbosity(opts.SSHVerbosity)
-	conn.SetHighlightOptions(highlightOptionsFromConfig(resolved.Highlight))
 	conn.SetResolvedEndpoint(resolved.Hostname, fmt.Sprintf("%d", resolved.Port))
 	return conn.Run(ctx)
 }
@@ -369,18 +626,10 @@ func newConnector(resolved *ResolvedHost, sshArgs []string, cfg *config.Config, 
 	conn.SetHostKeyPromptFunc(newHostKeyPromptFunc())
 	conn.SetSSHOptions(resolved.SSH)
 	conn.SetSSHVerbosity(opts.SSHVerbosity)
-	conn.SetHighlightOptions(highlightOptionsFromConfig(resolved.Highlight))
 	conn.SetResolvedEndpoint(resolved.Hostname, fmt.Sprintf("%d", resolved.Port))
 	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 	conn.SetTimeouts(&cfg.SSH.Connection)
 	return conn
-}
-
-func highlightOptionsFromConfig(cfg config.HighlightConfig) highlight.Options {
-	return highlight.Options{
-		Enabled: cfg.EnabledValue(),
-		Profile: cfg.EffectiveProfile(),
-	}
 }
 
 func isCompatibilityError(err error) bool {

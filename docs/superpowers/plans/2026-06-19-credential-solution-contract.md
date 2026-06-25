@@ -222,9 +222,12 @@ Provider setup:
 
 ```text
 nssh self init
-nssh self init sops-age
-nssh self init 1password
-nssh self init bitwarden
+nssh self init --cred sops-age
+nssh self init --cred 1password
+nssh self init --cred bitwarden
+nssh self init --inv local
+nssh self init --inv netbox
+nssh self init --inv containerlab
 ```
 
 Inventory assignment:
@@ -260,7 +263,7 @@ Completed:
 - Renamed credential provider include paths from `credentials/` to
   `credential/`.
 - Fixed auth patch behavior so credential changes preserve existing usernames.
-- Added provider setup under `nssh self init [provider]`.
+- Added provider setup under `nssh self init --cred <provider>`.
 - Kept `nssh self init` scoped to credential provider setup and readiness; it
   no longer assigns inventory auth.
 - Added provider readiness diagnostics under `nssh self status`.

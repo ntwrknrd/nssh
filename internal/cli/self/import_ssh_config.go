@@ -724,6 +724,7 @@ func (i *sshConfigImporter) hostConfigsFromBlocks(blocks []sshImportBlock) map[s
 		if host.Auth.Mode == "" && host.Auth.Username != "" {
 			host.Auth.Mode = config.AuthModePassword
 		}
+		omitPasswordAuthTransportOptions(&host)
 		host.Group = i.inferLocalGroup(hostName)
 		if match := existing.matchImportedHost(hostName, host); match != nil {
 			i.warnings = append(i.warnings, fmt.Sprintf("skipping imported host %q: %s %q already exists in inventory host %q", hostName, match.field, match.value, match.host))
@@ -1172,6 +1173,26 @@ func applySSHImportDirectives(sshCfg *config.SSHHostConfig, auth *config.Invento
 			*warnings = append(*warnings, fmt.Sprintf("line %d %s directive is not imported", directive.Line, key))
 		default:
 			addSSHImportOption(sshCfg, key, value)
+		}
+	}
+}
+
+func omitPasswordAuthTransportOptions(host *config.InventoryHostConfig) {
+	if host.Auth.Mode != config.AuthModePassword || len(host.SSH.Options) == 0 {
+		return
+	}
+	deleteSSHImportOption(host.SSH.Options, "PreferredAuthentications")
+	deleteSSHImportOption(host.SSH.Options, "PubkeyAuthentication")
+	if len(host.SSH.Options) == 0 {
+		host.SSH.Options = nil
+	}
+}
+
+func deleteSSHImportOption(options config.SSHOptions, key string) {
+	for existing := range options {
+		if strings.EqualFold(existing, key) {
+			delete(options, existing)
+			return
 		}
 	}
 }

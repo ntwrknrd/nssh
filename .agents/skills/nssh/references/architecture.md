@@ -59,8 +59,10 @@ Path resolution lives in `internal/config/paths.go`.
   `~/.local/share/nssh/backups`. This remains for legacy local inventory helper
   paths, not for current config writes.
 
-`nssh self init` uses `docs/examples/config/config.example.yaml` through
-`internal/config/embed.go` when creating a fresh config.
+`nssh self init` writes the commented first-run template embedded from
+`internal/config/example_config.yaml`. Bare init is first-run only; use
+`nssh self init --cred <provider>` and `nssh self init --inv <provider>` to add
+provider include files later.
 
 ## Configuration
 
@@ -80,9 +82,8 @@ YAML include handling is implemented by `internal/config/include.go`. Included
 files merge before the importing file overrides them. Use this for modular
 credential and inventory config instead of adding new root config files.
 
-The public example config is
-`docs/examples/config/config.example.yaml`. Keep field-level examples there, not
-in narrative docs.
+The public first-run template is `internal/config/example_config.yaml`. Keep
+field-level examples there, not in narrative docs.
 
 ## Inventory
 
@@ -98,6 +99,9 @@ Primary packages:
 There is an implicit local provider named `local`. Local hosts live under
 `inventory.providers.local.hosts`, usually in
 `~/.config/nssh/inventory/local.yaml`.
+Local host groups are optional inheritance buckets. A local host without
+`group` is still valid; it uses provider/default and host-level settings, and
+skips group auth, SSH, and highlight inheritance.
 External provider discovered state is non-secret JSON; operator-owned groups,
 auth mappings, SSH options, and host overrides live in provider-scoped YAML
 config.
@@ -119,8 +123,10 @@ Providers own groups and group selectors. The canonical group ID is
 `<provider>/<group>`, for example `local/custcbb` or `netbox-prod/custcbb`.
 Selectors are matched by `inventory.MatchGroupSelectors`.
 `inventory.Reconcile` owns add/update/remove planning.
-Auth mode defaults to password when the target group has password auth,
-otherwise key.
+Resolved password auth forces OpenSSH password-style auth during connection:
+`PreferredAuthentications=keyboard-interactive,password` and
+`PubkeyAuthentication=no`. This happens after SSH defaults, group options, and
+host options are merged. Key auth does not add those options.
 
 ## Credentials
 
@@ -204,27 +210,36 @@ packages.
 
 ## Connection Flow
 
-Interactive connection starts in `internal/connect.ConnectHost`.
+Root SSH-style execution is routed through `internal/connect.ConnectRequest`.
 
 1. `internal/app.PreprocessArgs` maps root SSH-style commands to hidden
    `smart-connect`.
-2. `connect.ResolveHostname` checks the nssh host catalog, exact matches,
+2. `smart-connect` preserves the OpenSSH grammar split: tokens before `HOST`
+   are SSH args, tokens after `HOST` are a remote command.
+3. `connect.ResolveHostname` checks the nssh host catalog, exact matches,
    suggestions, and fuzzy selection. On misses, it returns host-not-found
    immediately.
-3. On host-not-found, `internal/app.Run` spawns `nssh inv set <host>` for local
+4. On host-not-found, `internal/app.Run` spawns `nssh inv set <host>` for local
    inventory creation.
-4. `connect.ResolveHostForConnect` loads config, finds the nssh host catalog
+5. `connect.ResolveHostForConnect` loads config, finds the nssh host catalog
    entry from YAML config and provider state, resolves inventory group metadata,
    selects a username, and resolves any provider-backed credential.
-5. `connect.newConnector` builds an `internal/ssh/connector.Connector` with the
+6. Interactive sessions build an `internal/ssh/connector.Connector` with the
    host alias, optional username, optional secret, host-key policy, and timeout
    config.
-6. The connector runs OpenSSH in a PTY, detects prompts, injects credentials only
+7. The connector runs OpenSSH in a PTY, detects prompts, injects credentials only
    when prompted, handles host-key prompts, relays stdio and signals, and emits
    timing markers when enabled.
-7. On legacy SSH negotiation failure, nssh can persist compatibility floors
+8. Remote-command sessions run OpenSSH without a local PTY through the captured
+   runner. stdout and stderr are captured separately; stdout may be highlighted
+   after the command completes.
+9. Password-backed remote commands use `nssh-askpass` through OpenSSH
+   `SSH_ASKPASS`, backed by a one-shot local Unix socket. Passwords are not
+   placed in argv, environment variables, or temp files.
+10. On legacy SSH negotiation failure, nssh can persist compatibility floors
    under the owning provider YAML host `ssh.compatibility` field.
-8. Optional recording wraps the outer connection before connector execution.
+11. Optional recording wraps the outer interactive connection before connector
+    execution.
 
 SCP uses the same host and credential resolver through `internal/cli/cp`.
 

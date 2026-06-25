@@ -12,7 +12,7 @@ cd nssh
 make build
 ```
 
-Optional runtime tools depend on what you are testing: `pass`, `op`, `bw`,
+Optional runtime tools depend on what you are testing: `sops`, `age`, `op`, `bw`,
 `fzf`, `asciinema`, Docker, and VHS.
 
 ## Commands
@@ -66,9 +66,9 @@ connector timing markers.
 
 - CLI help snapshots live in `docs/examples/help/` and are tested by
   `cmd/nssh/help_test.go`.
-- The embedded example config is
-  `docs/examples/config/config.example.yaml`; `internal/config/embed.go`
-  exposes it to `nssh self init`.
+- The embedded first-run config template is
+  `internal/config/example_config.yaml`; `internal/config/embed.go` exposes it
+  to `nssh self init`.
 - Demo media and example command outputs under `docs/examples/` are retained as
   examples/assets, not narrative docs.
 
@@ -87,7 +87,7 @@ When creating or editing Markdown, validate it:
 Keep narrative docs limited to [README.md](README.md),
 [CONTRIBUTING.md](CONTRIBUTING.md), and the nssh skill under
 [.agents/skills/nssh/](.agents/skills/nssh/). Prefer links to code paths,
-function names, generated help, or example config over duplicating volatile
+function names, generated help, or the config template over duplicating volatile
 details.
 
 ## Opening a PR

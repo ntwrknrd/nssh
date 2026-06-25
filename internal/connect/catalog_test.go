@@ -40,20 +40,77 @@ func TestCatalogUsesProviderHostsAsOverlays(t *testing.T) {
 	}
 }
 
-func TestCatalogRequiresLocalHostGroup(t *testing.T) {
+func TestCatalogAllowsLocalHostWithoutGroup(t *testing.T) {
+	cfg := config.DefaultConfig()
+	enabled := true
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type: config.ProviderLocal,
+			Auth: config.InventoryAuthConfig{Mode: config.AuthModePassword, Username: "provider-user"},
+			Groups: map[string]config.GroupConfig{
+				"local": {
+					Auth: config.InventoryAuthConfig{Username: "group-user"},
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"ProxyJump": config.NewSSHOptionString("jump01"),
+					}},
+					Highlight: config.HighlightConfig{Enabled: &enabled, Profile: config.HighlightProfileJunos},
+				},
+			},
+			Hosts: map[string]config.InventoryHostConfig{
+				"rpi-a.lan": {
+					Aliases: []string{"rpi-a"},
+					Auth:    config.InventoryAuthConfig{Username: "host-user"},
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"LogLevel": config.NewSSHOptionString("ERROR"),
+					}},
+				},
+			},
+		},
+	}
+
+	cat := buildCatalogForTest(t, cfg, nil)
+	host, ok := cat.Find("rpi-a")
+	if !ok {
+		t.Fatalf("Find(rpi-a) failed")
+	}
+	if host.Group != "" {
+		t.Fatalf("group = %q, want empty", host.Group)
+	}
+	if host.Username != "host-user" {
+		t.Fatalf("username = %q, want host-user", host.Username)
+	}
+	if got := host.SSH.Options["LogLevel"].StringValue(); got != "ERROR" {
+		t.Fatalf("LogLevel = %q, want ERROR", got)
+	}
+	if hasSSHOption(host.SSH.Options, "ProxyJump") {
+		t.Fatalf("ungrouped host inherited group SSH options: %#v", host.SSH.Options)
+	}
+	if host.Highlight.Enabled != nil || host.Highlight.Profile != "" {
+		t.Fatalf("ungrouped host inherited group highlight: %#v", host.Highlight)
+	}
+}
+
+func TestCatalogRejectsUnknownLocalHostGroup(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Inventory.Provider = nil
 	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
 		config.ProviderLocal: {
 			Type: config.ProviderLocal,
+			Groups: map[string]config.GroupConfig{
+				"lab": {},
+			},
 			Hosts: map[string]config.InventoryHostConfig{
-				"rpi-a.lan": {},
+				"rpi-a.lan": {Group: "missing"},
 			},
 		},
 	}
-	_, err := BuildHostCatalog(cfg)
+	_, err := buildHostCatalog(cfg, nil)
 	if err == nil {
-		t.Fatalf("BuildHostCatalog succeeded without local host group")
+		t.Fatalf("buildHostCatalog succeeded with unknown local host group")
+	}
+	if !strings.Contains(err.Error(), `group references unknown group "missing"`) {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -116,6 +173,71 @@ func TestCatalogMergesSSHDefaultsGroupAndLocalHost(t *testing.T) {
 	}
 	if !reflect.DeepEqual(host.SSH.Options, want) {
 		t.Fatalf("Options = %#v", host.SSH.Options)
+	}
+}
+
+func TestCatalogPasswordAuthForcesPasswordOnlySSHOptions(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type: config.ProviderLocal,
+			Groups: map[string]config.GroupConfig{
+				"lab": {
+					Auth: config.InventoryAuthConfig{Mode: config.AuthModePassword},
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"IdentityFile": config.NewSSHOptionItems("~/.ssh/lab.pub"),
+					}},
+				},
+			},
+			Hosts: map[string]config.InventoryHostConfig{
+				"edge01.lab": {Group: "lab", Aliases: []string{"edge01"}},
+			},
+		},
+	}
+
+	cat := buildCatalogForTest(t, cfg, nil)
+	host, ok := cat.Find("edge01")
+	if !ok {
+		t.Fatalf("Find(edge01) failed")
+	}
+	pubkey := host.SSH.Options["PubkeyAuthentication"]
+	if pubkey.Bool == nil || *pubkey.Bool {
+		t.Fatalf("PubkeyAuthentication = %#v, want false", pubkey)
+	}
+	if got := host.SSH.Options["PreferredAuthentications"].Scalar; got != "keyboard-interactive,password" {
+		t.Fatalf("PreferredAuthentications = %q, want keyboard-interactive,password", got)
+	}
+	if got := host.SSH.Options["IdentityFile"].StringValue(); got != "~/.ssh/lab.pub" {
+		t.Fatalf("IdentityFile = %q, want preserved key path", got)
+	}
+}
+
+func TestCatalogKeyAuthDoesNotForcePasswordOnlySSHOptions(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type: config.ProviderLocal,
+			Groups: map[string]config.GroupConfig{
+				"lab": {Auth: config.InventoryAuthConfig{Mode: config.AuthModeKey}},
+			},
+			Hosts: map[string]config.InventoryHostConfig{
+				"edge01.lab": {Group: "lab", Aliases: []string{"edge01"}},
+			},
+		},
+	}
+
+	cat := buildCatalogForTest(t, cfg, nil)
+	host, ok := cat.Find("edge01")
+	if !ok {
+		t.Fatalf("Find(edge01) failed")
+	}
+	if _, ok := host.SSH.Options["PubkeyAuthentication"]; ok {
+		t.Fatalf("PubkeyAuthentication should not be forced for key auth: %#v", host.SSH.Options)
+	}
+	if _, ok := host.SSH.Options["PreferredAuthentications"]; ok {
+		t.Fatalf("PreferredAuthentications should not be forced for key auth: %#v", host.SSH.Options)
 	}
 }
 
@@ -224,11 +346,13 @@ func TestCatalogMergesSSHDefaultsGroupAndProviderOverlay(t *testing.T) {
 		t.Fatalf("Find(edge01) failed")
 	}
 	want := config.SSHOptions{
-		"IdentityAgent": config.NewSSHOptionString("/tmp/agent.sock"),
-		"LogLevel":      config.NewSSHOptionString("DEBUG"),
-		"MACs":          config.NewSSHOptionItems("hmac-sha2-512-etm@openssh.com"),
-		"ProxyCommand":  config.NewSSHOptionString("ssh jump nc %h %p"),
-		"TCPKeepAlive":  config.NewSSHOptionBool(true),
+		"IdentityAgent":            config.NewSSHOptionString("/tmp/agent.sock"),
+		"LogLevel":                 config.NewSSHOptionString("DEBUG"),
+		"MACs":                     config.NewSSHOptionItems("hmac-sha2-512-etm@openssh.com"),
+		"PreferredAuthentications": config.NewSSHOptionString("keyboard-interactive,password"),
+		"ProxyCommand":             config.NewSSHOptionString("ssh jump nc %h %p"),
+		"PubkeyAuthentication":     config.NewSSHOptionBool(false),
+		"TCPKeepAlive":             config.NewSSHOptionBool(true),
 	}
 	if !reflect.DeepEqual(host.SSH.Options, want) {
 		t.Fatalf("Options = %#v", host.SSH.Options)

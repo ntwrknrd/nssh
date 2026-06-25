@@ -24,10 +24,10 @@ prompts, and can record sessions.
   with nssh command names.
 - Inventory: `nssh inv` manages local hosts and external providers; current
   providers are NetBox and containerlab.
-- Credentials: Pass, 1Password, and Bitwarden providers are selected by
+- Credentials: SOPS+age, 1Password, and Bitwarden providers are selected by
   inventory host or group auth mappings. nssh has no local password vault.
 - Agent runtime: `nssh agent` brokers provider-session requests and runs
-  background recording archive maintenance.
+  retained provider access only when configured.
 - Connection behavior: OpenSSH still owns transport; nssh wraps it with a PTY
   connector for prompt detection, password injection, host-key handling, timing,
   and typed SSH option rendering.
@@ -35,8 +35,8 @@ prompts, and can record sessions.
 - SCP: `nssh cp` uses the same host and credential resolution path as connect.
 
 Run `nssh --help` or read the generated help snapshots under
-[docs/examples/help](docs/examples/help). The full example config is
-[docs/examples/config/config.example.yaml](docs/examples/config/config.example.yaml).
+[docs/examples/help](docs/examples/help). The first-run config template is
+[internal/config/example_config.yaml](internal/config/example_config.yaml).
 
 ## Installation
 
@@ -50,8 +50,12 @@ nssh self init
 nssh self status
 ```
 
-`nssh self init` creates the config file, credential provider defaults, and
-inventory group bindings. To remove local nssh state:
+On first run, `nssh self init` creates the commented root config template and
+offers credential and inventory provider setup. If `config.yaml` already exists,
+bare init skips without changing it; use `nssh self reset` to start fresh. Add
+providers later with `nssh self init --cred <provider>` or
+`nssh self init --inv <provider>`. Inventory auth mappings are added later with
+`nssh inv set`. To remove local nssh state:
 
 ```bash
 nssh self uninstall
@@ -72,4 +76,4 @@ password-manager records are not removed.
 
 nssh builds around OpenSSH, Cobra, Charm terminal UI packages, `creack/pty`,
 optional `fzf`, optional `asciinema`, and external credential CLIs such as
-`pass`, `op`, and `bw`. See [LICENSE](LICENSE).
+`sops`, `op`, and `bw`. See [LICENSE](LICENSE).

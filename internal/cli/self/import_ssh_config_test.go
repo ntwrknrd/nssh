@@ -51,6 +51,38 @@ Host edge01
 	}
 }
 
+func TestImportSSHConfigOmitsPasswordAuthTransportOptions(t *testing.T) {
+	input := `
+Host edge01
+  HostName edge01.example.com
+  User netops
+  PreferredAuthentications keyboard-interactive,password
+  PubkeyAuthentication no
+`
+	out, warnings, err := importSSHConfigText(strings.NewReader(input), "imported")
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+	for _, want := range []string{
+		"edge01.example.com:",
+		"auth:",
+		"mode: password",
+		"username: netops",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("import output missing %q:\n%s", want, out)
+		}
+	}
+	for _, reject := range []string{"PreferredAuthentications:", "PubkeyAuthentication:"} {
+		if strings.Contains(out, reject) {
+			t.Fatalf("import output should omit %q when auth.mode is password:\n%s", reject, out)
+		}
+	}
+}
+
 func TestSSHConfigImportCommandHasNoSelectionFlags(t *testing.T) {
 	cmd := NewImportSSHConfigCmd()
 
@@ -466,7 +498,7 @@ inventory:
 	}
 }
 
-func TestRunImportSSHConfigOmitsGroupWhenDomainSuffixDoesNotMatch(t *testing.T) {
+func TestRunImportSSHConfigImportsHostWithoutGroupWhenDomainSuffixDoesNotMatch(t *testing.T) {
 	tmp := t.TempDir()
 	sshDir := filepath.Join(tmp, ".ssh")
 	if err := os.MkdirAll(sshDir, 0700); err != nil {
@@ -502,10 +534,13 @@ inventory:
 	}
 	got := string(gotBytes)
 	if !strings.Contains(got, "edge01.unknown.local:") {
-		t.Fatalf("local inventory missing imported host:\n%s", got)
+		t.Fatalf("unmatched host should be imported without a group:\n%s", got)
 	}
 	if strings.Contains(got, "group:") {
-		t.Fatalf("unmatched host should not get a group:\n%s", got)
+		t.Fatalf("unmatched host should not get a group assignment:\n%s", got)
+	}
+	if !strings.Contains(got, "groups:") || !strings.Contains(got, "custcbb:") {
+		t.Fatalf("existing local groups should be preserved:\n%s", got)
 	}
 }
 

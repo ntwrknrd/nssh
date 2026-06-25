@@ -1220,6 +1220,42 @@ func TestFilterInventoryHostsBySelectPattern(t *testing.T) {
 	}
 }
 
+func TestMetadataForUngroupedLocalHostIgnoresLocalProviderIndexGroup(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.DefaultConfig()
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh")}
+	host := &sshconfig.HostEntry{
+		Host:       "10.77.37.142",
+		SourceFile: localProviderYAMLPath(cfg, paths),
+	}
+	index := map[string]*inventory.HostInfo{
+		"10.77.37.142": {Provider: inventory.LocalProviderName, Group: inventory.LocalProviderName},
+	}
+
+	meta := metadataForHost(host, cfg, paths, index)
+
+	if meta.Owner != inventory.LocalProviderName {
+		t.Fatalf("owner = %q, want local", meta.Owner)
+	}
+	if meta.Group != "-" {
+		t.Fatalf("group = %q, want -", meta.Group)
+	}
+}
+
+func TestHostEntryFromInventoryHostLeavesUngroupedLocalHostUngrouped(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.DefaultConfig()
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh")}
+
+	host := hostEntryFromInventoryHost(cfg, paths, inventory.LocalProviderName, "10.77.37.142", config.InventoryHostConfig{
+		Auth: config.InventoryAuthConfig{Username: "admin"},
+	})
+
+	if got := inventory.LocalHostGroup(host, "-"); got != "-" {
+		t.Fatalf("group = %q, want -", got)
+	}
+}
+
 func TestRemoveLocalHostIgnoresNonInventoryIncludes(t *testing.T) {
 	tmp := t.TempDir()
 	sshDir := filepath.Join(tmp, ".ssh")

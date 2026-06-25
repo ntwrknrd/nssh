@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
 
@@ -16,7 +17,9 @@ type hostSelector func(prompt string, options []string, initialQuery string) (st
 // - Multiple partial matches: opens fuzzy finder with query pre-filled
 // - No matches: returns HostNotFoundError to trigger local inventory creation
 func ResolveHostname(hostname string) (string, error) {
+	configTimer := connector.StartTiming(connector.TimingConfigLoad)
 	cfg, err := config.LoadDefault()
+	configTimer.Emit()
 	if err != nil {
 		return "", err
 	}

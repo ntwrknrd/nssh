@@ -138,14 +138,21 @@ func TestRunReinstallDevPrintsMinimalBuildOutput(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(project, "cmd", "nssh"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(project, "cmd", "nssh-askpass"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(project, "go.mod"), []byte("module example.test/nssh\n\ngo 1.25\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(project, "cmd", "nssh", "main.go"), []byte("package main\n\nfunc main() {}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(project, "cmd", "nssh-askpass", "main.go"), []byte("package main\n\nfunc main() {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 
-	t.Setenv("HOME", filepath.Join(temp, "home"))
+	home := filepath.Join(temp, "home")
+	t.Setenv("HOME", home)
 	previousWd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -172,5 +179,13 @@ func TestRunReinstallDevPrintsMinimalBuildOutput(t *testing.T) {
 	}
 	if !strings.Contains(got, "Built ~/.local/bin/nssh") {
 		t.Fatalf("runReinstallDev output missing built message:\n%s", got)
+	}
+	if !strings.Contains(got, "Built ~/.local/bin/nssh-askpass") {
+		t.Fatalf("runReinstallDev output missing askpass built message:\n%s", got)
+	}
+	for _, binary := range []string{"nssh", "nssh-askpass"} {
+		if _, err := os.Stat(filepath.Join(home, ".local", "bin", binary)); err != nil {
+			t.Fatalf("%s was not installed: %v", binary, err)
+		}
 	}
 }

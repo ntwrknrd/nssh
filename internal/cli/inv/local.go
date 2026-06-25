@@ -1211,12 +1211,19 @@ func hostEntryFromInventoryHost(cfg *config.Config, paths *config.Paths, provide
 	if port == 0 {
 		port = 22
 	}
-	groupID := config.FormatInventoryGroupID(providerName, hostCfg.Group)
+	groupID := inventoryHostGroupID(providerName, hostCfg.Group)
 	auth := cfg.ResolveInventoryAuth(config.InventoryAuthContext{Host: name, Provider: providerName, Group: groupID})
 	host := sshconfig.CreateHostEntry(name, hostname, auth.Username, port, auth.AuthMode == config.AuthModePassword, providerYAMLPath(cfg, paths, providerName))
 	host.Patterns = append(host.Patterns, hostCfg.Aliases...)
 	inventory.SetLocalHostGroup(host, groupID)
 	return host
+}
+
+func inventoryHostGroupID(providerName, group string) string {
+	if strings.TrimSpace(group) == "" {
+		return ""
+	}
+	return config.FormatInventoryGroupID(providerName, group)
 }
 
 func inventoryHostSSHHostName(name string, hostCfg config.InventoryHostConfig) string {
@@ -1548,6 +1555,18 @@ func metadataForHost(host *sshconfig.HostEntry, cfg *config.Config, paths *confi
 	if host == nil {
 		return hostMetadata{Owner: "local"}
 	}
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+	if paths == nil {
+		paths = config.DefaultPaths()
+	}
+	if samePath(host.SourceFile, localProviderYAMLPath(cfg, paths)) {
+		return hostMetadata{Owner: inventory.LocalProviderName, Group: inventory.LocalHostGroup(host, "-")}
+	}
+	if samePath(host.SourceFile, localFilePath(paths, inventory.LocalProviderIncludeFile())) {
+		return hostMetadata{Owner: inventory.LocalProviderName, Group: inventory.LocalHostGroup(host, "-")}
+	}
 	if index != nil {
 		if info := index[host.Host]; info != nil {
 			return hostMetadata{Owner: info.Provider, Group: info.Group}
@@ -1557,12 +1576,6 @@ func metadataForHost(host *sshconfig.HostEntry, cfg *config.Config, paths *confi
 				return hostMetadata{Owner: info.Provider, Group: info.Group}
 			}
 		}
-	}
-	if cfg == nil {
-		cfg = config.DefaultConfig()
-	}
-	if paths == nil {
-		paths = config.DefaultPaths()
 	}
 	for name := range cfg.Inventory.Provider {
 		if name == inventory.LocalProviderName {
@@ -1574,12 +1587,6 @@ func metadataForHost(host *sshconfig.HostEntry, cfg *config.Config, paths *confi
 		if samePath(host.SourceFile, providerYAMLPath(cfg, paths, name)) {
 			return hostMetadata{Owner: name, Group: inventory.LocalHostGroup(host, "-")}
 		}
-	}
-	if samePath(host.SourceFile, localProviderYAMLPath(cfg, paths)) {
-		return hostMetadata{Owner: inventory.LocalProviderName, Group: inventory.LocalHostGroup(host, "-")}
-	}
-	if samePath(host.SourceFile, localFilePath(paths, inventory.LocalProviderIncludeFile())) {
-		return hostMetadata{Owner: inventory.LocalProviderName, Group: inventory.LocalHostGroup(host, "-")}
 	}
 	return hostMetadata{Owner: "local", Group: "-"}
 }

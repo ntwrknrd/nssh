@@ -70,11 +70,47 @@ const (
 	// TimingConfigLoad is emitted after config file is loaded.
 	TimingConfigLoad = "config_load"
 
+	// TimingCatalogTotal is emitted after the host catalog is built.
+	TimingCatalogTotal = "catalog_total"
+
+	// TimingProviderStateList is emitted after provider state files are listed.
+	TimingProviderStateList = "provider_state_list"
+
+	// TimingProviderStateLoad is emitted after provider state files are loaded.
+	TimingProviderStateLoad = "provider_state_load"
+
+	// TimingCatalogLocalHosts is emitted after local inventory hosts are added to the catalog.
+	TimingCatalogLocalHosts = "catalog_local_hosts"
+
+	// TimingCatalogProviderHosts is emitted after provider state hosts are added to the catalog.
+	TimingCatalogProviderHosts = "catalog_provider_hosts"
+
+	// TimingAuthResolve is emitted after inventory auth inheritance is resolved.
+	TimingAuthResolve = "auth_resolve"
+
+	// TimingCredentialRegistry is emitted after credential provider registry construction completes.
+	TimingCredentialRegistry = "credential_registry"
+
 	// TimingCredentialLookup is emitted after credential resolution completes.
 	TimingCredentialLookup = "credential_lookup"
 
 	// TimingCredentialLookupLazy is emitted when a deferred password resolver runs.
 	TimingCredentialLookupLazy = "credential_lookup_lazy"
+
+	// TimingAskpassSetup is emitted after remote-command askpass setup completes.
+	TimingAskpassSetup = "askpass_setup"
+
+	// TimingSSHArgsBuild is emitted after OpenSSH argv construction completes.
+	TimingSSHArgsBuild = "ssh_args_build"
+
+	// TimingSSHProcessStart is emitted after the ssh subprocess starts.
+	TimingSSHProcessStart = "ssh_process_start"
+
+	// TimingSSHProcessWait is emitted after ssh output drain and process wait complete.
+	TimingSSHProcessWait = "ssh_process_wait"
+
+	// TimingSSHProcessTotal is emitted after the full ssh subprocess lifecycle completes.
+	TimingSSHProcessTotal = "ssh_process_total"
 
 	// Connector stages (emitted from connector)
 

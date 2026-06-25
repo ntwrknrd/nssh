@@ -137,7 +137,7 @@ const (
 	HighlightProfileJunos = "junos"
 )
 
-// HighlightConfig controls display-only terminal highlighting.
+// HighlightConfig controls optional highlighting for renderer-owned output.
 type HighlightConfig struct {
 	Enabled *bool  `yaml:"enabled,omitempty"`
 	Profile string `yaml:"profile,omitempty"`

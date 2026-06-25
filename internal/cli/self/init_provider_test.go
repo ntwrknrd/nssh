@@ -9,16 +9,20 @@ import (
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ui"
+	"gopkg.in/yaml.v3"
 )
 
-func TestInitPlanDefaultsToSOPSAgeCredentialProviderOnly(t *testing.T) {
+func TestInitPlanAllowsNoProviderSelections(t *testing.T) {
 	plan, err := buildInitPlan(initPlanRequest{})
 	if err != nil {
 		t.Fatalf("buildInitPlan: %v", err)
 	}
 
-	if !strings.Contains(plan.Summary(), "Credential providers: SOPS+age") {
-		t.Fatalf("summary missing SOPS+age provider:\n%s", plan.Summary())
+	if !strings.Contains(plan.Summary(), "Credential providers: none") {
+		t.Fatalf("summary missing empty credential selection:\n%s", plan.Summary())
+	}
+	if !strings.Contains(plan.Summary(), "Inventory providers: none") {
+		t.Fatalf("summary missing empty inventory selection:\n%s", plan.Summary())
 	}
 	for _, reject := range []string{"Inventory sources", "Credential assignment"} {
 		if strings.Contains(plan.Summary(), reject) {
@@ -27,8 +31,11 @@ func TestInitPlanDefaultsToSOPSAgeCredentialProviderOnly(t *testing.T) {
 	}
 
 	cfg := plan.Config
-	if cfg.Credential.Provider["sops"].Type != config.CredentialProviderSOPSAge {
-		t.Fatalf("sops provider = %+v", cfg.Credential.Provider["sops"])
+	if len(plan.CredentialProviders) != 0 {
+		t.Fatalf("credential selections = %+v", plan.CredentialProviders)
+	}
+	if len(plan.InventoryProviders) != 0 {
+		t.Fatalf("inventory selections = %+v", plan.InventoryProviders)
 	}
 	if got := cfg.Inventory.Provider["local"].Group["default"].Auth; got.IsSet() {
 		t.Fatalf("self init should not assign inventory auth, got %+v", got)
@@ -389,7 +396,11 @@ func TestApplyCredentialProviderSetupWritesProviderIncludeFile(t *testing.T) {
 			t.Fatalf("root config missing include %q:\n%s", want, rootText)
 		}
 	}
-	if strings.Contains(string(rootText), "credential:\n") {
+	var root map[string]any
+	if err := yaml.Unmarshal(rootText, &root); err != nil {
+		t.Fatalf("parse root config: %v", err)
+	}
+	if _, ok := root["credential"]; ok {
 		t.Fatalf("root config should not inline credential providers:\n%s", rootText)
 	}
 	loaded, err := config.Load(paths.ConfigFile)
@@ -453,18 +464,76 @@ credential:
 	if len(prompter.prompts) != 0 {
 		t.Fatalf("already configured setup should not prompt, got %v", prompter.prompts)
 	}
-	for _, want := range []string{
-		"Provider binary: ready (" + filepath.Join(binDir, "sops") + ")",
-		"Provider config: " + providerPath,
-		"SOPS file: ~/.local/share/nssh/credentials.sops.yaml",
-		"Age key file: ~/.config/sops/age/keys.txt",
-	} {
+	for _, want := range []string{"Credential provider already configured, skipping init: sops (SOPS+age)", providerPath} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("already configured output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Config file:") || strings.Contains(got, "Provider binary:") {
+		t.Fatalf("already configured setup should not rewrite root config:\n%s", got)
+	}
+}
+
+func TestApplyCredentialProviderSetupSkipsWhenOnePasswordAlreadyConfigured(t *testing.T) {
+	tmp := t.TempDir()
+	paths := &config.Paths{
+		ConfigDir:  filepath.Join(tmp, "config", "nssh"),
+		ConfigFile: filepath.Join(tmp, "config", "nssh", "config.yaml"),
+	}
+	if err := os.MkdirAll(filepath.Join(paths.ConfigDir, "credential"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	providerPath := filepath.Join(paths.ConfigDir, "credential", "op-expedient.yaml")
+	providerText := `
+credential:
+  provider:
+    op-expedient:
+      type: 1password
+      vault: Expedient
+`
+	if err := os.WriteFile(providerPath, []byte(providerText), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rootText := "include: [credential/*.yaml]\n"
+	if err := os.WriteFile(paths.ConfigFile, []byte(rootText), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	prompter := &fakeInitPrompter{}
+
+	got := captureStdout(t, func() {
+		if err := applyCredentialProviderSetup(paths, cfg, config.CredentialProvider1Password, prompter, false); err != nil {
+			t.Fatalf("applyCredentialProviderSetup: %v", err)
+		}
+	})
+
+	if len(prompter.prompts) != 0 {
+		t.Fatalf("already configured setup should not prompt, got %v", prompter.prompts)
+	}
+	for _, want := range []string{"Credential provider already configured, skipping init: op-expedient (1Password)", providerPath} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("already configured output missing %q:\n%s", want, got)
 		}
 	}
 	if strings.Contains(got, "Config file:") {
-		t.Fatalf("already configured setup should not rewrite root config:\n%s", got)
+		t.Fatalf("already configured setup should not write config:\n%s", got)
+	}
+	rootAfter, err := os.ReadFile(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("read root config: %v", err)
+	}
+	if string(rootAfter) != rootText {
+		t.Fatalf("root config changed:\n%s", rootAfter)
+	}
+	providerAfter, err := os.ReadFile(providerPath)
+	if err != nil {
+		t.Fatalf("read provider config: %v", err)
+	}
+	if string(providerAfter) != providerText {
+		t.Fatalf("provider config changed:\n%s", providerAfter)
 	}
 }
 
@@ -497,7 +566,17 @@ func TestApplyInitPlanWritesCredentialProviderIncludeFiles(t *testing.T) {
 	if !strings.Contains(string(rootText), "credential/*.yaml") {
 		t.Fatalf("root config missing credential include:\n%s", rootText)
 	}
-	if strings.Contains(string(rootText), "credential:\n") {
+	if !strings.Contains(string(rootText), "# nssh Configuration File") {
+		t.Fatalf("root config should use the commented init template:\n%s", rootText)
+	}
+	if !strings.Contains(string(rootText), "# Provider examples are intentionally commented") {
+		t.Fatalf("root config missing commented provider guidance:\n%s", rootText)
+	}
+	var root map[string]any
+	if err := yaml.Unmarshal(rootText, &root); err != nil {
+		t.Fatalf("parse root config: %v", err)
+	}
+	if _, ok := root["credential"]; ok {
 		t.Fatalf("root config should not inline credential providers:\n%s", rootText)
 	}
 	providerPath := filepath.Join(paths.ConfigDir, "credential", "sops.yaml")
@@ -522,6 +601,226 @@ func TestApplyInitPlanWritesCredentialProviderIncludeFiles(t *testing.T) {
 	}
 	if loaded.Credential.Provider["sops"].Type != config.CredentialProviderSOPSAge {
 		t.Fatalf("loaded credential providers = %+v", loaded.Credential.Provider)
+	}
+}
+
+func TestApplyInitPlanWithNoSelectionsWritesRootTemplateWithoutActiveIncludes(t *testing.T) {
+	tmp := t.TempDir()
+	paths := &config.Paths{
+		ConfigDir:  filepath.Join(tmp, "config", "nssh"),
+		ConfigFile: filepath.Join(tmp, "config", "nssh", "config.yaml"),
+	}
+	plan, err := buildInitPlan(initPlanRequest{})
+	if err != nil {
+		t.Fatalf("buildInitPlan: %v", err)
+	}
+
+	if err := applyInitPlan(paths, plan); err != nil {
+		t.Fatalf("applyInitPlan: %v", err)
+	}
+
+	rootText, err := os.ReadFile(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("read root config: %v", err)
+	}
+	var root map[string]any
+	if err := yaml.Unmarshal(rootText, &root); err != nil {
+		t.Fatalf("parse root config: %v", err)
+	}
+	if _, ok := root["include"]; ok {
+		t.Fatalf("empty init should not activate include globs:\n%s", rootText)
+	}
+	for _, reject := range []string{"\n  - credential/*.yaml", "\n  - inventory/*.yaml", "\ninventory:", "\ncredential:"} {
+		if strings.Contains(string(rootText), reject) {
+			t.Fatalf("empty init activated %q:\n%s", reject, rootText)
+		}
+	}
+}
+
+func TestApplyInitPlanWritesCredentialAndInventoryProviderIncludeFiles(t *testing.T) {
+	tmp := t.TempDir()
+	paths := &config.Paths{
+		ConfigDir:  filepath.Join(tmp, "config", "nssh"),
+		ConfigFile: filepath.Join(tmp, "config", "nssh", "config.yaml"),
+	}
+	plan, err := buildInitPlan(initPlanRequest{
+		CredentialProviders: []initCredentialProviderRequest{{
+			Name:       "sops",
+			Type:       config.CredentialProviderSOPSAge,
+			File:       "~/.local/share/nssh/credentials.sops.yaml",
+			AgeKeyFile: "~/.config/sops/age/keys.txt",
+		}},
+		InventoryProviders: []initInventoryProviderRequest{
+			{Name: config.ProviderLocal, Type: config.ProviderLocal},
+			{Name: "netbox-prod", Type: config.ProviderNetBox},
+			{Name: "containerlab", Type: config.ProviderContainerlab, JumpHost: "lab-jump"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildInitPlan: %v", err)
+	}
+
+	if err := applyInitPlan(paths, plan); err != nil {
+		t.Fatalf("applyInitPlan: %v", err)
+	}
+
+	rootText, err := os.ReadFile(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("read root config: %v", err)
+	}
+	for _, want := range []string{"  - credential/*.yaml", "  - inventory/*.yaml"} {
+		if !strings.Contains(string(rootText), want) {
+			t.Fatalf("root config missing active include %q:\n%s", want, rootText)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(paths.ConfigDir, "credential", "sops.yaml"),
+		filepath.Join(paths.ConfigDir, "inventory", "local.yaml"),
+		filepath.Join(paths.ConfigDir, "inventory", "netbox-prod.yaml"),
+		filepath.Join(paths.ConfigDir, "inventory", "containerlab.yaml"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("provider file missing %s: %v", path, err)
+		}
+	}
+	localText, err := os.ReadFile(filepath.Join(paths.ConfigDir, "inventory", "local.yaml"))
+	if err != nil {
+		t.Fatalf("read local inventory config: %v", err)
+	}
+	if !strings.Contains(string(localText), "default: {}") {
+		t.Fatalf("local inventory config missing default group:\n%s", localText)
+	}
+	loaded, err := config.Load(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("load merged config: %v", err)
+	}
+	if loaded.Inventory.Provider["containerlab"].Config.JumpHost != "lab-jump" {
+		t.Fatalf("containerlab provider = %+v", loaded.Inventory.Provider["containerlab"])
+	}
+}
+
+func TestApplyInventoryProviderSetupWritesProviderIncludeFile(t *testing.T) {
+	tmp := t.TempDir()
+	paths := &config.Paths{
+		ConfigDir:  filepath.Join(tmp, "config", "nssh"),
+		ConfigFile: filepath.Join(tmp, "config", "nssh", "config.yaml"),
+	}
+	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	rootText := "# nssh Configuration File\ninclude: [credential/*.yaml]\nagent:\n  auto_start: true\n"
+	if err := os.MkdirAll(filepath.Join(paths.ConfigDir, "credential"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "credential", "sops.yaml"), []byte("credential:\n  provider:\n    sops:\n      type: sops-age\n      file: ~/.local/share/nssh/credentials.sops.yaml\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.ConfigFile, []byte(rootText), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	prompter := &fakeInitPrompter{inputs: map[string]string{
+		"NetBox provider name":              "netbox-prod",
+		"NetBox URL environment variable":   "EXPEDIENT_NETBOX_URL",
+		"NetBox token environment variable": "EXPEDIENT_NETBOX_TOKEN",
+	}}
+
+	if err := applyInventoryProviderSetup(paths, cfg, config.ProviderNetBox, prompter, false); err != nil {
+		t.Fatalf("applyInventoryProviderSetup: %v", err)
+	}
+
+	providerPath := filepath.Join(paths.ConfigDir, "inventory", "netbox-prod.yaml")
+	providerText, err := os.ReadFile(providerPath)
+	if err != nil {
+		t.Fatalf("read provider config: %v", err)
+	}
+	for _, want := range []string{"inventory:", "netbox-prod:", "type: netbox", "url_env: EXPEDIENT_NETBOX_URL", "token_env: EXPEDIENT_NETBOX_TOKEN"} {
+		if !strings.Contains(string(providerText), want) {
+			t.Fatalf("provider file missing %q:\n%s", want, providerText)
+		}
+	}
+	rootAfter, err := os.ReadFile(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("read root config: %v", err)
+	}
+	for _, want := range []string{"credential/*.yaml", "inventory/*.yaml", "# nssh Configuration File", "agent:"} {
+		if !strings.Contains(string(rootAfter), want) {
+			t.Fatalf("root config missing %q:\n%s", want, rootAfter)
+		}
+	}
+	loaded, err := config.Load(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("load merged config: %v", err)
+	}
+	if loaded.Inventory.Provider["netbox-prod"].Type != config.ProviderNetBox {
+		t.Fatalf("loaded netbox provider = %+v", loaded.Inventory.Provider["netbox-prod"])
+	}
+	if detail := loaded.Inventory.Provider["netbox-prod"].Config; detail.BaseURL != "" || detail.URLEnv != "EXPEDIENT_NETBOX_URL" || detail.TokenEnv != "EXPEDIENT_NETBOX_TOKEN" || detail.EnvFile != "" {
+		t.Fatalf("netbox provider should only set url_env and token_env from init prompts: %+v", detail)
+	}
+	for _, reject := range []string{"NetBox base URL", "NetBox env file"} {
+		if prompter.saw(reject) {
+			t.Fatalf("netbox setup should not prompt for %q; prompts were %v", reject, prompter.prompts)
+		}
+	}
+}
+
+func TestApplyCredentialProviderSetupPreservesCommentedRootWhenIncludeExists(t *testing.T) {
+	tmp := t.TempDir()
+	binDir := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(binDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(binDir, "op"), "#!/bin/sh\nexit 0\n")
+	t.Setenv("PATH", binDir)
+	paths := &config.Paths{
+		ConfigDir:  filepath.Join(tmp, "config", "nssh"),
+		ConfigFile: filepath.Join(tmp, "config", "nssh", "config.yaml"),
+	}
+	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(paths.ConfigDir, "credential"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "credential", "sops.yaml"), []byte("credential:\n  provider:\n    sops:\n      type: sops-age\n      file: ~/.local/share/nssh/credentials.sops.yaml\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rootText := "# nssh Configuration File\ninclude: [credential/*.yaml]\n"
+	if err := os.WriteFile(paths.ConfigFile, []byte(rootText), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	prompter := &fakeInitPrompter{inputs: map[string]string{
+		"1Password provider name":   "op-expedient",
+		"1Password account user ID": "",
+		"1Password vault ID":        "Expedient",
+	}}
+
+	if err := applyCredentialProviderSetup(paths, cfg, config.CredentialProvider1Password, prompter, false); err != nil {
+		t.Fatalf("applyCredentialProviderSetup: %v", err)
+	}
+
+	got, err := os.ReadFile(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("read root config: %v", err)
+	}
+	if string(got) != rootText {
+		t.Fatalf("root config should not be rewritten when credential include already exists:\n%s", got)
+	}
+	providerPath := filepath.Join(paths.ConfigDir, "credential", "op-expedient.yaml")
+	providerText, err := os.ReadFile(providerPath)
+	if err != nil {
+		t.Fatalf("read provider config: %v", err)
+	}
+	if !strings.Contains(string(providerText), "# keepalive: true") {
+		t.Fatalf("1Password provider config should expose commented keepalive option:\n%s", providerText)
 	}
 }
 
@@ -616,7 +915,7 @@ func TestCredentialProviderSetupLabelKeepsUsefulProviderType(t *testing.T) {
 	}
 }
 
-func TestRunInitExistingConfigPrintsNextCommands(t *testing.T) {
+func TestRunInitExistingConfigSkipsAndRecommendsReset(t *testing.T) {
 	if os.Getenv("NSSH_TEST_RUN_INIT_EXISTING_CONFIG") == "1" {
 		runInitExistingConfigHelper(t)
 		return
@@ -631,7 +930,7 @@ func TestRunInitExistingConfigPrintsNextCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run", "^TestRunInitExistingConfigPrintsNextCommands$")
+	cmd := exec.Command(os.Args[0], "-test.run", "^TestRunInitExistingConfigSkipsAndRecommendsReset$")
 	cmd.Env = append(os.Environ(),
 		"NSSH_TEST_RUN_INIT_EXISTING_CONFIG=1",
 		"HOME="+tmp,
@@ -647,12 +946,12 @@ func TestRunInitExistingConfigPrintsNextCommands(t *testing.T) {
 	if strings.Contains(string(output), "nssh:") {
 		t.Fatalf("runInit printed app-level error prefix:\n%s", output)
 	}
-	for _, want := range []string{"Config file:", "nssh self init sops-age", "nssh self init 1password", "nssh self init bitwarden", "nssh inv set <host-or-group>"} {
+	for _, want := range []string{"Config file exists, skipping init:", "nssh self reset"} {
 		if !strings.Contains(string(output), want) {
 			t.Fatalf("runInit output missing %q:\n%s", want, output)
 		}
 	}
-	for _, reject := range []string{"nssh initialized successfully", "Next Steps"} {
+	for _, reject := range []string{"nssh initialized successfully", "Next Steps", "nssh self init sops-age", "nssh self init 1password", "nssh self init bitwarden", "nssh inv set <host-or-group>"} {
 		if strings.Contains(string(output), reject) {
 			t.Fatalf("runInit existing-config output should not contain %q:\n%s", reject, output)
 		}
@@ -697,7 +996,7 @@ func TestRunInitProviderSetupStopsBeforeDependencyChecks(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		if err := runInit(InitOptions{CredentialProviderType: config.CredentialProviderSOPSAge}); err != nil {
+		if err := runInit(InitOptions{CredentialProviderTypes: []string{config.CredentialProviderSOPSAge}}); err != nil {
 			t.Fatalf("runInit: %v", err)
 		}
 	})
@@ -709,6 +1008,102 @@ func TestRunInitProviderSetupStopsBeforeDependencyChecks(t *testing.T) {
 		if strings.Contains(output, reject) {
 			t.Fatalf("provider setup should not continue into %q:\n%s", reject, output)
 		}
+	}
+}
+
+func TestBuildSourceInstallBuildsAskpassBesideNSSH(t *testing.T) {
+	tmp := t.TempDir()
+	project := filepath.Join(tmp, "project")
+	if err := os.MkdirAll(filepath.Join(project, "cmd", "nssh"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(project, "cmd", "nssh-askpass"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "go.mod"), []byte("module example.test/nssh\n\ngo 1.25\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "cmd", "nssh", "main.go"), []byte("package main\n\nfunc main() {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "cmd", "nssh-askpass", "main.go"), []byte("package main\n\nfunc main() {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	installDir := filepath.Join(tmp, "bin")
+
+	binPath, askpassPath, err := buildSourceInstall(project, installDir)
+	if err != nil {
+		t.Fatalf("buildSourceInstall: %v", err)
+	}
+
+	if binPath != filepath.Join(installDir, "nssh") {
+		t.Fatalf("binPath = %q", binPath)
+	}
+	if askpassPath != filepath.Join(installDir, "nssh-askpass") {
+		t.Fatalf("askpassPath = %q", askpassPath)
+	}
+	for _, path := range []string{binPath, askpassPath} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("built binary missing %s: %v", path, err)
+		}
+	}
+}
+
+func TestInitNextStepsFollowSelectedInventoryProviders(t *testing.T) {
+	paths := &config.Paths{
+		ConfigDir:  filepath.Join("/tmp", "nssh-config"),
+		ConfigFile: filepath.Join("/tmp", "nssh-config", "config.yaml"),
+	}
+	steps := initNextSteps(paths, []initInventoryProviderRequest{
+		{Name: "local", Type: config.ProviderLocal},
+		{Name: "netbox-prod", Type: config.ProviderNetBox},
+		{Name: "containerlab", Type: config.ProviderContainerlab},
+	})
+	text := strings.Join(steps, "\n")
+
+	for _, want := range []string{
+		"/tmp/nssh-config/config.yaml",
+		"/tmp/nssh-config/inventory/local.yaml",
+		"nssh inv set -g local/<group>",
+		"/tmp/nssh-config/inventory/netbox-prod.yaml",
+		"create match groups",
+		"nssh inv refresh netbox-prod",
+		"/tmp/nssh-config/inventory/containerlab.yaml",
+		"kind/state match groups",
+		"nssh inv refresh containerlab",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("next steps missing %q:\n%s", want, text)
+		}
+	}
+	for _, reject := range []string{
+		"Create a group: nssh inv set local/<name>",
+		"Add your first host: nssh inv set <host>",
+	} {
+		if strings.Contains(text, reject) {
+			t.Fatalf("next steps should not contain old generic step %q:\n%s", reject, text)
+		}
+	}
+}
+
+func TestInitNextStepsWithoutInventoryProvidersRecommendsAddingInventory(t *testing.T) {
+	paths := &config.Paths{
+		ConfigDir:  filepath.Join("/tmp", "nssh-config"),
+		ConfigFile: filepath.Join("/tmp", "nssh-config", "config.yaml"),
+	}
+	steps := initNextSteps(paths, nil)
+	text := strings.Join(steps, "\n")
+
+	for _, want := range []string{
+		"/tmp/nssh-config/config.yaml",
+		"Add inventory later with nssh self init --inv local, --inv netbox, or --inv containerlab.",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("next steps missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "nssh inv set <host>") {
+		t.Fatalf("next steps should not tell users to add a host manually without inventory context:\n%s", text)
 	}
 }
 
@@ -740,29 +1135,41 @@ func TestInitCommandDoesNotExposeYesFlag(t *testing.T) {
 	}
 }
 
-func TestInitCommandAcceptsCredentialProviderArg(t *testing.T) {
+func TestInitCommandRejectsCredentialProviderArgs(t *testing.T) {
 	cmd := NewInitCmd()
 
 	for _, provider := range []string{"sops-age", "1password", "bitwarden"} {
-		if err := cmd.Args(cmd, []string{provider}); err != nil {
-			t.Fatalf("init %s args error = %v", provider, err)
+		if err := cmd.Args(cmd, []string{provider}); err == nil {
+			t.Fatalf("init accepted positional provider arg %q", provider)
 		}
-	}
-	if err := cmd.Args(cmd, []string{"vault"}); err == nil {
-		t.Fatal("init accepted unsupported provider arg")
 	}
 }
 
-func TestPromptInitPlanRequestShowsCredentialProvidersOnly(t *testing.T) {
+func TestInitCommandExposesProviderFlags(t *testing.T) {
+	cmd := NewInitCmd()
+
+	for _, name := range []string{"cred", "inv", "dry-run"} {
+		if flag := cmd.Flags().Lookup(name); flag == nil {
+			t.Fatalf("init missing --%s flag", name)
+		}
+	}
+}
+
+func TestPromptInitPlanRequestShowsCredentialAndInventoryMultiSelects(t *testing.T) {
 	prompter := &fakeInitPrompter{
-		selects: map[string]string{
-			"Credential providers":            config.CredentialProvider1Password,
-			"Add another credential provider": "done",
+		multiSelects: map[string][]string{
+			"Credential providers": {config.CredentialProvider1Password},
+			"Inventory providers":  {config.ProviderLocal, config.ProviderNetBox, config.ProviderContainerlab},
 		},
 		inputs: map[string]string{
-			"1Password provider name": "op-network",
-			"1Password account":       "ntwrknrd",
-			"1Password vault":         "Network",
+			"1Password provider name":           "op-network",
+			"1Password account user ID":         "ntwrknrd",
+			"1Password vault ID":                "vault-id",
+			"NetBox provider name":              "netbox-prod",
+			"NetBox URL environment variable":   "NETBOX_URL",
+			"NetBox token environment variable": "NETBOX_TOKEN",
+			"Containerlab provider name":        "containerlab",
+			"Containerlab jump host":            "lab-jump",
 		},
 	}
 
@@ -771,18 +1178,88 @@ func TestPromptInitPlanRequestShowsCredentialProvidersOnly(t *testing.T) {
 		t.Fatalf("promptInitPlanRequest: %v", err)
 	}
 
-	for _, want := range []string{"Credential providers", "1Password provider name", "1Password account", "1Password vault"} {
+	for _, want := range []string{"Credential providers", "Inventory providers", "1Password provider name", "1Password account user ID", "1Password vault ID", "NetBox provider name", "NetBox URL environment variable", "NetBox token environment variable", "Containerlab jump host"} {
 		if !prompter.saw(want) {
 			t.Fatalf("prompt flow did not show %q; prompts were %v", want, prompter.prompts)
 		}
 	}
-	for _, reject := range []string{"Inventory sources: NetBox", "Inventory sources: Containerlab", "Credential assignment: local/default"} {
+	if got := prompter.inputDefaults["1Password vault ID"]; got != "" {
+		t.Fatalf("vault ID default = %q, want empty", got)
+	}
+	for _, reject := range []string{"Credential assignment: local/default", "NetBox base URL", "NetBox env file"} {
 		if prompter.saw(reject) {
 			t.Fatalf("prompt flow should not show %q; prompts were %v", reject, prompter.prompts)
 		}
 	}
 	if req.CredentialProviders[0].Type != config.CredentialProvider1Password {
 		t.Fatalf("credential providers = %+v", req.CredentialProviders)
+	}
+	if len(req.InventoryProviders) != 3 {
+		t.Fatalf("inventory providers = %+v", req.InventoryProviders)
+	}
+}
+
+func TestPromptContainerlabInventoryProviderRequiresJumpHost(t *testing.T) {
+	prompter := &fakeInitPrompter{inputs: map[string]string{
+		"Containerlab provider name": "containerlab",
+		"Containerlab jump host":     "",
+	}}
+
+	_, err := promptInventoryProvider(prompter, config.ProviderContainerlab)
+	if err == nil || !strings.Contains(err.Error(), "requires jump_host") {
+		t.Fatalf("containerlab prompt error = %v, want jump_host requirement", err)
+	}
+}
+
+func TestApplyInventoryProviderSetupSkipsWhenNetBoxAlreadyConfigured(t *testing.T) {
+	tmp := t.TempDir()
+	paths := &config.Paths{
+		ConfigDir:  filepath.Join(tmp, "config", "nssh"),
+		ConfigFile: filepath.Join(tmp, "config", "nssh", "config.yaml"),
+	}
+	if err := os.MkdirAll(filepath.Join(paths.ConfigDir, "inventory"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	providerPath := filepath.Join(paths.ConfigDir, "inventory", "netbox-prod.yaml")
+	providerText := `
+inventory:
+  providers:
+    netbox-prod:
+      type: netbox
+`
+	if err := os.WriteFile(providerPath, []byte(providerText), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rootText := "include: [inventory/*.yaml]\n"
+	if err := os.WriteFile(paths.ConfigFile, []byte(rootText), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	prompter := &fakeInitPrompter{}
+
+	got := captureStdout(t, func() {
+		if err := applyInventoryProviderSetup(paths, cfg, config.ProviderNetBox, prompter, false); err != nil {
+			t.Fatalf("applyInventoryProviderSetup: %v", err)
+		}
+	})
+
+	if len(prompter.prompts) != 0 {
+		t.Fatalf("already configured setup should not prompt, got %v", prompter.prompts)
+	}
+	for _, want := range []string{"Inventory provider already configured, skipping init: netbox-prod (NetBox)", providerPath} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("already configured output missing %q:\n%s", want, got)
+		}
+	}
+	rootAfter, err := os.ReadFile(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("read root config: %v", err)
+	}
+	if string(rootAfter) != rootText {
+		t.Fatalf("root config changed:\n%s", rootAfter)
 	}
 }
 
@@ -805,6 +1282,7 @@ func writeExecutable(t *testing.T, path, text string) {
 
 type fakeInitPrompter struct {
 	selects       map[string]string
+	multiSelects  map[string][]string
 	inputs        map[string]string
 	confirms      map[string]bool
 	prompts       []string
@@ -814,6 +1292,11 @@ type fakeInitPrompter struct {
 func (p *fakeInitPrompter) Select(title string, _ []ui.SelectOption) (string, error) {
 	p.prompts = append(p.prompts, title)
 	return p.selects[title], nil
+}
+
+func (p *fakeInitPrompter) MultiSelect(title string, _ []ui.SelectOption) ([]string, error) {
+	p.prompts = append(p.prompts, title)
+	return p.multiSelects[title], nil
 }
 
 func (p *fakeInitPrompter) Input(title, defaultValue string) (string, error) {

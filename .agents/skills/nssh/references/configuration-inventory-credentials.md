@@ -11,7 +11,7 @@ Source paths:
 - `internal/config/settings.go`
 - `internal/config/include.go`
 - `internal/config/inventory.go`
-- `docs/examples/config/config.example.yaml`
+- `internal/config/example_config.yaml`
 
 Default paths:
 
@@ -24,8 +24,9 @@ Default paths:
 Config is YAML. `include: [...]` can appear at the root or under sections.
 Included files are merged first; the importing file wins.
 
-Use `nssh self cfg` or the example config for field-level details instead of
-repeating the whole schema.
+Use `nssh self cfg` or the first-run config template for field-level details
+instead of repeating the whole schema. Bare `nssh self init` is first-run only;
+add provider files later with repeatable `--cred` and `--inv` flags.
 
 ## Inventory
 
@@ -48,6 +49,9 @@ Local inventory is the implicit `local` provider and writes YAML, usually
 `~/.config/nssh/inventory/local.yaml`. Local host groups are stored under each
 host as a singular group key such as `custcbb`, with the canonical group ID
 remaining `local/custcbb`.
+The host `group` key is optional. Ungrouped local hosts are valid and inherit
+inventory/provider defaults plus host-level auth, SSH, and highlight settings,
+but they do not inherit any group settings.
 
 External inventory providers write non-secret state under
 `~/.local/state/nssh/inventory/providers/<name>.json`. Provider groups,
@@ -62,8 +66,11 @@ Current external providers:
   `jump_host`.
 
 Provider-owned group selectors assign discovered objects to canonical groups.
-nssh defaults to password SSH preferences when the provider group has password
-auth, otherwise key.
+When resolved inventory auth mode is `password`, nssh renders OpenSSH options
+that force password-style authentication:
+`PreferredAuthentications=keyboard-interactive,password` and
+`PubkeyAuthentication=no`. This is applied during connection after SSH defaults,
+group options, and host options are merged. Key auth does not add these options.
 For containerlab, use `state: [running]` to select any running node; add
 `kind: [ceos, vjunos]` only when a group should be limited to specific
 node kinds.

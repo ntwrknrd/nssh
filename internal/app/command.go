@@ -64,6 +64,8 @@ var (
 
 	verboseCount int
 	showVersion  bool
+
+	connectRequestFunc = connect.ConnectRequest
 )
 
 // NewRootCmd creates and configures the root Cobra command with all subcommands.
@@ -205,21 +207,20 @@ func newSmartConnectCmd() *cobra.Command {
 			if len(args) > 0 {
 				user, host = parseUserHost(args[0])
 			}
-			var sshArgs []string
+			var sshArgs, remoteCommand []string
 			if len(args) > 1 {
-				sshArgs = args[1:]
+				sshArgs, remoteCommand = splitSmartConnectArgs(args[1:])
 			}
 			if user != "" {
 				sshArgs = append([]string{"-l", user}, sshArgs...)
 			}
-			if literalTarget {
-				return connect.ConnectLiteralHost(context.Background(), host, sshArgs, connect.Options{Verbosity: verboseCount, SSHVerbosity: sshVerbosity()})
-			}
-			hostname, err := connect.ResolveHostname(host)
-			if err != nil {
-				return err
-			}
-			return connect.ConnectHost(context.Background(), hostname, sshArgs, connect.Options{Verbosity: verboseCount, SSHVerbosity: sshVerbosity()})
+			return connectRequestFunc(context.Background(), connect.Request{
+				Host:          host,
+				LiteralTarget: literalTarget,
+				SSHArgs:       sshArgs,
+				RemoteCommand: remoteCommand,
+				Options:       connect.Options{Verbosity: verboseCount, SSHVerbosity: sshVerbosity()},
+			})
 		},
 	}
 
@@ -227,6 +228,15 @@ func newSmartConnectCmd() *cobra.Command {
 	_ = cmd.Flags().MarkHidden("literal-target")
 	cmd.Flags().SetInterspersed(false)
 	return cmd
+}
+
+func splitSmartConnectArgs(args []string) (sshArgs, remoteCommand []string) {
+	for i, arg := range args {
+		if arg == "--" {
+			return args[:i], args[i+1:]
+		}
+	}
+	return args, nil
 }
 
 func isVerboseCluster(arg string) bool {

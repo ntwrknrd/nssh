@@ -17,7 +17,7 @@ source.
    - `nssh --help`
    - `nssh <command> --help`
    - `docs/examples/help/`
-   - `docs/examples/config/config.example.yaml`
+   - `internal/config/example_config.yaml`
    - `references/architecture.md`
 3. Describe only the current release/0.3 command surface.
 
@@ -35,6 +35,9 @@ Read only what matches the user request:
   for connect/SCP behavior, fuzzy matching, provider refresh on lookup miss,
   agent runtime, host keys, legacy SSH fixes, recordings, logs, benchmarks, and
   diagnostics.
+- [terminal-highlighting.md](references/terminal-highlighting.md) for the
+  highlighting config/profile contract, why interactive PTY highlighting is not
+  used, and future captured-output or TUI highlighting direction.
 
 ## Recording Guidance
 
@@ -74,6 +77,8 @@ nssh [flags] [ssh-options] HOST [command]
 
 ```bash
 nssh self init
+nssh self init --cred 1password
+nssh self init --inv local
 nssh self status
 nssh inv list
 nssh inv get <host>
