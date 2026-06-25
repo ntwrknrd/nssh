@@ -188,6 +188,51 @@ func TestConnectRequestRoutesRemoteCommandToCapturedRunner(t *testing.T) {
 	}
 }
 
+func TestConnectRequestRoutesControlCommandToNonPTYRunner(t *testing.T) {
+	var controlCalled bool
+	oldConnectHost := connectHostFunc
+	oldRunControlCommand := runControlCommandFunc
+	oldResolveHostname := resolveHostnameFunc
+	defer func() {
+		connectHostFunc = oldConnectHost
+		runControlCommandFunc = oldRunControlCommand
+		resolveHostnameFunc = oldResolveHostname
+	}()
+
+	resolveHostnameFunc = func(host string) (string, error) {
+		t.Fatalf("ConnectRequest should not pre-resolve non-literal control host, got %q", host)
+		return "", nil
+	}
+	connectHostFunc = func(_ context.Context, _ string, _ []string, _ ...Options) error {
+		t.Fatal("interactive connector should not be called for control commands")
+		return nil
+	}
+	runControlCommandFunc = func(_ context.Context, host string, literal bool, sshArgs []string, _ ...Options) error {
+		controlCalled = true
+		if host != "edge01" {
+			t.Fatalf("control host = %q, want raw host", host)
+		}
+		if literal {
+			t.Fatal("literal target should be false")
+		}
+		if len(sshArgs) != 2 || sshArgs[0] != "-O" || sshArgs[1] != "exit" {
+			t.Fatalf("control ssh args = %#v", sshArgs)
+		}
+		return nil
+	}
+
+	err := ConnectRequest(context.Background(), Request{
+		Host:    "edge01",
+		SSHArgs: []string{"-O", "exit"},
+	})
+	if err != nil {
+		t.Fatalf("ConnectRequest: %v", err)
+	}
+	if !controlCalled {
+		t.Fatal("control command runner was not called")
+	}
+}
+
 func TestConnectRequestPreservesLiteralTargetForRemoteCommand(t *testing.T) {
 	var remoteCalled bool
 	oldRunLiteralRemoteCommand := runLiteralRemoteCommandFunc
@@ -411,10 +456,12 @@ func TestRunResolvedRemoteCommandHotMuxSkipsAskpassAndPasswordResolver(t *testin
 	oldRunCapturedCommand := runCapturedCommandFunc
 	oldAskpassHelperPath := askpassHelperPathFunc
 	oldCheckMuxSession := checkMuxSessionFunc
+	oldStartMuxSession := startMuxSessionFunc
 	defer func() {
 		runCapturedCommandFunc = oldRunCapturedCommand
 		askpassHelperPathFunc = oldAskpassHelperPath
 		checkMuxSessionFunc = oldCheckMuxSession
+		startMuxSessionFunc = oldStartMuxSession
 	}()
 
 	var resolverCalls atomic.Int32
@@ -427,6 +474,10 @@ func TestRunResolvedRemoteCommandHotMuxSkipsAskpassAndPasswordResolver(t *testin
 	askpassHelperPathFunc = func() (string, error) {
 		t.Fatal("hot mux should not require askpass helper")
 		return "", nil
+	}
+	startMuxSessionFunc = func(context.Context, connector.MuxStartRequest) error {
+		t.Fatal("hot mux should not start a new mux session")
+		return nil
 	}
 	runCapturedCommandFunc = func(_ context.Context, req captured.Request) (captured.Result, error) {
 		if len(req.Env) != 0 {
@@ -455,6 +506,127 @@ func TestRunResolvedRemoteCommandHotMuxSkipsAskpassAndPasswordResolver(t *testin
 	}
 	if got := resolverCalls.Load(); got != 0 {
 		t.Fatalf("resolver calls = %d, want 0", got)
+	}
+}
+
+func TestRunResolvedRemoteCommandColdPersistentMuxStartsMuxBeforeCapturedCommand(t *testing.T) {
+	oldRunCapturedCommand := runCapturedCommandFunc
+	oldAskpassHelperPath := askpassHelperPathFunc
+	oldCheckMuxSession := checkMuxSessionFunc
+	oldStartMuxSession := startMuxSessionFunc
+	oldHostKeyProbe := hostKeyProbeFunc
+	oldHostKeyPrepare := hostKeyPrepareFunc
+	defer func() {
+		runCapturedCommandFunc = oldRunCapturedCommand
+		askpassHelperPathFunc = oldAskpassHelperPath
+		checkMuxSessionFunc = oldCheckMuxSession
+		startMuxSessionFunc = oldStartMuxSession
+		hostKeyProbeFunc = oldHostKeyProbe
+		hostKeyPrepareFunc = oldHostKeyPrepare
+	}()
+
+	checkMuxSessionFunc = func(context.Context, connector.MuxCheckRequest) (bool, bool) {
+		return false, true
+	}
+	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options) hostKeyProbeStatus {
+		return hostKeyProbeNeedsPrompt
+	}
+	hostKeyPrepareFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, bool) (*connector.HostKeyPreparation, error) {
+		return &connector.HostKeyPreparation{TempKnownHosts: "/tmp/nssh-known-hosts-prep"}, nil
+	}
+	askpassHelperPathFunc = func() (string, error) {
+		return "/tmp/nssh-askpass", nil
+	}
+	var muxStarted atomic.Bool
+	var resolverCalls atomic.Int32
+	startMuxSessionFunc = func(_ context.Context, req connector.MuxStartRequest) error {
+		muxStarted.Store(true)
+		if req.Hostname != "edge01" || req.Username != "netops" || req.Port != 2200 {
+			t.Fatalf("mux start request endpoint = %+v", req)
+		}
+		if len(req.Env) == 0 {
+			t.Fatal("mux start request missing askpass env")
+		}
+		joinedArgs := strings.Join(req.SSHArgs, "\n")
+		for _, want := range []string{
+			"UserKnownHostsFile=/tmp/nssh-known-hosts-prep",
+			"StrictHostKeyChecking=yes",
+		} {
+			if !strings.Contains(joinedArgs, want) {
+				t.Fatalf("mux start ssh args = %#v, want %q", req.SSHArgs, want)
+			}
+		}
+		return nil
+	}
+	runCapturedCommandFunc = func(_ context.Context, req captured.Request) (captured.Result, error) {
+		if !muxStarted.Load() {
+			t.Fatal("captured command started before mux prewarm")
+		}
+		if len(req.Env) != 0 {
+			t.Fatalf("captured env = %#v, want no askpass after mux prewarm", req.Env)
+		}
+		return captured.Result{Stdout: []byte("ok\n")}, nil
+	}
+
+	err := runResolvedRemoteCommand(context.Background(), &ResolvedHost{
+		Hostname: "edge01",
+		Username: "netops",
+		Port:     2200,
+		AuthMode: config.AuthModePassword,
+		SSH: config.SSHHostConfig{Options: config.SSHOptions{
+			"ControlMaster":  config.NewSSHOptionString("auto"),
+			"ControlPath":    config.NewSSHOptionString("~/.ssh/sockets/%r@%h:%p"),
+			"ControlPersist": config.NewSSHOptionString("12h"),
+		}},
+		Credential: &ResolvedCredential{
+			PasswordResolver: func(context.Context) (*secret.Secret, error) {
+				resolverCalls.Add(1)
+				return secret.NewFromString("secret"), nil
+			},
+		},
+	}, []string{"-o", "LogLevel=ERROR"}, []string{"show"}, config.DefaultConfig(), Options{})
+	if err != nil {
+		t.Fatalf("runResolvedRemoteCommand: %v", err)
+	}
+	if !muxStarted.Load() {
+		t.Fatal("mux prewarm was not started")
+	}
+	if got := resolverCalls.Load(); got != 1 {
+		t.Fatalf("resolver calls = %d, want one mux-start askpass request", got)
+	}
+}
+
+func TestRunResolvedRemoteCommandSkipsMuxPrewarmWithoutControlPersist(t *testing.T) {
+	oldRunCapturedCommand := runCapturedCommandFunc
+	oldCheckMuxSession := checkMuxSessionFunc
+	oldStartMuxSession := startMuxSessionFunc
+	defer func() {
+		runCapturedCommandFunc = oldRunCapturedCommand
+		checkMuxSessionFunc = oldCheckMuxSession
+		startMuxSessionFunc = oldStartMuxSession
+	}()
+
+	checkMuxSessionFunc = func(context.Context, connector.MuxCheckRequest) (bool, bool) {
+		return false, true
+	}
+	startMuxSessionFunc = func(context.Context, connector.MuxStartRequest) error {
+		t.Fatal("mux prewarm should require ControlPersist")
+		return nil
+	}
+	runCapturedCommandFunc = func(context.Context, captured.Request) (captured.Result, error) {
+		return captured.Result{Stdout: []byte("ok\n")}, nil
+	}
+
+	err := runResolvedRemoteCommand(context.Background(), &ResolvedHost{
+		Hostname: "edge01",
+		Port:     22,
+		SSH: config.SSHHostConfig{Options: config.SSHOptions{
+			"ControlMaster": config.NewSSHOptionString("auto"),
+			"ControlPath":   config.NewSSHOptionString("~/.ssh/sockets/%r@%h:%p"),
+		}},
+	}, nil, []string{"show"}, config.DefaultConfig(), Options{})
+	if err != nil {
+		t.Fatalf("runResolvedRemoteCommand: %v", err)
 	}
 }
 

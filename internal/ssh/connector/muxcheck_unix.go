@@ -5,6 +5,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -22,6 +23,19 @@ type MuxCheckRequest struct {
 }
 
 type MuxCheckExec func(context.Context, []string) error
+
+type MuxStartRequest struct {
+	Hostname     string
+	Username     string
+	Port         int
+	SSHOptions   config.SSHHostConfig
+	SSHVerbosity int
+	SSHArgs      []string
+	Timeout      int
+	Env          []string
+}
+
+type MuxStartExec func(context.Context, []string, []string) error
 
 func CheckMuxSession(ctx context.Context, req MuxCheckRequest, execFn MuxCheckExec) (hot bool, checked bool) {
 	args, ok := BuildMuxCheckArgs(req)
@@ -60,6 +74,75 @@ func BuildMuxCheckArgs(req MuxCheckRequest) ([]string, bool) {
 
 func defaultMuxCheckExec(ctx context.Context, args []string) error {
 	return exec.CommandContext(ctx, "ssh", args...).Run()
+}
+
+func StartMuxSession(ctx context.Context, req MuxStartRequest, execFn MuxStartExec) error {
+	args, ok := BuildMuxStartArgs(req)
+	if !ok {
+		return nil
+	}
+	if execFn == nil {
+		execFn = defaultMuxStartExec
+	}
+	timer := StartTiming(TimingMuxStart)
+	err := execFn(ctx, args, req.Env)
+	timer.Emit()
+	return err
+}
+
+func BuildMuxStartArgs(req MuxStartRequest) ([]string, bool) {
+	options, _ := splitSSHArgs(req.SSHArgs)
+	rendered := RenderSSHOptions(req.SSHOptions, req.SSHVerbosity)
+	allOptions := append([]string{}, rendered...)
+	allOptions = append(allOptions, options...)
+	if !persistentMuxEnabled(allOptions) {
+		return nil, false
+	}
+
+	args := append([]string{}, rendered...)
+	if len(req.Env) > 0 {
+		if effectiveSSHOption(allOptions, "NumberOfPasswordPrompts") == "" {
+			args = append(args, "-o", "NumberOfPasswordPrompts=1")
+		}
+	} else if effectiveSSHOption(allOptions, "BatchMode") == "" {
+		args = append(args, "-o", "BatchMode=yes")
+	}
+	if req.Timeout > 0 && effectiveSSHOption(allOptions, "ConnectTimeout") == "" {
+		args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", req.Timeout))
+	}
+	if req.Port != 0 && req.Port != 22 && explicitSSHPort(options) == "" && effectiveSSHOption(rendered, "Port") == "" {
+		args = append(args, "-p", fmt.Sprintf("%d", req.Port))
+	}
+	args = append(args, options...)
+	args = append(args, "-M", "-N", "-f", muxTarget(req.Username, req.Hostname))
+	return args, true
+}
+
+func persistentMuxEnabled(args []string) bool {
+	controlPath := effectiveSSHOption(args, "ControlPath")
+	if controlPath == "" || strings.EqualFold(controlPath, "none") {
+		return false
+	}
+	controlMaster := effectiveSSHOption(args, "ControlMaster")
+	if controlMaster == "" || strings.EqualFold(controlMaster, "no") {
+		return false
+	}
+	controlPersist := effectiveSSHOption(args, "ControlPersist")
+	if controlPersist == "" || strings.EqualFold(controlPersist, "no") || controlPersist == "0" {
+		return false
+	}
+	return true
+}
+
+func defaultMuxStartExec(ctx context.Context, args []string, env []string) error {
+	cmd := exec.CommandContext(ctx, "ssh", args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func muxTarget(username, hostname string) string {

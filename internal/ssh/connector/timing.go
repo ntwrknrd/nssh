@@ -100,6 +100,9 @@ const (
 	// TimingMuxCheck is emitted after checking for an existing OpenSSH ControlMaster session.
 	TimingMuxCheck = "mux_check"
 
+	// TimingMuxStart is emitted after starting a persistent OpenSSH ControlMaster session.
+	TimingMuxStart = "mux_start"
+
 	// TimingCredentialPrefetch is emitted after request-scoped credential prefetch completes.
 	TimingCredentialPrefetch = "credential_prefetch"
 

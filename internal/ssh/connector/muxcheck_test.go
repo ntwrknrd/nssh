@@ -85,3 +85,90 @@ func TestCheckMuxSessionTreatsExitZeroAsHotAndErrorsAsCold(t *testing.T) {
 		t.Fatalf("hot=%v checked=%v, want cold checked mux", hot, checked)
 	}
 }
+
+func TestBuildMuxStartArgsRequiresPersistentMuxConfig(t *testing.T) {
+	base := MuxStartRequest{
+		Hostname: "edge01",
+		SSHOptions: config.SSHHostConfig{Options: config.SSHOptions{
+			"ControlMaster":  config.NewSSHOptionString("auto"),
+			"ControlPath":    config.NewSSHOptionString("~/.ssh/sockets/%r@%h:%p"),
+			"ControlPersist": config.NewSSHOptionString("12h"),
+		}},
+	}
+	if args, ok := BuildMuxStartArgs(base); !ok || len(args) == 0 {
+		t.Fatalf("persistent mux args=%#v ok=%v, want args", args, ok)
+	}
+
+	withoutPersist := base
+	withoutPersist.SSHOptions.Options = config.SSHOptions{
+		"ControlMaster": config.NewSSHOptionString("auto"),
+		"ControlPath":   config.NewSSHOptionString("~/.ssh/sockets/%r@%h:%p"),
+	}
+	if args, ok := BuildMuxStartArgs(withoutPersist); ok || args != nil {
+		t.Fatalf("missing ControlPersist args=%#v ok=%v, want no start", args, ok)
+	}
+
+	controlMasterNo := base
+	controlMasterNo.SSHArgs = []string{"-o", "ControlMaster=no"}
+	if args, ok := BuildMuxStartArgs(controlMasterNo); ok || args != nil {
+		t.Fatalf("ControlMaster=no args=%#v ok=%v, want no start", args, ok)
+	}
+}
+
+func TestBuildMuxStartArgsUsesRenderedOptionsTargetAndEnvironment(t *testing.T) {
+	args, ok := BuildMuxStartArgs(MuxStartRequest{
+		Hostname: "edge01.example.com",
+		Username: "netops",
+		Port:     2200,
+		SSHOptions: config.SSHHostConfig{Options: config.SSHOptions{
+			"ControlMaster":  config.NewSSHOptionString("auto"),
+			"ControlPath":    config.NewSSHOptionString("~/.ssh/sockets/%r@%h:%p"),
+			"ControlPersist": config.NewSSHOptionString("12h"),
+		}},
+		SSHArgs: []string{"-o", "LogLevel=ERROR"},
+	})
+	if !ok {
+		t.Fatal("BuildMuxStartArgs returned ok=false")
+	}
+	want := []string{
+		"-F", "none",
+		"-o", "ControlMaster=auto",
+		"-o", "ControlPath=~/.ssh/sockets/%r@%h:%p",
+		"-o", "ControlPersist=43200",
+		"-o", "BatchMode=yes",
+		"-p", "2200",
+		"-o", "LogLevel=ERROR",
+		"-M", "-N", "-f",
+		"netops@edge01.example.com",
+	}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("args = %#v, want %#v", args, want)
+	}
+}
+
+func TestBuildMuxStartArgsAllowsOnePasswordPromptWithAskpass(t *testing.T) {
+	args, ok := BuildMuxStartArgs(MuxStartRequest{
+		Hostname: "edge01.example.com",
+		SSHOptions: config.SSHHostConfig{Options: config.SSHOptions{
+			"ControlMaster":  config.NewSSHOptionString("auto"),
+			"ControlPath":    config.NewSSHOptionString("~/.ssh/sockets/%r@%h:%p"),
+			"ControlPersist": config.NewSSHOptionString("12h"),
+		}},
+		Env: []string{"SSH_ASKPASS=/tmp/nssh-askpass"},
+	})
+	if !ok {
+		t.Fatal("BuildMuxStartArgs returned ok=false")
+	}
+	want := []string{
+		"-F", "none",
+		"-o", "ControlMaster=auto",
+		"-o", "ControlPath=~/.ssh/sockets/%r@%h:%p",
+		"-o", "ControlPersist=43200",
+		"-o", "NumberOfPasswordPrompts=1",
+		"-M", "-N", "-f",
+		"edge01.example.com",
+	}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("args = %#v, want %#v", args, want)
+	}
+}

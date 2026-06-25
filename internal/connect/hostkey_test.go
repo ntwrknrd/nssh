@@ -18,14 +18,16 @@ func TestRenderNewHostKeyPromptTextIsPlainTerminalOutput(t *testing.T) {
 	}))
 
 	for _, want := range []string{
-		"New host key",
+		"This is the first time connecting to this host.",
 		"Host: edge01.example.net",
 		"Fingerprint: ssh-ed25519 SHA256:test",
-		"This is the first time connecting to this host.",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("prompt text missing %q:\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "New host key") {
+		t.Fatalf("prompt text still contains removed heading:\n%s", text)
 	}
 	for _, unwanted := range []string{"─", "╭", "│", "╰"} {
 		if strings.Contains(text, unwanted) {
@@ -43,10 +45,11 @@ func TestRenderChangedHostKeyPromptTextIsPlainTerminalOutput(t *testing.T) {
 	}))
 
 	for _, want := range []string{
+		"The host key has changed.",
 		"WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!",
 		"Host: edge01.example.net",
 		"New fingerprint: ssh-ed25519 SHA256:test",
-		"The host key has changed.",
+		"Otherwise, DO NOT CONTINUE.",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("prompt text missing %q:\n%s", want, text)

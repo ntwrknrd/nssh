@@ -2,12 +2,15 @@ package app
 
 import (
 	"context"
+	"io"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/connect"
+	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
 
@@ -73,6 +76,16 @@ func TestPreprocessArgs(t *testing.T) {
 			out:  []string{"smart-connect", "router1", "-p", "2222", "--", "show", "version"},
 		},
 		{
+			name: "control command split form before host",
+			in:   []string{"-O", "exit", "router1"},
+			out:  []string{"smart-connect", "router1", "-O", "exit"},
+		},
+		{
+			name: "control command joined form before host",
+			in:   []string{"-Ocheck", "router1"},
+			out:  []string{"smart-connect", "router1", "-Ocheck"},
+		},
+		{
 			name: "select opens smart picker",
 			in:   []string{"--select"},
 			out:  []string{"smart-connect"},
@@ -111,6 +124,34 @@ func TestPreprocessArgs(t *testing.T) {
 				t.Fatalf("PreprocessArgs(%v) = %v, want %v", tt.in, got, tt.out)
 			}
 		})
+	}
+}
+
+func TestRunSuppressesEmptyExitErrorMessage(t *testing.T) {
+	oldConnectRequest := connectRequestFunc
+	defer func() { connectRequestFunc = oldConnectRequest }()
+	connectRequestFunc = func(context.Context, connect.Request) error {
+		return &exit.ExitError{Code: 255}
+	}
+
+	oldStderr := os.Stderr
+	stderrRead, stderrWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stderr pipe: %v", err)
+	}
+	os.Stderr = stderrWrite
+	code := Run(Options{Version: "test", Args: []string{"edge01"}})
+	_ = stderrWrite.Close()
+	os.Stderr = oldStderr
+	data, err := io.ReadAll(stderrRead)
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	if code != 255 {
+		t.Fatalf("exit code = %d, want 255", code)
+	}
+	if got := string(data); got != "" {
+		t.Fatalf("stderr = %q, want no nssh wrapper", got)
 	}
 }
 

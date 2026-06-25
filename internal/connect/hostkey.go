@@ -62,12 +62,10 @@ func renderNewHostKeyPromptText(prompt connector.HostKeyPrompt) string {
 	var sb strings.Builder
 	fp := hostKeyFingerprint(prompt)
 	sb.WriteString("\n")
-	sb.WriteString(ui.Cyan("New host key"))
+	sb.WriteString(ui.Gray("This is the first time connecting to this host."))
 	sb.WriteString("\n\n")
 	sb.WriteString(fmt.Sprintf("Host: %s\n", ui.Cyan(prompt.Host)))
 	sb.WriteString(fmt.Sprintf("Fingerprint: %s\n", ui.Cyan(fp)))
-	sb.WriteString("\n")
-	sb.WriteString(ui.Gray("This is the first time connecting to this host."))
 	sb.WriteString("\n\n")
 	return sb.String()
 }
@@ -76,8 +74,10 @@ func renderChangedHostKeyPromptText(prompt connector.HostKeyPrompt) string {
 	var sb strings.Builder
 	fp := hostKeyFingerprint(prompt)
 	sb.WriteString("\n")
-	sb.WriteString(ui.Red("WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!"))
+	sb.WriteString(ui.Red("The host key has changed."))
 	sb.WriteString("\n\n")
+	sb.WriteString(ui.Red("WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!"))
+	sb.WriteString("\n")
 	sb.WriteString(ui.Yellow("IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!"))
 	sb.WriteString("\n")
 	sb.WriteString(ui.Yellow("Someone could be eavesdropping on you right now (man-in-the-middle attack)!"))
@@ -85,8 +85,8 @@ func renderChangedHostKeyPromptText(prompt connector.HostKeyPrompt) string {
 	sb.WriteString(fmt.Sprintf("Host: %s\n", ui.Cyan(prompt.Host)))
 	sb.WriteString(fmt.Sprintf("New fingerprint: %s\n", ui.Yellow(fp)))
 	sb.WriteString("\n")
-	sb.WriteString("The host key has changed. If this is expected (server reinstall,\n")
-	sb.WriteString("key rotation), you may proceed. Otherwise, DO NOT CONTINUE.\n\n")
+	sb.WriteString("If this is expected (server reinstall, key rotation), you may proceed.\n")
+	sb.WriteString("Otherwise, DO NOT CONTINUE.\n\n")
 	return sb.String()
 }
 

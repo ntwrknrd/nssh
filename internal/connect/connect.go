@@ -51,12 +51,16 @@ var (
 	connectLiteralHostFunc      = ConnectLiteralHost
 	runRemoteCommandFunc        = RunRemoteCommand
 	runLiteralRemoteCommandFunc = RunLiteralRemoteCommand
+	runControlCommandFunc       = RunControlCommand
 	runCapturedCommandFunc      = func(ctx context.Context, req captured.Request) (captured.Result, error) {
 		return captured.Runner{}.Run(ctx, req)
 	}
 	askpassHelperPathFunc = defaultAskpassHelperPath
 	checkMuxSessionFunc   = func(ctx context.Context, req connector.MuxCheckRequest) (bool, bool) {
 		return connector.CheckMuxSession(ctx, req, nil)
+	}
+	startMuxSessionFunc = func(ctx context.Context, req connector.MuxStartRequest) error {
+		return connector.StartMuxSession(ctx, req, nil)
 	}
 	hostKeyProbeFunc   = probeInteractiveHostKey
 	hostKeyPrepareFunc = runHostKeyPreparation
@@ -70,6 +74,10 @@ func ConnectRequest(ctx context.Context, req Request) error {
 			return runLiteralRemoteCommandFunc(ctx, req.Host, req.SSHArgs, req.RemoteCommand, req.Options)
 		}
 		return runRemoteCommandFunc(ctx, req.Host, req.SSHArgs, req.RemoteCommand, req.Options)
+	}
+
+	if _, _, ok := connector.ExtractControlCommand(req.SSHArgs); ok {
+		return runControlCommandFunc(ctx, req.Host, req.LiteralTarget, req.SSHArgs, req.Options)
 	}
 
 	if req.LiteralTarget {
@@ -189,6 +197,32 @@ func RunLiteralRemoteCommand(ctx context.Context, hostname string, sshArgs, comm
 	return err
 }
 
+func RunControlCommand(ctx context.Context, hostname string, literal bool, sshArgs []string, opts ...Options) error {
+	var options Options
+	if len(opts) > 0 {
+		options = opts[0]
+	}
+	controlCommand, controlSSHArgs, ok := connector.ExtractControlCommand(sshArgs)
+	if !ok {
+		return fmt.Errorf("ssh control command is required")
+	}
+	explicitUser := extractExplicitUser(hostname, controlSSHArgs)
+	var resolved *ResolvedHost
+	var err error
+	if literal {
+		resolved, err = ResolveLiteralHostForConnect(hostname, explicitUser)
+		if err != nil {
+			return fmt.Errorf("resolve literal host: %w", err)
+		}
+	} else {
+		resolved, err = ResolveSmartHostForConnect(hostname, explicitUser)
+		if err != nil {
+			return fmt.Errorf("resolve host: %w", err)
+		}
+	}
+	return connector.RunControlCommand(ctx, controlCommandRequest(resolved, controlCommand, controlSSHArgs, resolved.Config, options), nil)
+}
+
 func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshArgs, command []string, cfg *config.Config, opts Options) error {
 	if resolved == nil {
 		return fmt.Errorf("resolved host is required")
@@ -212,9 +246,11 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 	if passwordFuture != nil {
 		defer passwordFuture.Close()
 	}
+	var hostKeyPrep *connector.HostKeyPreparation
 	if resolved.Credential != nil {
 		if !muxHot {
-			hostKeyPrep, err := prepareInteractiveHostKey(ctx, resolved, sshArgs, cfg, opts)
+			var err error
+			hostKeyPrep, err = prepareInteractiveHostKey(ctx, resolved, sshArgs, cfg, opts)
 			if err != nil {
 				return err
 			}
@@ -223,6 +259,36 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 				req.SSHArgs = appendHostKeyPreparationSSHArgs(req.SSHArgs, hostKeyPrep)
 			}
 		}
+	}
+
+	if !muxHot {
+		muxStartReq := muxStartRequest(resolved, req.SSHArgs, cfg, opts, nil)
+		if _, ok := connector.BuildMuxStartArgs(muxStartReq); ok {
+			muxAskpass, err := startMuxAskpass(ctx, resolved.Credential, passwordFuture)
+			if err != nil {
+				return err
+			}
+			if muxAskpass != nil {
+				muxStartReq.Env = muxAskpass.env
+			}
+
+			// Captured remote commands drain stdout/stderr and reap the foreground ssh process.
+			// Starting the persistent master as its own step keeps ControlPersist behavior
+			// independent of captured output pipe lifetime.
+			if err := startMuxSessionFunc(ctx, muxStartReq); err != nil {
+				if muxAskpass != nil {
+					muxAskpass.cleanup()
+				}
+				return err
+			}
+			if muxAskpass != nil {
+				muxAskpass.cleanup()
+			}
+			muxHot = true
+		}
+	}
+
+	if resolved.Credential != nil && !muxHot {
 		askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
 		slog.Debug("setting up askpass", "host", resolved.Hostname, "password_future", passwordFuture != nil, "mux_hot", muxHot)
 		if passwordFuture != nil {
@@ -361,6 +427,91 @@ func remoteCommandPassword(ctx context.Context, cred *ResolvedCredential) (*secr
 		return nil, err
 	}
 	return password, nil
+}
+
+type muxAskpassHandle struct {
+	env      []string
+	password *secret.Secret
+	server   *askpass.Server
+	cancel   context.CancelFunc
+	done     chan error
+}
+
+func (h *muxAskpassHandle) cleanup() {
+	if h.server != nil {
+		stopAskpassServer(h.server, h.cancel, h.done)
+	}
+	if h.password != nil {
+		h.password.Destroy()
+	}
+}
+
+func startMuxAskpass(ctx context.Context, cred *ResolvedCredential, passwordFuture *sshpassword.Future) (*muxAskpassHandle, error) {
+	if cred == nil {
+		return nil, nil
+	}
+	handle := &muxAskpassHandle{}
+	var resolve func(context.Context) (*secret.Secret, error)
+	if passwordFuture != nil {
+		resolve = passwordFuture.Resolve
+	} else {
+		password, err := remoteCommandPassword(ctx, cred)
+		if err != nil {
+			return nil, err
+		}
+		if password == nil {
+			return nil, nil
+		}
+		handle.password = password
+		resolve = func(context.Context) (*secret.Secret, error) {
+			return password, nil
+		}
+	}
+
+	askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
+	server, cancel, done, env, err := startAskpassServerEnv(ctx, resolve)
+	askpassTimer.Emit()
+	if err != nil {
+		handle.cleanup()
+		return nil, err
+	}
+	handle.server = server
+	handle.cancel = cancel
+	handle.done = done
+	handle.env = env
+	return handle, nil
+}
+
+func controlCommandRequest(resolved *ResolvedHost, command string, sshArgs []string, cfg *config.Config, opts Options) connector.ControlCommandRequest {
+	req := connector.ControlCommandRequest{
+		Hostname:     resolved.Hostname,
+		Username:     resolved.Username,
+		Port:         resolved.Port,
+		Command:      command,
+		SSHOptions:   resolved.SSH,
+		SSHVerbosity: opts.SSHVerbosity,
+		SSHArgs:      sshArgs,
+	}
+	if cfg != nil && cfg.SSH.Connection.Timeout.Duration() > 0 {
+		req.Timeout = int(cfg.SSH.Connection.Timeout.Duration().Seconds())
+	}
+	return req
+}
+
+func muxStartRequest(resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options, env []string) connector.MuxStartRequest {
+	req := connector.MuxStartRequest{
+		Hostname:     resolved.Hostname,
+		Username:     resolved.Username,
+		Port:         resolved.Port,
+		SSHOptions:   resolved.SSH,
+		SSHVerbosity: opts.SSHVerbosity,
+		SSHArgs:      sshArgs,
+		Env:          env,
+	}
+	if cfg != nil && cfg.SSH.Connection.Timeout.Duration() > 0 {
+		req.Timeout = int(cfg.SSH.Connection.Timeout.Duration().Seconds())
+	}
+	return req
 }
 
 func applyRemoteCommandHighlight(data []byte, cfg config.HighlightConfig) []byte {

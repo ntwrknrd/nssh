@@ -101,6 +101,7 @@ func TestEnhancedTimingStagesHaveDescriptionsAndOrder(t *testing.T) {
 		connector.TimingCredentialRegistry,
 		connector.TimingCredentialLookup,
 		connector.TimingMuxCheck,
+		connector.TimingMuxStart,
 		connector.TimingCredentialPrefetch,
 		connector.TimingAskpassSetup,
 		connector.TimingSSHArgsBuild,
@@ -118,6 +119,7 @@ func TestEnhancedTimingStagesHaveDescriptionsAndOrder(t *testing.T) {
 	got := sortStageNames([]string{
 		connector.TimingSSHProcessTotal,
 		connector.TimingCredentialLookup,
+		connector.TimingMuxStart,
 		connector.TimingConfigLoad,
 		connector.TimingCatalogTotal,
 		connector.TimingAskpassSetup,
@@ -128,6 +130,7 @@ func TestEnhancedTimingStagesHaveDescriptionsAndOrder(t *testing.T) {
 		connector.TimingConfigLoad,
 		connector.TimingCatalogTotal,
 		connector.TimingCredentialLookup,
+		connector.TimingMuxStart,
 		connector.TimingAskpassSetup,
 		connector.TimingSSHArgsBuild,
 		connector.TimingSSHProcessStart,
