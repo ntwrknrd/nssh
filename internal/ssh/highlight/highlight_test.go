@@ -110,6 +110,134 @@ func TestJunosHighlightColorsMajorSetHierarchies(t *testing.T) {
 	}
 }
 
+func TestJunosHighlightSublimeInspiredCategories(t *testing.T) {
+	input := "# generated config\n" +
+		"/* inactive annotation */\n" +
+		"set system login message \"authorized \\\"users\\\" only\"\n" +
+		"set interfaces ge-0/0/0 description uplink_to_core\n" +
+		"set system archival configuration transfer-on-commit archive-sites scp://ops@example.net/configs\n" +
+		"set routing-options rib-groups RG1 import-rib inet.0\n" +
+		"set firewall family inet filter EDGE term allow-web from destination-port 443\n" +
+		"set security zones security-zone trust interfaces irb.10\n" +
+		"set policy-options policy-statement EXPORT term permit then accept\n" +
+		"set policy-options policy-statement EXPORT term drop then reject\n"
+
+	out := string(New(Options{Enabled: true, Profile: ProfileJunos}).Highlight([]byte(input)))
+	if stripANSI(out) != input {
+		t.Fatalf("stripANSI(output) = %q, want original input", stripANSI(out))
+	}
+
+	for _, token := range []string{
+		"# generated config",
+		"/* inactive annotation */",
+		"\"authorized \\\"users\\\" only\"",
+		"uplink_to_core",
+		"scp://ops@example.net/configs",
+		"inet.0",
+		"RG1",
+		"EDGE",
+		"allow-web",
+		"trust",
+		"irb.10",
+		"443",
+		"accept",
+		"reject",
+	} {
+		if !tokenHighlighted(out, token) {
+			t.Fatalf("token %q was not highlighted in %q", token, out)
+		}
+	}
+
+	if tokenStyle(out, "# generated config") != "\x1b[2;37m" {
+		t.Fatalf("comment style = %q, want dim gray", tokenStyle(out, "# generated config"))
+	}
+	if tokenStyle(out, "accept") != "\x1b[32m" {
+		t.Fatalf("accept style = %q, want green", tokenStyle(out, "accept"))
+	}
+	if tokenStyle(out, "reject") != "\x1b[31m" {
+		t.Fatalf("reject style = %q, want red", tokenStyle(out, "reject"))
+	}
+}
+
+func TestJunosHighlightExpandedInterfacesAndSections(t *testing.T) {
+	input := "set poe interface fe-0/0/1 disable\n" +
+		"set ethernet-switching-options analyzer SPAN input ingress interface so-0/0/0\n" +
+		"set applications application APP protocol tcp destination-port 8443\n" +
+		"set virtual-chassis member 0 serial-number ABC123\n" +
+		"set fabric protocols bgp export FABRIC-OUT\n" +
+		"set switch-options interface me0.0\n" +
+		"set wlan access-point vme0\n" +
+		"set interfaces gr-0/0/0 unit 0\n" +
+		"set interfaces lt-0/0/0 unit 1 peer-unit 2\n" +
+		"set interfaces vt-0/0/0 unit 0\n" +
+		"set interfaces si-0/0/0 unit 0\n" +
+		"set interfaces sp-0/0/0 unit 0\n" +
+		"set interfaces st0 unit 1\n"
+
+	out := string(New(Options{Enabled: true, Profile: ProfileJunos}).Highlight([]byte(input)))
+	if stripANSI(out) != input {
+		t.Fatalf("stripANSI(output) = %q, want original input", stripANSI(out))
+	}
+
+	for _, token := range []string{"poe", "ethernet-switching-options", "applications", "virtual-chassis", "fabric", "switch-options", "wlan"} {
+		if !tokenHighlighted(out, token) {
+			t.Fatalf("section token %q was not highlighted in %q", token, out)
+		}
+	}
+	for _, token := range []string{"fe-0/0/1", "so-0/0/0", "me0.0", "vme0", "gr-0/0/0", "lt-0/0/0", "vt-0/0/0", "si-0/0/0", "sp-0/0/0", "st0"} {
+		if !tokenHighlighted(out, token) {
+			t.Fatalf("interface token %q was not highlighted in %q", token, out)
+		}
+	}
+	for _, token := range []string{"0", "1", "2", "8443"} {
+		if !tokenHighlighted(out, token) {
+			t.Fatalf("numeric token %q was not highlighted in %q", token, out)
+		}
+	}
+}
+
+func TestJunosScanProducesExpandedSemanticKinds(t *testing.T) {
+	line := []byte("set firewall family inet filter EDGE term allow from destination-port 443 then accept # ok")
+	spans := JunosProfile{}.Scan(line)
+	want := map[string]Kind{
+		"set":      KindAction,
+		"firewall": KindHierarchy,
+		"EDGE":     KindVariable,
+		"allow":    KindVariable,
+		"443":      KindNumber,
+		"accept":   KindStateGood,
+		"# ok":     KindComment,
+	}
+	assertSpanKinds(t, line, spans, want)
+}
+
+func TestJunosScanProducesStringURLAndRoutingTableKinds(t *testing.T) {
+	line := []byte("set system archival archive-sites https://example.net/configs rib inet.0 description 'inet.0 export'")
+	spans := JunosProfile{}.Scan(line)
+	want := map[string]Kind{
+		"set":                         KindAction,
+		"system":                      KindHierarchy,
+		"https://example.net/configs": KindURL,
+		"inet.0":                      KindRoutingTable,
+		"'inet.0 export'":             KindString,
+	}
+	assertSpanKinds(t, line, spans, want)
+}
+
+func TestJunosHighlightDoesNotColorGeneralNumbers(t *testing.T) {
+	input := "plain output with counters 12345 and system text\n"
+	out := string(New(Options{Enabled: true, Profile: ProfileJunos}).Highlight([]byte(input)))
+	if stripANSI(out) != input {
+		t.Fatalf("stripANSI(output) = %q, want original input", stripANSI(out))
+	}
+	if tokenHighlighted(out, "12345") {
+		t.Fatalf("general number should not be highlighted: %q", out)
+	}
+	if tokenHighlighted(out, "system") {
+		t.Fatalf("free-text hierarchy word should not be highlighted: %q", out)
+	}
+}
+
 func TestJunosHighlightGatesHierarchyAndProtocolsByLineContext(t *testing.T) {
 	input := "This system is for the use of authorized individuals only.\n" +
 		"Last login: Tue Apr 29 02:54:36 2025 from re1\n" +
@@ -138,7 +266,7 @@ func TestJunosHighlightGatesHierarchyAndProtocolsByLineContext(t *testing.T) {
 	}
 }
 
-func TestHighlighterCarriesConfigContextAcrossChunks(t *testing.T) {
+func TestHighlighterDoesNotCarryConfigContextAcrossCalls(t *testing.T) {
 	h := New(Options{Enabled: true, Profile: ProfileJunos})
 	first := string(h.Highlight([]byte("set protocols ")))
 	second := string(h.Highlight([]byte("bgp group edge\n")))
@@ -147,8 +275,8 @@ func TestHighlighterCarriesConfigContextAcrossChunks(t *testing.T) {
 	if stripANSI(first+second+third) != "set protocols bgp group edge\nThis system is monitored.\n" {
 		t.Fatalf("highlighting changed text: %q", stripANSI(first+second+third))
 	}
-	if !tokenHighlighted(second, "bgp") {
-		t.Fatalf("continued config chunk should highlight protocol context: %q", second)
+	if tokenHighlighted(second, "bgp") {
+		t.Fatalf("separate calls should not share config context: %q", second)
 	}
 	if tokenHighlighted(third, "system") {
 		t.Fatalf("context should reset after newline: %q", third)
@@ -157,8 +285,23 @@ func TestHighlighterCarriesConfigContextAcrossChunks(t *testing.T) {
 	h = New(Options{Enabled: true, Profile: ProfileJunos})
 	_ = h.Highlight([]byte("set "))
 	out := string(h.Highlight([]byte("event-options policy STORM_CTL events l2ald_st_ctl_in_effect\n")))
-	if !tokenHighlighted(out, "event-options") {
-		t.Fatalf("continued config chunk should highlight hierarchy context: %q", out)
+	if tokenHighlighted(out, "event-options") {
+		t.Fatalf("separate calls should not share hierarchy context: %q", out)
+	}
+}
+
+func TestHighlighterSplitLookingLinesDoNotShareContext(t *testing.T) {
+	input := "set protocols os\npf3 area 0.0.0.0\n"
+	out := string(New(Options{Enabled: true, Profile: ProfileJunos}).Highlight([]byte(input)))
+	if stripANSI(out) != input {
+		t.Fatalf("stripANSI(output) = %q, want original input", stripANSI(out))
+	}
+	first, second, _ := strings.Cut(out, "\n")
+	if !tokenHighlighted(first, "set") || !tokenHighlighted(first, "protocols") {
+		t.Fatalf("first config-shaped line was not highlighted: %q", first)
+	}
+	if tokenHighlighted(second, "pf3") || tokenHighlighted(second, "area") {
+		t.Fatalf("second split-looking line should not inherit config context: %q", second)
 	}
 }
 
@@ -175,10 +318,25 @@ func TestJunosScanProducesDeterministicNonOverlappingSpans(t *testing.T) {
 	if len(spans) != 3 {
 		t.Fatalf("len(spans) = %d, want 3: %#v", len(spans), spans)
 	}
+	wantKinds := []Kind{KindInterface, KindIdentifier, KindStateBad}
+	for i, span := range spans {
+		if span.Kind != wantKinds[i] {
+			t.Fatalf("span[%d].Kind = %v, want %v: %#v", i, span.Kind, wantKinds[i], spans)
+		}
+	}
 	for i := 1; i < len(spans); i++ {
 		if spans[i].Start < spans[i-1].End {
 			t.Fatalf("spans overlap: %#v", spans)
 		}
+	}
+}
+
+func TestHighlightExistingANSIReturnsOriginalBytes(t *testing.T) {
+	h := New(Options{Enabled: true, Profile: ProfileJunos})
+	input := []byte("set protocols bgp\n\x1b[31mdown\x1b[0m\n")
+	out := h.Highlight(input)
+	if string(out) != string(input) {
+		t.Fatalf("ANSI output should pass through unchanged:\nwant %q\n got %q", input, out)
 	}
 }
 
@@ -212,4 +370,25 @@ func stripANSI(s string) string {
 		b.WriteByte(s[i])
 	}
 	return b.String()
+}
+
+func assertSpanKinds(t *testing.T, line []byte, spans []Span, want map[string]Kind) {
+	t.Helper()
+	got := make(map[string]Kind, len(spans))
+	for _, span := range spans {
+		if span.Start < 0 || span.End > len(line) || span.Start >= span.End {
+			t.Fatalf("invalid span %#v for %q", span, line)
+		}
+		got[string(line[span.Start:span.End])] = span.Kind
+	}
+	for token, wantKind := range want {
+		if got[token] != wantKind {
+			t.Fatalf("span kind for %q = %v, want %v; spans=%#v", token, got[token], wantKind, spans)
+		}
+	}
+	for i := 1; i < len(spans); i++ {
+		if spans[i].Start < spans[i-1].End {
+			t.Fatalf("spans overlap: %#v", spans)
+		}
+	}
 }

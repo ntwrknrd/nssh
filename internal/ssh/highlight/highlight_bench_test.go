@@ -17,7 +17,7 @@ func BenchmarkHighlightNoTokens(b *testing.B) {
 
 func BenchmarkHighlightTokenHeavy(b *testing.B) {
 	h := New(Options{Enabled: true, Profile: ProfileJunos})
-	input := []byte(strings.Repeat("ge-0/0/0 up 192.0.2.1/32 bgp established target:64512:100 00:11:22:33:44:55\n", 64))
+	input := []byte(strings.Repeat("set interfaces ge-0/0/0 description \"core uplink\" unit 0 family inet address 192.0.2.1/32 # managed\nset system archival archive-sites scp://ops@example.net/configs rib inet.0\nset firewall family inet filter EDGE term allow then accept target:64512:100 00:11:22:33:44:55\n", 32))
 	b.ReportAllocs()
 	b.SetBytes(int64(len(input)))
 	for b.Loop() {

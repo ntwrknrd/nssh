@@ -1,15 +1,10 @@
 package highlight
 
-import "time"
-
 const (
 	ProfileNone  = "none"
 	ProfileJunos = "junos"
 
-	maxLineLength       = 8192
-	rateWindow          = 100 * time.Millisecond
-	rateBypassDuration  = 250 * time.Millisecond
-	rateWindowByteLimit = 64 << 20
+	maxLineLength = 8192
 )
 
 type Options struct {
@@ -28,19 +23,39 @@ const (
 	StyleMagenta
 	StyleBrightBlue
 	StyleBrightYellow
+	StyleDimGray
+)
+
+type Kind uint8
+
+const (
+	KindAction Kind = iota + 1
+	KindHierarchy
+	KindProtocol
+	KindIdentifier
+	KindInterface
+	KindStateGood
+	KindStateWarn
+	KindStateBad
+	KindComment
+	KindString
+	KindVariable
+	KindNumber
+	KindURL
+	KindRoutingTable
 )
 
 type Span struct {
 	Start int
 	End   int
-	Style Style
+	Kind  Kind
 }
 
-type lineContext uint8
+type lineShape uint8
 
 const (
-	lineContextFree lineContext = iota
-	lineContextConfig
+	lineShapeFree lineShape = iota
+	lineShapeConfig
 )
 
 type Profile interface {
@@ -49,13 +64,6 @@ type Profile interface {
 
 type Highlighter struct {
 	profile Profile
-
-	windowStart time.Time
-	windowBytes int
-	bypassUntil time.Time
-
-	lineContext lineContext
-	lineOpen    bool
 }
 
 type JunosProfile struct{}
@@ -76,8 +84,7 @@ func (h *Highlighter) Highlight(data []byte) []byte {
 	if h == nil || h.profile == nil || len(data) == 0 {
 		return data
 	}
-	if h.shouldBypassRate(len(data)) || containsUnsafe(data) {
-		h.resetLineContext()
+	if containsUnsafe(data) {
 		return data
 	}
 
@@ -92,14 +99,11 @@ func (h *Highlighter) Highlight(data []byte) []byte {
 			lineEnd++
 		}
 		line := data[lineStart:lineEnd]
-		ctx := detectLineContext(line)
-		if lineStart == 0 && h.lineOpen {
-			ctx = h.lineContext
-		}
+		shape := detectLineShape(line)
 		var spans []Span
 		if len(line) <= maxLineLength {
 			var stack [64]Span
-			spans = scanJunosWithContext(ctx, line, stack[:0])
+			spans = scanJunosWithShape(shape, line, stack[:0])
 		}
 		if len(spans) > 0 && out == nil {
 			out = make([]byte, 0, len(data)+len(spans)*12)
@@ -112,43 +116,12 @@ func (h *Highlighter) Highlight(data []byte) []byte {
 				out = append(out, line...)
 			}
 		}
-		if len(line) > maxLineLength {
-			h.resetLineContext()
-		} else if len(line) > 0 && line[len(line)-1] == '\n' {
-			h.resetLineContext()
-		} else {
-			h.lineContext = ctx
-			h.lineOpen = true
-		}
 		lineStart = lineEnd
 	}
 	if out == nil {
 		return data
 	}
 	return out
-}
-
-func (h *Highlighter) resetLineContext() {
-	h.lineContext = lineContextFree
-	h.lineOpen = false
-}
-
-func (h *Highlighter) shouldBypassRate(n int) bool {
-	now := time.Now()
-	if now.Before(h.bypassUntil) {
-		return true
-	}
-	if h.windowStart.IsZero() || now.Sub(h.windowStart) > rateWindow {
-		h.windowStart = now
-		h.windowBytes = n
-		return false
-	}
-	h.windowBytes += n
-	if h.windowBytes > rateWindowByteLimit {
-		h.bypassUntil = now.Add(rateBypassDuration)
-		return true
-	}
-	return false
 }
 
 func appendHighlightedLine(out, line []byte, spans []Span) []byte {
@@ -158,7 +131,7 @@ func appendHighlightedLine(out, line []byte, spans []Span) []byte {
 			continue
 		}
 		out = append(out, line[cursor:span.Start]...)
-		out = append(out, styleStart(span.Style)...)
+		out = append(out, styleStart(styleForKind(span.Kind))...)
 		out = append(out, line[span.Start:span.End]...)
 		out = append(out, "\x1b[0m"...)
 		cursor = span.End
@@ -172,33 +145,90 @@ func (JunosProfile) Scan(line []byte) []Span {
 }
 
 func scanJunos(line []byte, spans []Span) []Span {
-	return scanJunosWithContext(detectLineContext(line), line, spans)
+	return scanJunosWithShape(detectLineShape(line), line, spans)
 }
 
-func scanJunosWithContext(ctx lineContext, line []byte, spans []Span) []Span {
+func scanJunosWithShape(shape lineShape, line []byte, spans []Span) []Span {
+	expectDescription := false
+	expectNumber := false
+	expectVariable := false
+
 	for i := 0; i < len(line); {
+		switch line[i] {
+		case '\n', '\r':
+			return spans
+		case ' ', '\t':
+			i++
+			continue
+		case '#':
+			end := lineContentEnd(line, i)
+			return append(spans, Span{Start: i, End: end, Kind: KindComment})
+		case '/':
+			if i+1 < len(line) && line[i+1] == '*' {
+				end := scanBlockComment(line, i)
+				spans = append(spans, Span{Start: i, End: end, Kind: KindComment})
+				i = end
+				continue
+			}
+		case '\'', '"':
+			end := scanQuotedString(line, i)
+			spans = append(spans, Span{Start: i, End: end, Kind: KindString})
+			i = end
+			expectDescription = false
+			expectVariable = false
+			expectNumber = false
+			continue
+		}
+
+		if urlEnd := scanURL(line, i); urlEnd > i {
+			spans = append(spans, Span{Start: i, End: urlEnd, Kind: KindURL})
+			i = urlEnd
+			expectDescription = false
+			expectVariable = false
+			expectNumber = false
+			continue
+		}
+
 		if !isTokenByte(line[i]) {
 			i++
 			continue
 		}
+
 		start := i
 		for i < len(line) && isTokenByte(line[i]) {
 			i++
 		}
-		if style, ok := classifyToken(ctx, line[start:i]); ok {
-			spans = append(spans, Span{Start: start, End: i, Style: style})
+		token := line[start:i]
+
+		kind, ok := classifyToken(shape, token)
+		switch {
+		case expectDescription:
+			kind, ok = KindString, true
+		case isRoutingTable(token):
+			kind, ok = KindRoutingTable, true
+		case expectNumber && isNumericRange(token):
+			kind, ok = KindNumber, true
+		case expectVariable && !ok:
+			kind, ok = KindVariable, true
 		}
+		if ok {
+			spans = append(spans, Span{Start: start, End: i, Kind: kind})
+		}
+
+		expectDescription = shape == lineShapeConfig && asciiEqual(token, "description")
+		expectNumber = shape == lineShapeConfig && isNumberValueKeyword(token)
+		expectVariable = shape == lineShapeConfig && isVariableNameKeyword(token)
 	}
 	return spans
 }
 
-func detectLineContext(line []byte) lineContext {
+func detectLineShape(line []byte) lineShape {
 	i := 0
 	for i < len(line) && !isTokenByte(line[i]) {
 		i++
 	}
 	if i == len(line) {
-		return lineContextFree
+		return lineShapeFree
 	}
 	start := i
 	for i < len(line) && isTokenByte(line[i]) {
@@ -206,12 +236,12 @@ func detectLineContext(line []byte) lineContext {
 	}
 	token := line[start:i]
 	if isActionWord(token) {
-		return lineContextConfig
+		return lineShapeConfig
 	}
 	if (isHierarchyWord(token) || isProtocolWord(token)) && opensConfigStanza(line[i:]) {
-		return lineContextConfig
+		return lineShapeConfig
 	}
-	return lineContextFree
+	return lineShapeFree
 }
 
 func opensConfigStanza(rest []byte) bool {
@@ -219,58 +249,132 @@ func opensConfigStanza(rest []byte) bool {
 		switch b {
 		case ' ', '\t':
 			continue
+		case '\n', '\r', ';':
+			return false
 		case '{':
 			return true
-		default:
-			return false
 		}
 	}
 	return false
 }
 
-func classifyToken(ctx lineContext, token []byte) (Style, bool) {
+func classifyToken(shape lineShape, token []byte) (Kind, bool) {
 	switch {
 	case isMAC(token), isIPv4Token(token), isIPv6Token(token), isASN(token), isRouteTarget(token):
-		return StyleCyan, true
+		return KindIdentifier, true
 	case isInterface(token):
-		return StyleBlue, true
+		return KindInterface, true
 	}
-	return classifyWord(ctx, token)
+	return classifyWord(shape, token)
 }
 
-func classifyWord(ctx lineContext, token []byte) (Style, bool) {
+func classifyWord(shape lineShape, token []byte) (Kind, bool) {
 	switch {
-	case matchAny(token, "up", "enabled", "established", "active", "selected", "forwarding", "reachable"):
-		return StyleGreen, true
+	case matchAny(token, "up", "enabled", "established", "active", "selected", "forwarding", "reachable", "accept", "permit"):
+		return KindStateGood, true
 	case matchAny(token, "down", "disabled", "error", "errors", "failed", "reject", "rejected", "discard", "dropped", "unreachable", "timeout", "denied"):
-		return StyleRed, true
+		return KindStateBad, true
 	case matchAny(token, "inactive", "pending", "hold", "stale", "hidden", "suppressed", "flapping", "degraded"):
-		return StyleYellow, true
-	case ctx == lineContextConfig && isActionWord(token):
-		return StyleBrightYellow, true
-	case ctx == lineContextConfig && isHierarchyWord(token):
-		return StyleMagenta, true
-	case ctx == lineContextConfig && isProtocolWord(token):
-		return StyleBrightBlue, true
+		return KindStateWarn, true
+	case shape == lineShapeConfig && isActionWord(token):
+		return KindAction, true
+	case shape == lineShapeConfig && isHierarchyWord(token):
+		return KindHierarchy, true
+	case shape == lineShapeConfig && isProtocolWord(token):
+		return KindProtocol, true
 	default:
 		return 0, false
 	}
 }
 
-func isActionWord(token []byte) bool {
-	return matchAny(token, "set", "delete", "deleted", "deactivate", "activate", "annotate", "replace", "commit", "rollback", "changed")
+func lineContentEnd(line []byte, start int) int {
+	for start < len(line) && line[start] != '\n' && line[start] != '\r' {
+		start++
+	}
+	return start
 }
 
-func isHierarchyWord(token []byte) bool {
-	return matchAny(token, "interfaces", "protocols", "routing-options", "policy-options", "firewall", "class-of-service", "routing-instances", "vlans", "bridge-domains", "system", "chassis", "version", "groups", "apply-groups", "services", "security", "snmp", "forwarding-options", "event-options", "accounting-options")
+func scanBlockComment(line []byte, start int) int {
+	for i := start + 2; i < len(line); i++ {
+		if line[i] == '\n' || line[i] == '\r' {
+			return i
+		}
+		if line[i] == '*' && i+1 < len(line) && line[i+1] == '/' {
+			return i + 2
+		}
+	}
+	return len(line)
 }
 
-func isProtocolWord(token []byte) bool {
-	return matchAny(token, "bgp", "ospf", "ospf3", "isis", "evpn", "ldp", "mpls", "rsvp", "lldp", "l2-learning", "static", "direct", "local", "aggregate")
+func scanQuotedString(line []byte, start int) int {
+	quote := line[start]
+	for i := start + 1; i < len(line); i++ {
+		switch line[i] {
+		case '\n', '\r':
+			return i
+		case '\\':
+			if i+1 < len(line) && line[i+1] != '\n' && line[i+1] != '\r' {
+				i++
+			}
+		case quote:
+			return i + 1
+		}
+	}
+	return len(line)
+}
+
+func scanURL(line []byte, start int) int {
+	if !hasURLScheme(line[start:]) {
+		return -1
+	}
+	i := start
+	for i < len(line) {
+		switch line[i] {
+		case ' ', '\t', '\n', '\r', ';':
+			return i
+		}
+		i++
+	}
+	return i
+}
+
+func hasURLScheme(token []byte) bool {
+	return hasPrefixFold(token, "http://") ||
+		hasPrefixFold(token, "https://") ||
+		hasPrefixFold(token, "scp://") ||
+		hasPrefixFold(token, "ftp://") ||
+		hasPrefixFold(token, "tftp://") ||
+		hasPrefixFold(token, "sftp://")
+}
+
+func isRoutingTable(token []byte) bool {
+	dot := lastIndexByte(token, '.')
+	if dot <= 0 || dot == len(token)-1 || !parseRange(token[dot+1:], 0, 99) {
+		return false
+	}
+	base := token[:dot]
+	if asciiEqual(base, "bgp.l2vpn") || asciiEqual(base, "bgp.l3vpn") ||
+		hasSuffixFold(base, ".bgp.l2vpn") || hasSuffixFold(base, ".bgp.l3vpn") {
+		return true
+	}
+	if tailDot := lastIndexByte(base, '.'); tailDot >= 0 {
+		base = base[tailDot+1:]
+	}
+	return matchAny(base, "inet", "inet6", "mpls", "inetflow", "iso")
+}
+
+func isNumericRange(token []byte) bool {
+	if len(token) == 0 {
+		return false
+	}
+	if dash := indexByte(token, '-'); dash >= 0 {
+		return dash > 0 && dash < len(token)-1 && parseRange(token[:dash], 0, 65535) && parseRange(token[dash+1:], 0, 65535)
+	}
+	return parseRange(token, 0, 65535)
 }
 
 func isTokenByte(b byte) bool {
-	return isAlphaNum(b) || b == '.' || b == '/' || b == '-' || b == '_' || b == ':'
+	return isAlphaNum(b) || b == '.' || b == '/' || b == '-' || b == '_' || b == ':' || b == '<' || b == '>'
 }
 
 func isAlphaNum(b byte) bool {
@@ -436,12 +540,15 @@ func routeParts(token []byte) bool {
 
 func isInterface(token []byte) bool {
 	switch {
-	case hasPrefixFold(token, "ge-"), hasPrefixFold(token, "xe-"), hasPrefixFold(token, "et-"):
+	case hasPrefixFold(token, "ge-"), hasPrefixFold(token, "xe-"), hasPrefixFold(token, "et-"),
+		hasPrefixFold(token, "so-"), hasPrefixFold(token, "fe-"), hasPrefixFold(token, "gr-"),
+		hasPrefixFold(token, "lt-"), hasPrefixFold(token, "vt-"), hasPrefixFold(token, "si-"),
+		hasPrefixFold(token, "sp-"):
 		return len(token) > 3 && hasDigit(token[3:])
-	case hasPrefixFold(token, "ae"), hasPrefixFold(token, "irb"), hasPrefixFold(token, "reth"), hasPrefixFold(token, "vlan"):
+	case hasPrefixFold(token, "st"), hasPrefixFold(token, "lo"), hasPrefixFold(token, "me"),
+		hasPrefixFold(token, "vme"), hasPrefixFold(token, "ae"), hasPrefixFold(token, "reth"),
+		hasPrefixFold(token, "irb"), hasPrefixFold(token, "vlan"):
 		return hasDigit(token)
-	case hasPrefixFold(token, "lo0"):
-		return true
 	default:
 		return false
 	}
@@ -489,6 +596,19 @@ func hasPrefixFold(token []byte, prefix string) bool {
 	return true
 }
 
+func hasSuffixFold(token []byte, suffix string) bool {
+	if len(token) < len(suffix) {
+		return false
+	}
+	offset := len(token) - len(suffix)
+	for i := range suffix {
+		if lower(token[offset+i]) != suffix[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func lower(b byte) byte {
 	if b >= 'A' && b <= 'Z' {
 		return b + ('a' - 'A')
@@ -505,6 +625,15 @@ func indexByte(token []byte, needle byte) int {
 	return -1
 }
 
+func lastIndexByte(token []byte, needle byte) int {
+	for i := len(token) - 1; i >= 0; i-- {
+		if token[i] == needle {
+			return i
+		}
+	}
+	return -1
+}
+
 func containsUnsafe(data []byte) bool {
 	for _, b := range data {
 		switch {
@@ -515,6 +644,41 @@ func containsUnsafe(data []byte) bool {
 		}
 	}
 	return false
+}
+
+func styleForKind(kind Kind) Style {
+	switch kind {
+	case KindAction:
+		return StyleBrightYellow
+	case KindHierarchy:
+		return StyleMagenta
+	case KindProtocol:
+		return StyleBrightBlue
+	case KindIdentifier:
+		return StyleCyan
+	case KindInterface:
+		return StyleBlue
+	case KindStateGood:
+		return StyleGreen
+	case KindStateWarn:
+		return StyleYellow
+	case KindStateBad:
+		return StyleRed
+	case KindComment:
+		return StyleDimGray
+	case KindString:
+		return StyleGreen
+	case KindVariable:
+		return StyleCyan
+	case KindNumber:
+		return StyleCyan
+	case KindURL:
+		return StyleCyan
+	case KindRoutingTable:
+		return StyleCyan
+	default:
+		return 0
+	}
 }
 
 func styleStart(style Style) string {
@@ -535,6 +699,8 @@ func styleStart(style Style) string {
 		return "\x1b[94m"
 	case StyleBrightYellow:
 		return "\x1b[93m"
+	case StyleDimGray:
+		return "\x1b[2;37m"
 	default:
 		return ""
 	}
