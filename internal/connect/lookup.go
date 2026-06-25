@@ -11,6 +11,10 @@ import (
 
 type hostSelector func(prompt string, options []string, initialQuery string) (string, error)
 
+var selectHostFunc hostSelector = func(prompt string, options []string, initialQuery string) (string, error) {
+	return ui.FuzzySelectString(prompt, options, initialQuery)
+}
+
 // ResolveHostname performs smart hostname resolution:
 // - Exact match: returns hostname unchanged
 // - Single partial match: returns the matched hostname
@@ -27,9 +31,7 @@ func ResolveHostname(hostname string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return resolveHostnameFromCatalog(hostname, catalog, func(prompt string, options []string, initialQuery string) (string, error) {
-		return ui.FuzzySelectString(prompt, options, initialQuery)
-	})
+	return resolveHostnameFromCatalog(hostname, catalog, selectHostFunc)
 }
 
 func resolveHostnameFromCatalog(hostname string, catalog *HostCatalog, selectHost hostSelector) (string, error) {

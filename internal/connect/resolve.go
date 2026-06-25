@@ -54,28 +54,12 @@ type ResolvedHost struct {
 // connect and remote command execution.
 // If cfg is provided, it is used instead of loading the default config.
 func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*ResolvedHost, error) {
-	var c *config.Config
-	if len(cfg) > 0 && cfg[0] != nil {
-		c = cfg[0]
-	} else {
-		var err error
-		configTimer := connector.StartTiming(connector.TimingConfigLoad)
-		c, err = config.LoadDefault()
-		configTimer.Emit()
-		if err != nil {
-			return nil, err
-		}
+	c, err := loadConnectConfig(cfg...)
+	if err != nil {
+		return nil, err
 	}
 
-	hostname := query
-	// Strip user@ prefix if present
-	if idx := strings.LastIndex(hostname, "@"); idx != -1 {
-		if explicitUser == "" {
-			explicitUser = hostname[:idx]
-		}
-		hostname = hostname[idx+1:]
-	}
-
+	hostname, explicitUser := splitConnectQuery(query, explicitUser)
 	catalog, err := BuildHostCatalog(c)
 	if err != nil {
 		return nil, err
@@ -84,7 +68,59 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 	if !managed {
 		return nil, &HostNotFoundError{Hostname: hostname}
 	}
+	return resolveCatalogHostForConnect(query, explicitUser, c, hostData)
+}
 
+// ResolveSmartHostForConnect performs smart lookup and full host resolution in
+// one config/catalog pass. It preserves smart-connect matching while avoiding a
+// separate ResolveHostname call before connection setup.
+func ResolveSmartHostForConnect(query, explicitUser string, cfg ...*config.Config) (*ResolvedHost, error) {
+	c, err := loadConnectConfig(cfg...)
+	if err != nil {
+		return nil, err
+	}
+
+	hostname, explicitUser := splitConnectQuery(query, explicitUser)
+	catalog, err := BuildHostCatalog(c)
+	if err != nil {
+		return nil, err
+	}
+	canonical, err := resolveHostnameFromCatalog(hostname, catalog, selectHostFunc)
+	if err != nil {
+		return nil, err
+	}
+	hostData, managed := catalog.Find(canonical)
+	if !managed {
+		return nil, &HostNotFoundError{Hostname: canonical}
+	}
+	return resolveCatalogHostForConnect(query, explicitUser, c, hostData)
+}
+
+func loadConnectConfig(cfg ...*config.Config) (*config.Config, error) {
+	if len(cfg) > 0 && cfg[0] != nil {
+		return cfg[0], nil
+	}
+	configTimer := connector.StartTiming(connector.TimingConfigLoad)
+	c, err := config.LoadDefault()
+	configTimer.Emit()
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func splitConnectQuery(query, explicitUser string) (string, string) {
+	hostname := query
+	if idx := strings.LastIndex(hostname, "@"); idx != -1 {
+		if explicitUser == "" {
+			explicitUser = hostname[:idx]
+		}
+		hostname = hostname[idx+1:]
+	}
+	return hostname, explicitUser
+}
+
+func resolveCatalogHostForConnect(query, explicitUser string, c *config.Config, hostData *ResolvedHostData) (*ResolvedHost, error) {
 	authCtx := config.InventoryAuthContext{
 		Host:     hostData.Canonical,
 		Provider: hostData.Provider,
@@ -113,7 +149,7 @@ func ResolveHostForConnect(query, explicitUser string, cfg ...*config.Config) (*
 		}
 	}
 
-	username := selectConnectionUsername(managed, explicitUser, "", "", credentialUser, "")
+	username := selectConnectionUsername(true, explicitUser, "", "", credentialUser, "")
 
 	return &ResolvedHost{
 		Query:      query,

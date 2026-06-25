@@ -25,7 +25,7 @@ type Server struct {
 	dir        string
 	socketPath string
 	nonce      string
-	password   *secret.Secret
+	resolve    func(context.Context) (*secret.Secret, error)
 	listener   *net.UnixListener
 	closeOnce  sync.Once
 	closeErr   error
@@ -34,6 +34,15 @@ type Server struct {
 func NewServer(password *secret.Secret) (*Server, error) {
 	if password == nil {
 		return nil, fmt.Errorf("askpass password is required")
+	}
+	return NewServerWithResolver(func(context.Context) (*secret.Secret, error) {
+		return password, nil
+	})
+}
+
+func NewServerWithResolver(resolve func(context.Context) (*secret.Secret, error)) (*Server, error) {
+	if resolve == nil {
+		return nil, fmt.Errorf("askpass password resolver is required")
 	}
 	dir, err := os.MkdirTemp("", "nssh-askpass-*")
 	if err != nil {
@@ -59,7 +68,7 @@ func NewServer(password *secret.Secret) (*Server, error) {
 		dir:        dir,
 		socketPath: socketPath,
 		nonce:      nonce,
-		password:   password,
+		resolve:    resolve,
 		listener:   listener,
 	}, nil
 }
@@ -121,7 +130,14 @@ func (s *Server) ServeOnce(ctx context.Context) error {
 	if strings.TrimSuffix(nonce, "\n") != s.nonce {
 		return fmt.Errorf("askpass nonce mismatch")
 	}
-	if err := s.password.Use(func(password []byte) error {
+	password, err := s.resolve(ctx)
+	if err != nil {
+		return err
+	}
+	if password == nil {
+		return fmt.Errorf("askpass password is required")
+	}
+	if err := password.Use(func(password []byte) error {
 		_, err := conn.Write(password)
 		return err
 	}); err != nil {

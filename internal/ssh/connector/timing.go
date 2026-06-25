@@ -97,6 +97,12 @@ const (
 	// TimingCredentialLookupLazy is emitted when a deferred password resolver runs.
 	TimingCredentialLookupLazy = "credential_lookup_lazy"
 
+	// TimingMuxCheck is emitted after checking for an existing OpenSSH ControlMaster session.
+	TimingMuxCheck = "mux_check"
+
+	// TimingCredentialPrefetch is emitted after request-scoped credential prefetch completes.
+	TimingCredentialPrefetch = "credential_prefetch"
+
 	// TimingAskpassSetup is emitted after remote-command askpass setup completes.
 	TimingAskpassSetup = "askpass_setup"
 

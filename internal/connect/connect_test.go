@@ -7,13 +7,16 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/captured"
 	"github.com/ntwrknrd/nssh/internal/ssh/compat"
+	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 )
 
 func TestHostNotFoundErrorCarriesHostname(t *testing.T) {
@@ -109,15 +112,13 @@ func TestConnectRequestRoutesInteractiveSessionToPTYConnector(t *testing.T) {
 	}()
 
 	resolveHostnameFunc = func(host string) (string, error) {
-		if host != "edge01" {
-			t.Fatalf("resolve host = %q, want edge01", host)
-		}
-		return "edge01.example.com", nil
+		t.Fatalf("ConnectRequest should not pre-resolve non-literal interactive host, got %q", host)
+		return "", nil
 	}
 	connectHostFunc = func(_ context.Context, host string, sshArgs []string, _ ...Options) error {
 		interactiveCalled = true
-		if host != "edge01.example.com" {
-			t.Fatalf("interactive host = %q, want resolved host", host)
+		if host != "edge01" {
+			t.Fatalf("interactive host = %q, want raw host", host)
 		}
 		if len(sshArgs) != 2 || sshArgs[0] != "-p" || sshArgs[1] != "2222" {
 			t.Fatalf("interactive ssh args = %#v", sshArgs)
@@ -153,10 +154,8 @@ func TestConnectRequestRoutesRemoteCommandToCapturedRunner(t *testing.T) {
 	}()
 
 	resolveHostnameFunc = func(host string) (string, error) {
-		if host != "edge01" {
-			t.Fatalf("resolve host = %q, want edge01", host)
-		}
-		return "edge01.example.com", nil
+		t.Fatalf("ConnectRequest should not pre-resolve non-literal remote host, got %q", host)
+		return "", nil
 	}
 	connectHostFunc = func(_ context.Context, _ string, _ []string, _ ...Options) error {
 		t.Fatal("interactive connector should not be called for remote commands")
@@ -164,8 +163,8 @@ func TestConnectRequestRoutesRemoteCommandToCapturedRunner(t *testing.T) {
 	}
 	runRemoteCommandFunc = func(_ context.Context, host string, sshArgs, command []string, _ ...Options) error {
 		remoteCalled = true
-		if host != "edge01.example.com" {
-			t.Fatalf("remote host = %q, want resolved host", host)
+		if host != "edge01" {
+			t.Fatalf("remote host = %q, want raw host", host)
 		}
 		if len(sshArgs) != 2 || sshArgs[0] != "-p" || sshArgs[1] != "2222" {
 			t.Fatalf("remote ssh args = %#v", sshArgs)
@@ -349,6 +348,191 @@ func TestRunResolvedRemoteCommandRequiresAskpassHelperForPassword(t *testing.T) 
 	}, nil, []string{"show"}, config.DefaultConfig(), Options{})
 	if err == nil || !strings.Contains(err.Error(), "nssh-askpass not found") {
 		t.Fatalf("err = %v, want missing askpass helper", err)
+	}
+}
+
+func TestRunResolvedRemoteCommandHotMuxSkipsAskpassAndPasswordResolver(t *testing.T) {
+	oldRunCapturedCommand := runCapturedCommandFunc
+	oldAskpassHelperPath := askpassHelperPathFunc
+	oldCheckMuxSession := checkMuxSessionFunc
+	defer func() {
+		runCapturedCommandFunc = oldRunCapturedCommand
+		askpassHelperPathFunc = oldAskpassHelperPath
+		checkMuxSessionFunc = oldCheckMuxSession
+	}()
+
+	var resolverCalls atomic.Int32
+	checkMuxSessionFunc = func(_ context.Context, req connector.MuxCheckRequest) (bool, bool) {
+		if req.Hostname != "edge01" || req.Username != "netops" || req.Port != 2200 {
+			t.Fatalf("mux request = %+v, want resolved endpoint", req)
+		}
+		return true, true
+	}
+	askpassHelperPathFunc = func() (string, error) {
+		t.Fatal("hot mux should not require askpass helper")
+		return "", nil
+	}
+	runCapturedCommandFunc = func(_ context.Context, req captured.Request) (captured.Result, error) {
+		if len(req.Env) != 0 {
+			t.Fatalf("captured env = %#v, want no askpass env", req.Env)
+		}
+		return captured.Result{Stdout: []byte("ok\n")}, nil
+	}
+
+	err := runResolvedRemoteCommand(context.Background(), &ResolvedHost{
+		Hostname: "edge01",
+		Username: "netops",
+		Port:     2200,
+		AuthMode: config.AuthModePassword,
+		SSH: config.SSHHostConfig{Options: config.SSHOptions{
+			"ControlPath": config.NewSSHOptionString("~/.ssh/sockets/%r@%h:%p"),
+		}},
+		Credential: &ResolvedCredential{
+			PasswordResolver: func(context.Context) (*secret.Secret, error) {
+				resolverCalls.Add(1)
+				return secret.NewFromString("secret"), nil
+			},
+		},
+	}, nil, []string{"show"}, config.DefaultConfig(), Options{})
+	if err != nil {
+		t.Fatalf("runResolvedRemoteCommand: %v", err)
+	}
+	if got := resolverCalls.Load(); got != 0 {
+		t.Fatalf("resolver calls = %d, want 0", got)
+	}
+}
+
+func TestRunResolvedRemoteCommandColdMuxStartsPrefetchWithoutWaiting(t *testing.T) {
+	oldRunCapturedCommand := runCapturedCommandFunc
+	oldAskpassHelperPath := askpassHelperPathFunc
+	oldCheckMuxSession := checkMuxSessionFunc
+	defer func() {
+		runCapturedCommandFunc = oldRunCapturedCommand
+		askpassHelperPathFunc = oldAskpassHelperPath
+		checkMuxSessionFunc = oldCheckMuxSession
+	}()
+
+	checkMuxSessionFunc = func(context.Context, connector.MuxCheckRequest) (bool, bool) {
+		return false, true
+	}
+	askpassHelperPathFunc = func() (string, error) {
+		return "/tmp/nssh-askpass", nil
+	}
+	resolverStarted := make(chan struct{})
+	capturedCalled := make(chan captured.Request, 1)
+	runCapturedCommandFunc = func(_ context.Context, req captured.Request) (captured.Result, error) {
+		capturedCalled <- req
+		return captured.Result{Stdout: []byte("ok\n")}, nil
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runResolvedRemoteCommand(context.Background(), &ResolvedHost{
+			Hostname: "edge01",
+			Port:     22,
+			AuthMode: config.AuthModePassword,
+			SSH: config.SSHHostConfig{Options: config.SSHOptions{
+				"ControlPath": config.NewSSHOptionString("~/.ssh/sockets/%r@%h:%p"),
+			}},
+			Credential: &ResolvedCredential{
+				PasswordResolver: func(ctx context.Context) (*secret.Secret, error) {
+					close(resolverStarted)
+					<-ctx.Done()
+					return nil, ctx.Err()
+				},
+			},
+		}, nil, []string{"show"}, config.DefaultConfig(), Options{})
+	}()
+
+	select {
+	case <-resolverStarted:
+	case <-time.After(time.Second):
+		t.Fatal("password prefetch did not start")
+	}
+
+	select {
+	case req := <-capturedCalled:
+		if len(req.Env) == 0 {
+			t.Fatal("captured request missing askpass env")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("remote command waited for password resolver before spawning ssh")
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("runResolvedRemoteCommand: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runResolvedRemoteCommand did not finish")
+	}
+}
+
+func TestPreparePasswordPrefetchHotMuxPreservesLazyFallback(t *testing.T) {
+	oldCheckMuxSession := checkMuxSessionFunc
+	defer func() { checkMuxSessionFunc = oldCheckMuxSession }()
+
+	checkMuxSessionFunc = func(context.Context, connector.MuxCheckRequest) (bool, bool) {
+		return true, true
+	}
+	var resolverCalls atomic.Int32
+	future, muxHot := preparePasswordPrefetch(context.Background(), &ResolvedHost{
+		Hostname: "edge01",
+		AuthMode: config.AuthModePassword,
+		Credential: &ResolvedCredential{
+			PasswordResolver: func(context.Context) (*secret.Secret, error) {
+				resolverCalls.Add(1)
+				return secret.NewFromString("secret"), nil
+			},
+		},
+	}, nil, config.DefaultConfig(), Options{})
+	if future == nil || !muxHot {
+		t.Fatalf("future=%v muxHot=%v, want lazy future and hot mux", future, muxHot)
+	}
+	defer future.Close()
+	if got := resolverCalls.Load(); got != 0 {
+		t.Fatalf("resolver calls before prompt = %d, want 0", got)
+	}
+	if _, err := future.Resolve(context.Background()); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got := resolverCalls.Load(); got != 1 {
+		t.Fatalf("resolver calls after lazy resolve = %d, want 1", got)
+	}
+}
+
+func TestPreparePasswordPrefetchWithoutControlPathStartsPrefetch(t *testing.T) {
+	oldCheckMuxSession := checkMuxSessionFunc
+	defer func() { checkMuxSessionFunc = oldCheckMuxSession }()
+	checkMuxSessionFunc = func(ctx context.Context, req connector.MuxCheckRequest) (bool, bool) {
+		return connector.CheckMuxSession(ctx, req, func(context.Context, []string) error {
+			t.Fatal("mux check should not execute without ControlPath")
+			return nil
+		})
+	}
+
+	resolverStarted := make(chan struct{})
+	future, muxHot := preparePasswordPrefetch(context.Background(), &ResolvedHost{
+		Hostname: "edge01",
+		AuthMode: config.AuthModePassword,
+		Credential: &ResolvedCredential{
+			PasswordResolver: func(ctx context.Context) (*secret.Secret, error) {
+				close(resolverStarted)
+				<-ctx.Done()
+				return nil, ctx.Err()
+			},
+		},
+	}, nil, config.DefaultConfig(), Options{})
+	if future == nil || muxHot {
+		t.Fatalf("future=%v muxHot=%v, want prefetch future and cold mux", future, muxHot)
+	}
+	defer future.Close()
+
+	select {
+	case <-resolverStarted:
+	case <-time.After(time.Second):
+		t.Fatal("password prefetch did not start")
 	}
 }
 

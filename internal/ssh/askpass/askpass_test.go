@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ntwrknrd/nssh/internal/secret"
 )
@@ -110,5 +111,64 @@ func TestCloseRemovesPrivateDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("server dir still exists or unexpected error: %v", err)
+	}
+}
+
+func TestServerWithResolverWaitsForPassword(t *testing.T) {
+	release := make(chan struct{})
+	server, err := NewServerWithResolver(func(ctx context.Context) (*secret.Secret, error) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-release:
+		}
+		return secret.NewFromString("delayed-secret"), nil
+	})
+	if err != nil {
+		t.Fatalf("NewServerWithResolver: %v", err)
+	}
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- server.ServeOnce(ctx)
+	}()
+
+	passwordCh := make(chan []byte, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		password, err := RequestPassword(ctx, server.SocketPath(), server.Nonce())
+		if err != nil {
+			errCh <- err
+			return
+		}
+		passwordCh <- password
+	}()
+
+	select {
+	case <-passwordCh:
+		t.Fatal("askpass request returned before resolver completed")
+	case err := <-errCh:
+		t.Fatalf("RequestPassword: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+
+	select {
+	case password := <-passwordCh:
+		if string(password) != "delayed-secret" {
+			t.Fatalf("password = %q, want delayed-secret", password)
+		}
+	case err := <-errCh:
+		t.Fatalf("RequestPassword: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for askpass password")
+	}
+
+	if err := <-done; err != nil {
+		t.Fatalf("ServeOnce: %v", err)
 	}
 }

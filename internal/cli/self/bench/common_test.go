@@ -100,6 +100,8 @@ func TestEnhancedTimingStagesHaveDescriptionsAndOrder(t *testing.T) {
 		connector.TimingAuthResolve,
 		connector.TimingCredentialRegistry,
 		connector.TimingCredentialLookup,
+		connector.TimingMuxCheck,
+		connector.TimingCredentialPrefetch,
 		connector.TimingAskpassSetup,
 		connector.TimingSSHArgsBuild,
 		connector.TimingSSHProcessStart,

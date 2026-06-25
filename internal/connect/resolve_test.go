@@ -3,6 +3,7 @@ package connect
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -83,6 +84,130 @@ func setTestGroupAuth(cfg *config.Config, group string, auth config.InventoryAut
 	localProvider.Group[group] = config.GroupConfig{Auth: auth}
 	cfg.Inventory.Provider[config.ProviderLocal] = localProvider
 	return config.FormatInventoryGroupID(config.ProviderLocal, group)
+}
+
+func testSmartResolveConfig() *config.Config {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type: config.ProviderLocal,
+			Groups: map[string]config.GroupConfig{
+				"lab": {Auth: config.InventoryAuthConfig{Username: "group-user"}},
+			},
+			Hosts: map[string]config.InventoryHostConfig{
+				"edge01.example.com": {
+					Group:   "lab",
+					Aliases: []string{"router-one"},
+				},
+				"810-cactimain01.ldap.custcbb.local": {
+					Group: "lab",
+				},
+				"clab-dfz-core01": {
+					Group:   "lab",
+					Aliases: []string{"dfz-core01"},
+				},
+				"clab-dfz-core02": {
+					Group:   "lab",
+					Aliases: []string{"dfz-core02"},
+				},
+			},
+		},
+	}
+	return cfg
+}
+
+func TestResolveSmartHostForConnectMatchesExactAliasesAndShortNames(t *testing.T) {
+	cfg := testSmartResolveConfig()
+
+	aliasResolved, err := ResolveSmartHostForConnect("router-one", "", cfg)
+	if err != nil {
+		t.Fatalf("ResolveSmartHostForConnect alias: %v", err)
+	}
+	shortResolved, err := ResolveSmartHostForConnect("edge01", "", cfg)
+	if err != nil {
+		t.Fatalf("ResolveSmartHostForConnect short: %v", err)
+	}
+	exactResolved, err := ResolveHostForConnect("edge01.example.com", "", cfg)
+	if err != nil {
+		t.Fatalf("ResolveHostForConnect exact: %v", err)
+	}
+
+	if aliasResolved.Canonical != exactResolved.Canonical || shortResolved.Canonical != exactResolved.Canonical {
+		t.Fatalf("canonical alias=%q short=%q exact=%q", aliasResolved.Canonical, shortResolved.Canonical, exactResolved.Canonical)
+	}
+	if aliasResolved.Hostname != "edge01.example.com" || shortResolved.Hostname != "edge01.example.com" {
+		t.Fatalf("hostname alias=%q short=%q, want edge01.example.com", aliasResolved.Hostname, shortResolved.Hostname)
+	}
+}
+
+func TestResolveSmartHostForConnectAutoSelectsSinglePartialMatch(t *testing.T) {
+	cfg := testSmartResolveConfig()
+	oldSelectHost := selectHostFunc
+	defer func() { selectHostFunc = oldSelectHost }()
+	selectHostFunc = func(string, []string, string) (string, error) {
+		t.Fatal("selector should not open for one partial match")
+		return "", nil
+	}
+
+	resolved, err := ResolveSmartHostForConnect("cacti", "", cfg)
+	if err != nil {
+		t.Fatalf("ResolveSmartHostForConnect: %v", err)
+	}
+	if resolved.Canonical != "810-cactimain01.ldap.custcbb.local" {
+		t.Fatalf("canonical = %q, want cacti host", resolved.Canonical)
+	}
+}
+
+func TestResolveSmartHostForConnectUsesSelectorForMultiplePartialMatches(t *testing.T) {
+	cfg := testSmartResolveConfig()
+	oldSelectHost := selectHostFunc
+	defer func() { selectHostFunc = oldSelectHost }()
+	selectHostFunc = func(prompt string, options []string, initialQuery string) (string, error) {
+		if prompt != "Select host" {
+			t.Fatalf("prompt = %q, want Select host", prompt)
+		}
+		wantOptions := []string{"clab-dfz-core01", "clab-dfz-core02"}
+		if !reflect.DeepEqual(options, wantOptions) {
+			t.Fatalf("options = %#v, want %#v", options, wantOptions)
+		}
+		if initialQuery != "dfz" {
+			t.Fatalf("initialQuery = %q, want dfz", initialQuery)
+		}
+		return "clab-dfz-core02", nil
+	}
+
+	resolved, err := ResolveSmartHostForConnect("dfz", "", cfg)
+	if err != nil {
+		t.Fatalf("ResolveSmartHostForConnect: %v", err)
+	}
+	if resolved.Canonical != "clab-dfz-core02" {
+		t.Fatalf("canonical = %q, want clab-dfz-core02", resolved.Canonical)
+	}
+}
+
+func TestResolveSmartHostForConnectMissReturnsHostNotFound(t *testing.T) {
+	_, err := ResolveSmartHostForConnect("missing-edge", "", testSmartResolveConfig())
+	var notFound *HostNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("ResolveSmartHostForConnect error = %v, want HostNotFoundError", err)
+	}
+	if notFound.Hostname != "missing-edge" {
+		t.Fatalf("not found hostname = %q, want original query", notFound.Hostname)
+	}
+}
+
+func TestResolveSmartHostForConnectPreservesExplicitUserWithPartialMatch(t *testing.T) {
+	resolved, err := ResolveSmartHostForConnect("admin@cacti", "", testSmartResolveConfig())
+	if err != nil {
+		t.Fatalf("ResolveSmartHostForConnect: %v", err)
+	}
+	if resolved.Canonical != "810-cactimain01.ldap.custcbb.local" {
+		t.Fatalf("canonical = %q, want cacti host", resolved.Canonical)
+	}
+	if resolved.Username != "admin" {
+		t.Fatalf("username = %q, want explicit user", resolved.Username)
+	}
 }
 
 func TestResolveHostForConnectEmitsPreSSHTimings(t *testing.T) {

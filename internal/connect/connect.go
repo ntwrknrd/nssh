@@ -20,6 +20,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 	sshhighlight "github.com/ntwrknrd/nssh/internal/ssh/highlight"
+	sshpassword "github.com/ntwrknrd/nssh/internal/ssh/password"
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
 
@@ -54,6 +55,9 @@ var (
 		return captured.Runner{}.Run(ctx, req)
 	}
 	askpassHelperPathFunc = defaultAskpassHelperPath
+	checkMuxSessionFunc   = func(ctx context.Context, req connector.MuxCheckRequest) (bool, bool) {
+		return connector.CheckMuxSession(ctx, req, nil)
+	}
 )
 
 func ConnectRequest(ctx context.Context, req Request) error {
@@ -61,21 +65,13 @@ func ConnectRequest(ctx context.Context, req Request) error {
 		if req.LiteralTarget {
 			return runLiteralRemoteCommandFunc(ctx, req.Host, req.SSHArgs, req.RemoteCommand, req.Options)
 		}
-		hostname, err := resolveHostnameFunc(req.Host)
-		if err != nil {
-			return err
-		}
-		return runRemoteCommandFunc(ctx, hostname, req.SSHArgs, req.RemoteCommand, req.Options)
+		return runRemoteCommandFunc(ctx, req.Host, req.SSHArgs, req.RemoteCommand, req.Options)
 	}
 
 	if req.LiteralTarget {
 		return connectLiteralHostFunc(ctx, req.Host, req.SSHArgs, req.Options)
 	}
-	hostname, err := resolveHostnameFunc(req.Host)
-	if err != nil {
-		return err
-	}
-	return connectHostFunc(ctx, hostname, req.SSHArgs, req.Options)
+	return connectHostFunc(ctx, req.Host, req.SSHArgs, req.Options)
 }
 
 func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ...Options) error {
@@ -83,20 +79,20 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ..
 	if len(opts) > 0 {
 		options = opts[0]
 	}
-	recorded, err := maybeWrapWithRecording(hostname, sshArgs, options)
+	explicitUser := extractExplicitUser(hostname, sshArgs)
+	resolved, err := ResolveSmartHostForConnect(hostname, explicitUser)
+	if err != nil {
+		return fmt.Errorf("resolve host: %w", err)
+	}
+	cfg := resolved.Config
+
+	recorded, err := maybeWrapWithRecording(resolved.Canonical, sshArgs, options)
 	if err != nil {
 		return err
 	}
 	if recorded {
 		return nil
 	}
-
-	explicitUser := extractExplicitUser(hostname, sshArgs)
-	resolved, err := ResolveHostForConnect(hostname, explicitUser)
-	if err != nil {
-		return fmt.Errorf("resolve host: %w", err)
-	}
-	cfg := resolved.Config
 
 	audit := newConnectAudit(cfg)
 	if audit != nil {
@@ -115,7 +111,7 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ..
 	result := runResolvedConnection(ctx, resolved, sshArgs, cfg, audit, options)
 	if result.Err != nil && isCompatibilityError(result.Err) {
 		var err error
-		if result, resolved, err = handleCompatibilityFixes(ctx, hostname, explicitUser, resolved, sshArgs, cfg, audit, options, result); err != nil {
+		if result, resolved, err = handleCompatibilityFixes(ctx, hostname, explicitUser, true, resolved, sshArgs, cfg, audit, options, result); err != nil {
 			return err
 		}
 	}
@@ -129,7 +125,7 @@ func RunRemoteCommand(ctx context.Context, hostname string, sshArgs, command []s
 		options = opts[0]
 	}
 	explicitUser := extractExplicitUser(hostname, sshArgs)
-	resolved, err := ResolveHostForConnect(hostname, explicitUser)
+	resolved, err := ResolveSmartHostForConnect(hostname, explicitUser)
 	if err != nil {
 		return fmt.Errorf("resolve host: %w", err)
 	}
@@ -208,32 +204,37 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 	var askpassServer *askpass.Server
 	var askpassCancel context.CancelFunc
 	var askpassDone chan error
+	passwordFuture, muxHot := preparePasswordPrefetch(ctx, resolved, sshArgs, cfg, opts)
+	if passwordFuture != nil {
+		defer passwordFuture.Close()
+	}
 	if resolved.Credential != nil {
 		askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
-		password, err := remoteCommandPassword(ctx, resolved.Credential)
-		if err != nil {
-			askpassTimer.Emit()
-			return err
-		}
-		if password != nil {
-			defer password.Destroy()
-			helper, err := askpassHelperPathFunc()
+		if passwordFuture != nil {
+			if !muxHot {
+				var err error
+				askpassServer, askpassCancel, askpassDone, err = startAskpassServer(ctx, &req, passwordFuture.Resolve)
+				if err != nil {
+					askpassTimer.Emit()
+					return err
+				}
+			}
+		} else {
+			password, err := remoteCommandPassword(ctx, resolved.Credential)
 			if err != nil {
 				askpassTimer.Emit()
 				return err
 			}
-			askpassServer, err = askpass.NewServer(password)
-			if err != nil {
-				askpassTimer.Emit()
-				return err
+			if password != nil {
+				defer password.Destroy()
+				askpassServer, askpassCancel, askpassDone, err = startAskpassServer(ctx, &req, func(context.Context) (*secret.Secret, error) {
+					return password, nil
+				})
+				if err != nil {
+					askpassTimer.Emit()
+					return err
+				}
 			}
-			req.Env = append(req.Env, askpassServer.Env(helper)...)
-			askpassCtx, cancel := context.WithCancel(ctx)
-			askpassCancel = cancel
-			askpassDone = make(chan error, 1)
-			go func() {
-				askpassDone <- askpassServer.ServeOnce(askpassCtx)
-			}()
 		}
 		askpassTimer.Emit()
 	}
@@ -255,6 +256,98 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 	result, err := runCapturedCommandFunc(ctx, req)
 	writeCapturedCommandOutput(result, resolved.Highlight)
 	return err
+}
+
+func startAskpassServer(ctx context.Context, req *captured.Request, resolve func(context.Context) (*secret.Secret, error)) (*askpass.Server, context.CancelFunc, chan error, error) {
+	helper, err := askpassHelperPathFunc()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	askpassServer, err := askpass.NewServerWithResolver(resolve)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	req.Env = append(req.Env, askpassServer.Env(helper)...)
+	askpassCtx, cancel := context.WithCancel(ctx)
+	askpassDone := make(chan error, 1)
+	go func() {
+		askpassDone <- askpassServer.ServeOnce(askpassCtx)
+	}()
+	return askpassServer, cancel, askpassDone, nil
+}
+
+func preparePasswordPrefetch(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options) (*sshpassword.Future, bool) {
+	if !shouldPrefetchPassword(resolved) {
+		return nil, false
+	}
+	future := sshpassword.NewFuture(resolved.Credential.PasswordResolver)
+	muxHot, _ := checkMuxSessionFunc(ctx, muxCheckRequest(resolved, sshArgs, cfg, opts))
+	if !muxHot {
+		future.Start(ctx)
+	}
+	return future, muxHot
+}
+
+func shouldPrefetchPassword(resolved *ResolvedHost) bool {
+	return resolved != nil &&
+		resolved.AuthMode == config.AuthModePassword &&
+		resolved.Credential != nil &&
+		resolved.Credential.PasswordResolver != nil
+}
+
+func muxCheckRequest(resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options) connector.MuxCheckRequest {
+	req := connector.MuxCheckRequest{
+		Hostname:     resolved.Hostname,
+		Username:     resolved.Username,
+		Port:         resolved.Port,
+		SSHOptions:   resolved.SSH,
+		SSHVerbosity: opts.SSHVerbosity,
+		SSHArgs:      sshArgs,
+	}
+	if cfg != nil && cfg.SSH.Connection.Timeout.Duration() > 0 {
+		req.Timeout = int(cfg.SSH.Connection.Timeout.Duration().Seconds())
+	}
+	return req
+}
+
+func remoteCommandPassword(ctx context.Context, cred *ResolvedCredential) (*secret.Secret, error) {
+	if cred == nil {
+		return nil, nil
+	}
+	if cred.Password != nil {
+		return cred.Password, nil
+	}
+	if cred.PasswordResolver == nil {
+		return nil, nil
+	}
+	password, err := cred.PasswordResolver(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return password, nil
+}
+
+func applyRemoteCommandHighlight(data []byte, cfg config.HighlightConfig) []byte {
+	highlighter := sshhighlight.New(sshhighlight.Options{
+		Enabled: cfg.EnabledValue(),
+		Profile: cfg.EffectiveProfile(),
+	})
+	if highlighter == nil {
+		return data
+	}
+	return highlighter.Highlight(data)
+}
+
+func defaultAskpassHelperPath() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("locate nssh executable: %w", err)
+	}
+	helper := filepath.Join(filepath.Dir(exe), "nssh-askpass")
+	if _, err := os.Stat(helper); err != nil {
+		return "", fmt.Errorf("nssh-askpass not found beside nssh: %w", err)
+	}
+	return helper, nil
 }
 
 func writeCapturedCommandOutput(result captured.Result, cfg config.HighlightConfig) {
@@ -299,46 +392,6 @@ func writeCapturedCommandOutput(result captured.Result, cfg config.HighlightConf
 	}
 }
 
-func remoteCommandPassword(ctx context.Context, cred *ResolvedCredential) (*secret.Secret, error) {
-	if cred == nil {
-		return nil, nil
-	}
-	if cred.Password != nil {
-		return cred.Password, nil
-	}
-	if cred.PasswordResolver == nil {
-		return nil, nil
-	}
-	password, err := cred.PasswordResolver(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return password, nil
-}
-
-func applyRemoteCommandHighlight(data []byte, cfg config.HighlightConfig) []byte {
-	highlighter := sshhighlight.New(sshhighlight.Options{
-		Enabled: cfg.EnabledValue(),
-		Profile: cfg.EffectiveProfile(),
-	})
-	if highlighter == nil {
-		return data
-	}
-	return highlighter.Highlight(data)
-}
-
-func defaultAskpassHelperPath() (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("locate nssh executable: %w", err)
-	}
-	helper := filepath.Join(filepath.Dir(exe), "nssh-askpass")
-	if _, err := os.Stat(helper); err != nil {
-		return "", fmt.Errorf("nssh-askpass not found beside nssh: %w", err)
-	}
-	return helper, nil
-}
-
 func ConnectLiteralHost(ctx context.Context, hostname string, sshArgs []string, opts ...Options) error {
 	var options Options
 	if len(opts) > 0 {
@@ -368,7 +421,7 @@ func ConnectLiteralHost(ctx context.Context, hostname string, sshArgs []string, 
 	result := runResolvedConnection(ctx, resolved, sshArgs, cfg, audit, options)
 	if result.Err != nil && resolved.Provider != "" && isCompatibilityError(result.Err) {
 		var compatErr error
-		if result, resolved, compatErr = handleCompatibilityFixes(ctx, hostname, explicitUser, resolved, sshArgs, cfg, audit, options, result); compatErr != nil {
+		if result, resolved, compatErr = handleCompatibilityFixes(ctx, hostname, explicitUser, false, resolved, sshArgs, cfg, audit, options, result); compatErr != nil {
 			return compatErr
 		}
 	}
@@ -389,7 +442,14 @@ func newConnectAudit(cfg *config.Config) *audit.Logger {
 }
 
 func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger, opts Options) connectionResult {
+	passwordFuture, _ := preparePasswordPrefetch(ctx, resolved, sshArgs, cfg, opts)
+	if passwordFuture != nil {
+		defer passwordFuture.Close()
+	}
 	conn := newConnector(resolved, sshArgs, cfg, opts)
+	if passwordFuture != nil {
+		conn.SetPasswordResolver(passwordFuture.Resolve)
+	}
 	connErr := conn.Run(ctx)
 	result := connectionResult{Err: connErr, Output: conn.LastOutput()}
 
@@ -409,7 +469,7 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 	return result
 }
 
-func handleCompatibilityFixes(ctx context.Context, query, explicitUser string, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger, opts Options, result connectionResult) (connectionResult, *ResolvedHost, error) {
+func handleCompatibilityFixes(ctx context.Context, query, explicitUser string, smart bool, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger, opts Options, result connectionResult) (connectionResult, *ResolvedHost, error) {
 	for iteration := 1; iteration <= maxCompatibilityFixIterations; iteration++ {
 		fixes := discoverCompatibilityFixes(ctx, resolved, cfg, result.Output)
 		if len(fixes) == 0 {
@@ -426,7 +486,13 @@ func handleCompatibilityFixes(ctx context.Context, query, explicitUser string, r
 			return result, resolved, err
 		}
 		ui.Success("Compatibility fixes applied")
-		nextResolved, err := ResolveHostForConnect(query, explicitUser, cfg)
+		var nextResolved *ResolvedHost
+		var err error
+		if smart {
+			nextResolved, err = ResolveSmartHostForConnect(query, explicitUser, cfg)
+		} else {
+			nextResolved, err = ResolveHostForConnect(query, explicitUser, cfg)
+		}
 		if err != nil {
 			return result, resolved, err
 		}
@@ -603,6 +669,11 @@ func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArg
 	conn := connector.NewConnector(resolved.Hostname, resolved.Username, retryPassword, sshArgs)
 	if retryResolved != nil && retryResolved.Credential != nil {
 		conn.SetPasswordResolver(retryResolved.Credential.PasswordResolver)
+	}
+	passwordFuture, _ := preparePasswordPrefetch(ctx, retryResolved, sshArgs, cfg, opts)
+	if passwordFuture != nil {
+		defer passwordFuture.Close()
+		conn.SetPasswordResolver(passwordFuture.Resolve)
 	}
 	conn.SetHostKeyPromptFunc(newHostKeyPromptFunc())
 	conn.SetSSHOptions(resolved.SSH)
