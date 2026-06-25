@@ -23,37 +23,6 @@ func termWidth() int {
 	return 80
 }
 
-// Ruler prints a horizontal line with optional centered title.
-// Example: ──────────── HOST DETAILS ────────────
-func Ruler(title string) string {
-	width := termWidth()
-	lineChar := "─"
-	lineStyle := lipgloss.NewStyle().Foreground(ColorDim)
-	titleStyle := lipgloss.NewStyle().Foreground(ColorWhite).Bold(true)
-
-	if title == "" {
-		return lineStyle.Render(strings.Repeat(lineChar, width))
-	}
-
-	// Title with padding
-	paddedTitle := " " + title + " "
-	titleLen := len(paddedTitle)
-
-	// Calculate line lengths on each side
-	remaining := width - titleLen
-	if remaining < 2 {
-		return titleStyle.Render(title)
-	}
-
-	leftLen := remaining / 2
-	rightLen := remaining - leftLen
-
-	left := lineStyle.Render(strings.Repeat(lineChar, leftLen))
-	right := lineStyle.Render(strings.Repeat(lineChar, rightLen))
-
-	return left + titleStyle.Render(paddedTitle) + right
-}
-
 // SubSection prints a lightweight sub-section header with a mini ruler.
 // Example:   ── Preview
 // Pass skipNewline=true to omit the leading blank line.
@@ -64,85 +33,6 @@ func SubSection(title string, skipNewline ...bool) {
 		fmt.Println()
 	}
 	fmt.Printf("  %s %s\n", lineStyle.Render("───"), titleStyle.Render(title))
-}
-
-// Panel displays key-value content within rulers.
-// Top ruler has title, bottom ruler has optional footer (like "OK").
-type Panel struct {
-	title   string
-	footer  string
-	rows    []panelRow
-	warning bool
-}
-
-type panelRow struct {
-	label string
-	value string
-}
-
-// NewPanel creates a new panel with title.
-func NewPanel(title string) *Panel {
-	return &Panel{title: title}
-}
-
-// WithFooter sets the footer text.
-func (p *Panel) WithFooter(footer string) *Panel {
-	p.footer = footer
-	return p
-}
-
-// WithWarning makes the panel use warning colors.
-func (p *Panel) WithWarning() *Panel {
-	p.warning = true
-	return p
-}
-
-// Row adds a key-value row.
-func (p *Panel) Row(label, value string) *Panel {
-	p.rows = append(p.rows, panelRow{label: label, value: value})
-	return p
-}
-
-// Render returns the panel as a string.
-func (p *Panel) Render() string {
-	var sb strings.Builder
-
-	// Top ruler
-	sb.WriteString(Ruler(p.title))
-	sb.WriteString("\n\n")
-
-	// Find max label width for alignment
-	maxLabel := 0
-	for _, row := range p.rows {
-		if len(row.label) > maxLabel {
-			maxLabel = len(row.label)
-		}
-	}
-
-	// Rows
-	labelStyle := StyleLabel
-	valueStyle := StyleCyan
-	if p.warning {
-		labelStyle = StyleRed.Bold(true)
-		valueStyle = StyleYellow
-	}
-
-	for _, row := range p.rows {
-		label := labelStyle.Render(fmt.Sprintf("%-*s", maxLabel, row.label))
-		value := valueStyle.Render(row.value)
-		sb.WriteString(label + " " + value + "\n")
-	}
-
-	// Bottom ruler
-	sb.WriteString("\n")
-	sb.WriteString(Ruler(p.footer))
-
-	return sb.String()
-}
-
-// Print renders the panel to stdout.
-func (p *Panel) Print() {
-	fmt.Println(p.Render())
 }
 
 // StatusType represents the type of status message for output formatting.

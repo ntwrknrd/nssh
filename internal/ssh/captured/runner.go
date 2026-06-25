@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -117,6 +118,15 @@ func defaultExec(ctx context.Context, command Command) Result {
 
 	events := make(chan OutputEvent, 16)
 	readErrs := make(chan error, 2)
+	outputDone := make(chan []OutputEvent, 1)
+	go func() {
+		var output []OutputEvent
+		for event := range events {
+			output = append(output, event)
+		}
+		outputDone <- output
+	}()
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -127,19 +137,14 @@ func defaultExec(ctx context.Context, command Command) Result {
 		defer wg.Done()
 		readErrs <- readOutputEvents(StreamStderr, stderrPipe, &stderr, events)
 	}()
-	go func() {
-		wg.Wait()
-		close(events)
-	}()
 
-	var output []OutputEvent
 	waitTimer := connector.StartTiming(connector.TimingSSHProcessWait)
-	for event := range events {
-		output = append(output, event)
-	}
 	err = cmd.Wait()
+	wg.Wait()
+	close(events)
+	output := <-outputDone
 	for range 2 {
-		if readErr := <-readErrs; readErr != nil && err == nil {
+		if readErr := <-readErrs; readErr != nil && err == nil && !errors.Is(readErr, os.ErrClosed) {
 			err = readErr
 		}
 	}

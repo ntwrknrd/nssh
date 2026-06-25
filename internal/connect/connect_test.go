@@ -525,6 +525,100 @@ func TestRunResolvedRemoteCommandColdMuxStartsPrefetchWithoutWaiting(t *testing.
 	}
 }
 
+func TestRunResolvedRemoteCommandPreparesHostKeyBeforeAskpass(t *testing.T) {
+	oldRunCapturedCommand := runCapturedCommandFunc
+	oldAskpassHelperPath := askpassHelperPathFunc
+	oldCheckMuxSession := checkMuxSessionFunc
+	oldHostKeyProbe := hostKeyProbeFunc
+	oldHostKeyPrepare := hostKeyPrepareFunc
+	defer func() {
+		runCapturedCommandFunc = oldRunCapturedCommand
+		askpassHelperPathFunc = oldAskpassHelperPath
+		checkMuxSessionFunc = oldCheckMuxSession
+		hostKeyProbeFunc = oldHostKeyProbe
+		hostKeyPrepareFunc = oldHostKeyPrepare
+	}()
+
+	checkMuxSessionFunc = func(context.Context, connector.MuxCheckRequest) (bool, bool) {
+		return false, true
+	}
+	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options) hostKeyProbeStatus {
+		return hostKeyProbeNeedsPrompt
+	}
+	var prepareCalled atomic.Bool
+	hostKeyPrepareFunc = func(_ context.Context, _ *ResolvedHost, _ []string, _ *config.Config, _ Options, changed bool) (*connector.HostKeyPreparation, error) {
+		if changed {
+			t.Fatal("unknown host-key preparation was marked changed")
+		}
+		prepareCalled.Store(true)
+		return &connector.HostKeyPreparation{TempKnownHosts: "/tmp/nssh-known-hosts-prep"}, nil
+	}
+	askpassHelperPathFunc = func() (string, error) {
+		return "/tmp/nssh-askpass", nil
+	}
+	runCapturedCommandFunc = func(_ context.Context, req captured.Request) (captured.Result, error) {
+		if !prepareCalled.Load() {
+			t.Fatal("captured command started before host-key preparation")
+		}
+		if len(req.Env) == 0 {
+			t.Fatal("captured request missing askpass env")
+		}
+		joinedArgs := strings.Join(req.SSHArgs, "\n")
+		for _, want := range []string{
+			"UserKnownHostsFile=/tmp/nssh-known-hosts-prep",
+			"StrictHostKeyChecking=yes",
+		} {
+			if !strings.Contains(joinedArgs, want) {
+				t.Fatalf("ssh args = %#v, want %q", req.SSHArgs, want)
+			}
+		}
+		return captured.Result{Stdout: []byte("ok\n")}, nil
+	}
+
+	err := runResolvedRemoteCommand(context.Background(), &ResolvedHost{
+		Hostname: "edge01",
+		Port:     22,
+		AuthMode: config.AuthModePassword,
+		Credential: &ResolvedCredential{
+			PasswordResolver: func(context.Context) (*secret.Secret, error) {
+				return secret.NewFromString("secret"), nil
+			},
+		},
+	}, nil, []string{"show"}, config.DefaultConfig(), Options{})
+	if err != nil {
+		t.Fatalf("runResolvedRemoteCommand: %v", err)
+	}
+	if !prepareCalled.Load() {
+		t.Fatal("host-key preparation was not called")
+	}
+}
+
+func TestPrepareInteractiveHostKeyPassesChangedStatus(t *testing.T) {
+	oldHostKeyProbe := hostKeyProbeFunc
+	oldHostKeyPrepare := hostKeyPrepareFunc
+	defer func() {
+		hostKeyProbeFunc = oldHostKeyProbe
+		hostKeyPrepareFunc = oldHostKeyPrepare
+	}()
+
+	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options) hostKeyProbeStatus {
+		return hostKeyProbeChanged
+	}
+	var sawChanged bool
+	hostKeyPrepareFunc = func(_ context.Context, _ *ResolvedHost, _ []string, _ *config.Config, _ Options, changed bool) (*connector.HostKeyPreparation, error) {
+		sawChanged = changed
+		return nil, nil
+	}
+
+	_, err := prepareInteractiveHostKey(context.Background(), &ResolvedHost{Hostname: "edge01"}, nil, config.DefaultConfig(), Options{})
+	if err != nil {
+		t.Fatalf("prepareInteractiveHostKey: %v", err)
+	}
+	if !sawChanged {
+		t.Fatal("changed host-key probe did not pass changed=true to preparation")
+	}
+}
+
 func TestPreparePasswordPrefetchHotMuxPreservesLazyFallback(t *testing.T) {
 	oldCheckMuxSession := checkMuxSessionFunc
 	defer func() { checkMuxSessionFunc = oldCheckMuxSession }()

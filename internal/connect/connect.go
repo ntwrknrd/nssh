@@ -58,7 +58,10 @@ var (
 	checkMuxSessionFunc   = func(ctx context.Context, req connector.MuxCheckRequest) (bool, bool) {
 		return connector.CheckMuxSession(ctx, req, nil)
 	}
-	hostKeyProbeFunc = probeInteractiveHostKey
+	hostKeyProbeFunc   = probeInteractiveHostKey
+	hostKeyPrepareFunc = runHostKeyPreparation
+	hostKeyPromptFunc  = newHostKeyPromptFunc
+	scanHostKeyFunc    = scanHostKey
 )
 
 func ConnectRequest(ctx context.Context, req Request) error {
@@ -210,7 +213,18 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 		defer passwordFuture.Close()
 	}
 	if resolved.Credential != nil {
+		if !muxHot {
+			hostKeyPrep, err := prepareInteractiveHostKey(ctx, resolved, sshArgs, cfg, opts)
+			if err != nil {
+				return err
+			}
+			if hostKeyPrep != nil {
+				defer hostKeyPrep.Cleanup()
+				req.SSHArgs = appendHostKeyPreparationSSHArgs(req.SSHArgs, hostKeyPrep)
+			}
+		}
 		askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
+		slog.Debug("setting up askpass", "host", resolved.Hostname, "password_future", passwordFuture != nil, "mux_hot", muxHot)
 		if passwordFuture != nil {
 			if !muxHot {
 				var env []string
@@ -221,6 +235,7 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 					return err
 				}
 				req.Env = append(req.Env, env...)
+				slog.Debug("askpass setup complete", "host", resolved.Hostname)
 			}
 		} else {
 			password, err := remoteCommandPassword(ctx, resolved.Credential)
@@ -239,6 +254,7 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 					return err
 				}
 				req.Env = append(req.Env, env...)
+				slog.Debug("askpass setup complete", "host", resolved.Hostname)
 			}
 		}
 		askpassTimer.Emit()
@@ -249,8 +265,10 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 		}()
 	}
 
+	slog.Debug("starting captured ssh command", "host", req.Hostname, "has_askpass", len(req.Env) > 0)
 	result, err := runCapturedCommandFunc(ctx, req)
 	writeCapturedCommandOutput(result, resolved.Highlight)
+	slog.Debug("captured ssh command completed", "host", req.Hostname, "err", err)
 	return err
 }
 
@@ -298,7 +316,10 @@ func preparePasswordPrefetch(ctx context.Context, resolved *ResolvedHost, sshArg
 	future := sshpassword.NewFuture(resolved.Credential.PasswordResolver)
 	muxHot, _ := checkMuxSessionFunc(ctx, muxCheckRequest(resolved, sshArgs, cfg, opts))
 	if !muxHot {
+		slog.Debug("starting password prefetch", "host", resolved.Hostname)
 		future.Start(ctx)
+	} else {
+		slog.Debug("skipping password prefetch for hot mux", "host", resolved.Hostname)
 	}
 	return future, muxHot
 }
@@ -474,11 +495,7 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 		}
 		if hostKeyPrep != nil {
 			defer hostKeyPrep.Cleanup()
-			if prepArgs := hostKeyPrep.SSHArgs(); len(prepArgs) > 0 {
-				nextArgs := append([]string{}, sshArgs...)
-				nextArgs = append(nextArgs, prepArgs...)
-				sshArgs = nextArgs
-			}
+			sshArgs = appendHostKeyPreparationSSHArgs(sshArgs, hostKeyPrep)
 		}
 	}
 	conn := newConnector(resolved, sshArgs, cfg, opts)
@@ -539,11 +556,25 @@ func interactiveAskpassResolver(resolved *ResolvedHost, passwordFuture *sshpassw
 func prepareInteractiveHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options) (*connector.HostKeyPreparation, error) {
 	switch hostKeyProbeFunc(ctx, resolved, sshArgs, cfg, opts) {
 	case hostKeyProbeNeedsPrompt:
-		conn := newConnector(resolved, sshArgs, cfg, opts)
-		return conn.PrepareHostKey(ctx)
+		return hostKeyPrepareFunc(ctx, resolved, sshArgs, cfg, opts, false)
+	case hostKeyProbeChanged:
+		return hostKeyPrepareFunc(ctx, resolved, sshArgs, cfg, opts, true)
 	default:
 		return nil, nil
 	}
+}
+
+func appendHostKeyPreparationSSHArgs(sshArgs []string, prep *connector.HostKeyPreparation) []string {
+	if prep == nil {
+		return sshArgs
+	}
+	prepArgs := prep.SSHArgs()
+	if len(prepArgs) == 0 {
+		return sshArgs
+	}
+	nextArgs := append([]string{}, sshArgs...)
+	nextArgs = append(nextArgs, prepArgs...)
+	return nextArgs
 }
 
 func handleCompatibilityFixes(ctx context.Context, query, explicitUser string, smart bool, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger, opts Options, result connectionResult) (connectionResult, *ResolvedHost, error) {
@@ -760,11 +791,7 @@ func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArg
 		}
 		if hostKeyPrep != nil {
 			defer hostKeyPrep.Cleanup()
-			if prepArgs := hostKeyPrep.SSHArgs(); len(prepArgs) > 0 {
-				nextArgs := append([]string{}, sshArgs...)
-				nextArgs = append(nextArgs, prepArgs...)
-				sshArgs = nextArgs
-			}
+			sshArgs = appendHostKeyPreparationSSHArgs(sshArgs, hostKeyPrep)
 		}
 	}
 	conn := connector.NewConnector(resolved.Hostname, resolved.Username, retryPassword, sshArgs)

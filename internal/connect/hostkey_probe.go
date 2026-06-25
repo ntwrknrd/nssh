@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -18,6 +19,7 @@ type hostKeyProbeStatus int
 const (
 	hostKeyProbeClean hostKeyProbeStatus = iota
 	hostKeyProbeNeedsPrompt
+	hostKeyProbeChanged
 	hostKeyProbeInconclusive
 )
 
@@ -30,10 +32,26 @@ func probeInteractiveHostKey(ctx context.Context, resolved *ResolvedHost, sshArg
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	slog.Debug("probing host key", "host", resolved.Hostname, "argv", append([]string{"ssh"}, args...))
 	cmd := exec.CommandContext(probeCtx, "ssh", args...)
 	cmd.Env = withoutAskpassEnv(os.Environ())
 	output, _ := cmd.CombinedOutput()
-	return classifyHostKeyProbeOutput(output)
+	status := classifyHostKeyProbeOutput(output)
+	slog.Debug("host key probe completed", "host", resolved.Hostname, "status", status.String())
+	return status
+}
+
+func (s hostKeyProbeStatus) String() string {
+	switch s {
+	case hostKeyProbeClean:
+		return "clean"
+	case hostKeyProbeNeedsPrompt:
+		return "needs_host_key_prompt"
+	case hostKeyProbeChanged:
+		return "changed_host_key"
+	default:
+		return "inconclusive"
+	}
 }
 
 func buildHostKeyProbeArgs(resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options) []string {
@@ -58,9 +76,9 @@ func buildHostKeyProbeArgs(resolved *ResolvedHost, sshArgs []string, cfg *config
 func classifyHostKeyProbeOutput(output []byte) hostKeyProbeStatus {
 	lower := bytes.ToLower(output)
 	switch {
-	case bytes.Contains(lower, []byte("host key verification failed")):
-		return hostKeyProbeNeedsPrompt
 	case bytes.Contains(lower, []byte("remote host identification has changed")):
+		return hostKeyProbeChanged
+	case bytes.Contains(lower, []byte("host key verification failed")):
 		return hostKeyProbeNeedsPrompt
 	case bytes.Contains(lower, []byte("the authenticity of host")):
 		return hostKeyProbeNeedsPrompt

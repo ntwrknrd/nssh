@@ -194,6 +194,23 @@ func TestDefaultExecRecordsOutputEventsInReadOrder(t *testing.T) {
 	}
 }
 
+func TestDefaultExecDoesNotWaitForBackgroundProcessHoldingStdout(t *testing.T) {
+	start := time.Now()
+	result := defaultExec(context.Background(), Command{
+		Name: "sh",
+		Args: []string{"-c", "sleep 5 & printf 'done\\n'"},
+	})
+	if result.Err != nil {
+		t.Fatalf("defaultExec: %v", result.Err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("defaultExec took %s, want direct child exit without waiting for background process", elapsed)
+	}
+	if string(result.Stdout) != "done\n" {
+		t.Fatalf("stdout = %q, want done", result.Stdout)
+	}
+}
+
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	oldStderr := os.Stderr

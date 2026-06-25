@@ -40,10 +40,4 @@
 //
 //	ui.ApplyStyledHelp(cmd)           // Single command
 //	ui.ApplyStyledHelpRecursive(cmd)  // Command and all subcommands
-//
-// # Components
-//
-// Visual components for command output:
-//
-//	ui.Ruler("SECTION TITLE")   // Horizontal rule with title
 package ui

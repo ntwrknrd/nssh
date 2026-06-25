@@ -27,7 +27,7 @@ func TestClassifyHostKeyProbeOutput(t *testing.T) {
 		{
 			name:   "changed host needs preparation",
 			output: "@@@@@@@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@@@@@@@",
-			want:   hostKeyProbeNeedsPrompt,
+			want:   hostKeyProbeChanged,
 		},
 		{
 			name:   "verification failure needs preparation",
@@ -46,6 +46,13 @@ func TestClassifyHostKeyProbeOutput(t *testing.T) {
 				t.Fatalf("classifyHostKeyProbeOutput() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestClassifyHostKeyProbeOutputDistinguishesChangedHost(t *testing.T) {
+	got := classifyHostKeyProbeOutput([]byte("@@@@@@@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@@@@@@@"))
+	if got != hostKeyProbeChanged {
+		t.Fatalf("changed host key status = %v, want %v", got, hostKeyProbeChanged)
 	}
 }
 
