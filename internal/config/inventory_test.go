@@ -109,6 +109,39 @@ inventory:
 	}
 }
 
+func TestInventoryProviderSSHDefaultsDecode(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.yaml")
+	writeConfigFile(t, path, `
+inventory:
+  providers:
+    clab-all:
+      type: containerlab
+      config:
+        jump_host: nre@nre-netlab01.example.com
+        ssh_defaults: all
+      groups:
+        lab: {}
+    clab-selected:
+      type: containerlab
+      config:
+        jump_host: nre@nre-netlab02.example.com
+        ssh_defaults: [SetEnv, ServerAliveInterval]
+      groups:
+        lab: {}
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Inventory.Providers["clab-all"].Config.SSHDefaults.Mode; got != "all" {
+		t.Fatalf("scalar ssh_defaults mode = %q, want all", got)
+	}
+	if got := strings.Join(cfg.Inventory.Providers["clab-selected"].Config.SSHDefaults.Options, ","); got != "SetEnv,ServerAliveInterval" {
+		t.Fatalf("list ssh_defaults options = %q, want SetEnv,ServerAliveInterval", got)
+	}
+}
+
 func TestInventoryProviderGroupValidatesConfigKeySafeGroupName(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Inventory.Providers = map[string]InventoryProviderConfig{
@@ -363,6 +396,68 @@ func TestInventoryConfigValidation(t *testing.T) {
 				},
 			},
 			wantErr: "jump_host is required",
+		},
+		{
+			name: "containerlab accepts selected ssh defaults",
+			cfg: InventoryConfig{
+				Providers: map[string]InventoryProviderConfig{
+					"nre-netlab01": {
+						Type: ProviderContainerlab,
+						Config: InventoryProviderDetailConfig{
+							JumpHost:    "nre@nre-netlab01.example.com",
+							SSHDefaults: NewSSHDefaultsInheritanceOptions("SetEnv"),
+						},
+						Groups: map[string]GroupConfig{"lab": {}},
+					},
+				},
+			},
+		},
+		{
+			name: "containerlab accepts all ssh defaults",
+			cfg: InventoryConfig{
+				Providers: map[string]InventoryProviderConfig{
+					"nre-netlab01": {
+						Type: ProviderContainerlab,
+						Config: InventoryProviderDetailConfig{
+							JumpHost:    "nre@nre-netlab01.example.com",
+							SSHDefaults: NewSSHDefaultsInheritanceMode("all"),
+						},
+						Groups: map[string]GroupConfig{"lab": {}},
+					},
+				},
+			},
+		},
+		{
+			name: "containerlab rejects unknown ssh defaults policy",
+			cfg: InventoryConfig{
+				Providers: map[string]InventoryProviderConfig{
+					"nre-netlab01": {
+						Type: ProviderContainerlab,
+						Config: InventoryProviderDetailConfig{
+							JumpHost:    "nre@nre-netlab01.example.com",
+							SSHDefaults: NewSSHDefaultsInheritanceMode("selected"),
+						},
+						Groups: map[string]GroupConfig{"lab": {}},
+					},
+				},
+			},
+			wantErr: "ssh_defaults must be all, none, or a list",
+		},
+		{
+			name: "containerlab rejects empty selected ssh default option",
+			cfg: InventoryConfig{
+				Providers: map[string]InventoryProviderConfig{
+					"nre-netlab01": {
+						Type: ProviderContainerlab,
+						Config: InventoryProviderDetailConfig{
+							JumpHost:    "nre@nre-netlab01.example.com",
+							SSHDefaults: NewSSHDefaultsInheritanceOptions("SetEnv", ""),
+						},
+						Groups: map[string]GroupConfig{"lab": {}},
+					},
+				},
+			},
+			wantErr: "non-empty option names",
 		},
 	}
 

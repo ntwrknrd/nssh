@@ -633,6 +633,13 @@ func inventoryProviderDetailTable(cfg InventoryProviderDetailConfig) map[string]
 	if cfg.StrictHostKeyChecking {
 		table["strict_host_key_checking"] = cfg.StrictHostKeyChecking
 	}
+	if !cfg.SSHDefaults.IsZero() {
+		if len(cfg.SSHDefaults.Options) > 0 {
+			table["ssh_defaults"] = cfg.SSHDefaults.Options
+		} else {
+			table["ssh_defaults"] = cfg.SSHDefaults.Mode
+		}
+	}
 	return table
 }
 

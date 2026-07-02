@@ -3,9 +3,12 @@ package config
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -146,13 +149,60 @@ type GroupConfig struct {
 
 // InventoryProviderDetailConfig holds implementation-specific provider config.
 type InventoryProviderDetailConfig struct {
-	BaseURL               string `yaml:"base_url,omitempty"`
-	URLEnv                string `yaml:"url_env,omitempty"`
-	TokenEnv              string `yaml:"token_env,omitempty"`
-	EnvFile               string `yaml:"env_file,omitempty"`
-	JumpHost              string `yaml:"jump_host,omitempty"`
-	Sudo                  bool   `yaml:"sudo,omitempty"`
-	StrictHostKeyChecking bool   `yaml:"strict_host_key_checking,omitempty"`
+	BaseURL               string                 `yaml:"base_url,omitempty"`
+	URLEnv                string                 `yaml:"url_env,omitempty"`
+	TokenEnv              string                 `yaml:"token_env,omitempty"`
+	EnvFile               string                 `yaml:"env_file,omitempty"`
+	JumpHost              string                 `yaml:"jump_host,omitempty"`
+	Sudo                  bool                   `yaml:"sudo,omitempty"`
+	StrictHostKeyChecking bool                   `yaml:"strict_host_key_checking,omitempty"`
+	SSHDefaults           SSHDefaultsInheritance `yaml:"ssh_defaults,omitempty"`
+}
+
+type SSHDefaultsInheritance struct {
+	Mode    string
+	Options []string
+}
+
+func NewSSHDefaultsInheritanceMode(mode string) SSHDefaultsInheritance {
+	return SSHDefaultsInheritance{Mode: mode}
+}
+
+func NewSSHDefaultsInheritanceOptions(options ...string) SSHDefaultsInheritance {
+	return SSHDefaultsInheritance{Options: slices.Clone(options)}
+}
+
+func (v *SSHDefaultsInheritance) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		v.Mode = strings.TrimSpace(node.Value)
+		v.Options = nil
+		return nil
+	case yaml.SequenceNode:
+		options := make([]string, 0, len(node.Content))
+		for _, item := range node.Content {
+			if item.Kind != yaml.ScalarNode {
+				return fmt.Errorf("ssh_defaults list entries must be option names")
+			}
+			options = append(options, item.Value)
+		}
+		v.Mode = ""
+		v.Options = options
+		return nil
+	default:
+		return fmt.Errorf("ssh_defaults must be a string or list")
+	}
+}
+
+func (v SSHDefaultsInheritance) MarshalYAML() (any, error) {
+	if len(v.Options) > 0 {
+		return v.Options, nil
+	}
+	return v.Mode, nil
+}
+
+func (v SSHDefaultsInheritance) IsZero() bool {
+	return strings.TrimSpace(v.Mode) == "" && len(v.Options) == 0
 }
 
 type InventoryAuthContext struct {
@@ -511,6 +561,9 @@ func (c *InventoryProviderConfig) Validate() error {
 	if !supportedProviders[c.Type] {
 		return fmt.Errorf("unsupported provider %q", c.Type)
 	}
+	if err := c.Config.validate(c.Type); err != nil {
+		return err
+	}
 
 	switch c.Type {
 	case ProviderLocal:
@@ -523,6 +576,26 @@ func (c *InventoryProviderConfig) Validate() error {
 		// NetBox supports base_url directly or environment-backed URL config.
 	}
 
+	return nil
+}
+
+func (c *InventoryProviderDetailConfig) validate(providerType string) error {
+	sshDefaults := strings.ToLower(strings.TrimSpace(c.SSHDefaults.Mode))
+	if !c.SSHDefaults.IsZero() {
+		if providerType != ProviderContainerlab {
+			return fmt.Errorf("%s.config.ssh_defaults is only supported for containerlab providers", providerType)
+		}
+	}
+	switch sshDefaults {
+	case "", "none", "all":
+	default:
+		return fmt.Errorf("containerlab.config.ssh_defaults must be all, none, or a list of option names")
+	}
+	for _, option := range c.SSHDefaults.Options {
+		if strings.TrimSpace(option) == "" {
+			return fmt.Errorf("containerlab.config.ssh_defaults list must contain only non-empty option names")
+		}
+	}
 	return nil
 }
 

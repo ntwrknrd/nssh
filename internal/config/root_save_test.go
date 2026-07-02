@@ -31,6 +31,14 @@ func TestSaveSparseWritesYAMLIncludesAndProviderHosts(t *testing.T) {
 				"rpi-a.lan": {Group: "homelab", Aliases: []string{"rpi-a"}, Highlight: HighlightConfig{Enabled: &highlightDisabled}},
 			},
 		},
+		"nre-netlab01": {
+			Type: ProviderContainerlab,
+			Config: InventoryProviderDetailConfig{
+				JumpHost:    "nre@nre-netlab01.example.com",
+				SSHDefaults: NewSSHDefaultsInheritanceOptions("SetEnv"),
+			},
+			Groups: map[string]GroupConfig{"vjunos": {}},
+		},
 	}
 	if err := Save(path, cfg); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -53,6 +61,8 @@ func TestSaveSparseWritesYAMLIncludesAndProviderHosts(t *testing.T) {
 		"profile: none",
 		"profile: junos",
 		"enabled: false",
+		"ssh_defaults:",
+		"- SetEnv",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("saved config missing %q:\n%s", want, text)

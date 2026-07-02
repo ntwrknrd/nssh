@@ -439,6 +439,9 @@ func TestCatalogCarriesProviderStateProxyJump(t *testing.T) {
 		},
 		"nre-netlab01": {
 			Type: config.ProviderContainerlab,
+			Config: config.InventoryProviderDetailConfig{
+				SSHDefaults: config.NewSSHDefaultsInheritanceMode("none"),
+			},
 			Groups: map[string]config.GroupConfig{
 				"juniper-crpd": {
 					Auth: config.InventoryAuthConfig{Mode: config.AuthModePassword, Username: "admin"},
@@ -505,6 +508,101 @@ func TestCatalogCarriesProviderStateProxyJump(t *testing.T) {
 	for _, targetOnly := range []string{"ControlPath", "IdentityFile"} {
 		if hasSSHOption(host.SSH.Options, targetOnly) {
 			t.Fatalf("containerlab target should not inherit global %s: %#v", targetOnly, host.SSH.Options)
+		}
+	}
+}
+
+func TestCatalogContainerlabCanInheritSelectedDefaultSSHOptions(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.SSH.Defaults = config.SSHHostConfig{Options: config.SSHOptions{
+		"ControlPath": config.NewSSHOptionString("~/.ssh/sockets/%r@%h:%p"),
+		"SetEnv": config.NewSSHOptionMap(map[string]string{
+			"COLORTERM": "truecolor",
+			"TERM":      "xterm-256color",
+		}),
+	}}
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		"nre-netlab01": {
+			Type: config.ProviderContainerlab,
+			Config: config.InventoryProviderDetailConfig{
+				SSHDefaults: config.NewSSHDefaultsInheritanceOptions("SetEnv"),
+			},
+			Groups: map[string]config.GroupConfig{
+				"vjunos": {},
+			},
+		},
+	}
+	state := &inventory.ProviderState{
+		Provider: "nre-netlab01",
+		Type:     config.ProviderContainerlab,
+		Objects: map[string]*inventory.ProviderHost{
+			"isis/r1": {
+				ObjectID: "isis/r1",
+				Host:     "clab-isis-r1",
+				HostName: "192.168.123.101",
+				Patterns: []string{"isis"},
+				Group:    "nre-netlab01/vjunos",
+			},
+		},
+	}
+
+	cat := buildCatalogForTest(t, cfg, []*inventory.ProviderState{state})
+	host, ok := cat.Find("isis")
+	if !ok {
+		t.Fatalf("Find(isis) failed")
+	}
+	if got := host.SSH.Options["SetEnv"].StringValue(); got != "COLORTERM=truecolor TERM=xterm-256color" {
+		t.Fatalf("SetEnv = %q, want COLORTERM=truecolor TERM=xterm-256color", got)
+	}
+	if hasSSHOption(host.SSH.Options, "ControlPath") {
+		t.Fatalf("containerlab target should not inherit unselected ControlPath: %#v", host.SSH.Options)
+	}
+}
+
+func TestCatalogContainerlabInheritsAllSSHDefaultsByDefault(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.SSH.Defaults = config.SSHHostConfig{
+		Compatibility: config.SSHCompatibility{Kex: "diffie-hellman-group14-sha1"},
+		Options: config.SSHOptions{
+			"ControlPath": config.NewSSHOptionString("~/.ssh/sockets/%r@%h:%p"),
+			"SetEnv":      config.NewSSHOptionMap(map[string]string{"TERM": "xterm-256color"}),
+		},
+	}
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		"nre-netlab01": {
+			Type: config.ProviderContainerlab,
+			Groups: map[string]config.GroupConfig{
+				"vjunos": {},
+			},
+		},
+	}
+	state := &inventory.ProviderState{
+		Provider: "nre-netlab01",
+		Type:     config.ProviderContainerlab,
+		Objects: map[string]*inventory.ProviderHost{
+			"isis/r1": {
+				ObjectID: "isis/r1",
+				Host:     "clab-isis-r1",
+				HostName: "192.168.123.101",
+				Patterns: []string{"isis"},
+				Group:    "nre-netlab01/vjunos",
+			},
+		},
+	}
+
+	cat := buildCatalogForTest(t, cfg, []*inventory.ProviderState{state})
+	host, ok := cat.Find("isis")
+	if !ok {
+		t.Fatalf("Find(isis) failed")
+	}
+	if got := host.SSH.Compatibility.Kex; got != "diffie-hellman-group14-sha1" {
+		t.Fatalf("Kex = %q, want diffie-hellman-group14-sha1", got)
+	}
+	for _, key := range []string{"ControlPath", "SetEnv"} {
+		if !hasSSHOption(host.SSH.Options, key) {
+			t.Fatalf("containerlab target should inherit %s by default: %#v", key, host.SSH.Options)
 		}
 	}
 }

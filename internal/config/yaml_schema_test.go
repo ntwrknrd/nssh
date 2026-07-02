@@ -51,11 +51,24 @@ inventory:
             options:
               Ciphers:
                 - aes256-ctr
+    nre-netlab01:
+      type: containerlab
+      config:
+        jump_host: nre@nre-netlab01.custcbb.local
+        ssh_defaults: [SetEnv]
+      groups:
+        vjunos:
+          match:
+            kind: [juniper_vjunosrouter]
+            state: [running]
 ssh:
   defaults:
     options:
       IdentitiesOnly: true
       IdentityAgent: ~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock
+      SetEnv:
+        TERM: xterm-256color
+        COLORTERM: truecolor
       IdentityFile:
         - ~/.ssh/ed25519-1Password-Personal.pub
 highlight:
@@ -74,6 +87,13 @@ highlight:
 	}
 	if got := cfg.SSH.Defaults.Options["IdentityAgent"].Scalar; got == "" {
 		t.Fatalf("identity agent path not decoded")
+	}
+	containerlab := cfg.Inventory.Providers["nre-netlab01"].Config
+	if got := containerlab.SSHDefaults.Mode; got != "" {
+		t.Fatalf("containerlab ssh_defaults mode = %q, want empty for selected options", got)
+	}
+	if got := strings.Join(containerlab.SSHDefaults.Options, ","); got != "SetEnv" {
+		t.Fatalf("containerlab ssh_defaults options = %q, want SetEnv", got)
 	}
 	if got := cfg.Inventory.Providers["netbox-prod"].Groups["cbb"].SSH.Options["ProxyJump"].Scalar; got != "bastion" {
 		t.Fatalf("group ssh proxy_jump = %q, want bastion", got)

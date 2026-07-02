@@ -197,13 +197,48 @@ func mergeCatalogSSH(cfg *config.Config, provider config.InventoryProviderConfig
 
 func mergeProviderStateSSH(cfg *config.Config, state *inventory.ProviderState, provider config.InventoryProviderConfig, group string, host config.SSHHostConfig) config.SSHHostConfig {
 	if state != nil && state.Type == config.ProviderContainerlab {
-		ssh := config.SSHHostConfig{}
+		ssh := containerlabInheritedSSHDefaults(cfg, provider.Config)
 		if groupCfg, ok := provider.Groups[group]; ok {
 			ssh = config.MergeSSH(ssh, groupCfg.SSH)
 		}
 		return config.MergeSSH(ssh, host)
 	}
 	return mergeCatalogSSH(cfg, provider, group, host)
+}
+
+func containerlabInheritedSSHDefaults(cfg *config.Config, detail config.InventoryProviderDetailConfig) config.SSHHostConfig {
+	if cfg == nil {
+		return config.SSHHostConfig{}
+	}
+	if len(detail.SSHDefaults.Options) > 0 {
+		return config.SSHHostConfig{
+			Options: selectedSSHDefaultOptions(cfg.SSH.Defaults.Options, detail.SSHDefaults.Options),
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(detail.SSHDefaults.Mode)) {
+	case "", "all":
+		return config.MergeSSH(config.SSHHostConfig{}, cfg.SSH.Defaults)
+	case "none":
+		return config.SSHHostConfig{}
+	}
+	return config.SSHHostConfig{}
+}
+
+func selectedSSHDefaultOptions(defaults config.SSHOptions, names []string) config.SSHOptions {
+	selected := make(config.SSHOptions)
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		for key, value := range defaults {
+			if strings.EqualFold(key, name) {
+				selected[key] = value
+				break
+			}
+		}
+	}
+	return config.MergeSSH(config.SSHHostConfig{}, config.SSHHostConfig{Options: selected}).Options
 }
 
 func applyAuthModeSSH(ssh config.SSHHostConfig, authMode string) config.SSHHostConfig {
