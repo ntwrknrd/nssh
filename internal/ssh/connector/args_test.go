@@ -41,6 +41,36 @@ func TestBuildSSHArgsAddsDefaultTTYForInteractiveSession(t *testing.T) {
 	}
 }
 
+func TestBuildSSHArgsLimitsAskpassToOnePrompt(t *testing.T) {
+	conn := NewConnector("edge01", "netops", nil, nil)
+	conn.SetEnv([]string{"SSH_ASKPASS=/tmp/nssh-askpass"})
+
+	got, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatalf("buildSSHArgs() error = %v", err)
+	}
+
+	want := []string{"-tt", "-F", "none", "-o", "NumberOfPasswordPrompts=1", "netops@edge01"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildSSHArgsKeepsExplicitAskpassPromptLimit(t *testing.T) {
+	conn := NewConnector("edge01", "netops", nil, []string{"-o", "NumberOfPasswordPrompts=2"})
+	conn.SetEnv([]string{"SSH_ASKPASS=/tmp/nssh-askpass"})
+
+	got, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatalf("buildSSHArgs() error = %v", err)
+	}
+
+	want := []string{"-tt", "-F", "none", "-o", "NumberOfPasswordPrompts=2", "netops@edge01"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
 func TestBuildSSHArgsDoesNotAddDefaultTTYForRemoteCommand(t *testing.T) {
 	conn := NewConnector("edge01", "netops", nil, []string{"--", "show", "version"})
 	conn.SetResolvedEndpoint("edge01", "2200")

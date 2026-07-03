@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
+	"strings"
 )
 
 // buildSSHArgs constructs SSH arguments, adding temp known_hosts if needed.
@@ -17,7 +19,8 @@ func (c *Connector) buildSSHArgs() ([]string, error) {
 	if len(command) == 0 && !hasExplicitTTYOption(options) {
 		args = append(args, "-tt")
 	}
-	args = append(args, RenderSSHOptions(c.sshOptions, c.sshVerbosity)...)
+	renderedOptions := RenderSSHOptions(c.sshOptions, c.sshVerbosity)
+	args = append(args, renderedOptions...)
 
 	// Build target (user@host or just host). OpenSSH config is disabled with
 	// -F none; host-specific settings are already rendered into argv.
@@ -35,6 +38,13 @@ func (c *Connector) buildSSHArgs() ([]string, error) {
 
 	if c.resolvedPort != "" && c.resolvedPort != "22" && c.parsePortFromSSHArgs() == "" {
 		args = append(args, "-p", c.resolvedPort)
+	}
+
+	if hasAskpassEnv(c.env) {
+		allOptions := append(slices.Clone(renderedOptions), options...)
+		if effectiveSSHOption(allOptions, "NumberOfPasswordPrompts") == "" {
+			args = append(args, "-o", "NumberOfPasswordPrompts=1")
+		}
 	}
 
 	// Add SSH options
@@ -70,6 +80,15 @@ func (c *Connector) buildSSHArgs() ([]string, error) {
 	}
 
 	return args, nil
+}
+
+func hasAskpassEnv(env []string) bool {
+	for _, entry := range env {
+		if entry == "SSH_ASKPASS" || strings.HasPrefix(entry, "SSH_ASKPASS=") {
+			return true
+		}
+	}
+	return false
 }
 
 func splitSSHArgs(args []string) (options, command []string) {
