@@ -72,6 +72,38 @@ func TestServerSendsPasswordOnceForMatchingNonce(t *testing.T) {
 	}
 }
 
+func TestServerServesMultiplePasswordRequestsUntilCanceled(t *testing.T) {
+	password := secret.NewFromString("super-secret")
+	defer password.Destroy()
+
+	server, err := NewServer(password)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- server.Serve(ctx)
+	}()
+
+	for i := 0; i < 2; i++ {
+		got, err := RequestPassword(context.Background(), server.SocketPath(), server.Nonce())
+		if err != nil {
+			t.Fatalf("RequestPassword %d: %v", i+1, err)
+		}
+		if !bytes.Equal(got, []byte("super-secret")) {
+			t.Fatalf("password %d = %q", i+1, got)
+		}
+	}
+
+	cancel()
+	if err := <-done; err != context.Canceled {
+		t.Fatalf("Serve = %v, want context canceled", err)
+	}
+}
+
 func TestServerRejectsWrongNonce(t *testing.T) {
 	password := secret.NewFromString("super-secret")
 	defer password.Destroy()

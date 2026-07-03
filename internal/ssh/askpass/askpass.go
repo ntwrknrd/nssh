@@ -99,6 +99,30 @@ func (s *Server) ServeOnce(ctx context.Context) error {
 	if s == nil || s.listener == nil {
 		return fmt.Errorf("askpass server is closed")
 	}
+	conn, err := s.accept(ctx)
+	if err != nil {
+		return err
+	}
+	_ = s.listener.Close()
+	return s.serveConn(ctx, conn)
+}
+
+func (s *Server) Serve(ctx context.Context) error {
+	if s == nil || s.listener == nil {
+		return fmt.Errorf("askpass server is closed")
+	}
+	for {
+		conn, err := s.accept(ctx)
+		if err != nil {
+			return err
+		}
+		if err := s.serveConn(ctx, conn); err != nil {
+			return err
+		}
+	}
+}
+
+func (s *Server) accept(ctx context.Context) (*net.UnixConn, error) {
 	done := make(chan struct{})
 	go func() {
 		select {
@@ -112,13 +136,15 @@ func (s *Server) ServeOnce(ctx context.Context) error {
 	conn, err := s.listener.AcceptUnix()
 	if err != nil {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
-		return fmt.Errorf("accept askpass connection: %w", err)
+		return nil, fmt.Errorf("accept askpass connection: %w", err)
 	}
-	defer func() { _ = conn.Close() }()
-	_ = s.listener.Close()
+	return conn, nil
+}
 
+func (s *Server) serveConn(ctx context.Context, conn *net.UnixConn) error {
+	defer func() { _ = conn.Close() }()
 	if err := verifyPeer(conn); err != nil {
 		return err
 	}

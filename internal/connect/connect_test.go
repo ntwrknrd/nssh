@@ -14,6 +14,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/secret"
+	"github.com/ntwrknrd/nssh/internal/ssh/askpass"
 	"github.com/ntwrknrd/nssh/internal/ssh/captured"
 	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
@@ -421,6 +422,50 @@ func TestStartAskpassServerEnvUsesHelperEnvironment(t *testing.T) {
 			t.Fatalf("env = %q, want %q", joined, want)
 		}
 	}
+}
+
+func TestStartAskpassServerEnvSupportsMultiplePrompts(t *testing.T) {
+	oldAskpassHelperPath := askpassHelperPathFunc
+	defer func() { askpassHelperPathFunc = oldAskpassHelperPath }()
+	askpassHelperPathFunc = func() (string, error) {
+		return "/tmp/nssh-askpass", nil
+	}
+
+	password := secret.NewFromString("secret")
+	defer password.Destroy()
+	server, cancel, done, env, err := startAskpassServerEnv(context.Background(), func(context.Context) (*secret.Secret, error) {
+		return password, nil
+	})
+	if err != nil {
+		t.Fatalf("startAskpassServerEnv: %v", err)
+	}
+	defer stopAskpassServer(server, cancel, done)
+
+	socketPath := envValue(env, askpass.SocketEnv)
+	nonce := envValue(env, askpass.NonceEnv)
+	if socketPath == "" || nonce == "" {
+		t.Fatalf("askpass env missing socket or nonce: %#v", env)
+	}
+
+	for i := 0; i < 2; i++ {
+		got, err := askpass.RequestPassword(context.Background(), socketPath, nonce)
+		if err != nil {
+			t.Fatalf("RequestPassword %d: %v", i+1, err)
+		}
+		if string(got) != "secret" {
+			t.Fatalf("password %d = %q", i+1, got)
+		}
+	}
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
 }
 
 func TestInteractiveAskpassEnabledByDefault(t *testing.T) {

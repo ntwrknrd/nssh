@@ -350,7 +350,7 @@ func startAskpassServerEnv(ctx context.Context, resolve func(context.Context) (*
 	askpassCtx, cancel := context.WithCancel(ctx)
 	askpassDone := make(chan error, 1)
 	go func() {
-		askpassDone <- askpassServer.ServeOnce(askpassCtx)
+		askpassDone <- askpassServer.Serve(askpassCtx)
 	}()
 	return askpassServer, cancel, askpassDone, askpassServer.Env(helper), nil
 }
