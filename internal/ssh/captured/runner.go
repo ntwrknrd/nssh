@@ -28,12 +28,14 @@ type Request struct {
 	RemoteCommand []string
 	Timeout       time.Duration
 	Env           []string
+	Stdin         io.Reader
 }
 
 type Command struct {
-	Name string
-	Args []string
-	Env  []string
+	Name  string
+	Args  []string
+	Env   []string
+	Stdin io.Reader
 }
 
 type Stream string
@@ -74,10 +76,16 @@ func (r Runner) Run(ctx context.Context, req Request) (Result, error) {
 	args := buildOpenSSHArgs(req)
 	argsTimer.Emit()
 
+	stdin := req.Stdin
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+
 	result := execFn(ctx, Command{
-		Name: "ssh",
-		Args: args,
-		Env:  req.Env,
+		Name:  "ssh",
+		Args:  args,
+		Env:   req.Env,
+		Stdin: stdin,
 	})
 	if result.Err == nil {
 		return result, nil
@@ -96,6 +104,9 @@ func defaultExec(ctx context.Context, command Command) Result {
 	cmd := exec.CommandContext(ctx, command.Name, command.Args...)
 	if len(command.Env) > 0 {
 		cmd.Env = append(os.Environ(), command.Env...)
+	}
+	if command.Stdin != nil {
+		cmd.Stdin = command.Stdin
 	}
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {

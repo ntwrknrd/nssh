@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -131,6 +132,58 @@ func TestRunnerCapturesStdoutStderrAndExitCode(t *testing.T) {
 	}
 }
 
+func TestRunnerPassesRequestStdinToExec(t *testing.T) {
+	stdin := strings.NewReader("payload")
+	runner := Runner{
+		Exec: func(_ context.Context, command Command) Result {
+			if command.Stdin != stdin {
+				t.Fatalf("command stdin = %#v, want request stdin", command.Stdin)
+			}
+			return Result{}
+		},
+	}
+
+	_, err := runner.Run(context.Background(), Request{
+		Hostname:      "edge01",
+		RemoteCommand: []string{"cat"},
+		Stdin:         stdin,
+	})
+	if err != nil {
+		t.Fatalf("Runner.Run: %v", err)
+	}
+}
+
+func TestRunnerDefaultsStdinToOSStdin(t *testing.T) {
+	oldStdin := os.Stdin
+	stdinRead, stdinWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	os.Stdin = stdinRead
+	t.Cleanup(func() {
+		os.Stdin = oldStdin
+		_ = stdinRead.Close()
+		_ = stdinWrite.Close()
+	})
+
+	runner := Runner{
+		Exec: func(_ context.Context, command Command) Result {
+			if command.Stdin != stdinRead {
+				t.Fatalf("command stdin = %#v, want os.Stdin", command.Stdin)
+			}
+			return Result{}
+		},
+	}
+
+	_, err = runner.Run(context.Background(), Request{
+		Hostname:      "edge01",
+		RemoteCommand: []string{"cat"},
+	})
+	if err != nil {
+		t.Fatalf("Runner.Run: %v", err)
+	}
+}
+
 func TestRunnerEmitsSSHArgsBuildTiming(t *testing.T) {
 	t.Setenv("NSSH_DEBUG", "1")
 
@@ -172,6 +225,53 @@ func TestDefaultExecEmitsSSHProcessTimings(t *testing.T) {
 		if !strings.Contains(stderr, "NSSH_TIMING:"+stage+":") {
 			t.Fatalf("stderr = %q, want %s timing", stderr, stage)
 		}
+	}
+}
+
+func TestDefaultExecForwardsStdin(t *testing.T) {
+	result := defaultExec(context.Background(), Command{
+		Name:  "sh",
+		Args:  []string{"-c", "cat"},
+		Stdin: strings.NewReader("hello\n"),
+	})
+	if result.Err != nil {
+		t.Fatalf("defaultExec: %v", result.Err)
+	}
+	if string(result.Stdout) != "hello\n" {
+		t.Fatalf("stdout = %q, want hello", result.Stdout)
+	}
+}
+
+func TestDefaultExecForwardsLargeBinaryStdin(t *testing.T) {
+	payload := bytes.Repeat([]byte{0xab}, 1<<20)
+	result := defaultExec(context.Background(), Command{
+		Name:  "wc",
+		Args:  []string{"-c"},
+		Stdin: bytes.NewReader(payload),
+	})
+	if result.Err != nil {
+		t.Fatalf("defaultExec: %v", result.Err)
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(string(result.Stdout)))
+	if err != nil {
+		t.Fatalf("parse stdout %q: %v", result.Stdout, err)
+	}
+	if count != len(payload) {
+		t.Fatalf("byte count = %d, want %d", count, len(payload))
+	}
+}
+
+func TestDefaultExecClosesRemoteStdinAndCompletes(t *testing.T) {
+	result := defaultExec(context.Background(), Command{
+		Name:  "sh",
+		Args:  []string{"-c", "cat >/dev/null; printf done"},
+		Stdin: strings.NewReader("finite input"),
+	})
+	if result.Err != nil {
+		t.Fatalf("defaultExec: %v", result.Err)
+	}
+	if string(result.Stdout) != "done" {
+		t.Fatalf("stdout = %q, want done", result.Stdout)
 	}
 }
 
