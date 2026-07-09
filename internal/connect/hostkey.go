@@ -46,16 +46,21 @@ func promptChangedHostKey(prompt connector.HostKeyPrompt) connector.HostKeyActio
 
 	options := []string{
 		"Reject - possible attack! (recommended)",
-		"Accept anyway (dangerous)",
+		"Accept once (this session only, dangerous)",
+		"Accept always (replace known_hosts, dangerous)",
 	}
 	idx, err := ui.SelectIndex("Host key verification", options, prompt.Stdin)
 	if err != nil || idx < 0 {
 		return connector.HostKeyReject
 	}
-	if idx == 0 {
+	switch idx {
+	case 0:
 		return connector.HostKeyReject
+	case 1:
+		return connector.HostKeyAcceptOnce
+	default:
+		return connector.HostKeyAcceptAlways
 	}
-	return connector.HostKeyAcceptAlways
 }
 
 func renderNewHostKeyPromptText(prompt connector.HostKeyPrompt) string {

@@ -122,6 +122,70 @@ func TestRunHostKeyPreparationAcceptAlwaysReplacesChangedKnownHosts(t *testing.T
 	}
 }
 
+func TestRunHostKeyPreparationAcceptOnceForChangedHostDoesNotReplaceKnownHosts(t *testing.T) {
+	oldPrompt := hostKeyPromptFunc
+	oldScan := scanHostKeyFunc
+	oldRemove := removeKnownHostsEntryFunc
+	defer func() {
+		hostKeyPromptFunc = oldPrompt
+		scanHostKeyFunc = oldScan
+		removeKnownHostsEntryFunc = oldRemove
+	}()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
+	if err := os.MkdirAll(filepath.Dir(knownHostsPath), 0700); err != nil {
+		t.Fatalf("mkdir .ssh: %v", err)
+	}
+	stale := "edge01 ecdsa-sha2-nistp256 stale\n"
+	if err := os.WriteFile(knownHostsPath, []byte(stale), 0600); err != nil {
+		t.Fatalf("write known_hosts: %v", err)
+	}
+
+	line := "edge01 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBcLcMSBE8+TJuxrHFujWBrOCcXrl+/sTqONstg2Jcg7"
+	hostKeyPromptFunc = func() connector.HostKeyPromptFunc {
+		return func(prompt connector.HostKeyPrompt) connector.HostKeyAction {
+			if !prompt.Changed {
+				t.Fatal("prompt was not marked changed")
+			}
+			return connector.HostKeyAcceptOnce
+		}
+	}
+	scanHostKeyFunc = func(context.Context, *ResolvedHost, []string) (scannedHostKey, error) {
+		return scannedHostKey{
+			KeyType:     "ssh-ed25519",
+			Fingerprint: "SHA256:Gxy6lCTHwEEnHYy0j4LxmDP+NTRPSv6KRjCJj/q6bYs",
+			Line:        line,
+		}, nil
+	}
+	removeKnownHostsEntryFunc = func(target, path string) error {
+		t.Fatalf("removeKnownHostsEntryFunc(%q, %q) called for accept once", target, path)
+		return nil
+	}
+
+	prep, err := runHostKeyPreparation(context.Background(), &ResolvedHost{Hostname: "edge01", Port: 22}, nil, config.DefaultConfig(), Options{}, true)
+	if err != nil {
+		t.Fatalf("runHostKeyPreparation: %v", err)
+	}
+	defer prep.Cleanup()
+
+	data, err := os.ReadFile(prep.TempKnownHosts)
+	if err != nil {
+		t.Fatalf("read temp known_hosts: %v", err)
+	}
+	if string(data) != line+"\n" {
+		t.Fatalf("temp known_hosts = %q, want replacement line", data)
+	}
+	data, err = os.ReadFile(knownHostsPath)
+	if err != nil {
+		t.Fatalf("read known_hosts: %v", err)
+	}
+	if string(data) != stale {
+		t.Fatalf("known_hosts = %q, want stale entry untouched", data)
+	}
+}
+
 func TestRunHostKeyPreparationAcceptAlwaysDoesNotRemoveForNewHost(t *testing.T) {
 	oldPrompt := hostKeyPromptFunc
 	oldScan := scanHostKeyFunc
