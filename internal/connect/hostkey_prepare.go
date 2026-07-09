@@ -45,7 +45,13 @@ func runHostKeyPreparation(ctx context.Context, resolved *ResolvedHost, sshArgs 
 	case connector.HostKeyAcceptOnce:
 		return writeTemporaryKnownHosts(key.Line)
 	case connector.HostKeyAcceptAlways:
-		if err := appendKnownHosts(key.Line); err != nil {
+		var err error
+		if changed {
+			err = replaceKnownHosts(resolved, sshArgs, key.Line)
+		} else {
+			err = appendKnownHosts(key.Line)
+		}
+		if err != nil {
 			return nil, err
 		}
 		return nil, nil
@@ -73,15 +79,45 @@ func writeTemporaryKnownHosts(line string) (*connector.HostKeyPreparation, error
 }
 
 func appendKnownHosts(line string) error {
+	path, err := userKnownHostsPath()
+	if err != nil {
+		return err
+	}
+	return appendKnownHostsLine(path, line)
+}
+
+func replaceKnownHosts(resolved *ResolvedHost, sshArgs []string, line string) error {
+	path, err := userKnownHostsPath()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("stat known_hosts: %w", err)
+		}
+	} else {
+		for _, target := range knownHostsRemovalTargets(resolved, sshArgs) {
+			if err := removeKnownHostsEntryFunc(target, path); err != nil {
+				return err
+			}
+		}
+	}
+	return appendKnownHostsLine(path, line)
+}
+
+func userKnownHostsPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("locate home directory: %w", err)
+		return "", fmt.Errorf("locate home directory: %w", err)
 	}
-	sshDir := filepath.Join(home, ".ssh")
+	return filepath.Join(home, ".ssh", "known_hosts"), nil
+}
+
+func appendKnownHostsLine(path string, line string) error {
+	sshDir := filepath.Dir(path)
 	if err := os.MkdirAll(sshDir, 0700); err != nil {
 		return fmt.Errorf("create .ssh directory: %w", err)
 	}
-	path := filepath.Join(sshDir, "known_hosts")
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("open known_hosts: %w", err)
@@ -89,6 +125,33 @@ func appendKnownHosts(line string) error {
 	defer func() { _ = file.Close() }()
 	if _, err := file.WriteString(strings.TrimSpace(line) + "\n"); err != nil {
 		return fmt.Errorf("write known_hosts: %w", err)
+	}
+	return nil
+}
+
+func knownHostsRemovalTargets(resolved *ResolvedHost, sshArgs []string) []string {
+	if resolved == nil || strings.TrimSpace(resolved.Hostname) == "" {
+		return nil
+	}
+	host := strings.TrimSpace(resolved.Hostname)
+	port := fmt.Sprintf("%d", resolved.Port)
+	if explicit := explicitConnectSSHPort(sshArgs); explicit != "" {
+		port = explicit
+	}
+	if port == "" || port == "0" || port == "22" {
+		return []string{host}
+	}
+	return []string{fmt.Sprintf("[%s]:%s", host, port), host}
+}
+
+func removeKnownHostsEntry(target, path string) error {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return nil
+	}
+	output, err := exec.Command("ssh-keygen", "-R", target, "-f", path).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("remove stale known_hosts entry for %s: %w (%s)", target, err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }

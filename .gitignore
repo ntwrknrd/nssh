@@ -26,6 +26,9 @@ profile.cov
 go.work
 go.work.sum
 
+# Agent scratch context
+.agent-worklog.md
+
 # Sensitive dirs
 benchmarks/
 import/

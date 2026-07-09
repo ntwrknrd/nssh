@@ -62,10 +62,11 @@ var (
 	startMuxSessionFunc = func(ctx context.Context, req connector.MuxStartRequest) error {
 		return connector.StartMuxSession(ctx, req, nil)
 	}
-	hostKeyProbeFunc   = probeInteractiveHostKey
-	hostKeyPrepareFunc = runHostKeyPreparation
-	hostKeyPromptFunc  = newHostKeyPromptFunc
-	scanHostKeyFunc    = scanHostKey
+	hostKeyProbeFunc          = probeInteractiveHostKey
+	hostKeyPrepareFunc        = runHostKeyPreparation
+	hostKeyPromptFunc         = newHostKeyPromptFunc
+	scanHostKeyFunc           = scanHostKey
+	removeKnownHostsEntryFunc = removeKnownHostsEntry
 )
 
 func ConnectRequest(ctx context.Context, req Request) error {
