@@ -22,9 +22,6 @@ FROM ghcr.io/charmbracelet/vhs:latest
 
 # Install additional runtime dependencies
 USER root
-# Fix VHS image sources.list which uses 'stable' instead of 'bookworm'
-RUN sed -i 's/stable/bookworm/g' /etc/apt/sources.list.d/*.sources 2>/dev/null || \
-    sed -i 's/stable/bookworm/g' /etc/apt/sources.list 2>/dev/null || true
 RUN apt-get update && apt-get install -y --no-install-recommends \
         openssh-client \
     && rm -rf /var/lib/apt/lists/*
