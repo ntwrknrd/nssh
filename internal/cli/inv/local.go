@@ -106,6 +106,10 @@ var localHostConnectionTest = func(ctx context.Context, host *sshconfig.HostEntr
 	return connector.TestConnection(ctx, host.Host, host.User(), cfg)
 }
 
+var promptLocalHostProbePassword = func() (string, error) {
+	return ui.Password("Password (used only for connection test)")
+}
+
 type credentialRegistry interface {
 	Provider(name string) credential.Provider
 }
@@ -835,6 +839,23 @@ func resolveLocalHostCredentialRecord(cfg *config.Config, patch hostPatch) (*cre
 	return nil, nil
 }
 
+func localHostProbeCredentialSecret(patch hostPatch, record *credential.Record) (*secret.Secret, error) {
+	if record != nil && record.Secret != nil {
+		return record.Secret, nil
+	}
+	if patch.AuthMode != config.AuthModePassword {
+		return nil, nil
+	}
+	password, err := promptLocalHostProbePassword()
+	if err != nil {
+		return nil, err
+	}
+	if password == "" {
+		return nil, nil
+	}
+	return secret.NewFromString(password), nil
+}
+
 func applyInteractiveHostAuthSelection(cfg *config.Config, patch hostPatch) bool {
 	if cfg == nil {
 		return false
@@ -1142,11 +1163,13 @@ func testLocalHostCompatibility(
 	for iteration := 1; iteration <= maxIterations; iteration++ {
 		ui.Info("Testing connection to %s (%d/%d)...", testHost.Host, iteration, maxIterations)
 		testResult, err := localHostConnectionTest(ctx, testHost, connector.TestConfig{
-			Timeout:             10 * time.Second,
-			Password:            password,
-			ConfigFile:          tmpPath,
-			Port:                testHost.Port(),
-			UseSystemKnownHosts: cfg.SSH.Security.CompatPersistProbes,
+			Timeout:    10 * time.Second,
+			Password:   password,
+			ConfigFile: tmpPath,
+			Port:       testHost.Port(),
+			// Host add is enrollment, not a read-only compatibility probe. Keep the
+			// accepted key so the first normal connection does not prompt again.
+			UseSystemKnownHosts: true,
 		})
 		if err != nil {
 			result.TestResult = &connector.TestResult{Success: false, ExitCode: 1, Stderr: err.Error()}
@@ -1154,13 +1177,13 @@ func testLocalHostCompatibility(
 			return result, nil
 		}
 		result.TestResult = testResult
-		if testResult.Success || compat.IsAuthFailureAfterKex(testResult.Stderr) {
+		if testResult.Success {
 			result.Success = true
-			if testResult.Success {
-				result.StoppedReason = "connection_succeeded"
-			} else {
-				result.StoppedReason = "auth_failed_after_kex_success"
-			}
+			result.StoppedReason = "connection_succeeded"
+			return result, nil
+		}
+		if compat.IsAuthFailureAfterKex(testResult.Stderr) {
+			result.StoppedReason = "authentication_failed"
 			return result, nil
 		}
 

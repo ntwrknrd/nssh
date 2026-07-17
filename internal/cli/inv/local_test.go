@@ -512,6 +512,48 @@ func TestResolveLocalHostCredentialUsesHostAuthMapping(t *testing.T) {
 	defer secret.Destroy()
 }
 
+func TestLocalHostProbeCredentialSecretPromptsForUnstoredPassword(t *testing.T) {
+	old := promptLocalHostProbePassword
+	defer func() { promptLocalHostProbePassword = old }()
+	promptLocalHostProbePassword = func() (string, error) {
+		return "one-time-password", nil
+	}
+
+	got, err := localHostProbeCredentialSecret(hostPatch{AuthMode: config.AuthModePassword}, nil)
+	if err != nil {
+		t.Fatalf("localHostProbeCredentialSecret: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected prompted password secret")
+	}
+	defer got.Destroy()
+	if err := got.Use(func(password []byte) error {
+		if string(password) != "one-time-password" {
+			t.Fatalf("password = %q", password)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("use password: %v", err)
+	}
+}
+
+func TestLocalHostProbeCredentialSecretDoesNotPromptForKeyAuth(t *testing.T) {
+	old := promptLocalHostProbePassword
+	defer func() { promptLocalHostProbePassword = old }()
+	promptLocalHostProbePassword = func() (string, error) {
+		t.Fatal("password prompt called for key auth")
+		return "", nil
+	}
+
+	got, err := localHostProbeCredentialSecret(hostPatch{AuthMode: config.AuthModeKey}, nil)
+	if err != nil {
+		t.Fatalf("localHostProbeCredentialSecret: %v", err)
+	}
+	if got != nil {
+		t.Fatal("key auth returned a password secret")
+	}
+}
+
 func TestUpsertLocalHostWritesSelectedAuthModeAndCompatFixes(t *testing.T) {
 	tmp := t.TempDir()
 	sshDir := filepath.Join(tmp, ".ssh")
@@ -705,6 +747,9 @@ func TestLocalHostCompatibilityAppliesDetectedFixesBeforeRetry(t *testing.T) {
 	var calls int
 	localHostConnectionTest = func(ctx context.Context, host *sshconfig.HostEntry, cfg connector.TestConfig) (*connector.TestResult, error) {
 		calls++
+		if !cfg.UseSystemKnownHosts {
+			t.Fatal("host enrollment probe must persist the accepted host key")
+		}
 		if calls == 1 {
 			return &connector.TestResult{
 				ExitCode: 255,
@@ -718,11 +763,7 @@ func TestLocalHostCompatibilityAppliesDetectedFixesBeforeRetry(t *testing.T) {
 		if !strings.Contains(string(content), "KexAlgorithms") {
 			t.Fatalf("retry temp config missing compat fix:\n%s", content)
 		}
-		return &connector.TestResult{
-			ExitCode: 255,
-			Stderr: `debug1: kex: algorithm: diffie-hellman-group14-sha1
-Permission denied (publickey,password).`,
-		}, nil
+		return &connector.TestResult{Success: true, ExitCode: 0}, nil
 	}
 
 	host := sshconfig.CreateHostEntry("edge01", "edge01.lab.local", "admin", 22, false, "provider_local.conf")
@@ -738,6 +779,31 @@ Permission denied (publickey,password).`,
 	}
 	if len(result.FixesApplied) != 1 || result.FixesApplied[0].Category != compat.CategoryKex || result.FixesApplied[0].Floor != "diffie-hellman-group14-sha1" {
 		t.Fatalf("fixes = %v, want kex floor diffie-hellman-group14-sha1", result.FixesApplied)
+	}
+}
+
+func TestLocalHostCompatibilityRequiresSuccessfulAuthentication(t *testing.T) {
+	old := localHostConnectionTest
+	defer func() { localHostConnectionTest = old }()
+	localHostConnectionTest = func(context.Context, *sshconfig.HostEntry, connector.TestConfig) (*connector.TestResult, error) {
+		return &connector.TestResult{
+			ExitCode: 255,
+			Stderr: `debug1: kex: algorithm: curve25519-sha256
+debug1: Server accepts key: /Users/test/.ssh/id_ed25519
+Permission denied (publickey,password).`,
+		}, nil
+	}
+
+	host := sshconfig.CreateHostEntry("edge01", "edge01.lab.local", "admin", 22, false, "provider_local.conf")
+	result, err := testLocalHostCompatibility(context.Background(), config.DefaultConfig(), host, 5, nil)
+	if err != nil {
+		t.Fatalf("testLocalHostCompatibility: %v", err)
+	}
+	if result.Success {
+		t.Fatal("authentication failure was treated as successful login")
+	}
+	if result.StoppedReason != "authentication_failed" {
+		t.Fatalf("stopped reason = %q, want authentication_failed", result.StoppedReason)
 	}
 }
 

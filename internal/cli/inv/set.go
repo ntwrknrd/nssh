@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
@@ -438,9 +437,9 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 				if err != nil {
 					return err
 				}
-				var credentialSecret *secret.Secret
-				if credentialRecord != nil {
-					credentialSecret = credentialRecord.Secret
+				credentialSecret, err := localHostProbeCredentialSecret(patch, credentialRecord)
+				if err != nil {
+					return err
 				}
 				if credentialSecret != nil {
 					defer credentialSecret.Destroy()
