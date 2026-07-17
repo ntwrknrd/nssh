@@ -412,7 +412,11 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 			}
 			patch.Group = resolvedGroup
 			if interactiveAdd {
-				patch, err = promptLocalHostConnectionDetails(cfg, patch, nil)
+				proxyHosts, listErr := inventoryProxyHostNames(parser, cfg, paths, patch.Host)
+				if listErr != nil {
+					return listErr
+				}
+				patch, err = promptLocalHostConnectionDetailsWithProxyHosts(cfg, patch, nil, proxyHosts)
 				if errors.Is(err, errPromptBack) && group == "" {
 					continue
 				}
