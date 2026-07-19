@@ -1138,8 +1138,9 @@ func testLocalHostCompatibility(
 	if maxIterations <= 0 {
 		maxIterations = 5
 	}
-	if cfg == nil {
-		cfg = config.DefaultConfig()
+	timeout := 10 * time.Second
+	if cfg != nil && cfg.SSH.Connection.Timeout.Duration() > 0 {
+		timeout = cfg.SSH.Connection.Timeout.Duration()
 	}
 	testHost := cloneHostEntry(host)
 	tmp, err := os.CreateTemp("", "nssh-host-add-*.conf")
@@ -1163,7 +1164,7 @@ func testLocalHostCompatibility(
 	for iteration := 1; iteration <= maxIterations; iteration++ {
 		ui.Info("Testing connection to %s (%d/%d)...", testHost.Host, iteration, maxIterations)
 		testResult, err := localHostConnectionTest(ctx, testHost, connector.TestConfig{
-			Timeout:    10 * time.Second,
+			Timeout:    timeout,
 			Password:   password,
 			ConfigFile: tmpPath,
 			Port:       testHost.Port(),
