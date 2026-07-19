@@ -205,36 +205,27 @@ func TestServerWithResolverWaitsForPassword(t *testing.T) {
 	}
 }
 
-func TestServerRoutesDecodedPromptToResolver(t *testing.T) {
-	var gotPrompt string
+func TestServerProxyEnvUsesIsolatedNames(t *testing.T) {
 	password := secret.NewFromString("proxy-secret")
 	defer password.Destroy()
-	server, err := NewServerWithPromptResolver(func(_ context.Context, prompt string) (*secret.Secret, error) {
-		gotPrompt = prompt
-		return password, nil
-	})
+	server, err := NewServer(password)
 	if err != nil {
-		t.Fatalf("NewServerWithPromptResolver: %v", err)
+		t.Fatalf("NewServer: %v", err)
 	}
 	defer server.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- server.ServeOnce(ctx) }()
-
-	prompt := "(netops@jump01.example) Password:"
-	got, err := RequestPassword(ctx, server.SocketPath(), server.Nonce(), prompt)
-	if err != nil {
-		t.Fatalf("RequestPassword: %v", err)
+	entries := server.ProxyEnv("/tmp/nssh-askpass")
+	env := strings.Join(entries, "\n")
+	for _, want := range []string{ProxyHelperEnv, ProxySocketEnv, ProxyNonceEnv} {
+		if !strings.Contains(env, want+"=") {
+			t.Fatalf("proxy env missing %s: %s", want, env)
+		}
 	}
-	if string(got) != "proxy-secret" {
-		t.Fatalf("password = %q", got)
-	}
-	if gotPrompt != prompt {
-		t.Fatalf("prompt = %q, want %q", gotPrompt, prompt)
-	}
-	if err := <-done; err != nil {
-		t.Fatalf("ServeOnce: %v", err)
+	for _, forbidden := range []string{"SSH_ASKPASS=", SocketEnv + "=", NonceEnv + "="} {
+		for _, entry := range entries {
+			if strings.HasPrefix(entry, forbidden) {
+				t.Fatalf("proxy env contains target channel %q: %s", forbidden, env)
+			}
+		}
 	}
 }

@@ -316,6 +316,30 @@ func TestInventoryAuthResolutionKeyModeClearsInheritedCredential(t *testing.T) {
 	}
 }
 
+func TestInventoryAuthResolutionProviderHostDisabledClearsInheritedCredential(t *testing.T) {
+	cfg := &Config{}
+	cfg.Inventory.Providers = map[string]InventoryProviderConfig{
+		"netbox-prod": {
+			Type: ProviderNetBox,
+			Auth: InventoryAuthConfig{
+				CredentialProvider: "op-expedient",
+				PasswordRef:        "op://Expedient/provider/password",
+			},
+			Hosts: map[string]InventoryHostConfig{
+				"edge01": {AuthDisabled: true},
+			},
+		},
+	}
+
+	got := cfg.ResolveInventoryAuth(InventoryAuthContext{Host: "edge01", Provider: "netbox-prod"})
+	if !got.Disabled {
+		t.Fatal("provider-scoped host auth was not disabled")
+	}
+	if got.CredentialProvider != "" || got.PasswordRef != "" || got.PasswordSource != "disabled" {
+		t.Fatalf("disabled host retained credential: provider=%q ref=%q source=%q", got.CredentialProvider, got.PasswordRef, got.PasswordSource)
+	}
+}
+
 func TestDefaultCredentialConfigCreatesSOPSAgeProvider(t *testing.T) {
 	cfg := CredentialConfig{}
 	if err := cfg.Validate(); err != nil {

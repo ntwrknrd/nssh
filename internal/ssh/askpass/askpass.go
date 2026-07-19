@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -18,21 +17,22 @@ import (
 )
 
 const (
-	SocketEnv = "NSSH_ASKPASS_SOCKET"
-	NonceEnv  = "NSSH_ASKPASS_NONCE"
+	SocketEnv      = "NSSH_ASKPASS_SOCKET"
+	NonceEnv       = "NSSH_ASKPASS_NONCE"
+	ProxyHelperEnv = "NSSH_PROXY_SSH_ASKPASS"
+	ProxySocketEnv = "NSSH_PROXY_ASKPASS_SOCKET"
+	ProxyNonceEnv  = "NSSH_PROXY_ASKPASS_NONCE"
 )
 
 type Server struct {
 	dir        string
 	socketPath string
 	nonce      string
-	resolve    PromptResolver
+	resolve    func(context.Context) (*secret.Secret, error)
 	listener   *net.UnixListener
 	closeOnce  sync.Once
 	closeErr   error
 }
-
-type PromptResolver func(context.Context, string) (*secret.Secret, error)
 
 func NewServer(password *secret.Secret) (*Server, error) {
 	if password == nil {
@@ -44,15 +44,6 @@ func NewServer(password *secret.Secret) (*Server, error) {
 }
 
 func NewServerWithResolver(resolve func(context.Context) (*secret.Secret, error)) (*Server, error) {
-	if resolve == nil {
-		return nil, fmt.Errorf("askpass password resolver is required")
-	}
-	return NewServerWithPromptResolver(func(ctx context.Context, _ string) (*secret.Secret, error) {
-		return resolve(ctx)
-	})
-}
-
-func NewServerWithPromptResolver(resolve PromptResolver) (*Server, error) {
 	if resolve == nil {
 		return nil, fmt.Errorf("askpass password resolver is required")
 	}
@@ -104,6 +95,16 @@ func (s *Server) Env(helper string) []string {
 		"DISPLAY=nssh-askpass",
 		SocketEnv + "=" + s.socketPath,
 		NonceEnv + "=" + s.nonce,
+	}
+}
+
+// ProxyEnv exposes an isolated askpass channel for the managed ProxyCommand.
+// The proxy command maps these values onto its own SSH_ASKPASS environment.
+func (s *Server) ProxyEnv(helper string) []string {
+	return []string{
+		ProxyHelperEnv + "=" + helper,
+		ProxySocketEnv + "=" + s.socketPath,
+		ProxyNonceEnv + "=" + s.nonce,
 	}
 }
 
@@ -168,15 +169,7 @@ func (s *Server) serveConn(ctx context.Context, conn *net.UnixConn) error {
 	if strings.TrimSuffix(nonce, "\n") != s.nonce {
 		return fmt.Errorf("askpass nonce mismatch")
 	}
-	promptLine, err := reader.ReadString('\n')
-	if err != nil {
-		return fmt.Errorf("read askpass prompt: %w", err)
-	}
-	promptBytes, err := base64.RawStdEncoding.DecodeString(strings.TrimSuffix(promptLine, "\n"))
-	if err != nil {
-		return fmt.Errorf("decode askpass prompt: %w", err)
-	}
-	password, err := s.resolve(ctx, string(promptBytes))
+	password, err := s.resolve(ctx)
 	if err != nil {
 		return err
 	}
@@ -205,7 +198,7 @@ func (s *Server) Close() error {
 	return s.closeErr
 }
 
-func RequestPassword(ctx context.Context, socketPath, nonce string, prompt ...string) ([]byte, error) {
+func RequestPassword(ctx context.Context, socketPath, nonce string) ([]byte, error) {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", socketPath)
 	if err != nil {
@@ -213,12 +206,7 @@ func RequestPassword(ctx context.Context, socketPath, nonce string, prompt ...st
 	}
 	defer func() { _ = conn.Close() }()
 
-	promptValue := ""
-	if len(prompt) > 0 {
-		promptValue = prompt[0]
-	}
-	request := nonce + "\n" + base64.RawStdEncoding.EncodeToString([]byte(promptValue)) + "\n"
-	if _, err := io.WriteString(conn, request); err != nil {
+	if _, err := io.WriteString(conn, nonce+"\n"); err != nil {
 		return nil, fmt.Errorf("write askpass nonce: %w", err)
 	}
 	password, err := io.ReadAll(conn)

@@ -555,13 +555,9 @@ func TestLocalHostProbeCredentialSecretDoesNotPromptForKeyAuth(t *testing.T) {
 	}
 }
 
-func TestLocalHostProbePasswordResolverRoutesProxyAndTargetPrompts(t *testing.T) {
+func TestLocalHostProbeProxyCommandUsesResolvedKeyProxyInBatchMode(t *testing.T) {
 	oldResolveProxy := resolveLocalHostProxy
 	defer func() { resolveLocalHostProxy = oldResolveProxy }()
-	targetPassword := secretFromTest("target-sentinel")
-	defer targetPassword.Destroy()
-	proxyPassword := secretFromTest("proxy-sentinel")
-	var proxyCalls int
 	resolveLocalHostProxy = func(query, _ string, _ ...*config.Config) (*connect.ResolvedHost, error) {
 		if query != "jump01" {
 			t.Fatalf("proxy query = %q, want jump01", query)
@@ -569,66 +565,38 @@ func TestLocalHostProbePasswordResolverRoutesProxyAndTargetPrompts(t *testing.T)
 		return &connect.ResolvedHost{
 			Canonical: "jump01.example",
 			Hostname:  "jump01.example",
-			AuthMode:  config.AuthModePassword,
-			Credential: &connect.ResolvedCredential{PasswordResolver: func(context.Context) (*secret.Secret, error) {
-				proxyCalls++
-				return proxyPassword, nil
-			}},
-		}, nil
-	}
-
-	resolve, cleanup, proxyCommand, err := localHostProbePasswordResolver(config.DefaultConfig(), hostPatch{ProxyJump: "jump01"}, targetPassword)
-	if err != nil {
-		t.Fatalf("localHostProbePasswordResolver: %v", err)
-	}
-	defer cleanup()
-	if !strings.Contains(proxyCommand, "jump01.example") {
-		t.Fatalf("proxy command = %q", proxyCommand)
-	}
-	gotProxy, err := resolve(context.Background(), "(netops@jump01.example) Password:")
-	if err != nil {
-		t.Fatalf("resolve proxy: %v", err)
-	}
-	gotTarget, err := resolve(context.Background(), "(netops@edge01.example) Password:")
-	if err != nil {
-		t.Fatalf("resolve target: %v", err)
-	}
-	gotAmbiguous, err := resolve(context.Background(), "Password:")
-	if err != nil {
-		t.Fatalf("resolve ambiguous target: %v", err)
-	}
-	if gotProxy != proxyPassword || gotTarget != targetPassword || gotAmbiguous != targetPassword {
-		t.Fatal("probe password resolver routed a prompt to the wrong credential")
-	}
-	if proxyCalls != 1 {
-		t.Fatalf("proxy resolver calls = %d, want 1", proxyCalls)
-	}
-}
-
-func TestLocalHostProbePasswordResolverDoesNotSendTargetPasswordToKeyProxy(t *testing.T) {
-	oldResolveProxy := resolveLocalHostProxy
-	defer func() { resolveLocalHostProxy = oldResolveProxy }()
-	targetPassword := secretFromTest("target-sentinel")
-	defer targetPassword.Destroy()
-	resolveLocalHostProxy = func(string, string, ...*config.Config) (*connect.ResolvedHost, error) {
-		return &connect.ResolvedHost{
-			Canonical: "jump01.example",
-			Hostname:  "jump01.example",
+			Username:  "proxy-user",
 			AuthMode:  config.AuthModeKey,
 		}, nil
 	}
 
-	resolve, cleanup, _, err := localHostProbePasswordResolver(config.DefaultConfig(), hostPatch{ProxyJump: "jump01"}, targetPassword)
+	proxyCommand, err := localHostProbeProxyCommand(config.DefaultConfig(), hostPatch{ProxyJump: "jump01"})
 	if err != nil {
-		t.Fatalf("localHostProbePasswordResolver: %v", err)
+		t.Fatalf("localHostProbeProxyCommand: %v", err)
 	}
-	defer cleanup()
-	got, err := resolve(context.Background(), "(netops@jump01.example) Password:")
-	if err == nil {
-		t.Fatal("key proxy prompt unexpectedly resolved a password")
+	for _, want := range []string{"jump01.example", "proxy-user@", "BatchMode=yes", "NSSH_PROXY_ASKPASS_SOCKET"} {
+		if !strings.Contains(proxyCommand, want) {
+			t.Fatalf("proxy command = %q, want %q", proxyCommand, want)
+		}
 	}
-	if got != nil {
-		t.Fatal("target password was sent to key-auth proxy")
+	if strings.Contains(proxyCommand, "target-sentinel") {
+		t.Fatalf("proxy command = %q", proxyCommand)
+	}
+}
+
+func TestLocalHostProbeProxyCommandRejectsPasswordProxy(t *testing.T) {
+	oldResolveProxy := resolveLocalHostProxy
+	defer func() { resolveLocalHostProxy = oldResolveProxy }()
+	resolveLocalHostProxy = func(string, string, ...*config.Config) (*connect.ResolvedHost, error) {
+		return &connect.ResolvedHost{
+			Canonical: "jump01.example",
+			Hostname:  "jump01.example",
+			AuthMode:  config.AuthModePassword,
+		}, nil
+	}
+
+	if _, err := localHostProbeProxyCommand(config.DefaultConfig(), hostPatch{ProxyJump: "jump01"}); err == nil || !strings.Contains(err.Error(), "not supported securely") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -845,7 +813,7 @@ func TestLocalHostCompatibilityAppliesDetectedFixesBeforeRetry(t *testing.T) {
 	}
 
 	host := sshconfig.CreateHostEntry("edge01", "edge01.lab.local", "admin", 22, false, "provider_local.conf")
-	result, err := testLocalHostCompatibility(context.Background(), config.DefaultConfig(), host, 5, nil, nil)
+	result, err := testLocalHostCompatibility(context.Background(), config.DefaultConfig(), host, 5, nil)
 	if err != nil {
 		t.Fatalf("testLocalHostCompatibility: %v", err)
 	}
@@ -873,7 +841,7 @@ Permission denied (publickey,password).`,
 	}
 
 	host := sshconfig.CreateHostEntry("edge01", "edge01.lab.local", "admin", 22, false, "provider_local.conf")
-	result, err := testLocalHostCompatibility(context.Background(), config.DefaultConfig(), host, 5, nil, nil)
+	result, err := testLocalHostCompatibility(context.Background(), config.DefaultConfig(), host, 5, nil)
 	if err != nil {
 		t.Fatalf("testLocalHostCompatibility: %v", err)
 	}
@@ -885,33 +853,20 @@ Permission denied (publickey,password).`,
 	}
 }
 
-func TestLocalHostCompatibilityPassesPerHopResolverWithoutPersistingSecrets(t *testing.T) {
+func TestLocalHostCompatibilityPassesTargetPasswordWithoutPersistingIt(t *testing.T) {
 	old := localHostConnectionTest
 	defer func() { localHostConnectionTest = old }()
 	targetPassword := secretFromTest("target-sentinel")
-	proxyPassword := secretFromTest("proxy-sentinel")
 	defer targetPassword.Destroy()
-	defer proxyPassword.Destroy()
-	localHostConnectionTest = func(ctx context.Context, _ *sshconfig.HostEntry, cfg connector.TestConfig) (*connector.TestResult, error) {
-		if cfg.PasswordResolver == nil {
-			t.Fatal("connection test missing per-hop password resolver")
-		}
-		gotProxy, err := cfg.PasswordResolver(ctx, "(netops@jump01.example) Password:")
-		if err != nil {
-			t.Fatalf("resolve proxy: %v", err)
-		}
-		gotTarget, err := cfg.PasswordResolver(ctx, "Password:")
-		if err != nil {
-			t.Fatalf("resolve target: %v", err)
-		}
-		if gotProxy != proxyPassword || gotTarget != targetPassword {
-			t.Fatal("connection test resolver routed the wrong credential")
+	localHostConnectionTest = func(_ context.Context, _ *sshconfig.HostEntry, cfg connector.TestConfig) (*connector.TestResult, error) {
+		if cfg.Password != targetPassword {
+			t.Fatal("connection test did not receive target password")
 		}
 		content, err := os.ReadFile(cfg.ConfigFile)
 		if err != nil {
 			t.Fatalf("read temp config: %v", err)
 		}
-		for _, sentinel := range []string{"target-sentinel", "proxy-sentinel"} {
+		for _, sentinel := range []string{"target-sentinel"} {
 			if strings.Contains(string(content), sentinel) {
 				t.Fatalf("temp config contains secret sentinel %q", sentinel)
 			}
@@ -922,14 +877,8 @@ func TestLocalHostCompatibilityPassesPerHopResolverWithoutPersistingSecrets(t *t
 		return &connector.TestResult{Success: true}, nil
 	}
 
-	resolver := func(_ context.Context, prompt string) (*secret.Secret, error) {
-		if strings.Contains(prompt, "jump01.example") {
-			return proxyPassword, nil
-		}
-		return targetPassword, nil
-	}
 	host := sshconfig.CreateHostEntry("edge01", "edge01.example", "netops", 22, true, "provider_local.conf")
-	result, err := testLocalHostCompatibility(context.Background(), config.DefaultConfig(), host, 5, targetPassword, resolver)
+	result, err := testLocalHostCompatibility(context.Background(), config.DefaultConfig(), host, 5, targetPassword)
 	if err != nil {
 		t.Fatalf("testLocalHostCompatibility: %v", err)
 	}

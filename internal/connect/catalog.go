@@ -295,7 +295,7 @@ func (c *HostCatalog) resolveManagedProxies() {
 		if host == nil || hasSSHOption(host.SSH.Options, "ProxyCommand") {
 			continue
 		}
-		key, target, ok := sshOption(host.SSH.Options, "ProxyJump")
+		_, target, ok := sshOption(host.SSH.Options, "ProxyJump")
 		if !ok || strings.TrimSpace(target) == "" || strings.Contains(target, ",") {
 			continue
 		}
@@ -303,12 +303,6 @@ func (c *HostCatalog) resolveManagedProxies() {
 		if !ok || hasSSHOption(jump.SSH.Options, "ProxyJump") || hasSSHOption(jump.SSH.Options, "ProxyCommand") {
 			continue
 		}
-		command := formatManagedProxyCommand(jump)
-		if command == "" {
-			continue
-		}
-		delete(host.SSH.Options, key)
-		host.SSH.Options["ProxyCommand"] = config.NewSSHOptionString(command)
 		host.ManagedProxy = jump
 	}
 }
@@ -335,6 +329,10 @@ func (c *HostCatalog) findProxyJumpHost(target string) (*ResolvedHostData, bool)
 	if !ok {
 		return nil, false
 	}
+	clone := *jump
+	clone.Aliases = slices.Clone(jump.Aliases)
+	clone.SSH = config.MergeSSH(config.SSHHostConfig{}, jump.SSH)
+	jump = &clone
 	if user != "" {
 		jump.Username = user
 	}
@@ -396,8 +394,10 @@ func formatManagedProxyCommand(host *ResolvedHostData) string {
 		argv = append(argv, escapeProxyCommandTokenExpansion(arg))
 	}
 	argv = append(argv, "-W", "%h:%p", target)
-	return shellJoin(argv)
+	return managedProxyAskpassPrefix + shellJoin(argv)
 }
+
+const managedProxyAskpassPrefix = `env SSH_ASKPASS="$NSSH_PROXY_SSH_ASKPASS" SSH_ASKPASS_REQUIRE=force DISPLAY=nssh-askpass NSSH_ASKPASS_SOCKET="$NSSH_PROXY_ASKPASS_SOCKET" NSSH_ASKPASS_NONCE="$NSSH_PROXY_ASKPASS_NONCE" `
 
 // RenderManagedProxyCommand renders an inventory-resolved host as an OpenSSH
 // ProxyCommand. Nested proxy configurations remain OpenSSH-native.

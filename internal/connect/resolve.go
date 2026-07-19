@@ -151,7 +151,7 @@ func resolveCatalogHostForConnect(query, explicitUser string, c *config.Config, 
 		Provider:   hostData.Provider,
 		Group:      hostData.Group,
 		Aliases:    hostData.Aliases,
-		SSH:        hostData.SSH,
+		SSH:        config.MergeSSH(config.SSHHostConfig{}, hostData.SSH),
 		Highlight:  hostData.Highlight,
 		Credential: cred,
 		Config:     c,
@@ -166,8 +166,25 @@ func resolveCatalogHostForConnect(query, explicitUser string, c *config.Config, 
 			AuthMode:   proxyAuth.AuthMode,
 			Credential: proxyCredential,
 		}
+		proxyData := *hostData.ManagedProxy
+		proxyData.Username = proxyUsername
+		if command := formatManagedProxyCommand(&proxyData); command != "" {
+			deleteSSHOption(resolved.SSH.Options, "ProxyJump")
+			if resolved.SSH.Options == nil {
+				resolved.SSH.Options = make(config.SSHOptions)
+			}
+			resolved.SSH.Options["ProxyCommand"] = config.NewSSHOptionString(command)
+		}
 	}
 	return resolved, nil
+}
+
+func deleteSSHOption(options config.SSHOptions, name string) {
+	for key := range options {
+		if strings.EqualFold(key, name) {
+			delete(options, key)
+		}
+	}
 }
 
 func resolveCatalogAuthCredential(c *config.Config, registry providerRegistry, host *ResolvedHostData, explicitUser string) (config.InventoryAuthResolution, *ResolvedCredential, string) {

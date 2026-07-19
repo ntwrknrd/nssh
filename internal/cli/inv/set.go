@@ -444,11 +444,10 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 				if credentialSecret != nil {
 					defer credentialSecret.Destroy()
 				}
-				passwordResolver, cleanupPasswordResolver, proxyCommand, err := localHostProbePasswordResolver(cfg, patch, credentialSecret)
+				proxyCommand, err := localHostProbeProxyCommand(cfg, patch)
 				if err != nil {
 					return err
 				}
-				defer cleanupPasswordResolver()
 				draft := localHostEntryFromPatch(paths, patch)
 				if proxyCommand != "" {
 					deleteDirective(draft, "ProxyJump")
@@ -459,7 +458,7 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 					upsertDirective(draft, "User", user)
 					draft.Properties["user"] = user
 				}
-				result, err := runLocalHostCompatCheck(context.Background(), cfg, draft, 5, credentialSecret, passwordResolver)
+				result, err := runLocalHostCompatCheck(context.Background(), cfg, draft, 5, credentialSecret)
 				if err != nil {
 					return err
 				}

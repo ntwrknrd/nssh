@@ -14,7 +14,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
@@ -1138,7 +1137,6 @@ func testLocalHostCompatibility(
 	host *sshconfig.HostEntry,
 	maxIterations int,
 	password *secret.Secret,
-	passwordResolver func(context.Context, string) (*secret.Secret, error),
 ) (*localHostCompatResult, error) {
 	if maxIterations <= 0 {
 		maxIterations = 5
@@ -1169,11 +1167,10 @@ func testLocalHostCompatibility(
 	for iteration := 1; iteration <= maxIterations; iteration++ {
 		ui.Info("Testing connection to %s (%d/%d)...", testHost.Host, iteration, maxIterations)
 		testResult, err := localHostConnectionTest(ctx, testHost, connector.TestConfig{
-			Timeout:          timeout,
-			Password:         password,
-			PasswordResolver: passwordResolver,
-			ConfigFile:       tmpPath,
-			Port:             testHost.Port(),
+			Timeout:    timeout,
+			Password:   password,
+			ConfigFile: tmpPath,
+			Port:       testHost.Port(),
 			// Host add is enrollment, not a read-only compatibility probe. Keep the
 			// accepted key so the first normal connection does not prompt again.
 			UseSystemKnownHosts: true,
@@ -1234,80 +1231,26 @@ func testLocalHostCompatibility(
 	return result, nil
 }
 
-func localHostProbePasswordResolver(cfg *config.Config, patch hostPatch, targetPassword *secret.Secret) (func(context.Context, string) (*secret.Secret, error), func(), string, error) {
-	var proxy *connect.ResolvedProxy
-	var proxyCommand string
-	if strings.TrimSpace(patch.ProxyJump) != "" {
-		resolved, err := resolveLocalHostProxy(patch.ProxyJump, "", cfg)
-		if err != nil {
-			return nil, func() {}, "", fmt.Errorf("resolve SSH proxy credential: %w", err)
-		}
-		proxyCommand = connect.RenderManagedProxyCommand(resolved)
-		proxy = &connect.ResolvedProxy{
-			Canonical:  resolved.Canonical,
-			Hostname:   resolved.Hostname,
-			Port:       resolved.Port,
-			Username:   resolved.Username,
-			AuthMode:   resolved.AuthMode,
-			Credential: resolved.Credential,
-		}
+func localHostProbeProxyCommand(cfg *config.Config, patch hostPatch) (string, error) {
+	if strings.TrimSpace(patch.ProxyJump) == "" {
+		return "", nil
 	}
-
-	var proxyPassword *secret.Secret
-	var proxyErr error
-	var proxyOnce sync.Once
-	if proxy != nil && proxy.Credential != nil {
-		proxyPassword = proxy.Credential.Password
+	resolved, err := resolveLocalHostProxy(patch.ProxyJump, "", cfg)
+	if err != nil {
+		return "", fmt.Errorf("resolve SSH proxy: %w", err)
 	}
-	resolveProxy := func(ctx context.Context) (*secret.Secret, error) {
-		if proxy == nil || proxy.AuthMode == config.AuthModeKey || proxy.Credential == nil {
-			return nil, fmt.Errorf("no password configured for SSH proxy")
-		}
-		proxyOnce.Do(func() {
-			if proxyPassword != nil {
-				return
-			}
-			if proxy.Credential.PasswordResolver == nil {
-				proxyErr = fmt.Errorf("no password configured for SSH proxy")
-				return
-			}
-			proxyPassword, proxyErr = proxy.Credential.PasswordResolver(ctx)
-		})
-		return proxyPassword, proxyErr
+	if resolved.Credential != nil && resolved.Credential.Password != nil {
+		defer resolved.Credential.Password.Destroy()
 	}
-	cleanup := func() {
-		if proxyPassword != nil {
-			proxyPassword.Destroy()
-			proxyPassword = nil
-		}
+	if resolved.AuthMode == config.AuthModePassword {
+		return "", fmt.Errorf("connection testing through password-authenticated SSH proxy %q is not supported securely", patch.ProxyJump)
 	}
-	hasProxyPassword := proxy != nil && proxy.AuthMode != config.AuthModeKey && proxy.Credential != nil
-	if targetPassword == nil && !hasProxyPassword {
-		return nil, cleanup, proxyCommand, nil
+	resolved.SSH = config.MergeSSH(config.SSHHostConfig{}, resolved.SSH)
+	if resolved.SSH.Options == nil {
+		resolved.SSH.Options = make(config.SSHOptions)
 	}
-	return func(ctx context.Context, prompt string) (*secret.Secret, error) {
-		if localHostPromptMatchesProxy(prompt, proxy) {
-			return resolveProxy(ctx)
-		}
-		if targetPassword == nil {
-			return nil, fmt.Errorf("no password configured for SSH target")
-		}
-		return targetPassword, nil
-	}, cleanup, proxyCommand, nil
-}
-
-func localHostPromptMatchesProxy(prompt string, proxy *connect.ResolvedProxy) bool {
-	if proxy == nil {
-		return false
-	}
-	prompt = strings.ToLower(prompt)
-	for _, host := range []string{proxy.Hostname, proxy.Canonical} {
-		host = strings.ToLower(strings.TrimSpace(host))
-		if host != "" && strings.Contains(prompt, host) {
-			return true
-		}
-	}
-	return false
+	resolved.SSH.Options["BatchMode"] = config.NewSSHOptionString("yes")
+	return connect.RenderManagedProxyCommand(resolved), nil
 }
 
 func inventoryHosts(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths) ([]*sshconfig.HostEntry, error) {

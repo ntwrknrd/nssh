@@ -127,10 +127,20 @@ func TestCatalogResolvesLocalInventoryProxyAfterCatalogBuild(t *testing.T) {
 	if target.ManagedProxy == nil {
 		t.Fatal("target has no managed proxy")
 	}
-	if hasSSHOption(target.SSH.Options, "ProxyJump") {
-		t.Fatalf("managed target retained ProxyJump: %#v", target.SSH.Options)
+	if !hasSSHOption(target.SSH.Options, "ProxyJump") || hasSSHOption(target.SSH.Options, "ProxyCommand") {
+		t.Fatalf("catalog should retain native ProxyJump until credential resolution: %#v", target.SSH.Options)
 	}
-	command := target.SSH.Options["ProxyCommand"].StringValue()
+	if target.ManagedProxy.Username != "ops" || target.ManagedProxy.Port != 2200 {
+		t.Fatalf("managed proxy override = user %q port %d", target.ManagedProxy.Username, target.ManagedProxy.Port)
+	}
+	resolved, err := resolveCatalogHostForConnect("pla-ts01", "", cfg, target)
+	if err != nil {
+		t.Fatalf("resolveCatalogHostForConnect: %v", err)
+	}
+	if hasSSHOption(resolved.SSH.Options, "ProxyJump") {
+		t.Fatalf("resolved target retained ProxyJump: %#v", resolved.SSH.Options)
+	}
+	command := resolved.SSH.Options["ProxyCommand"].StringValue()
 	for _, want := range []string{"IdentityFile=~/.ssh/netops.pub", "-W %h:%p", "ops@810-neteng01.custcbb.local:2200"} {
 		if !strings.Contains(command, want) {
 			t.Fatalf("ProxyCommand = %q, want %q", command, want)
@@ -143,6 +153,56 @@ func TestCatalogResolvesLocalInventoryProxyAfterCatalogBuild(t *testing.T) {
 	}
 	if proxy.Username != "netops" || proxy.Port != 22 {
 		t.Fatalf("direct proxy mutated by target override: user=%q port=%d", proxy.Username, proxy.Port)
+	}
+}
+
+func TestCatalogManagedProxyResolutionIsProviderStateOrderIndependent(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		"targets": {Type: config.ProviderNetBox},
+		"proxies": {Type: config.ProviderNetBox, Auth: config.InventoryAuthConfig{Mode: config.AuthModeKey, Username: "netops"}},
+	}
+	targetState := &inventory.ProviderState{
+		Provider: "targets",
+		Type:     config.ProviderNetBox,
+		Objects: map[string]*inventory.ProviderHost{
+			"edge01": {Host: "edge01.example", HostName: "edge01.example", Patterns: []string{"edge01"}, ProxyJump: "ops@jump01.example:2200"},
+		},
+	}
+	proxyState := &inventory.ProviderState{
+		Provider: "proxies",
+		Type:     config.ProviderNetBox,
+		Objects: map[string]*inventory.ProviderHost{
+			"jump01": {Host: "jump01.example", HostName: "jump01.example", Patterns: []string{"jump01"}, Port: 22},
+		},
+	}
+
+	for _, tc := range []struct {
+		name   string
+		states []*inventory.ProviderState
+	}{
+		{name: "target before proxy", states: []*inventory.ProviderState{targetState, proxyState}},
+		{name: "proxy before target", states: []*inventory.ProviderState{proxyState, targetState}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cat := buildCatalogForTest(t, cfg, tc.states)
+			target, ok := cat.Find("edge01")
+			if !ok || target.ManagedProxy == nil {
+				t.Fatalf("managed target = %#v found=%v", target, ok)
+			}
+			resolved, err := resolveCatalogHostForConnect("edge01", "", cfg, target)
+			if err != nil {
+				t.Fatalf("resolveCatalogHostForConnect: %v", err)
+			}
+			if command := resolved.SSH.Options["ProxyCommand"].StringValue(); !strings.Contains(command, "ops@jump01.example:2200") {
+				t.Fatalf("ProxyCommand = %q", command)
+			}
+			proxy, ok := cat.Find("jump01")
+			if !ok || proxy.Username != "netops" || proxy.Port != 22 {
+				t.Fatalf("direct proxy mutated: %#v found=%v", proxy, ok)
+			}
+		})
 	}
 }
 
@@ -578,10 +638,14 @@ func TestCatalogCarriesProviderStateProxyJump(t *testing.T) {
 	if !ok {
 		t.Fatalf("Find(clab-dfz-core01) failed")
 	}
-	if hasSSHOption(host.SSH.Options, "ProxyJump") {
-		t.Fatalf("ProxyJump should be replaced by managed ProxyCommand: %#v", host.SSH.Options)
+	if !hasSSHOption(host.SSH.Options, "ProxyJump") || host.ManagedProxy == nil {
+		t.Fatalf("catalog did not retain and resolve ProxyJump: %#v", host.SSH.Options)
 	}
-	got := host.SSH.Options["ProxyCommand"].StringValue()
+	resolved, err := resolveCatalogHostForConnect("clab-dfz-core01", "", cfg, host)
+	if err != nil {
+		t.Fatalf("resolveCatalogHostForConnect: %v", err)
+	}
+	got := resolved.SSH.Options["ProxyCommand"].StringValue()
 	for _, want := range []string{
 		"ssh -F none",
 		"ControlPath=~/.ssh/sockets/%%r@%%h:%%p",

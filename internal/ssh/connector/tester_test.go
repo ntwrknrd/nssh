@@ -109,33 +109,25 @@ func TestBuildTestSSHArgs_AllowsSystemKnownHostsWhenEnabled(t *testing.T) {
 	}
 }
 
-func TestConnectionPasswordResolverHandlesProxyAndTargetPrompts(t *testing.T) {
+func TestConnectionInjectsPasswordOnlyOnce(t *testing.T) {
 	tmp := t.TempDir()
 	sshPath := filepath.Join(tmp, "ssh")
 	script := `#!/bin/sh
-printf '(proxy-user@jump01.example) Password:'
-IFS= read -r proxy_password
 printf '(target-user@edge01.example) Password:'
 IFS= read -r target_password
-test "$proxy_password" = 'proxy-sentinel' && test "$target_password" = 'target-sentinel'
+printf '(target-user@edge01.example) Password:'
+test "$target_password" = 'target-sentinel'
 `
 	if err := os.WriteFile(sshPath, []byte(script), 0700); err != nil {
 		t.Fatalf("write fake ssh: %v", err)
 	}
 	t.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
-	proxyPassword := secret.NewFromString("proxy-sentinel")
 	targetPassword := secret.NewFromString("target-sentinel")
-	defer proxyPassword.Destroy()
 	defer targetPassword.Destroy()
 
 	result, err := TestConnection(context.Background(), "edge01.example", "target-user", TestConfig{
-		Timeout: time.Second,
-		PasswordResolver: func(_ context.Context, prompt string) (*secret.Secret, error) {
-			if strings.Contains(prompt, "jump01.example") {
-				return proxyPassword, nil
-			}
-			return targetPassword, nil
-		},
+		Timeout:  time.Second,
+		Password: targetPassword,
 	})
 	if err != nil {
 		t.Fatalf("TestConnection: %v", err)
