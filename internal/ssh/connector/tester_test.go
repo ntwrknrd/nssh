@@ -1,16 +1,13 @@
 package connector
 
 import (
-	"context"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/secret"
 )
 
 func TestBuildTestSSHArgsUsesRenderedNSSHOptions(t *testing.T) {
@@ -109,30 +106,20 @@ func TestBuildTestSSHArgs_AllowsSystemKnownHostsWhenEnabled(t *testing.T) {
 	}
 }
 
-func TestConnectionInjectsPasswordOnlyOnce(t *testing.T) {
-	tmp := t.TempDir()
-	sshPath := filepath.Join(tmp, "ssh")
-	script := `#!/bin/sh
-printf '(target-user@edge01.example) Password:'
-IFS= read -r target_password
-printf '(target-user@edge01.example) Password:'
-test "$target_password" = 'target-sentinel'
-`
-	if err := os.WriteFile(sshPath, []byte(script), 0700); err != nil {
-		t.Fatalf("write fake ssh: %v", err)
-	}
-	t.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
-	targetPassword := secret.NewFromString("target-sentinel")
-	defer targetPassword.Destroy()
-
-	result, err := TestConnection(context.Background(), "edge01.example", "target-user", TestConfig{
-		Timeout:  time.Second,
-		Password: targetPassword,
+func TestBuildTestSSHArgsUsesAskpassWithoutBatchMode(t *testing.T) {
+	args, cleanup, err := buildTestSSHArgs("edge01.example", "target-user", TestConfig{
+		Timeout: time.Second,
+		Env:     []string{"SSH_ASKPASS=/tmp/nssh-askpass"},
 	})
 	if err != nil {
-		t.Fatalf("TestConnection: %v", err)
+		t.Fatalf("buildTestSSHArgs: %v", err)
 	}
-	if !result.Success || result.ExitCode != 0 {
-		t.Fatalf("result = %#v", result)
+	defer cleanup()
+	joined := strings.Join(args, "\n")
+	if strings.Contains(joined, "BatchMode=yes") {
+		t.Fatalf("askpass probe enabled BatchMode: %#v", args)
+	}
+	if !strings.Contains(joined, "PreferredAuthentications=password,keyboard-interactive,publickey") {
+		t.Fatalf("askpass probe missing password authentication: %#v", args)
 	}
 }

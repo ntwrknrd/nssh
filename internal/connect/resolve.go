@@ -168,7 +168,7 @@ func resolveCatalogHostForConnect(query, explicitUser string, c *config.Config, 
 		}
 		proxyData := *hostData.ManagedProxy
 		proxyData.Username = proxyUsername
-		if command := formatManagedProxyCommand(&proxyData); command != "" {
+		if command := formatManagedProxyCommand(&proxyData, resolved.Hostname, resolved.Port); command != "" {
 			deleteSSHOption(resolved.SSH.Options, "ProxyJump")
 			if resolved.SSH.Options == nil {
 				resolved.SSH.Options = make(config.SSHOptions)

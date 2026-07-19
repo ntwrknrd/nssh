@@ -101,7 +101,7 @@ func withoutAskpassEnv(env []string) []string {
 		key, _, _ := strings.Cut(item, "=")
 		switch key {
 		case "SSH_ASKPASS", "SSH_ASKPASS_REQUIRE", "NSSH_ASKPASS_SOCKET", "NSSH_ASKPASS_NONCE",
-			"NSSH_PROXY_SSH_ASKPASS", "NSSH_PROXY_ASKPASS_SOCKET", "NSSH_PROXY_ASKPASS_NONCE":
+			"NSSH_PROXY_SSH_ASKPASS", "NSSH_PROXY_ASKPASS_REQUIRE", "NSSH_PROXY_ASKPASS_SOCKET", "NSSH_PROXY_ASKPASS_NONCE":
 			continue
 		default:
 			filtered = append(filtered, item)

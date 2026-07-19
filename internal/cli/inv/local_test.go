@@ -570,9 +570,13 @@ func TestLocalHostProbeProxyCommandUsesResolvedKeyProxyInBatchMode(t *testing.T)
 		}, nil
 	}
 
-	proxyCommand, err := localHostProbeProxyCommand(config.DefaultConfig(), hostPatch{ProxyJump: "jump01"})
+	proxyCommand, env, cleanup, err := localHostProbeProxy(context.Background(), config.DefaultConfig(), hostPatch{Host: "edge01.example", ProxyJump: "jump01"})
 	if err != nil {
-		t.Fatalf("localHostProbeProxyCommand: %v", err)
+		t.Fatalf("localHostProbeProxy: %v", err)
+	}
+	defer cleanup()
+	if len(env) != 0 {
+		t.Fatalf("key proxy env = %#v, want none", env)
 	}
 	for _, want := range []string{"jump01.example", "proxy-user@", "BatchMode=yes", "NSSH_PROXY_ASKPASS_SOCKET"} {
 		if !strings.Contains(proxyCommand, want) {
@@ -584,19 +588,67 @@ func TestLocalHostProbeProxyCommandUsesResolvedKeyProxyInBatchMode(t *testing.T)
 	}
 }
 
-func TestLocalHostProbeProxyCommandRejectsPasswordProxy(t *testing.T) {
+func TestLocalHostProbeProxyUsesIsolatedCredentialForPasswordProxy(t *testing.T) {
 	oldResolveProxy := resolveLocalHostProxy
-	defer func() { resolveLocalHostProxy = oldResolveProxy }()
+	oldStartAskpass := startLocalHostProxyAskpass
+	defer func() {
+		resolveLocalHostProxy = oldResolveProxy
+		startLocalHostProxyAskpass = oldStartAskpass
+	}()
+	proxyPassword := secretFromTest("proxy-sentinel")
 	resolveLocalHostProxy = func(string, string, ...*config.Config) (*connect.ResolvedHost, error) {
 		return &connect.ResolvedHost{
-			Canonical: "jump01.example",
-			Hostname:  "jump01.example",
-			AuthMode:  config.AuthModePassword,
+			Canonical:  "jump01.example",
+			Hostname:   "jump01.example",
+			AuthMode:   config.AuthModePassword,
+			Credential: &connect.ResolvedCredential{Password: proxyPassword},
 		}, nil
 	}
+	var cleaned bool
+	startLocalHostProxyAskpass = func(ctx context.Context, resolve func(context.Context) (*secret.Secret, error)) ([]string, func(), error) {
+		got, err := resolve(ctx)
+		if err != nil || got != proxyPassword {
+			t.Fatalf("proxy resolver password=%v err=%v", got == proxyPassword, err)
+		}
+		return []string{"NSSH_PROXY_ASKPASS_SOCKET=/tmp/proxy.sock"}, func() { cleaned = true }, nil
+	}
 
-	if _, err := localHostProbeProxyCommand(config.DefaultConfig(), hostPatch{ProxyJump: "jump01"}); err == nil || !strings.Contains(err.Error(), "not supported securely") {
-		t.Fatalf("error = %v", err)
+	command, env, cleanup, err := localHostProbeProxy(context.Background(), config.DefaultConfig(), hostPatch{Host: "edge01.example", ProxyJump: "jump01"})
+	if err != nil {
+		t.Fatalf("localHostProbeProxy: %v", err)
+	}
+	if strings.Contains(command, "BatchMode=yes") || !strings.Contains(command, "edge01.example:22") {
+		t.Fatalf("password proxy command = %q", command)
+	}
+	if got := strings.Join(env, "\n"); !strings.Contains(got, "NSSH_PROXY_ASKPASS_SOCKET") || strings.Contains(got, "proxy-sentinel") {
+		t.Fatalf("proxy env = %#v", env)
+	}
+	cleanup()
+	if !cleaned {
+		t.Fatal("proxy askpass cleanup was not called")
+	}
+}
+
+func TestLocalHostProbeEntryReplacesProxyJumpBeforeConnectionTest(t *testing.T) {
+	proxyCommand := `env SSH_ASKPASS="$NSSH_PROXY_SSH_ASKPASS" ssh -W edge01.example:22 proxy-user@jump01.example`
+	draft := localHostProbeEntry(&config.Paths{}, hostPatch{
+		Host:      "edge01.example",
+		HostName:  "edge01.example",
+		ProxyJump: "jump01.example",
+	}, proxyCommand, "target-user")
+
+	if _, ok := draft.Properties["proxyjump"]; ok {
+		t.Fatalf("draft retained ProxyJump: %#v", draft.Properties)
+	}
+	if got := draft.Properties["proxycommand"]; got != proxyCommand {
+		t.Fatalf("draft ProxyCommand = %q, want %q", got, proxyCommand)
+	}
+	if got := draft.Properties["user"]; got != "target-user" {
+		t.Fatalf("draft User = %q", got)
+	}
+	text := strings.Join(draft.Lines, "")
+	if strings.Contains(text, "ProxyJump") || !strings.Contains(text, "ProxyCommand "+proxyCommand) {
+		t.Fatalf("draft lines did not replace ProxyJump:\n%s", text)
 	}
 }
 
@@ -853,23 +905,20 @@ Permission denied (publickey,password).`,
 	}
 }
 
-func TestLocalHostCompatibilityPassesTargetPasswordWithoutPersistingIt(t *testing.T) {
+func TestLocalHostCompatibilityPassesAskpassEnvironmentWithoutPersistingSecrets(t *testing.T) {
 	old := localHostConnectionTest
 	defer func() { localHostConnectionTest = old }()
-	targetPassword := secretFromTest("target-sentinel")
-	defer targetPassword.Destroy()
+	askpassEnv := []string{"SSH_ASKPASS=/tmp/nssh-askpass", "NSSH_ASKPASS_SOCKET=/tmp/target.sock", "NSSH_ASKPASS_NONCE=nonce"}
 	localHostConnectionTest = func(_ context.Context, _ *sshconfig.HostEntry, cfg connector.TestConfig) (*connector.TestResult, error) {
-		if cfg.Password != targetPassword {
-			t.Fatal("connection test did not receive target password")
+		if got := strings.Join(cfg.Env, "\n"); got != strings.Join(askpassEnv, "\n") {
+			t.Fatalf("connection test env = %#v", cfg.Env)
 		}
 		content, err := os.ReadFile(cfg.ConfigFile)
 		if err != nil {
 			t.Fatalf("read temp config: %v", err)
 		}
-		for _, sentinel := range []string{"target-sentinel"} {
-			if strings.Contains(string(content), sentinel) {
-				t.Fatalf("temp config contains secret sentinel %q", sentinel)
-			}
+		if strings.Contains(string(content), "target-sentinel") {
+			t.Fatal("temp config contains secret sentinel")
 		}
 		if !cfg.UseSystemKnownHosts {
 			t.Fatal("host enrollment probe did not persist the target host key")
@@ -878,7 +927,7 @@ func TestLocalHostCompatibilityPassesTargetPasswordWithoutPersistingIt(t *testin
 	}
 
 	host := sshconfig.CreateHostEntry("edge01", "edge01.example", "netops", 22, true, "provider_local.conf")
-	result, err := testLocalHostCompatibility(context.Background(), config.DefaultConfig(), host, 5, targetPassword)
+	result, err := testLocalHostCompatibility(context.Background(), config.DefaultConfig(), host, 5, askpassEnv)
 	if err != nil {
 		t.Fatalf("testLocalHostCompatibility: %v", err)
 	}

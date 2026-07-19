@@ -322,6 +322,29 @@ func startAskpassServerEnv(ctx context.Context, resolve func(context.Context) (*
 	return startAskpassServerEnvForRole(ctx, resolve, false)
 }
 
+// StartProxyAskpassEnvironment starts an isolated askpass channel suitable for
+// a managed ProxyCommand. The caller must invoke cleanup after SSH exits.
+func StartProxyAskpassEnvironment(ctx context.Context, resolve func(context.Context) (*secret.Secret, error)) ([]string, func(), error) {
+	return startExternalAskpassEnvironment(ctx, resolve, true)
+}
+
+// StartTargetAskpassEnvironment starts the standard target askpass channel for
+// callers that execute OpenSSH outside the normal connection runner.
+func StartTargetAskpassEnvironment(ctx context.Context, resolve func(context.Context) (*secret.Secret, error)) ([]string, func(), error) {
+	return startExternalAskpassEnvironment(ctx, resolve, false)
+}
+
+func startExternalAskpassEnvironment(ctx context.Context, resolve func(context.Context) (*secret.Secret, error), proxy bool) ([]string, func(), error) {
+	server, cancel, done, env, err := startAskpassServerEnvForRole(ctx, resolve, proxy)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	var once sync.Once
+	return env, func() {
+		once.Do(func() { stopAskpassServer(server, cancel, done) })
+	}, nil
+}
+
 func startAskpassServerEnvForRole(ctx context.Context, resolve func(context.Context) (*secret.Secret, error), proxy bool) (*askpass.Server, context.CancelFunc, chan error, []string, error) {
 	helper, err := askpassHelperPathFunc()
 	if err != nil {
@@ -380,6 +403,7 @@ func preparePasswordPrefetch(ctx context.Context, resolved *ResolvedHost, sshArg
 
 func shouldPrefetchPassword(resolved *ResolvedHost) bool {
 	return resolved != nil &&
+		!hasUnmanagedProxyTransport(resolved) &&
 		resolved.AuthMode == config.AuthModePassword &&
 		resolved.Credential != nil &&
 		resolved.Credential.PasswordResolver != nil
@@ -675,13 +699,21 @@ func interactiveAskpassResolvers(resolved *ResolvedHost, passwordFuture, proxyPa
 	if resolved == nil {
 		return passwordResolvers{}
 	}
-	resolvers := passwordResolvers{
-		target: credentialPasswordResolver(resolved.AuthMode, resolved.Credential, passwordFuture),
+	resolvers := passwordResolvers{}
+	if !hasUnmanagedProxyTransport(resolved) {
+		resolvers.target = credentialPasswordResolver(resolved.AuthMode, resolved.Credential, passwordFuture)
+	} else if resolved.Credential != nil {
+		slog.Warn("password autofill disabled for unmanaged SSH proxy transport", "host", resolved.Hostname)
 	}
 	if resolved.Proxy != nil {
 		resolvers.proxy = credentialPasswordResolver(resolved.Proxy.AuthMode, resolved.Proxy.Credential, proxyPasswordFuture)
 	}
 	return resolvers
+}
+
+func hasUnmanagedProxyTransport(resolved *ResolvedHost) bool {
+	return resolved != nil && resolved.Proxy == nil &&
+		(hasSSHOption(resolved.SSH.Options, "ProxyJump") || hasSSHOption(resolved.SSH.Options, "ProxyCommand"))
 }
 
 func credentialPasswordResolver(authMode string, credential *ResolvedCredential, future *sshpassword.Future) func(context.Context) (*secret.Secret, error) {

@@ -651,6 +651,31 @@ func TestInteractiveAskpassResolversDoNotCreateProxyChannelForKeyAuth(t *testing
 	}
 }
 
+func TestInteractiveAskpassResolversDisableTargetChannelForUnmanagedProxyTransport(t *testing.T) {
+	for _, option := range []string{"ProxyJump", "ProxyCommand"} {
+		t.Run(option, func(t *testing.T) {
+			password := secret.NewFromString("target-secret")
+			defer password.Destroy()
+			resolved := &ResolvedHost{
+				Hostname:   "edge01.example",
+				AuthMode:   config.AuthModePassword,
+				Credential: &ResolvedCredential{Password: password},
+				SSH: config.SSHHostConfig{Options: config.SSHOptions{
+					option: config.NewSSHOptionString("unmanaged-proxy"),
+				}},
+			}
+
+			resolvers := interactiveAskpassResolvers(resolved, nil, nil)
+			if resolvers.target != nil || resolvers.proxy != nil {
+				t.Fatalf("unmanaged %s received askpass resolvers", option)
+			}
+			if shouldPrefetchPassword(resolved) {
+				t.Fatalf("unmanaged %s enabled password prefetch", option)
+			}
+		})
+	}
+}
+
 func TestRunResolvedRemoteCommandHotMuxSkipsAskpassAndPasswordResolver(t *testing.T) {
 	oldRunCapturedCommand := runCapturedCommandFunc
 	oldAskpassHelperPath := askpassHelperPathFunc

@@ -216,7 +216,7 @@ func TestServerProxyEnvUsesIsolatedNames(t *testing.T) {
 
 	entries := server.ProxyEnv("/tmp/nssh-askpass")
 	env := strings.Join(entries, "\n")
-	for _, want := range []string{ProxyHelperEnv, ProxySocketEnv, ProxyNonceEnv} {
+	for _, want := range []string{ProxyHelperEnv, ProxyRequireEnv, ProxySocketEnv, ProxyNonceEnv} {
 		if !strings.Contains(env, want+"=") {
 			t.Fatalf("proxy env missing %s: %s", want, env)
 		}

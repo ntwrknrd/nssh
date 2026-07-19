@@ -379,12 +379,13 @@ func setSSHOptionIfAbsent(options config.SSHOptions, key string, value config.SS
 	}
 }
 
-func formatManagedProxyCommand(host *ResolvedHostData) string {
+func formatManagedProxyCommand(host *ResolvedHostData, forwardHost string, forwardPort int) string {
 	if host == nil {
 		return ""
 	}
 	target := formatProxyJumpTarget(host)
-	if target == "" {
+	forward := formatProxyForwardTarget(forwardHost, forwardPort)
+	if target == "" || forward == "" {
 		return ""
 	}
 	args := connector.RenderSSHOptions(host.SSH, 0)
@@ -393,15 +394,15 @@ func formatManagedProxyCommand(host *ResolvedHostData) string {
 	for _, arg := range args {
 		argv = append(argv, escapeProxyCommandTokenExpansion(arg))
 	}
-	argv = append(argv, "-W", "%h:%p", target)
+	argv = append(argv, "-W", forward, target)
 	return managedProxyAskpassPrefix + shellJoin(argv)
 }
 
-const managedProxyAskpassPrefix = `env SSH_ASKPASS="$NSSH_PROXY_SSH_ASKPASS" SSH_ASKPASS_REQUIRE=force DISPLAY=nssh-askpass NSSH_ASKPASS_SOCKET="$NSSH_PROXY_ASKPASS_SOCKET" NSSH_ASKPASS_NONCE="$NSSH_PROXY_ASKPASS_NONCE" `
+const managedProxyAskpassPrefix = `env SSH_ASKPASS="${NSSH_PROXY_SSH_ASKPASS:-}" SSH_ASKPASS_REQUIRE="${NSSH_PROXY_ASKPASS_REQUIRE:-never}" DISPLAY=nssh-askpass NSSH_ASKPASS_SOCKET="${NSSH_PROXY_ASKPASS_SOCKET:-}" NSSH_ASKPASS_NONCE="${NSSH_PROXY_ASKPASS_NONCE:-}" `
 
 // RenderManagedProxyCommand renders an inventory-resolved host as an OpenSSH
 // ProxyCommand. Nested proxy configurations remain OpenSSH-native.
-func RenderManagedProxyCommand(host *ResolvedHost) string {
+func RenderManagedProxyCommand(host *ResolvedHost, forwardHost string, forwardPort int) string {
 	if host == nil || hasSSHOption(host.SSH.Options, "ProxyJump") || hasSSHOption(host.SSH.Options, "ProxyCommand") {
 		return ""
 	}
@@ -411,7 +412,21 @@ func RenderManagedProxyCommand(host *ResolvedHost) string {
 		Port:      host.Port,
 		Username:  host.Username,
 		SSH:       host.SSH,
-	})
+	}, forwardHost, forwardPort)
+}
+
+func formatProxyForwardTarget(host string, port int) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	if port == 0 {
+		port = 22
+	}
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		host = "[" + host + "]"
+	}
+	return fmt.Sprintf("%s:%d", host, port)
 }
 
 func formatProxyJumpTarget(host *ResolvedHostData) string {

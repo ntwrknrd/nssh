@@ -141,7 +141,7 @@ func TestCatalogResolvesLocalInventoryProxyAfterCatalogBuild(t *testing.T) {
 		t.Fatalf("resolved target retained ProxyJump: %#v", resolved.SSH.Options)
 	}
 	command := resolved.SSH.Options["ProxyCommand"].StringValue()
-	for _, want := range []string{"IdentityFile=~/.ssh/netops.pub", "-W %h:%p", "ops@810-neteng01.custcbb.local:2200"} {
+	for _, want := range []string{"IdentityFile=~/.ssh/netops.pub", "-W pla-ts01.custcbb.local:22", "ops@810-neteng01.custcbb.local:2200"} {
 		if !strings.Contains(command, want) {
 			t.Fatalf("ProxyCommand = %q, want %q", command, want)
 		}
@@ -203,6 +203,24 @@ func TestCatalogManagedProxyResolutionIsProviderStateOrderIndependent(t *testing
 				t.Fatalf("direct proxy mutated: %#v found=%v", proxy, ok)
 			}
 		})
+	}
+}
+
+func TestManagedProxyCommandQuotesConcreteForwardHost(t *testing.T) {
+	command := formatManagedProxyCommand(&ResolvedHostData{
+		Hostname: "jump01.example",
+		Username: "proxy-user",
+		Port:     22,
+	}, "edge01.example; touch /tmp/nssh-pwned", 2222)
+
+	if strings.Contains(command, "%h") || strings.Contains(command, "%p") {
+		t.Fatalf("ProxyCommand retained unsafe token expansion: %q", command)
+	}
+	if !strings.Contains(command, `-W 'edge01.example; touch /tmp/nssh-pwned:2222'`) {
+		t.Fatalf("ProxyCommand did not quote concrete target: %q", command)
+	}
+	if !strings.Contains(command, `SSH_ASKPASS_REQUIRE="${NSSH_PROXY_ASKPASS_REQUIRE:-never}"`) {
+		t.Fatalf("ProxyCommand does not preserve manual proxy password fallback: %q", command)
 	}
 }
 
@@ -650,7 +668,7 @@ func TestCatalogCarriesProviderStateProxyJump(t *testing.T) {
 		"ssh -F none",
 		"ControlPath=~/.ssh/sockets/%%r@%%h:%%p",
 		"IdentityFile=~/.ssh/ed25519-1Password-Expedient.pub",
-		"-W %h:%p",
+		"-W 172.20.20.13:22",
 		"nre@nre-netlab01.custcbb.local",
 	} {
 		if !strings.Contains(got, want) {

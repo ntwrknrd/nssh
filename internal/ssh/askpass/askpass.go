@@ -17,11 +17,12 @@ import (
 )
 
 const (
-	SocketEnv      = "NSSH_ASKPASS_SOCKET"
-	NonceEnv       = "NSSH_ASKPASS_NONCE"
-	ProxyHelperEnv = "NSSH_PROXY_SSH_ASKPASS"
-	ProxySocketEnv = "NSSH_PROXY_ASKPASS_SOCKET"
-	ProxyNonceEnv  = "NSSH_PROXY_ASKPASS_NONCE"
+	SocketEnv       = "NSSH_ASKPASS_SOCKET"
+	NonceEnv        = "NSSH_ASKPASS_NONCE"
+	ProxyHelperEnv  = "NSSH_PROXY_SSH_ASKPASS"
+	ProxyRequireEnv = "NSSH_PROXY_ASKPASS_REQUIRE"
+	ProxySocketEnv  = "NSSH_PROXY_ASKPASS_SOCKET"
+	ProxyNonceEnv   = "NSSH_PROXY_ASKPASS_NONCE"
 )
 
 type Server struct {
@@ -103,6 +104,7 @@ func (s *Server) Env(helper string) []string {
 func (s *Server) ProxyEnv(helper string) []string {
 	return []string{
 		ProxyHelperEnv + "=" + helper,
+		ProxyRequireEnv + "=force",
 		ProxySocketEnv + "=" + s.socketPath,
 		ProxyNonceEnv + "=" + s.nonce,
 	}

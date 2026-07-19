@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
@@ -444,21 +445,24 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 				if credentialSecret != nil {
 					defer credentialSecret.Destroy()
 				}
-				proxyCommand, err := localHostProbeProxyCommand(cfg, patch)
+				proxyCommand, proxyEnv, cleanupProxy, err := localHostProbeProxy(context.Background(), cfg, patch)
 				if err != nil {
 					return err
 				}
-				draft := localHostEntryFromPatch(paths, patch)
-				if proxyCommand != "" {
-					deleteDirective(draft, "ProxyJump")
-					delete(draft.Properties, "proxyjump")
-					upsertDirective(draft, "ProxyCommand", proxyCommand)
+				defer cleanupProxy()
+				askpassEnv := append([]string{}, proxyEnv...)
+				if credentialSecret != nil {
+					targetEnv, cleanupTarget, err := startLocalHostTargetAskpass(context.Background(), func(context.Context) (*secret.Secret, error) {
+						return credentialSecret, nil
+					})
+					if err != nil {
+						return fmt.Errorf("start SSH target credential helper: %w", err)
+					}
+					defer cleanupTarget()
+					askpassEnv = append(askpassEnv, targetEnv...)
 				}
-				if user := localHostProbeUser(cfg, patch, credentialRecord); user != "" {
-					upsertDirective(draft, "User", user)
-					draft.Properties["user"] = user
-				}
-				result, err := runLocalHostCompatCheck(context.Background(), cfg, draft, 5, credentialSecret)
+				draft := localHostProbeEntry(paths, patch, proxyCommand, localHostProbeUser(cfg, patch, credentialRecord))
+				result, err := runLocalHostCompatCheck(context.Background(), cfg, draft, 5, askpassEnv)
 				if err != nil {
 					return err
 				}
