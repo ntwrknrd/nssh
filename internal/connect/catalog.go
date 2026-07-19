@@ -399,7 +399,7 @@ func formatManagedProxyCommand(host *ResolvedHostData, forwardHost string, forwa
 	return managedProxyAskpassPrefix + shellJoin(argv)
 }
 
-const managedProxyAskpassPrefix = `env SSH_ASKPASS="${NSSH_PROXY_SSH_ASKPASS:-}" SSH_ASKPASS_REQUIRE="${NSSH_PROXY_ASKPASS_REQUIRE:-never}" DISPLAY=nssh-askpass NSSH_ASKPASS_SOCKET="${NSSH_PROXY_ASKPASS_SOCKET:-}" NSSH_ASKPASS_NONCE="${NSSH_PROXY_ASKPASS_NONCE:-}" `
+const managedProxyAskpassPrefix = `/bin/sh -c 'exec env SSH_ASKPASS="${NSSH_PROXY_SSH_ASKPASS:-}" SSH_ASKPASS_REQUIRE="${NSSH_PROXY_ASKPASS_REQUIRE:-never}" DISPLAY=nssh-askpass NSSH_ASKPASS_SOCKET="${NSSH_PROXY_ASKPASS_SOCKET:-}" NSSH_ASKPASS_NONCE="${NSSH_PROXY_ASKPASS_NONCE:-}" "$@"' nssh-proxy `
 
 // RenderManagedProxyCommand renders an inventory-resolved host as an OpenSSH
 // ProxyCommand. Nested proxy configurations remain OpenSSH-native.

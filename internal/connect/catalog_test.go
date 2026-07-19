@@ -1,6 +1,8 @@
 package connect
 
 import (
+	"os"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -221,6 +223,45 @@ func TestManagedProxyCommandQuotesConcreteForwardHost(t *testing.T) {
 	}
 	if !strings.Contains(command, `SSH_ASKPASS_REQUIRE="${NSSH_PROXY_ASKPASS_REQUIRE:-never}"`) {
 		t.Fatalf("ProxyCommand does not preserve manual proxy password fallback: %q", command)
+	}
+}
+
+func TestManagedProxyAskpassPrefixRunsUnderFish(t *testing.T) {
+	fish, err := exec.LookPath("fish")
+	if err != nil {
+		t.Skip("fish is not installed")
+	}
+	command := managedProxyAskpassPrefix + shellJoin([]string{"/usr/bin/env"})
+	cmd := exec.Command(fish, "-c", command)
+	cmd.Env = append(os.Environ(),
+		"SSH_ASKPASS=/tmp/target-helper",
+		"SSH_ASKPASS_REQUIRE=force",
+		"NSSH_ASKPASS_SOCKET=/tmp/target.sock",
+		"NSSH_ASKPASS_NONCE=target-nonce",
+		"NSSH_PROXY_SSH_ASKPASS=/tmp/proxy-helper",
+		"NSSH_PROXY_ASKPASS_REQUIRE=force",
+		"NSSH_PROXY_ASKPASS_SOCKET=/tmp/proxy.sock",
+		"NSSH_PROXY_ASKPASS_NONCE=proxy-nonce",
+	)
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("fish ProxyCommand wrapper: %v", err)
+	}
+	env := string(output)
+	for _, want := range []string{
+		"SSH_ASKPASS=/tmp/proxy-helper",
+		"SSH_ASKPASS_REQUIRE=force",
+		"NSSH_ASKPASS_SOCKET=/tmp/proxy.sock",
+		"NSSH_ASKPASS_NONCE=proxy-nonce",
+	} {
+		if !strings.Contains(env, want+"\n") {
+			t.Fatalf("proxy environment missing %q:\n%s", want, env)
+		}
+	}
+	for _, forbidden := range []string{"/tmp/target-helper", "/tmp/target.sock", "target-nonce"} {
+		if strings.Contains(env, forbidden) {
+			t.Fatalf("proxy environment retained target value %q:\n%s", forbidden, env)
+		}
 	}
 }
 
