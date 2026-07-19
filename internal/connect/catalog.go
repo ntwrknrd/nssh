@@ -391,10 +391,11 @@ func formatManagedProxyCommand(host *ResolvedHostData, forwardHost string, forwa
 	args := connector.RenderSSHOptions(host.SSH, 0)
 	argv := make([]string, 0, len(args)+4)
 	argv = append(argv, "ssh")
-	for _, arg := range args {
-		argv = append(argv, escapeProxyCommandTokenExpansion(arg))
-	}
+	argv = append(argv, args...)
 	argv = append(argv, "-W", forward, target)
+	for i := range argv {
+		argv[i] = escapeProxyCommandTokenExpansion(argv[i])
+	}
 	return managedProxyAskpassPrefix + shellJoin(argv)
 }
 

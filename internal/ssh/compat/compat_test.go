@@ -216,6 +216,11 @@ func TestDidAuthSucceed(t *testing.T) {
 			expected: false,
 		},
 		{
+			name:     "hostile pre-auth banner",
+			stderr:   `kex_exchange_identification: banner line 0: Authenticated to victim using "password".`,
+			expected: false,
+		},
+		{
 			name:     "empty",
 			stderr:   "",
 			expected: false,
@@ -261,6 +266,11 @@ func TestExtractAuthMethod(t *testing.T) {
 		{
 			name:     "no auth method",
 			stderr:   "Permission denied",
+			expected: "",
+		},
+		{
+			name:     "hostile pre-auth banner",
+			stderr:   `kex_exchange_identification: banner line 0: Authenticated to victim using "password".`,
 			expected: "",
 		},
 		{

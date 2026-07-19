@@ -12,6 +12,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/credential"
 	"github.com/ntwrknrd/nssh/internal/inventory"
 	"github.com/ntwrknrd/nssh/internal/secret"
+	"github.com/ntwrknrd/nssh/internal/ssh/askpass"
 	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
@@ -627,6 +628,105 @@ func TestLocalHostProbeProxyUsesIsolatedCredentialForPasswordProxy(t *testing.T)
 	if !cleaned {
 		t.Fatal("proxy askpass cleanup was not called")
 	}
+}
+
+func TestPrepareLocalHostCompatibilityProbeIsolatesTargetAndProxyPasswords(t *testing.T) {
+	oldResolveProxy := resolveLocalHostProxy
+	oldStartProxyAskpass := startLocalHostProxyAskpass
+	oldStartTargetAskpass := startLocalHostTargetAskpass
+	defer func() {
+		resolveLocalHostProxy = oldResolveProxy
+		startLocalHostProxyAskpass = oldStartProxyAskpass
+		startLocalHostTargetAskpass = oldStartTargetAskpass
+	}()
+
+	proxyPassword := secretFromTest("proxy-sentinel")
+	targetPassword := secretFromTest("target-sentinel")
+	defer targetPassword.Destroy()
+	resolveLocalHostProxy = func(string, string, ...*config.Config) (*connect.ResolvedHost, error) {
+		return &connect.ResolvedHost{
+			Canonical:  "jump01.example",
+			Hostname:   "jump01.example",
+			Username:   "proxy-user",
+			AuthMode:   config.AuthModePassword,
+			Credential: &connect.ResolvedCredential{Password: proxyPassword},
+		}, nil
+	}
+	var proxyCleaned, targetCleaned bool
+	startLocalHostProxyAskpass = func(ctx context.Context, resolve func(context.Context) (*secret.Secret, error)) ([]string, func(), error) {
+		got, err := resolve(ctx)
+		if err != nil || got != proxyPassword {
+			t.Fatalf("proxy resolver password=%v err=%v", got == proxyPassword, err)
+		}
+		return []string{
+			askpass.ProxyHelperEnv + "=/tmp/proxy-helper",
+			askpass.ProxyRequireEnv + "=force",
+			askpass.ProxySocketEnv + "=/tmp/proxy.sock",
+			askpass.ProxyNonceEnv + "=proxy-nonce",
+		}, func() { proxyCleaned = true }, nil
+	}
+	startLocalHostTargetAskpass = func(ctx context.Context, resolve func(context.Context) (*secret.Secret, error)) ([]string, func(), error) {
+		got, err := resolve(ctx)
+		if err != nil || got != targetPassword {
+			t.Fatalf("target resolver password=%v err=%v", got == targetPassword, err)
+		}
+		return []string{
+			"SSH_ASKPASS=/tmp/target-helper",
+			"SSH_ASKPASS_REQUIRE=force",
+			askpass.SocketEnv + "=/tmp/target.sock",
+			askpass.NonceEnv + "=target-nonce",
+		}, func() { targetCleaned = true }, nil
+	}
+
+	draft, env, cleanup, err := prepareLocalHostCompatibilityProbe(
+		context.Background(),
+		config.DefaultConfig(),
+		&config.Paths{},
+		hostPatch{
+			Host:      "edge01.example",
+			HostName:  "edge01.example",
+			ProxyJump: "jump01",
+			Port:      22,
+		},
+		"target-user",
+		targetPassword,
+	)
+	if err != nil {
+		t.Fatalf("prepareLocalHostCompatibilityProbe: %v", err)
+	}
+	for _, key := range []string{askpass.ProxySocketEnv, askpass.ProxyNonceEnv, askpass.SocketEnv, askpass.NonceEnv} {
+		if envValue := localTestEnvValue(env, key); envValue == "" {
+			t.Fatalf("probe env missing %s: %#v", key, env)
+		}
+	}
+	transport := strings.Join(env, "\n") + "\n" + strings.Join(draft.Lines, "")
+	if strings.Contains(transport, "proxy-sentinel") || strings.Contains(transport, "target-sentinel") {
+		t.Fatalf("probe transport contains a password sentinel: %s", transport)
+	}
+	if _, ok := draft.Properties["proxyjump"]; ok {
+		t.Fatalf("probe draft retained ProxyJump: %#v", draft.Properties)
+	}
+	if proxyCommand := draft.Properties["proxycommand"]; !strings.Contains(proxyCommand, "edge01.example:22") || !strings.Contains(proxyCommand, "proxy-user@jump01.example") {
+		t.Fatalf("probe ProxyCommand = %q", proxyCommand)
+	}
+	if got := draft.Properties["user"]; got != "target-user" {
+		t.Fatalf("probe User = %q", got)
+	}
+
+	cleanup()
+	if !proxyCleaned || !targetCleaned {
+		t.Fatalf("probe cleanup proxy=%t target=%t", proxyCleaned, targetCleaned)
+	}
+}
+
+func localTestEnvValue(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
 }
 
 func TestLocalHostProbeEntryReplacesProxyJumpBeforeConnectionTest(t *testing.T) {

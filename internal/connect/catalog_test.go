@@ -224,6 +224,23 @@ func TestManagedProxyCommandQuotesConcreteForwardHost(t *testing.T) {
 	}
 }
 
+func TestManagedProxyCommandEscapesPercentTokensInEveryArgument(t *testing.T) {
+	command := formatManagedProxyCommand(&ResolvedHostData{
+		Hostname: "%h",
+		Username: "%r",
+		Port:     22,
+		SSH: config.SSHHostConfig{Options: config.SSHOptions{
+			"IdentityFile": config.NewSSHOptionString("/tmp/%d/id"),
+		}},
+	}, "%h.example", 22)
+
+	for _, want := range []string{"%%r@%%h", "%%h.example:22", "/tmp/%%d/id"} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("ProxyCommand did not escape %q: %q", want, command)
+		}
+	}
+}
+
 func TestCatalogLeavesUnmanagedAndNestedProxyJumpsNative(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Inventory.Provider = nil

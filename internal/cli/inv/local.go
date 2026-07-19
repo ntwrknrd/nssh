@@ -1296,6 +1296,37 @@ func localHostProbeProxy(ctx context.Context, cfg *config.Config, patch hostPatc
 	return command, proxyEnv, cleanup, nil
 }
 
+func prepareLocalHostCompatibilityProbe(
+	ctx context.Context,
+	cfg *config.Config,
+	paths *config.Paths,
+	patch hostPatch,
+	user string,
+	targetPassword *secret.Secret,
+) (*sshconfig.HostEntry, []string, func(), error) {
+	proxyCommand, proxyEnv, cleanupProxy, err := localHostProbeProxy(ctx, cfg, patch)
+	if err != nil {
+		return nil, nil, func() {}, err
+	}
+	cleanup := cleanupProxy
+	askpassEnv := append([]string{}, proxyEnv...)
+	if targetPassword != nil {
+		targetEnv, cleanupTarget, err := startLocalHostTargetAskpass(ctx, func(context.Context) (*secret.Secret, error) {
+			return targetPassword, nil
+		})
+		if err != nil {
+			cleanupProxy()
+			return nil, nil, func() {}, fmt.Errorf("start SSH target credential helper: %w", err)
+		}
+		cleanup = func() {
+			cleanupTarget()
+			cleanupProxy()
+		}
+		askpassEnv = append(askpassEnv, targetEnv...)
+	}
+	return localHostProbeEntry(paths, patch, proxyCommand, user), askpassEnv, cleanup, nil
+}
+
 func localHostProbeEntry(paths *config.Paths, patch hostPatch, proxyCommand, user string) *sshconfig.HostEntry {
 	draft := localHostEntryFromPatch(paths, patch)
 	if proxyCommand != "" {

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
@@ -445,23 +444,18 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 				if credentialSecret != nil {
 					defer credentialSecret.Destroy()
 				}
-				proxyCommand, proxyEnv, cleanupProxy, err := localHostProbeProxy(context.Background(), cfg, patch)
+				draft, askpassEnv, cleanupProbe, err := prepareLocalHostCompatibilityProbe(
+					context.Background(),
+					cfg,
+					paths,
+					patch,
+					localHostProbeUser(cfg, patch, credentialRecord),
+					credentialSecret,
+				)
 				if err != nil {
 					return err
 				}
-				defer cleanupProxy()
-				askpassEnv := append([]string{}, proxyEnv...)
-				if credentialSecret != nil {
-					targetEnv, cleanupTarget, err := startLocalHostTargetAskpass(context.Background(), func(context.Context) (*secret.Secret, error) {
-						return credentialSecret, nil
-					})
-					if err != nil {
-						return fmt.Errorf("start SSH target credential helper: %w", err)
-					}
-					defer cleanupTarget()
-					askpassEnv = append(askpassEnv, targetEnv...)
-				}
-				draft := localHostProbeEntry(paths, patch, proxyCommand, localHostProbeUser(cfg, patch, credentialRecord))
+				defer cleanupProbe()
 				result, err := runLocalHostCompatCheck(context.Background(), cfg, draft, 5, askpassEnv)
 				if err != nil {
 					return err

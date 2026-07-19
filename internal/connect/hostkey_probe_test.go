@@ -84,6 +84,10 @@ func TestWithoutAskpassEnvRemovesAskpassVariables(t *testing.T) {
 		"SSH_ASKPASS_REQUIRE=force",
 		"NSSH_ASKPASS_SOCKET=/tmp/sock",
 		"NSSH_ASKPASS_NONCE=secret",
+		"NSSH_PROXY_SSH_ASKPASS=/tmp/proxy-helper",
+		"NSSH_PROXY_ASKPASS_REQUIRE=force",
+		"NSSH_PROXY_ASKPASS_SOCKET=/tmp/proxy.sock",
+		"NSSH_PROXY_ASKPASS_NONCE=proxy-secret",
 	})
 	want := []string{"PATH=/bin"}
 	if !slices.Equal(got, want) {

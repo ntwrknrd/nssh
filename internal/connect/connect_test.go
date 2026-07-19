@@ -476,7 +476,7 @@ func TestCapturedManagedProxyAskpassKeepsSecretsOutOfTransportAndLogs(t *testing
 	var logs bytes.Buffer
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	checkMuxSessionFunc = func(context.Context, connector.MuxCheckRequest) (bool, bool) { return false, false }
-	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options) hostKeyProbeStatus {
+	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) hostKeyProbeStatus {
 		return hostKeyProbeClean
 	}
 	askpassHelperPathFunc = func() (string, error) { return "/tmp/nssh-askpass", nil }
@@ -552,8 +552,23 @@ func TestCapturedProxyCredentialRunsHostKeyPreparationWithoutTargetCredential(t 
 
 	var probeCalls atomic.Int32
 	checkMuxSessionFunc = func(context.Context, connector.MuxCheckRequest) (bool, bool) { return false, false }
-	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options) hostKeyProbeStatus {
+	hostKeyProbeFunc = func(ctx context.Context, _ *ResolvedHost, _ []string, _ *config.Config, _ Options, env []string) hostKeyProbeStatus {
 		probeCalls.Add(1)
+		if envValue(env, askpass.SocketEnv) != "" || envValue(env, askpass.NonceEnv) != "" {
+			t.Fatal("host-key probe received the target askpass channel")
+		}
+		proxySocket := envValue(env, askpass.ProxySocketEnv)
+		proxyNonce := envValue(env, askpass.ProxyNonceEnv)
+		if proxySocket == "" || proxyNonce == "" {
+			t.Fatalf("host-key probe missing proxy askpass channel: %#v", env)
+		}
+		got, err := askpass.RequestPassword(ctx, proxySocket, proxyNonce)
+		if err != nil {
+			t.Fatalf("request proxy password during host-key probe: %v", err)
+		}
+		if string(got) != "proxy-secret" {
+			t.Fatalf("host-key probe proxy password = %q", got)
+		}
 		return hostKeyProbeClean
 	}
 	askpassHelperPathFunc = func() (string, error) { return "/tmp/nssh-askpass", nil }
@@ -752,7 +767,7 @@ func TestRunResolvedRemoteCommandColdPersistentMuxStartsMuxBeforeCapturedCommand
 	checkMuxSessionFunc = func(context.Context, connector.MuxCheckRequest) (bool, bool) {
 		return false, true
 	}
-	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options) hostKeyProbeStatus {
+	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) hostKeyProbeStatus {
 		return hostKeyProbeNeedsPrompt
 	}
 	hostKeyPrepareFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, bool) (*connector.HostKeyPreparation, error) {
@@ -910,7 +925,7 @@ func TestRunResolvedRemoteCommandColdMuxStartsPrefetchWithoutWaiting(t *testing.
 	checkMuxSessionFunc = func(context.Context, connector.MuxCheckRequest) (bool, bool) {
 		return false, true
 	}
-	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options) hostKeyProbeStatus {
+	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) hostKeyProbeStatus {
 		return hostKeyProbeClean
 	}
 	startMuxSessionFunc = func(context.Context, connector.MuxStartRequest) error { return nil }
@@ -984,7 +999,7 @@ func TestRunResolvedRemoteCommandPreparesHostKeyBeforeAskpass(t *testing.T) {
 	checkMuxSessionFunc = func(context.Context, connector.MuxCheckRequest) (bool, bool) {
 		return false, true
 	}
-	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options) hostKeyProbeStatus {
+	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) hostKeyProbeStatus {
 		return hostKeyProbeNeedsPrompt
 	}
 	var prepareCalled atomic.Bool
@@ -1043,7 +1058,7 @@ func TestPrepareInteractiveHostKeyPassesChangedStatus(t *testing.T) {
 		hostKeyPrepareFunc = oldHostKeyPrepare
 	}()
 
-	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options) hostKeyProbeStatus {
+	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) hostKeyProbeStatus {
 		return hostKeyProbeChanged
 	}
 	var sawChanged bool
@@ -1052,7 +1067,7 @@ func TestPrepareInteractiveHostKeyPassesChangedStatus(t *testing.T) {
 		return nil, nil
 	}
 
-	_, err := prepareInteractiveHostKey(context.Background(), &ResolvedHost{Hostname: "edge01"}, nil, config.DefaultConfig(), Options{})
+	_, err := prepareInteractiveHostKey(context.Background(), &ResolvedHost{Hostname: "edge01"}, nil, config.DefaultConfig(), Options{}, nil)
 	if err != nil {
 		t.Fatalf("prepareInteractiveHostKey: %v", err)
 	}

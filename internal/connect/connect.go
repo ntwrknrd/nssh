@@ -251,11 +251,22 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 	}
 	defer destroyImmediateResolvedPasswords(resolved)
 	passwordResolvers := interactiveAskpassResolvers(resolved, passwordFuture, proxyPasswordFuture)
+	var askpassHandle *connectionAskpassHandle
+	if passwordResolvers.any() && !muxHot {
+		askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
+		var err error
+		askpassHandle, err = startConnectionAskpass(ctx, passwordResolvers)
+		askpassTimer.Emit()
+		if err != nil {
+			return err
+		}
+		defer askpassHandle.cleanup()
+	}
 	var hostKeyPrep *connector.HostKeyPreparation
 	if passwordResolvers.any() {
 		if !muxHot {
 			var err error
-			hostKeyPrep, err = prepareInteractiveHostKey(ctx, resolved, sshArgs, cfg, opts)
+			hostKeyPrep, err = prepareInteractiveHostKey(ctx, resolved, sshArgs, cfg, opts, proxyAskpassEnv(askpassHandle))
 			if err != nil {
 				return err
 			}
@@ -269,46 +280,22 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 	if !muxHot {
 		muxStartReq := muxStartRequest(resolved, req.SSHArgs, cfg, opts, nil)
 		if _, ok := connector.BuildMuxStartArgs(muxStartReq); ok {
-			muxAskpass, err := startMuxAskpass(ctx, passwordResolvers)
-			if err != nil {
-				return err
-			}
-			if muxAskpass != nil {
-				muxStartReq.Env = muxAskpass.env
+			if askpassHandle != nil {
+				muxStartReq.Env = askpassHandle.env
 			}
 
 			// Captured remote commands drain stdout/stderr and reap the foreground ssh process.
 			// Starting the persistent master as its own step keeps ControlPersist behavior
 			// independent of captured output pipe lifetime.
 			if err := startMuxSessionFunc(ctx, muxStartReq); err != nil {
-				if muxAskpass != nil {
-					muxAskpass.cleanup()
-				}
 				return err
-			}
-			if muxAskpass != nil {
-				muxAskpass.cleanup()
 			}
 			muxHot = true
 		}
 	}
 
-	var askpassHandle *connectionAskpassHandle
-	if passwordResolvers.any() && !muxHot {
-		askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
-		slog.Debug("setting up askpass", "host", resolved.Hostname, "password_future", passwordFuture != nil, "mux_hot", muxHot)
-		var err error
-		askpassHandle, err = startConnectionAskpass(ctx, passwordResolvers)
-		if err != nil {
-			askpassTimer.Emit()
-			return err
-		}
+	if askpassHandle != nil && !muxHot {
 		req.Env = append(req.Env, askpassHandle.env...)
-		slog.Debug("askpass setup complete", "host", resolved.Hostname)
-		askpassTimer.Emit()
-	}
-	if askpassHandle != nil {
-		defer askpassHandle.cleanup()
 	}
 
 	slog.Debug("starting captured ssh command", "host", req.Hostname, "has_askpass", len(req.Env) > 0)
@@ -453,6 +440,21 @@ func (h *connectionAskpassHandle) cleanup() {
 	}
 }
 
+func proxyAskpassEnv(handle *connectionAskpassHandle) []string {
+	if handle == nil {
+		return nil
+	}
+	var env []string
+	for _, entry := range handle.env {
+		key, _, _ := strings.Cut(entry, "=")
+		switch key {
+		case askpass.ProxyHelperEnv, askpass.ProxyRequireEnv, askpass.ProxySocketEnv, askpass.ProxyNonceEnv:
+			env = append(env, entry)
+		}
+	}
+	return env
+}
+
 func startConnectionAskpass(ctx context.Context, resolvers passwordResolvers) (*connectionAskpassHandle, error) {
 	if !resolvers.any() {
 		return nil, nil
@@ -478,12 +480,6 @@ func startConnectionAskpass(ctx context.Context, resolvers passwordResolvers) (*
 		handle.env = append(handle.env, env...)
 	}
 	return handle, nil
-}
-
-func startMuxAskpass(ctx context.Context, resolvers passwordResolvers) (*connectionAskpassHandle, error) {
-	askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
-	defer askpassTimer.Emit()
-	return startConnectionAskpass(ctx, resolvers)
 }
 
 func controlCommandRequest(resolved *ResolvedHost, command string, sshArgs []string, cfg *config.Config, opts Options) connector.ControlCommandRequest {
@@ -646,10 +642,21 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 	if passwordResolvers.any() && passwordFuture == nil {
 		muxHot, _ = checkMuxSessionFunc(ctx, muxCheckRequest(resolved, sshArgs, cfg, opts))
 	}
+	var askpassHandle *connectionAskpassHandle
+	if interactiveAskpassEnabled() && passwordResolvers.any() && !muxHot {
+		askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
+		var err error
+		askpassHandle, err = startConnectionAskpass(ctx, passwordResolvers)
+		askpassTimer.Emit()
+		if err != nil {
+			return connectionResult{Err: err}
+		}
+		defer askpassHandle.cleanup()
+	}
 	var hostKeyPrep *connector.HostKeyPreparation
 	if interactiveAskpassEnabled() && passwordResolvers.any() && !muxHot {
 		var err error
-		hostKeyPrep, err = prepareInteractiveHostKey(ctx, resolved, sshArgs, cfg, opts)
+		hostKeyPrep, err = prepareInteractiveHostKey(ctx, resolved, sshArgs, cfg, opts, proxyAskpassEnv(askpassHandle))
 		if err != nil {
 			return connectionResult{Err: err}
 		}
@@ -659,17 +666,7 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 		}
 	}
 	conn := newConnector(resolved, sshArgs, cfg, opts)
-	var askpassHandle *connectionAskpassHandle
-	if interactiveAskpassEnabled() && passwordResolvers.any() && !muxHot {
-		askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
-		var err error
-		askpassHandle, err = startConnectionAskpass(ctx, passwordResolvers)
-		if err != nil {
-			askpassTimer.Emit()
-			return connectionResult{Err: err}
-		}
-		askpassTimer.Emit()
-		defer askpassHandle.cleanup()
+	if askpassHandle != nil {
 		conn.SetEnv(askpassHandle.env)
 	}
 	connErr := conn.Run(ctx)
@@ -760,8 +757,8 @@ func destroyImmediateResolvedPasswords(resolved *ResolvedHost) {
 	destroyImmediateProxyPassword(resolved)
 }
 
-func prepareInteractiveHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options) (*connector.HostKeyPreparation, error) {
-	switch hostKeyProbeFunc(ctx, resolved, sshArgs, cfg, opts) {
+func prepareInteractiveHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options, proxyEnv []string) (*connector.HostKeyPreparation, error) {
+	switch hostKeyProbeFunc(ctx, resolved, sshArgs, cfg, opts, proxyEnv) {
 	case hostKeyProbeNeedsPrompt:
 		return hostKeyPrepareFunc(ctx, resolved, sshArgs, cfg, opts, false)
 	case hostKeyProbeChanged:
@@ -994,10 +991,21 @@ func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArg
 	if passwordResolvers.any() && passwordFuture == nil {
 		muxHot, _ = checkMuxSessionFunc(ctx, muxCheckRequest(retryResolved, sshArgs, cfg, opts))
 	}
+	var askpassHandle *connectionAskpassHandle
+	if interactiveAskpassEnabled() && passwordResolvers.any() && !muxHot {
+		askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
+		var err error
+		askpassHandle, err = startConnectionAskpass(ctx, passwordResolvers)
+		askpassTimer.Emit()
+		if err != nil {
+			return err
+		}
+		defer askpassHandle.cleanup()
+	}
 	var hostKeyPrep *connector.HostKeyPreparation
 	if interactiveAskpassEnabled() && passwordResolvers.any() && !muxHot {
 		var prepErr error
-		hostKeyPrep, prepErr = prepareInteractiveHostKey(ctx, retryResolved, sshArgs, cfg, opts)
+		hostKeyPrep, prepErr = prepareInteractiveHostKey(ctx, retryResolved, sshArgs, cfg, opts, proxyAskpassEnv(askpassHandle))
 		if prepErr != nil {
 			return prepErr
 		}
@@ -1007,17 +1015,7 @@ func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArg
 		}
 	}
 	conn := connector.NewConnector(resolved.Hostname, resolved.Username, retryPassword, sshArgs)
-	var askpassHandle *connectionAskpassHandle
-	if interactiveAskpassEnabled() && passwordResolvers.any() && !muxHot {
-		askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
-		var err error
-		askpassHandle, err = startConnectionAskpass(ctx, passwordResolvers)
-		if err != nil {
-			askpassTimer.Emit()
-			return err
-		}
-		askpassTimer.Emit()
-		defer askpassHandle.cleanup()
+	if askpassHandle != nil {
 		conn.SetEnv(askpassHandle.env)
 	}
 	conn.SetHostKeyPromptFunc(newHostKeyPromptFunc())
