@@ -204,3 +204,28 @@ func TestServerWithResolverWaitsForPassword(t *testing.T) {
 		t.Fatalf("ServeOnce: %v", err)
 	}
 }
+
+func TestServerProxyEnvUsesIsolatedNames(t *testing.T) {
+	password := secret.NewFromString("proxy-secret")
+	defer password.Destroy()
+	server, err := NewServer(password)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	entries := server.ProxyEnv("/tmp/nssh-askpass")
+	env := strings.Join(entries, "\n")
+	for _, want := range []string{ProxyHelperEnv, ProxyRequireEnv, ProxySocketEnv, ProxyNonceEnv} {
+		if !strings.Contains(env, want+"=") {
+			t.Fatalf("proxy env missing %s: %s", want, env)
+		}
+	}
+	for _, forbidden := range []string{"SSH_ASKPASS=", SocketEnv + "=", NonceEnv + "="} {
+		for _, entry := range entries {
+			if strings.HasPrefix(entry, forbidden) {
+				t.Fatalf("proxy env contains target channel %q: %s", forbidden, env)
+			}
+		}
+	}
+}

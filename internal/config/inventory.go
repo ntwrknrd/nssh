@@ -767,7 +767,7 @@ func applyAuth(res *InventoryAuthResolution, auth InventoryAuthConfig, source st
 		res.AuthMode = auth.Mode
 		res.AuthModeSource = source
 		res.Source = source
-		if auth.PasswordRef == "" {
+		if auth.Mode == AuthModeKey {
 			res.CredentialProvider = ""
 			res.PasswordRef = ""
 			res.PasswordSource = source

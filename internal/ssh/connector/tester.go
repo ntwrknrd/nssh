@@ -11,9 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/compat"
 )
 
@@ -21,15 +19,15 @@ import (
 type TestResult struct {
 	Success    bool   // Whether the connection/auth succeeded
 	ExitCode   int    // SSH exit code
-	Stderr     string // SSH verbose output (combined stdout/stderr from PTY)
+	Stderr     string // SSH verbose output (combined stdout/stderr)
 	AuthMethod string // Detected auth method from verbose output
 }
 
 // TestConfig configures the connection test.
 type TestConfig struct {
-	Timeout  time.Duration  // Connection timeout (default 10s)
-	Password *secret.Secret // Password for auth testing (nil = BatchMode)
-	Port     string         // SSH port (empty = use SSH config default)
+	Timeout time.Duration // Connection timeout (default 10s)
+	Port    string        // SSH port (empty = use SSH config default)
+	Env     []string      // Additional environment for isolated askpass channels
 	// UseSystemKnownHosts controls whether probes write to the user's real
 	// known_hosts file. Default false uses a temp file to avoid persistence.
 	UseSystemKnownHosts bool
@@ -42,11 +40,21 @@ type TestConfig struct {
 
 // buildTestSSHArgs builds SSH arguments for a probe and returns a cleanup
 // function for any temporary resources (e.g., temp known_hosts).
-func buildTestSSHArgs(hostname, username string, cfg TestConfig) ([]string, func(), error) {
-	cleanup := func() {}
+func buildTestSSHArgs(hostname, username string, cfg TestConfig) ([]string, string, func(), error) {
+	clientLog, err := os.CreateTemp("", "nssh-test-client-log-*")
+	if err != nil {
+		return nil, "", func() {}, fmt.Errorf("create SSH client log: %w", err)
+	}
+	clientLogPath := clientLog.Name()
+	if err := clientLog.Close(); err != nil {
+		_ = os.Remove(clientLogPath)
+		return nil, "", func() {}, fmt.Errorf("close SSH client log: %w", err)
+	}
+	cleanup := func() { _ = os.Remove(clientLogPath) }
 
 	args := []string{
 		"-vv",
+		"-E", clientLogPath,
 		"-o", fmt.Sprintf("ConnectTimeout=%d", int(cfg.Timeout.Seconds())),
 		"-o", "NumberOfPasswordPrompts=1",
 		"-o", "StrictHostKeyChecking=accept-new",
@@ -63,17 +71,22 @@ func buildTestSSHArgs(hostname, username string, cfg TestConfig) ([]string, func
 	if !cfg.UseSystemKnownHosts {
 		tmpFile, err := os.CreateTemp("", "nssh-test-known-hosts-*")
 		if err != nil {
-			return nil, cleanup, fmt.Errorf("create temp known_hosts: %w", err)
+			cleanup()
+			return nil, "", func() {}, fmt.Errorf("create temp known_hosts: %w", err)
 		}
 		_ = tmpFile.Close()
 		args = append(args,
 			"-o", "UserKnownHostsFile="+tmpFile.Name(),
 			"-o", "GlobalKnownHostsFile=/dev/null",
 		)
-		cleanup = func() { _ = os.Remove(tmpFile.Name()) }
+		cleanupClientLog := cleanup
+		cleanup = func() {
+			_ = os.Remove(tmpFile.Name())
+			cleanupClientLog()
+		}
 	}
 
-	if cfg.Password == nil {
+	if !hasTestEnv(cfg.Env, "SSH_ASKPASS") {
 		args = append(args, "-o", "BatchMode=yes")
 	} else {
 		args = append(args, "-o", "PreferredAuthentications=password,keyboard-interactive,publickey")
@@ -90,7 +103,17 @@ func buildTestSSHArgs(hostname, username string, cfg TestConfig) ([]string, func
 	}
 	args = append(args, target, "--", "exit")
 
-	return args, cleanup, nil
+	return args, clientLogPath, cleanup, nil
+}
+
+func hasTestEnv(env []string, name string) bool {
+	prefix := name + "="
+	for _, entry := range env {
+		if entry == name || strings.HasPrefix(entry, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasSSHOptions(opts config.SSHHostConfig) bool {
@@ -114,14 +137,14 @@ func diagnosticSSHOptions(opts config.SSHHostConfig) config.SSHHostConfig {
 
 // TestConnection runs a non-interactive SSH connection test.
 // It uses -vv for verbose output to capture negotiation details.
-// If password is nil, uses BatchMode (compat-only testing).
-// If password is provided, injects it via PTY (full auth testing).
+// Without a target askpass environment it uses BatchMode (compat-only testing).
+// With askpass it performs a full authentication test without trusting PTY text.
 func TestConnection(ctx context.Context, hostname, username string, cfg TestConfig) (*TestResult, error) {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 10 * time.Second
 	}
 
-	args, cleanup, err := buildTestSSHArgs(hostname, username, cfg)
+	args, clientLogPath, cleanup, err := buildTestSSHArgs(hostname, username, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -131,15 +154,16 @@ func TestConnection(ctx context.Context, hostname, username string, cfg TestConf
 	testCtx, cancel := context.WithTimeout(ctx, cfg.Timeout+5*time.Second)
 	defer cancel()
 
-	if cfg.Password != nil {
-		return testWithPassword(testCtx, args, cfg.Password)
-	}
-	return testBatchMode(testCtx, args), nil
+	return testNonInteractive(testCtx, args, cfg.Env, clientLogPath), nil
 }
 
-// testBatchMode runs SSH in batch mode (no password injection).
-func testBatchMode(ctx context.Context, args []string) *TestResult {
+// testNonInteractive runs SSH without a PTY. Authentication is either batch
+// mode or isolated askpass, as selected by buildTestSSHArgs.
+func testNonInteractive(ctx context.Context, args, env []string, clientLogPath string) *TestResult {
 	cmd := exec.CommandContext(ctx, "ssh", args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 
 	// Capture combined output
 	var output bytes.Buffer
@@ -147,132 +171,48 @@ func testBatchMode(ctx context.Context, args []string) *TestResult {
 	cmd.Stderr = &output
 
 	err := cmd.Run()
-	stderr := output.String()
+	clientLog, _ := os.ReadFile(clientLogPath)
+	return connectionTestResult(err, ctx.Err(), string(clientLog), output.String())
+}
+
+func connectionTestResult(runErr, contextErr error, clientLog, remoteOutput string) *TestResult {
+	stderr := strings.TrimSuffix(clientLog, "\n")
+	if stderr != "" && remoteOutput != "" {
+		stderr += "\n"
+	}
+	stderr += remoteOutput
 
 	result := &TestResult{
 		Stderr:     stderr,
-		AuthMethod: compat.ExtractAuthMethod(stderr),
+		AuthMethod: compat.ExtractAuthMethod(clientLog),
 	}
 
-	if err == nil {
+	if runErr == nil {
 		result.Success = true
 		result.ExitCode = 0
 		return result
 	}
 
 	// Extract exit code
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	if exitErr, ok := runErr.(*exec.ExitError); ok {
 		result.ExitCode = exitErr.ExitCode()
 	} else {
 		result.ExitCode = 1
 	}
 
 	// Check for timeout
-	if ctx.Err() == context.DeadlineExceeded || strings.Contains(strings.ToLower(stderr), "timed out") {
+	if contextErr == context.DeadlineExceeded || strings.Contains(strings.ToLower(stderr), "timed out") {
 		result.ExitCode = 124
 		return result
 	}
 
 	// Check if auth actually succeeded despite non-zero exit
 	// (remote may reject "exit" command on some devices)
-	if compat.DidAuthSucceed(stderr) {
+	if compat.DidAuthSucceed(clientLog) {
 		result.Success = true
 		result.Stderr = "[nssh] Remote CLI rejected probe command 'exit'; treating connection as successful.\n" + stderr
 		return result
 	}
 
 	return result
-}
-
-// testWithPassword runs SSH via PTY with password injection.
-func testWithPassword(ctx context.Context, args []string, password *secret.Secret) (*TestResult, error) {
-	cmd := exec.CommandContext(ctx, "ssh", args...)
-
-	// Start with PTY
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		return nil, fmt.Errorf("pty start: %w", err)
-	}
-	defer func() { _ = ptmx.Close() }()
-
-	// Read output with password injection
-	var output bytes.Buffer
-	ringBuf := NewRingBuffer(DefaultRingBufferSize)
-	passwordSent := false
-	done := make(chan error, 1)
-
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := ptmx.Read(buf)
-			if err != nil {
-				done <- err
-				return
-			}
-			output.Write(buf[:n])
-			ringBuf.Write(buf[:n])
-
-			// Check for password prompt and inject if needed
-			if !passwordSent && matchPasswordPrompt(ringBuf.LinearBytes()) {
-				if err := injectTestPassword(ptmx, password); err == nil {
-					passwordSent = true
-				}
-			}
-		}
-	}()
-
-	// Wait for completion or context cancellation
-	var waitErr error
-	select {
-	case <-ctx.Done():
-		_ = cmd.Process.Kill()
-		waitErr = ctx.Err()
-	case err := <-done:
-		if err != nil {
-			// PTY read error usually means process exited
-			_ = err
-		}
-		waitErr = cmd.Wait()
-	}
-
-	stderr := output.String()
-	result := &TestResult{
-		Stderr:     stderr,
-		AuthMethod: compat.ExtractAuthMethod(stderr),
-	}
-
-	if waitErr == nil {
-		result.Success = true
-		result.ExitCode = 0
-		return result, nil
-	}
-
-	// Extract exit code
-	if exitErr, ok := waitErr.(*exec.ExitError); ok {
-		result.ExitCode = exitErr.ExitCode()
-	} else if ctx.Err() == context.DeadlineExceeded {
-		result.ExitCode = 124
-	} else {
-		result.ExitCode = 1
-	}
-
-	// Check if auth succeeded despite non-zero exit
-	if compat.DidAuthSucceed(stderr) {
-		result.Success = true
-		result.Stderr = "[nssh] Remote CLI rejected probe command 'exit'; treating connection as successful.\n" + stderr
-		return result, nil
-	}
-
-	return result, nil
-}
-
-// injectTestPassword writes the password to the PTY.
-func injectTestPassword(ptmx *os.File, password *secret.Secret) error {
-	return password.Use(func(pw []byte) error {
-		if _, err := ptmx.Write(pw); err != nil {
-			return err
-		}
-		_, err := ptmx.Write([]byte{'\n'})
-		return err
-	})
 }

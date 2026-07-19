@@ -17,8 +17,12 @@ import (
 )
 
 const (
-	SocketEnv = "NSSH_ASKPASS_SOCKET"
-	NonceEnv  = "NSSH_ASKPASS_NONCE"
+	SocketEnv       = "NSSH_ASKPASS_SOCKET"
+	NonceEnv        = "NSSH_ASKPASS_NONCE"
+	ProxyHelperEnv  = "NSSH_PROXY_SSH_ASKPASS"
+	ProxyRequireEnv = "NSSH_PROXY_ASKPASS_REQUIRE"
+	ProxySocketEnv  = "NSSH_PROXY_ASKPASS_SOCKET"
+	ProxyNonceEnv   = "NSSH_PROXY_ASKPASS_NONCE"
 )
 
 type Server struct {
@@ -92,6 +96,17 @@ func (s *Server) Env(helper string) []string {
 		"DISPLAY=nssh-askpass",
 		SocketEnv + "=" + s.socketPath,
 		NonceEnv + "=" + s.nonce,
+	}
+}
+
+// ProxyEnv exposes an isolated askpass channel for the managed ProxyCommand.
+// The proxy command maps these values onto its own SSH_ASKPASS environment.
+func (s *Server) ProxyEnv(helper string) []string {
+	return []string{
+		ProxyHelperEnv + "=" + helper,
+		ProxyRequireEnv + "=force",
+		ProxySocketEnv + "=" + s.socketPath,
+		ProxyNonceEnv + "=" + s.nonce,
 	}
 }
 

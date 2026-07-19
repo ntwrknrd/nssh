@@ -91,6 +91,204 @@ func TestCatalogAllowsLocalHostWithoutGroup(t *testing.T) {
 	}
 }
 
+func TestCatalogResolvesLocalInventoryProxyAfterCatalogBuild(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type: config.ProviderLocal,
+			Groups: map[string]config.GroupConfig{
+				"custcbb": {},
+			},
+			Hosts: map[string]config.InventoryHostConfig{
+				"810-neteng01.custcbb.local": {
+					Group:   "custcbb",
+					Aliases: []string{"810-neteng01"},
+					Auth:    config.InventoryAuthConfig{Mode: config.AuthModeKey, Username: "netops"},
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"IdentityFile": config.NewSSHOptionString("~/.ssh/netops.pub"),
+					}},
+				},
+				"pla-ts01.custcbb.local": {
+					Group: "custcbb",
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"ProxyJump": config.NewSSHOptionString("ops@810-neteng01:2200"),
+					}},
+				},
+			},
+		},
+	}
+
+	cat := buildCatalogForTest(t, cfg, nil)
+	target, ok := cat.Find("pla-ts01")
+	if !ok {
+		t.Fatal("Find(pla-ts01) failed")
+	}
+	if target.ManagedProxy == nil {
+		t.Fatal("target has no managed proxy")
+	}
+	if !hasSSHOption(target.SSH.Options, "ProxyJump") || hasSSHOption(target.SSH.Options, "ProxyCommand") {
+		t.Fatalf("catalog should retain native ProxyJump until credential resolution: %#v", target.SSH.Options)
+	}
+	if target.ManagedProxy.Username != "ops" || target.ManagedProxy.Port != 2200 {
+		t.Fatalf("managed proxy override = user %q port %d", target.ManagedProxy.Username, target.ManagedProxy.Port)
+	}
+	resolved, err := resolveCatalogHostForConnect("pla-ts01", "", cfg, target)
+	if err != nil {
+		t.Fatalf("resolveCatalogHostForConnect: %v", err)
+	}
+	if hasSSHOption(resolved.SSH.Options, "ProxyJump") {
+		t.Fatalf("resolved target retained ProxyJump: %#v", resolved.SSH.Options)
+	}
+	command := resolved.SSH.Options["ProxyCommand"].StringValue()
+	for _, want := range []string{"IdentityFile=~/.ssh/netops.pub", "-W pla-ts01.custcbb.local:22", "ops@810-neteng01.custcbb.local:2200"} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("ProxyCommand = %q, want %q", command, want)
+		}
+	}
+
+	proxy, ok := cat.Find("810-neteng01")
+	if !ok {
+		t.Fatal("Find(810-neteng01) failed")
+	}
+	if proxy.Username != "netops" || proxy.Port != 22 {
+		t.Fatalf("direct proxy mutated by target override: user=%q port=%d", proxy.Username, proxy.Port)
+	}
+}
+
+func TestCatalogManagedProxyResolutionIsProviderStateOrderIndependent(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		"targets": {Type: config.ProviderNetBox},
+		"proxies": {Type: config.ProviderNetBox, Auth: config.InventoryAuthConfig{Mode: config.AuthModeKey, Username: "netops"}},
+	}
+	targetState := &inventory.ProviderState{
+		Provider: "targets",
+		Type:     config.ProviderNetBox,
+		Objects: map[string]*inventory.ProviderHost{
+			"edge01": {Host: "edge01.example", HostName: "edge01.example", Patterns: []string{"edge01"}, ProxyJump: "ops@jump01.example:2200"},
+		},
+	}
+	proxyState := &inventory.ProviderState{
+		Provider: "proxies",
+		Type:     config.ProviderNetBox,
+		Objects: map[string]*inventory.ProviderHost{
+			"jump01": {Host: "jump01.example", HostName: "jump01.example", Patterns: []string{"jump01"}, Port: 22},
+		},
+	}
+
+	for _, tc := range []struct {
+		name   string
+		states []*inventory.ProviderState
+	}{
+		{name: "target before proxy", states: []*inventory.ProviderState{targetState, proxyState}},
+		{name: "proxy before target", states: []*inventory.ProviderState{proxyState, targetState}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cat := buildCatalogForTest(t, cfg, tc.states)
+			target, ok := cat.Find("edge01")
+			if !ok || target.ManagedProxy == nil {
+				t.Fatalf("managed target = %#v found=%v", target, ok)
+			}
+			resolved, err := resolveCatalogHostForConnect("edge01", "", cfg, target)
+			if err != nil {
+				t.Fatalf("resolveCatalogHostForConnect: %v", err)
+			}
+			if command := resolved.SSH.Options["ProxyCommand"].StringValue(); !strings.Contains(command, "ops@jump01.example:2200") {
+				t.Fatalf("ProxyCommand = %q", command)
+			}
+			proxy, ok := cat.Find("jump01")
+			if !ok || proxy.Username != "netops" || proxy.Port != 22 {
+				t.Fatalf("direct proxy mutated: %#v found=%v", proxy, ok)
+			}
+		})
+	}
+}
+
+func TestManagedProxyCommandQuotesConcreteForwardHost(t *testing.T) {
+	command := formatManagedProxyCommand(&ResolvedHostData{
+		Hostname: "jump01.example",
+		Username: "proxy-user",
+		Port:     22,
+	}, "edge01.example; touch /tmp/nssh-pwned", 2222)
+
+	if strings.Contains(command, "%h") || strings.Contains(command, "%p") {
+		t.Fatalf("ProxyCommand retained unsafe token expansion: %q", command)
+	}
+	if !strings.Contains(command, `-W 'edge01.example; touch /tmp/nssh-pwned:2222'`) {
+		t.Fatalf("ProxyCommand did not quote concrete target: %q", command)
+	}
+	if !strings.Contains(command, `SSH_ASKPASS_REQUIRE="${NSSH_PROXY_ASKPASS_REQUIRE:-never}"`) {
+		t.Fatalf("ProxyCommand does not preserve manual proxy password fallback: %q", command)
+	}
+}
+
+func TestManagedProxyCommandEscapesPercentTokensInEveryArgument(t *testing.T) {
+	command := formatManagedProxyCommand(&ResolvedHostData{
+		Hostname: "%h",
+		Username: "%r",
+		Port:     22,
+		SSH: config.SSHHostConfig{Options: config.SSHOptions{
+			"IdentityFile": config.NewSSHOptionString("/tmp/%d/id"),
+		}},
+	}, "%h.example", 22)
+
+	for _, want := range []string{"%%r@%%h", "%%h.example:22", "/tmp/%%d/id"} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("ProxyCommand did not escape %q: %q", want, command)
+		}
+	}
+}
+
+func TestCatalogLeavesUnmanagedAndNestedProxyJumpsNative(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type:   config.ProviderLocal,
+			Groups: map[string]config.GroupConfig{"lab": {}},
+			Hosts: map[string]config.InventoryHostConfig{
+				"nested-proxy": {
+					Group: "lab",
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"ProxyJump": config.NewSSHOptionString("outer-proxy"),
+					}},
+				},
+				"nested-target": {
+					Group: "lab",
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"ProxyJump": config.NewSSHOptionString("nested-proxy"),
+					}},
+				},
+				"multi-target": {
+					Group: "lab",
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"ProxyJump": config.NewSSHOptionString("jump-a,jump-b"),
+					}},
+				},
+			},
+		},
+	}
+
+	cat := buildCatalogForTest(t, cfg, nil)
+	for host, want := range map[string]string{
+		"nested-target": "nested-proxy",
+		"multi-target":  "jump-a,jump-b",
+	} {
+		got, ok := cat.Find(host)
+		if !ok {
+			t.Fatalf("Find(%s) failed", host)
+		}
+		if got.ManagedProxy != nil {
+			t.Fatalf("%s unexpectedly managed proxy %#v", host, got.ManagedProxy)
+		}
+		if value := got.SSH.Options["ProxyJump"].StringValue(); value != want {
+			t.Fatalf("%s ProxyJump = %q, want %q", host, value, want)
+		}
+	}
+}
+
 func TestCatalogRejectsUnknownLocalHostGroup(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Inventory.Provider = nil
@@ -475,15 +673,19 @@ func TestCatalogCarriesProviderStateProxyJump(t *testing.T) {
 	if !ok {
 		t.Fatalf("Find(clab-dfz-core01) failed")
 	}
-	if hasSSHOption(host.SSH.Options, "ProxyJump") {
-		t.Fatalf("ProxyJump should be replaced by managed ProxyCommand: %#v", host.SSH.Options)
+	if !hasSSHOption(host.SSH.Options, "ProxyJump") || host.ManagedProxy == nil {
+		t.Fatalf("catalog did not retain and resolve ProxyJump: %#v", host.SSH.Options)
 	}
-	got := host.SSH.Options["ProxyCommand"].StringValue()
+	resolved, err := resolveCatalogHostForConnect("clab-dfz-core01", "", cfg, host)
+	if err != nil {
+		t.Fatalf("resolveCatalogHostForConnect: %v", err)
+	}
+	got := resolved.SSH.Options["ProxyCommand"].StringValue()
 	for _, want := range []string{
 		"ssh -F none",
 		"ControlPath=~/.ssh/sockets/%%r@%%h:%%p",
 		"IdentityFile=~/.ssh/ed25519-1Password-Expedient.pub",
-		"-W %h:%p",
+		"-W 172.20.20.13:22",
 		"nre@nre-netlab01.custcbb.local",
 	} {
 		if !strings.Contains(got, want) {

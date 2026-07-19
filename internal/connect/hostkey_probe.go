@@ -23,7 +23,7 @@ const (
 	hostKeyProbeInconclusive
 )
 
-func probeInteractiveHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options) hostKeyProbeStatus {
+func probeInteractiveHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options, proxyEnv []string) hostKeyProbeStatus {
 	args := buildHostKeyProbeArgs(resolved, sshArgs, cfg, opts)
 	timeout := 10 * time.Second
 	if cfg != nil && cfg.SSH.Connection.Timeout.Duration() > 0 {
@@ -34,7 +34,7 @@ func probeInteractiveHostKey(ctx context.Context, resolved *ResolvedHost, sshArg
 
 	slog.Debug("probing host key", "host", resolved.Hostname, "argv", append([]string{"ssh"}, args...))
 	cmd := exec.CommandContext(probeCtx, "ssh", args...)
-	cmd.Env = withoutAskpassEnv(os.Environ())
+	cmd.Env = append(withoutAskpassEnv(os.Environ()), proxyEnv...)
 	output, _ := cmd.CombinedOutput()
 	status := classifyHostKeyProbeOutput(output)
 	slog.Debug("host key probe completed", "host", resolved.Hostname, "status", status.String())
@@ -100,7 +100,8 @@ func withoutAskpassEnv(env []string) []string {
 	for _, item := range env {
 		key, _, _ := strings.Cut(item, "=")
 		switch key {
-		case "SSH_ASKPASS", "SSH_ASKPASS_REQUIRE", "NSSH_ASKPASS_SOCKET", "NSSH_ASKPASS_NONCE":
+		case "SSH_ASKPASS", "SSH_ASKPASS_REQUIRE", "NSSH_ASKPASS_SOCKET", "NSSH_ASKPASS_NONCE",
+			"NSSH_PROXY_SSH_ASKPASS", "NSSH_PROXY_ASKPASS_REQUIRE", "NSSH_PROXY_ASKPASS_SOCKET", "NSSH_PROXY_ASKPASS_NONCE":
 			continue
 		default:
 			filtered = append(filtered, item)

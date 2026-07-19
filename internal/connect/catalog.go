@@ -16,17 +16,18 @@ type HostCatalog struct {
 }
 
 type ResolvedHostData struct {
-	Query     string
-	Canonical string
-	Hostname  string
-	Aliases   []string
-	Provider  string
-	Group     string
-	Port      int
-	Username  string
-	Auth      config.InventoryAuthConfig
-	SSH       config.SSHHostConfig
-	Highlight config.HighlightConfig
+	Query        string
+	Canonical    string
+	Hostname     string
+	Aliases      []string
+	Provider     string
+	Group        string
+	Port         int
+	Username     string
+	Auth         config.InventoryAuthConfig
+	SSH          config.SSHHostConfig
+	Highlight    config.HighlightConfig
+	ManagedProxy *ResolvedHostData
 }
 
 func BuildHostCatalog(cfg *config.Config) (*HostCatalog, error) {
@@ -106,6 +107,7 @@ func buildHostCatalog(cfg *config.Config, states []*inventory.ProviderState) (*H
 		}
 	}
 	providerTimer.Emit()
+	cat.resolveManagedProxies()
 	return cat, nil
 }
 
@@ -166,7 +168,7 @@ func resolvedHostFromState(cfg *config.Config, state *inventory.ProviderState, p
 	aliases := slices.Clone(host.Patterns)
 	aliases = appendUnique(aliases, overlay.Aliases...)
 	ssh := mergeProviderStateSSH(cfg, state, provider, group, overlay.SSH)
-	ssh = applyProviderStateSSH(ssh, host, state, cat)
+	ssh = applyProviderStateSSH(ssh, host, state)
 	ssh = applyAuthModeSSH(ssh, auth.AuthMode)
 	highlight := mergeCatalogHighlight(cfg, provider, group, overlay.Highlight)
 	canonical := firstNonEmpty(host.Host, firstString(aliases), host.HostName)
@@ -264,7 +266,7 @@ func mergeCatalogHighlight(cfg *config.Config, provider config.InventoryProvider
 	return config.MergeHighlight(highlight, host)
 }
 
-func applyProviderStateSSH(ssh config.SSHHostConfig, host *inventory.ProviderHost, state *inventory.ProviderState, cat *HostCatalog) config.SSHHostConfig {
+func applyProviderStateSSH(ssh config.SSHHostConfig, host *inventory.ProviderHost, state *inventory.ProviderState) config.SSHHostConfig {
 	if state != nil && state.Type == config.ProviderContainerlab && !state.StrictHostKeyChecking {
 		if ssh.Options == nil {
 			ssh.Options = make(config.SSHOptions)
@@ -278,22 +280,40 @@ func applyProviderStateSSH(ssh config.SSHHostConfig, host *inventory.ProviderHos
 	if host == nil || strings.TrimSpace(host.ProxyJump) == "" || hasSSHOption(ssh.Options, "ProxyJump") || hasSSHOption(ssh.Options, "ProxyCommand") {
 		return ssh
 	}
-	proxyJump := strings.TrimSpace(host.ProxyJump)
-	if jump, ok := cat.findProxyJumpHost(proxyJump); ok {
-		if command := formatManagedProxyCommand(jump); command != "" {
-			if ssh.Options == nil {
-				ssh.Options = make(config.SSHOptions)
-			}
-			ssh.Options["ProxyCommand"] = config.NewSSHOptionString(command)
-			return ssh
-		}
-		proxyJump = formatProxyJumpTarget(jump)
-	}
 	if ssh.Options == nil {
 		ssh.Options = make(config.SSHOptions)
 	}
-	ssh.Options["ProxyJump"] = config.NewSSHOptionString(proxyJump)
+	ssh.Options["ProxyJump"] = config.NewSSHOptionString(strings.TrimSpace(host.ProxyJump))
 	return ssh
+}
+
+func (c *HostCatalog) resolveManagedProxies() {
+	if c == nil {
+		return
+	}
+	for _, host := range c.hosts {
+		if host == nil || hasSSHOption(host.SSH.Options, "ProxyCommand") {
+			continue
+		}
+		_, target, ok := sshOption(host.SSH.Options, "ProxyJump")
+		if !ok || strings.TrimSpace(target) == "" || strings.Contains(target, ",") {
+			continue
+		}
+		jump, ok := c.findProxyJumpHost(target)
+		if !ok || hasSSHOption(jump.SSH.Options, "ProxyJump") || hasSSHOption(jump.SSH.Options, "ProxyCommand") {
+			continue
+		}
+		host.ManagedProxy = jump
+	}
+}
+
+func sshOption(options config.SSHOptions, name string) (string, string, bool) {
+	for key, value := range options {
+		if strings.EqualFold(key, name) {
+			return key, value.StringValue(), true
+		}
+	}
+	return "", "", false
 }
 
 func (c *HostCatalog) findProxyJumpHost(target string) (*ResolvedHostData, bool) {
@@ -309,6 +329,10 @@ func (c *HostCatalog) findProxyJumpHost(target string) (*ResolvedHostData, bool)
 	if !ok {
 		return nil, false
 	}
+	clone := *jump
+	clone.Aliases = slices.Clone(jump.Aliases)
+	clone.SSH = config.MergeSSH(config.SSHHostConfig{}, jump.SSH)
+	jump = &clone
 	if user != "" {
 		jump.Username = user
 	}
@@ -355,22 +379,55 @@ func setSSHOptionIfAbsent(options config.SSHOptions, key string, value config.SS
 	}
 }
 
-func formatManagedProxyCommand(host *ResolvedHostData) string {
+func formatManagedProxyCommand(host *ResolvedHostData, forwardHost string, forwardPort int) string {
 	if host == nil {
 		return ""
 	}
 	target := formatProxyJumpTarget(host)
-	if target == "" {
+	forward := formatProxyForwardTarget(forwardHost, forwardPort)
+	if target == "" || forward == "" {
 		return ""
 	}
 	args := connector.RenderSSHOptions(host.SSH, 0)
 	argv := make([]string, 0, len(args)+4)
 	argv = append(argv, "ssh")
-	for _, arg := range args {
-		argv = append(argv, escapeProxyCommandTokenExpansion(arg))
+	argv = append(argv, args...)
+	argv = append(argv, "-W", forward, target)
+	for i := range argv {
+		argv[i] = escapeProxyCommandTokenExpansion(argv[i])
 	}
-	argv = append(argv, "-W", "%h:%p", target)
-	return shellJoin(argv)
+	return managedProxyAskpassPrefix + shellJoin(argv)
+}
+
+const managedProxyAskpassPrefix = `env SSH_ASKPASS="${NSSH_PROXY_SSH_ASKPASS:-}" SSH_ASKPASS_REQUIRE="${NSSH_PROXY_ASKPASS_REQUIRE:-never}" DISPLAY=nssh-askpass NSSH_ASKPASS_SOCKET="${NSSH_PROXY_ASKPASS_SOCKET:-}" NSSH_ASKPASS_NONCE="${NSSH_PROXY_ASKPASS_NONCE:-}" `
+
+// RenderManagedProxyCommand renders an inventory-resolved host as an OpenSSH
+// ProxyCommand. Nested proxy configurations remain OpenSSH-native.
+func RenderManagedProxyCommand(host *ResolvedHost, forwardHost string, forwardPort int) string {
+	if host == nil || hasSSHOption(host.SSH.Options, "ProxyJump") || hasSSHOption(host.SSH.Options, "ProxyCommand") {
+		return ""
+	}
+	return formatManagedProxyCommand(&ResolvedHostData{
+		Canonical: host.Canonical,
+		Hostname:  host.Hostname,
+		Port:      host.Port,
+		Username:  host.Username,
+		SSH:       host.SSH,
+	}, forwardHost, forwardPort)
+}
+
+func formatProxyForwardTarget(host string, port int) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	if port == 0 {
+		port = 22
+	}
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		host = "[" + host + "]"
+	}
+	return fmt.Sprintf("%s:%d", host, port)
 }
 
 func formatProxyJumpTarget(host *ResolvedHostData) string {

@@ -444,12 +444,15 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 				if credentialSecret != nil {
 					defer credentialSecret.Destroy()
 				}
-				draft := localHostEntryFromPatch(paths, patch)
-				if user := localHostProbeUser(cfg, patch, credentialRecord); user != "" {
-					upsertDirective(draft, "User", user)
-					draft.Properties["user"] = user
-				}
-				result, err := runLocalHostCompatCheck(context.Background(), cfg, draft, 5, credentialSecret)
+				result, err := runPreparedLocalHostCompatibilityProbe(
+					context.Background(),
+					cfg,
+					paths,
+					patch,
+					localHostProbeUser(cfg, patch, credentialRecord),
+					credentialSecret,
+					5,
+				)
 				if err != nil {
 					return err
 				}

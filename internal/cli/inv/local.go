@@ -14,9 +14,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/connect"
 	"github.com/ntwrknrd/nssh/internal/credential"
 	"github.com/ntwrknrd/nssh/internal/inventory"
 	"github.com/ntwrknrd/nssh/internal/secret"
@@ -98,6 +100,8 @@ const (
 
 var errPromptBack = errors.New("prompt back")
 var runLocalHostCompatCheck = testLocalHostCompatibility
+var startLocalHostProxyAskpass = connect.StartProxyAskpassEnvironment
+var startLocalHostTargetAskpass = connect.StartTargetAskpassEnvironment
 var promptNewInventoryGroupName = func() (string, error) {
 	return ui.InputWithDefault("New local group", "")
 }
@@ -117,6 +121,8 @@ type credentialRegistry interface {
 var newCredentialRegistry = func(cfg *config.Config) (credentialRegistry, error) {
 	return credential.NewRegistry(cfg)
 }
+
+var resolveLocalHostProxy = connect.ResolveHostForConnect
 
 func upsertLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, patch hostPatch) error {
 	return upsertLocalHostYAML(cfg, paths, patch)
@@ -1133,7 +1139,7 @@ func testLocalHostCompatibility(
 	cfg *config.Config,
 	host *sshconfig.HostEntry,
 	maxIterations int,
-	password *secret.Secret,
+	askpassEnv []string,
 ) (*localHostCompatResult, error) {
 	if maxIterations <= 0 {
 		maxIterations = 5
@@ -1165,9 +1171,9 @@ func testLocalHostCompatibility(
 		ui.Info("Testing connection to %s (%d/%d)...", testHost.Host, iteration, maxIterations)
 		testResult, err := localHostConnectionTest(ctx, testHost, connector.TestConfig{
 			Timeout:    timeout,
-			Password:   password,
 			ConfigFile: tmpPath,
 			Port:       testHost.Port(),
+			Env:        askpassEnv,
 			// Host add is enrollment, not a read-only compatibility probe. Keep the
 			// accepted key so the first normal connection does not prompt again.
 			UseSystemKnownHosts: true,
@@ -1226,6 +1232,131 @@ func testLocalHostCompatibility(
 	}
 	result.StoppedReason = "max_iterations_reached"
 	return result, nil
+}
+
+func localHostProbeProxy(ctx context.Context, cfg *config.Config, patch hostPatch) (string, []string, func(), error) {
+	if strings.TrimSpace(patch.ProxyJump) == "" {
+		return "", nil, func() {}, nil
+	}
+	resolved, err := resolveLocalHostProxy(patch.ProxyJump, "", cfg)
+	if err != nil {
+		return "", nil, func() {}, fmt.Errorf("resolve SSH proxy: %w", err)
+	}
+	resolved.SSH = config.MergeSSH(config.SSHHostConfig{}, resolved.SSH)
+	if resolved.SSH.Options == nil {
+		resolved.SSH.Options = make(config.SSHOptions)
+	}
+
+	var proxyEnv []string
+	cleanup := func() {}
+	if resolved.AuthMode == config.AuthModePassword {
+		if resolved.Credential == nil || (resolved.Credential.Password == nil && resolved.Credential.PasswordResolver == nil) {
+			return "", nil, cleanup, fmt.Errorf("SSH proxy %q uses password authentication but has no configured credential", patch.ProxyJump)
+		}
+		var once sync.Once
+		proxyPassword := resolved.Credential.Password
+		var proxyErr error
+		resolvePassword := func(ctx context.Context) (*secret.Secret, error) {
+			once.Do(func() {
+				if proxyPassword == nil {
+					proxyPassword, proxyErr = resolved.Credential.PasswordResolver(ctx)
+				}
+			})
+			return proxyPassword, proxyErr
+		}
+		var cleanupAskpass func()
+		proxyEnv, cleanupAskpass, err = startLocalHostProxyAskpass(ctx, resolvePassword)
+		if err != nil {
+			if proxyPassword != nil {
+				proxyPassword.Destroy()
+			}
+			return "", nil, cleanup, fmt.Errorf("start SSH proxy credential helper: %w", err)
+		}
+		cleanup = func() {
+			cleanupAskpass()
+			if proxyPassword != nil {
+				proxyPassword.Destroy()
+				proxyPassword = nil
+			}
+		}
+	} else {
+		// A key-authenticated proxy must not fall back to a PTY password prompt
+		// during a target-password probe; that would receive the target secret.
+		resolved.SSH.Options["BatchMode"] = config.NewSSHOptionString("yes")
+	}
+	forwardHost := strings.TrimSpace(patch.HostName)
+	if forwardHost == "" {
+		forwardHost = strings.TrimSpace(patch.Host)
+	}
+	command := connect.RenderManagedProxyCommand(resolved, forwardHost, patch.Port)
+	if command == "" {
+		cleanup()
+		return "", nil, func() {}, fmt.Errorf("SSH proxy %q cannot be rendered as a managed single-hop proxy", patch.ProxyJump)
+	}
+	return command, proxyEnv, cleanup, nil
+}
+
+func prepareLocalHostCompatibilityProbe(
+	ctx context.Context,
+	cfg *config.Config,
+	paths *config.Paths,
+	patch hostPatch,
+	user string,
+	targetPassword *secret.Secret,
+) (*sshconfig.HostEntry, []string, func(), error) {
+	proxyCommand, proxyEnv, cleanupProxy, err := localHostProbeProxy(ctx, cfg, patch)
+	if err != nil {
+		return nil, nil, func() {}, err
+	}
+	cleanup := cleanupProxy
+	askpassEnv := append([]string{}, proxyEnv...)
+	if targetPassword != nil {
+		targetEnv, cleanupTarget, err := startLocalHostTargetAskpass(ctx, func(context.Context) (*secret.Secret, error) {
+			return targetPassword, nil
+		})
+		if err != nil {
+			cleanupProxy()
+			return nil, nil, func() {}, fmt.Errorf("start SSH target credential helper: %w", err)
+		}
+		cleanup = func() {
+			cleanupTarget()
+			cleanupProxy()
+		}
+		askpassEnv = append(askpassEnv, targetEnv...)
+	}
+	return localHostProbeEntry(paths, patch, proxyCommand, user), askpassEnv, cleanup, nil
+}
+
+func runPreparedLocalHostCompatibilityProbe(
+	ctx context.Context,
+	cfg *config.Config,
+	paths *config.Paths,
+	patch hostPatch,
+	user string,
+	targetPassword *secret.Secret,
+	maxIterations int,
+) (*localHostCompatResult, error) {
+	draft, askpassEnv, cleanup, err := prepareLocalHostCompatibilityProbe(ctx, cfg, paths, patch, user, targetPassword)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	return runLocalHostCompatCheck(ctx, cfg, draft, maxIterations, askpassEnv)
+}
+
+func localHostProbeEntry(paths *config.Paths, patch hostPatch, proxyCommand, user string) *sshconfig.HostEntry {
+	draft := localHostEntryFromPatch(paths, patch)
+	if proxyCommand != "" {
+		deleteDirective(draft, "ProxyJump")
+		delete(draft.Properties, "proxyjump")
+		upsertDirective(draft, "ProxyCommand", proxyCommand)
+		draft.Properties["proxycommand"] = proxyCommand
+	}
+	if user != "" {
+		upsertDirective(draft, "User", user)
+		draft.Properties["user"] = user
+	}
+	return draft
 }
 
 func inventoryHosts(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths) ([]*sshconfig.HostEntry, error) {

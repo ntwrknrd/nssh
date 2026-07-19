@@ -319,9 +319,9 @@ var (
 	// Auth failure patterns
 	authFailurePattern = regexp.MustCompile(`(?i)(Permission denied|No more authentication methods)`)
 
-	// Auth success: "Authenticated to hostname (via proxy) using "password"."
-	authSuccessPattern = regexp.MustCompile(`(?i)Authenticated to [^\s]+(?:\s+\([^)]+\))?`)
+	// Auth success: exact OpenSSH status line, not banner text containing it.
+	authSuccessPattern = regexp.MustCompile(`(?mi)^Authenticated to [^\s]+(?:\s+\([^)]+\))?\s+using\s+"[^"]+"\.\r?$`)
 
 	// Auth method extraction: Authenticated to host using "password"
-	authMethodPattern = regexp.MustCompile(`(?i)Authenticated to [^\s]+(?:\s+\([^)]+\))?\s+using\s+"([^"]+)"`)
+	authMethodPattern = regexp.MustCompile(`(?mi)^Authenticated to [^\s]+(?:\s+\([^)]+\))?\s+using\s+"([^"]+)"\.\r?$`)
 )

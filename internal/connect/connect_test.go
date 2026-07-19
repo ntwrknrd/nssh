@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -458,6 +459,150 @@ func TestStartAskpassServerEnvSupportsMultiplePrompts(t *testing.T) {
 	}
 }
 
+func TestCapturedManagedProxyAskpassKeepsSecretsOutOfTransportAndLogs(t *testing.T) {
+	oldRunCapturedCommand := runCapturedCommandFunc
+	oldAskpassHelperPath := askpassHelperPathFunc
+	oldCheckMuxSession := checkMuxSessionFunc
+	oldHostKeyProbe := hostKeyProbeFunc
+	oldLogger := slog.Default()
+	defer func() {
+		runCapturedCommandFunc = oldRunCapturedCommand
+		askpassHelperPathFunc = oldAskpassHelperPath
+		checkMuxSessionFunc = oldCheckMuxSession
+		hostKeyProbeFunc = oldHostKeyProbe
+		slog.SetDefault(oldLogger)
+	}()
+
+	var logs bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	checkMuxSessionFunc = func(context.Context, connector.MuxCheckRequest) (bool, bool) { return false, false }
+	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) hostKeyProbeStatus {
+		return hostKeyProbeClean
+	}
+	askpassHelperPathFunc = func() (string, error) { return "/tmp/nssh-askpass", nil }
+	targetPassword := secret.NewFromString("target-transport-sentinel")
+	proxyPassword := secret.NewFromString("proxy-transport-sentinel")
+
+	runCapturedCommandFunc = func(ctx context.Context, req captured.Request) (captured.Result, error) {
+		transport := strings.Join(req.Env, "\n") + strings.Join(req.SSHArgs, "\n") + strings.Join(req.RemoteCommand, "\n")
+		for key, value := range req.SSHOptions.Options {
+			transport += "\n" + key + "=" + value.StringValue()
+		}
+		for _, sentinel := range []string{"target-transport-sentinel", "proxy-transport-sentinel"} {
+			if strings.Contains(transport, sentinel) {
+				t.Fatalf("captured SSH transport contains secret sentinel %q", sentinel)
+			}
+		}
+		targetSocket := envValue(req.Env, askpass.SocketEnv)
+		targetNonce := envValue(req.Env, askpass.NonceEnv)
+		proxySocket := envValue(req.Env, askpass.ProxySocketEnv)
+		proxyNonce := envValue(req.Env, askpass.ProxyNonceEnv)
+		gotProxy, err := askpass.RequestPassword(ctx, proxySocket, proxyNonce)
+		if err != nil {
+			return captured.Result{}, err
+		}
+		gotTarget, err := askpass.RequestPassword(ctx, targetSocket, targetNonce)
+		if err != nil {
+			return captured.Result{}, err
+		}
+		if string(gotProxy) != "proxy-transport-sentinel" || string(gotTarget) != "target-transport-sentinel" {
+			t.Fatal("captured askpass returned the wrong per-hop credential")
+		}
+		return captured.Result{Stdout: []byte("ok\n")}, nil
+	}
+
+	err := runResolvedRemoteCommand(context.Background(), &ResolvedHost{
+		Hostname: "edge01.example",
+		Username: "target-user",
+		Port:     22,
+		AuthMode: config.AuthModePassword,
+		SSH: config.SSHHostConfig{Options: config.SSHOptions{
+			"ProxyCommand": config.NewSSHOptionString(managedProxyAskpassPrefix + "ssh -W %h:%p proxy-user@jump01.example"),
+		}},
+		Credential: &ResolvedCredential{Password: targetPassword},
+		Proxy: &ResolvedProxy{
+			Canonical:  "jump01.example",
+			Hostname:   "jump01.example",
+			Username:   "proxy-user",
+			AuthMode:   config.AuthModePassword,
+			Credential: &ResolvedCredential{Password: proxyPassword},
+		},
+	}, nil, []string{"show", "version"}, config.DefaultConfig(), Options{})
+	if err != nil {
+		t.Fatalf("runResolvedRemoteCommand: %v", err)
+	}
+	for _, sentinel := range []string{"target-transport-sentinel", "proxy-transport-sentinel"} {
+		if strings.Contains(logs.String(), sentinel) {
+			t.Fatalf("debug logs contain secret sentinel %q", sentinel)
+		}
+	}
+}
+
+func TestCapturedProxyCredentialRunsHostKeyPreparationWithoutTargetCredential(t *testing.T) {
+	oldRunCapturedCommand := runCapturedCommandFunc
+	oldAskpassHelperPath := askpassHelperPathFunc
+	oldCheckMuxSession := checkMuxSessionFunc
+	oldHostKeyProbe := hostKeyProbeFunc
+	defer func() {
+		runCapturedCommandFunc = oldRunCapturedCommand
+		askpassHelperPathFunc = oldAskpassHelperPath
+		checkMuxSessionFunc = oldCheckMuxSession
+		hostKeyProbeFunc = oldHostKeyProbe
+	}()
+
+	var probeCalls atomic.Int32
+	checkMuxSessionFunc = func(context.Context, connector.MuxCheckRequest) (bool, bool) { return false, false }
+	hostKeyProbeFunc = func(ctx context.Context, _ *ResolvedHost, _ []string, _ *config.Config, _ Options, env []string) hostKeyProbeStatus {
+		probeCalls.Add(1)
+		if envValue(env, askpass.SocketEnv) != "" || envValue(env, askpass.NonceEnv) != "" {
+			t.Fatal("host-key probe received the target askpass channel")
+		}
+		proxySocket := envValue(env, askpass.ProxySocketEnv)
+		proxyNonce := envValue(env, askpass.ProxyNonceEnv)
+		if proxySocket == "" || proxyNonce == "" {
+			t.Fatalf("host-key probe missing proxy askpass channel: %#v", env)
+		}
+		got, err := askpass.RequestPassword(ctx, proxySocket, proxyNonce)
+		if err != nil {
+			t.Fatalf("request proxy password during host-key probe: %v", err)
+		}
+		if string(got) != "proxy-secret" {
+			t.Fatalf("host-key probe proxy password = %q", got)
+		}
+		return hostKeyProbeClean
+	}
+	askpassHelperPathFunc = func() (string, error) { return "/tmp/nssh-askpass", nil }
+	runCapturedCommandFunc = func(_ context.Context, req captured.Request) (captured.Result, error) {
+		if envValue(req.Env, askpass.SocketEnv) != "" {
+			t.Fatal("key-auth target unexpectedly received a target askpass channel")
+		}
+		if envValue(req.Env, askpass.ProxySocketEnv) == "" {
+			t.Fatal("password-auth proxy did not receive its isolated askpass channel")
+		}
+		return captured.Result{}, nil
+	}
+
+	proxyPassword := secret.NewFromString("proxy-secret")
+	err := runResolvedRemoteCommand(context.Background(), &ResolvedHost{
+		Hostname: "edge01.example",
+		AuthMode: config.AuthModeKey,
+		SSH: config.SSHHostConfig{Options: config.SSHOptions{
+			"ProxyCommand": config.NewSSHOptionString(managedProxyAskpassPrefix + "ssh -W %h:%p proxy-user@jump01.example"),
+		}},
+		Proxy: &ResolvedProxy{
+			Hostname:   "jump01.example",
+			AuthMode:   config.AuthModePassword,
+			Credential: &ResolvedCredential{Password: proxyPassword},
+		},
+	}, nil, []string{"show"}, config.DefaultConfig(), Options{})
+	if err != nil {
+		t.Fatalf("runResolvedRemoteCommand: %v", err)
+	}
+	if got := probeCalls.Load(); got != 1 {
+		t.Fatalf("host-key probe calls = %d, want 1", got)
+	}
+}
+
 func envValue(env []string, key string) string {
 	prefix := key + "="
 	for _, entry := range env {
@@ -475,7 +620,7 @@ func TestInteractiveAskpassEnabledByDefault(t *testing.T) {
 	}
 }
 
-func TestInteractiveAskpassResolverUsesImmediatePassword(t *testing.T) {
+func TestInteractiveAskpassResolversUseImmediateTargetPassword(t *testing.T) {
 	password := secret.NewFromString("secret")
 	resolved := &ResolvedHost{
 		AuthMode: config.AuthModePassword,
@@ -484,11 +629,11 @@ func TestInteractiveAskpassResolverUsesImmediatePassword(t *testing.T) {
 		},
 	}
 
-	resolve := interactiveAskpassResolver(resolved, nil)
-	if resolve == nil {
+	resolvers := interactiveAskpassResolvers(resolved, nil, nil)
+	if resolvers.target == nil {
 		t.Fatal("interactive askpass resolver is nil")
 	}
-	got, err := resolve(context.Background())
+	got, err := resolvers.target(context.Background())
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -497,16 +642,65 @@ func TestInteractiveAskpassResolverUsesImmediatePassword(t *testing.T) {
 	}
 }
 
+func TestInteractiveAskpassResolversDoNotCreateProxyChannelForKeyAuth(t *testing.T) {
+	targetPassword := secret.NewFromString("target-secret")
+	defer targetPassword.Destroy()
+	resolved := &ResolvedHost{
+		Hostname:   "edge01.example",
+		AuthMode:   config.AuthModePassword,
+		Credential: &ResolvedCredential{Password: targetPassword},
+		Proxy: &ResolvedProxy{
+			Canonical: "jump01.example",
+			Hostname:  "jump01.example",
+			AuthMode:  config.AuthModeKey,
+		},
+	}
+
+	resolvers := interactiveAskpassResolvers(resolved, nil, nil)
+	if resolvers.proxy != nil {
+		t.Fatal("key-auth proxy unexpectedly received an askpass channel")
+	}
+	got, err := resolvers.target(context.Background())
+	if err != nil || got != targetPassword {
+		t.Fatalf("ambiguous target prompt resolved password=%v err=%v", got != nil, err)
+	}
+}
+
+func TestInteractiveAskpassResolversDisableTargetChannelForUnmanagedProxyTransport(t *testing.T) {
+	for _, option := range []string{"ProxyJump", "ProxyCommand"} {
+		t.Run(option, func(t *testing.T) {
+			password := secret.NewFromString("target-secret")
+			defer password.Destroy()
+			resolved := &ResolvedHost{
+				Hostname:   "edge01.example",
+				AuthMode:   config.AuthModePassword,
+				Credential: &ResolvedCredential{Password: password},
+				SSH: config.SSHHostConfig{Options: config.SSHOptions{
+					option: config.NewSSHOptionString("unmanaged-proxy"),
+				}},
+			}
+
+			resolvers := interactiveAskpassResolvers(resolved, nil, nil)
+			if resolvers.target != nil || resolvers.proxy != nil {
+				t.Fatalf("unmanaged %s received askpass resolvers", option)
+			}
+			if shouldPrefetchPassword(resolved) {
+				t.Fatalf("unmanaged %s enabled password prefetch", option)
+			}
+		})
+	}
+}
+
 func TestRunResolvedRemoteCommandHotMuxSkipsAskpassAndPasswordResolver(t *testing.T) {
 	oldRunCapturedCommand := runCapturedCommandFunc
 	oldAskpassHelperPath := askpassHelperPathFunc
 	oldCheckMuxSession := checkMuxSessionFunc
-	oldStartMuxSession := startMuxSessionFunc
+	oldHostKeyProbe := hostKeyProbeFunc
 	defer func() {
 		runCapturedCommandFunc = oldRunCapturedCommand
 		askpassHelperPathFunc = oldAskpassHelperPath
 		checkMuxSessionFunc = oldCheckMuxSession
-		startMuxSessionFunc = oldStartMuxSession
+		hostKeyProbeFunc = oldHostKeyProbe
 	}()
 
 	var resolverCalls atomic.Int32
@@ -573,7 +767,7 @@ func TestRunResolvedRemoteCommandColdPersistentMuxStartsMuxBeforeCapturedCommand
 	checkMuxSessionFunc = func(context.Context, connector.MuxCheckRequest) (bool, bool) {
 		return false, true
 	}
-	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options) hostKeyProbeStatus {
+	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) hostKeyProbeStatus {
 		return hostKeyProbeNeedsPrompt
 	}
 	hostKeyPrepareFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, bool) (*connector.HostKeyPreparation, error) {
@@ -583,7 +777,8 @@ func TestRunResolvedRemoteCommandColdPersistentMuxStartsMuxBeforeCapturedCommand
 		return "/tmp/nssh-askpass", nil
 	}
 	var muxStarted atomic.Bool
-	var resolverCalls atomic.Int32
+	var targetResolverCalls atomic.Int32
+	var proxyResolverCalls atomic.Int32
 	startMuxSessionFunc = func(_ context.Context, req connector.MuxStartRequest) error {
 		muxStarted.Store(true)
 		if req.Hostname != "edge01" || req.Username != "netops" || req.Port != 2200 {
@@ -591,6 +786,15 @@ func TestRunResolvedRemoteCommandColdPersistentMuxStartsMuxBeforeCapturedCommand
 		}
 		if len(req.Env) == 0 {
 			t.Fatal("mux start request missing askpass env")
+		}
+		transport := strings.Join(req.Env, "\n") + strings.Join(req.SSHArgs, "\n")
+		for key, value := range req.SSHOptions.Options {
+			transport += "\n" + key + "=" + value.StringValue()
+		}
+		for _, sentinel := range []string{"target-secret", "proxy-secret"} {
+			if strings.Contains(transport, sentinel) {
+				t.Fatalf("mux transport contains secret sentinel %q", sentinel)
+			}
 		}
 		joinedArgs := strings.Join(req.SSHArgs, "\n")
 		for _, want := range []string{
@@ -600,6 +804,21 @@ func TestRunResolvedRemoteCommandColdPersistentMuxStartsMuxBeforeCapturedCommand
 			if !strings.Contains(joinedArgs, want) {
 				t.Fatalf("mux start ssh args = %#v, want %q", req.SSHArgs, want)
 			}
+		}
+		targetSocket := envValue(req.Env, askpass.SocketEnv)
+		targetNonce := envValue(req.Env, askpass.NonceEnv)
+		proxySocket := envValue(req.Env, askpass.ProxySocketEnv)
+		proxyNonce := envValue(req.Env, askpass.ProxyNonceEnv)
+		gotProxy, err := askpass.RequestPassword(context.Background(), proxySocket, proxyNonce)
+		if err != nil {
+			t.Fatalf("request proxy password: %v", err)
+		}
+		gotTarget, err := askpass.RequestPassword(context.Background(), targetSocket, targetNonce)
+		if err != nil {
+			t.Fatalf("request target password: %v", err)
+		}
+		if string(gotProxy) != "proxy-secret" || string(gotTarget) != "target-secret" {
+			t.Fatal("mux askpass routed a prompt to the wrong credential")
 		}
 		return nil
 	}
@@ -622,12 +841,23 @@ func TestRunResolvedRemoteCommandColdPersistentMuxStartsMuxBeforeCapturedCommand
 			"ControlMaster":  config.NewSSHOptionString("auto"),
 			"ControlPath":    config.NewSSHOptionString("~/.ssh/sockets/%r@%h:%p"),
 			"ControlPersist": config.NewSSHOptionString("12h"),
+			"ProxyCommand":   config.NewSSHOptionString(managedProxyAskpassPrefix + "ssh -W %h:%p proxy-user@jump01.example"),
 		}},
 		Credential: &ResolvedCredential{
 			PasswordResolver: func(context.Context) (*secret.Secret, error) {
-				resolverCalls.Add(1)
-				return secret.NewFromString("secret"), nil
+				targetResolverCalls.Add(1)
+				return secret.NewFromString("target-secret"), nil
 			},
+		},
+		Proxy: &ResolvedProxy{
+			Canonical: "jump01.example",
+			Hostname:  "jump01.example",
+			Username:  "proxy-user",
+			AuthMode:  config.AuthModePassword,
+			Credential: &ResolvedCredential{PasswordResolver: func(context.Context) (*secret.Secret, error) {
+				proxyResolverCalls.Add(1)
+				return secret.NewFromString("proxy-secret"), nil
+			}},
 		},
 	}, []string{"-o", "LogLevel=ERROR"}, []string{"show"}, config.DefaultConfig(), Options{})
 	if err != nil {
@@ -636,8 +866,11 @@ func TestRunResolvedRemoteCommandColdPersistentMuxStartsMuxBeforeCapturedCommand
 	if !muxStarted.Load() {
 		t.Fatal("mux prewarm was not started")
 	}
-	if got := resolverCalls.Load(); got != 1 {
-		t.Fatalf("resolver calls = %d, want one mux-start askpass request", got)
+	if got := targetResolverCalls.Load(); got != 1 {
+		t.Fatalf("target resolver calls = %d, want 1", got)
+	}
+	if got := proxyResolverCalls.Load(); got != 1 {
+		t.Fatalf("proxy resolver calls = %d, want 1", got)
 	}
 }
 
@@ -679,15 +912,23 @@ func TestRunResolvedRemoteCommandColdMuxStartsPrefetchWithoutWaiting(t *testing.
 	oldRunCapturedCommand := runCapturedCommandFunc
 	oldAskpassHelperPath := askpassHelperPathFunc
 	oldCheckMuxSession := checkMuxSessionFunc
+	oldStartMuxSession := startMuxSessionFunc
+	oldHostKeyProbe := hostKeyProbeFunc
 	defer func() {
 		runCapturedCommandFunc = oldRunCapturedCommand
 		askpassHelperPathFunc = oldAskpassHelperPath
 		checkMuxSessionFunc = oldCheckMuxSession
+		startMuxSessionFunc = oldStartMuxSession
+		hostKeyProbeFunc = oldHostKeyProbe
 	}()
 
 	checkMuxSessionFunc = func(context.Context, connector.MuxCheckRequest) (bool, bool) {
 		return false, true
 	}
+	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) hostKeyProbeStatus {
+		return hostKeyProbeClean
+	}
+	startMuxSessionFunc = func(context.Context, connector.MuxStartRequest) error { return nil }
 	askpassHelperPathFunc = func() (string, error) {
 		return "/tmp/nssh-askpass", nil
 	}
@@ -722,7 +963,6 @@ func TestRunResolvedRemoteCommandColdMuxStartsPrefetchWithoutWaiting(t *testing.
 	case <-time.After(time.Second):
 		t.Fatal("password prefetch did not start")
 	}
-
 	select {
 	case req := <-capturedCalled:
 		if len(req.Env) == 0 {
@@ -759,7 +999,7 @@ func TestRunResolvedRemoteCommandPreparesHostKeyBeforeAskpass(t *testing.T) {
 	checkMuxSessionFunc = func(context.Context, connector.MuxCheckRequest) (bool, bool) {
 		return false, true
 	}
-	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options) hostKeyProbeStatus {
+	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) hostKeyProbeStatus {
 		return hostKeyProbeNeedsPrompt
 	}
 	var prepareCalled atomic.Bool
@@ -818,7 +1058,7 @@ func TestPrepareInteractiveHostKeyPassesChangedStatus(t *testing.T) {
 		hostKeyPrepareFunc = oldHostKeyPrepare
 	}()
 
-	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options) hostKeyProbeStatus {
+	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) hostKeyProbeStatus {
 		return hostKeyProbeChanged
 	}
 	var sawChanged bool
@@ -827,7 +1067,7 @@ func TestPrepareInteractiveHostKeyPassesChangedStatus(t *testing.T) {
 		return nil, nil
 	}
 
-	_, err := prepareInteractiveHostKey(context.Background(), &ResolvedHost{Hostname: "edge01"}, nil, config.DefaultConfig(), Options{})
+	_, err := prepareInteractiveHostKey(context.Background(), &ResolvedHost{Hostname: "edge01"}, nil, config.DefaultConfig(), Options{}, nil)
 	if err != nil {
 		t.Fatalf("prepareInteractiveHostKey: %v", err)
 	}

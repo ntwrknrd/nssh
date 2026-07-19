@@ -59,6 +59,22 @@ type countingCredentialProvider struct {
 	record *credential.Record
 }
 
+type refCredentialProvider struct {
+	records map[string]*credential.Record
+	errors  map[string]error
+	calls   []string
+}
+
+func (p *refCredentialProvider) GetHost(string) (*credential.Record, error)  { return nil, nil }
+func (p *refCredentialProvider) GetGroup(string) (*credential.Record, error) { return nil, nil }
+func (p *refCredentialProvider) GetRef(ref config.CredentialRefConfig) (*credential.Record, error) {
+	p.calls = append(p.calls, ref.Ref)
+	if err := p.errors[ref.Ref]; err != nil {
+		return nil, err
+	}
+	return p.records[ref.Ref], nil
+}
+
 func (p *countingCredentialProvider) GetHost(host string) (*credential.Record, error) {
 	return nil, nil
 }
@@ -138,6 +154,130 @@ func TestResolveSmartHostForConnectMatchesExactAliasesAndShortNames(t *testing.T
 	}
 	if aliasResolved.Hostname != "edge01.example.com" || shortResolved.Hostname != "edge01.example.com" {
 		t.Fatalf("hostname alias=%q short=%q, want edge01.example.com", aliasResolved.Hostname, shortResolved.Hostname)
+	}
+}
+
+func TestResolveHostForConnectRoutesManagedProxyAndTargetCredentialsLazily(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Credential.Provider["op"] = config.CredentialProviderConfig{Type: config.CredentialProvider1Password}
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type: config.ProviderLocal,
+			Groups: map[string]config.GroupConfig{
+				"proxy": {Auth: config.InventoryAuthConfig{
+					Mode:               config.AuthModePassword,
+					CredentialProvider: "op",
+					PasswordRef:        "op://Network/proxy/password",
+					Username:           "proxy-user",
+				}},
+				"target": {Auth: config.InventoryAuthConfig{
+					CredentialProvider: "op",
+					PasswordRef:        "op://Network/target/password",
+					Username:           "target-user",
+				}},
+			},
+			Hosts: map[string]config.InventoryHostConfig{
+				"jump01.example": {Group: "proxy"},
+				"edge01.example": {
+					Group: "target",
+					Auth:  config.InventoryAuthConfig{Mode: config.AuthModePassword},
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"ProxyJump": config.NewSSHOptionString("jump01.example"),
+					}},
+				},
+			},
+		},
+	}
+	targetPassword := secret.NewFromString("target-sentinel")
+	proxyPassword := secret.NewFromString("proxy-sentinel")
+	defer targetPassword.Destroy()
+	defer proxyPassword.Destroy()
+	provider := &refCredentialProvider{records: map[string]*credential.Record{
+		"op://Network/target/password": {Username: "target-user", Secret: targetPassword},
+		"op://Network/proxy/password":  {Username: "proxy-user", Secret: proxyPassword},
+	}}
+	oldRegistry := newConnectCredentialRegistry
+	newConnectCredentialRegistry = func(*config.Config) (providerRegistry, error) {
+		return fakeProviderRegistry{providers: map[string]credential.Provider{"op": provider}}, nil
+	}
+	defer func() { newConnectCredentialRegistry = oldRegistry }()
+
+	resolved, err := ResolveHostForConnect("edge01.example", "", cfg)
+	if err != nil {
+		t.Fatalf("ResolveHostForConnect: %v", err)
+	}
+	if resolved.Proxy == nil || resolved.Proxy.Hostname != "jump01.example" {
+		t.Fatalf("proxy = %#v", resolved.Proxy)
+	}
+	if len(provider.calls) != 0 {
+		t.Fatalf("provider called before askpass prompt: %v", provider.calls)
+	}
+	resolvers := interactiveAskpassResolvers(resolved, nil, nil)
+	if !resolvers.any() {
+		t.Fatal("askpass resolver is nil")
+	}
+
+	gotProxy, err := resolvers.proxy(context.Background())
+	if err != nil {
+		t.Fatalf("resolve proxy: %v", err)
+	}
+	gotTarget, err := resolvers.target(context.Background())
+	if err != nil {
+		t.Fatalf("resolve target: %v", err)
+	}
+	if gotProxy != proxyPassword || gotTarget != targetPassword {
+		t.Fatal("askpass resolver returned the wrong credential")
+	}
+	if got := strings.Join(provider.calls, ","); got != "op://Network/proxy/password,op://Network/target/password" {
+		t.Fatalf("provider calls = %q", got)
+	}
+}
+
+func TestResolveHostForConnectRendersCredentialResolvedProxyUsername(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Credential.Provider["op"] = config.CredentialProviderConfig{Type: config.CredentialProvider1Password}
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type: config.ProviderLocal,
+			Groups: map[string]config.GroupConfig{
+				"proxy": {Auth: config.InventoryAuthConfig{
+					Mode:               config.AuthModePassword,
+					CredentialProvider: "op",
+					PasswordRef:        "op://Network/proxy/password",
+					UsernameRef:        "op://Network/proxy/username",
+				}},
+			},
+			Hosts: map[string]config.InventoryHostConfig{
+				"jump01.example": {Group: "proxy"},
+				"edge01.example": {Auth: config.InventoryAuthConfig{Mode: config.AuthModeKey}, SSH: config.SSHHostConfig{Options: config.SSHOptions{
+					"ProxyJump": config.NewSSHOptionString("jump01.example"),
+				}}},
+			},
+		},
+	}
+	proxyPassword := secret.NewFromString("proxy-sentinel")
+	provider := &refCredentialProvider{records: map[string]*credential.Record{
+		"op://Network/proxy/password": {Username: "credential-proxy-user", Secret: proxyPassword},
+	}}
+	oldRegistry := newConnectCredentialRegistry
+	newConnectCredentialRegistry = func(*config.Config) (providerRegistry, error) {
+		return fakeProviderRegistry{providers: map[string]credential.Provider{"op": provider}}, nil
+	}
+	defer func() { newConnectCredentialRegistry = oldRegistry }()
+
+	resolved, err := ResolveHostForConnect("edge01.example", "", cfg)
+	if err != nil {
+		t.Fatalf("ResolveHostForConnect: %v", err)
+	}
+	defer destroyImmediateResolvedPasswords(resolved)
+	if resolved.Proxy == nil || resolved.Proxy.Username != "credential-proxy-user" {
+		t.Fatalf("resolved proxy = %#v", resolved.Proxy)
+	}
+	command := resolved.SSH.Options["ProxyCommand"].StringValue()
+	if !strings.Contains(command, "credential-proxy-user@jump01.example") {
+		t.Fatalf("ProxyCommand = %q", command)
 	}
 }
 

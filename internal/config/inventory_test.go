@@ -201,6 +201,145 @@ func TestInventoryAuthResolutionUsesLowestConfiguredField(t *testing.T) {
 	}
 }
 
+func TestInventoryAuthResolutionPasswordModePreservesInheritedCredential(t *testing.T) {
+	cfg := &Config{}
+	cfg.Inventory.Providers = map[string]InventoryProviderConfig{
+		"local": {
+			Type: ProviderLocal,
+			Groups: map[string]GroupConfig{
+				"custcbb": {Auth: InventoryAuthConfig{
+					CredentialProvider: "op-expedient",
+					PasswordRef:        "op://Expedient/group/password",
+					Username:           "chris.jones",
+				}},
+			},
+			Hosts: map[string]InventoryHostConfig{
+				"pla-ts01.custcbb.local": {
+					Group: "custcbb",
+					Auth:  InventoryAuthConfig{Mode: AuthModePassword},
+				},
+			},
+		},
+	}
+
+	got := cfg.ResolveInventoryAuth(InventoryAuthContext{
+		Host:     "pla-ts01.custcbb.local",
+		Group:    "local/custcbb",
+		Provider: "local",
+	})
+
+	if got.AuthMode != AuthModePassword {
+		t.Fatalf("auth mode = %q, want password", got.AuthMode)
+	}
+	if got.CredentialProvider != "op-expedient" || got.PasswordRef != "op://Expedient/group/password" {
+		t.Fatalf("password binding = provider %q ref %q", got.CredentialProvider, got.PasswordRef)
+	}
+	if got.PasswordSource != "group local/custcbb" {
+		t.Fatalf("password source = %q, want group local/custcbb", got.PasswordSource)
+	}
+}
+
+func TestLoadedInventoryPasswordHostPreservesGroupCredential(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.yaml")
+	writeConfigFile(t, path, `
+credential:
+  provider:
+    op-expedient:
+      type: 1password
+      vault: Network
+inventory:
+  providers:
+    local:
+      type: local
+      groups:
+        custcbb:
+          auth:
+            credential_provider: op-expedient
+            password_ref: op://Network/custcbb/password
+            username: chris.jones
+      hosts:
+        pla-ts01.custcbb.local:
+          group: custcbb
+          auth:
+            mode: password
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := cfg.ResolveInventoryAuth(InventoryAuthContext{
+		Host:     "pla-ts01.custcbb.local",
+		Group:    "local/custcbb",
+		Provider: "local",
+	})
+	if got.CredentialProvider != "op-expedient" || got.PasswordRef != "op://Network/custcbb/password" {
+		t.Fatalf("loaded password binding = provider %q ref %q", got.CredentialProvider, got.PasswordRef)
+	}
+	if got.AuthMode != AuthModePassword || got.AuthModeSource != "host pla-ts01.custcbb.local" {
+		t.Fatalf("loaded auth mode = %q source %q", got.AuthMode, got.AuthModeSource)
+	}
+}
+
+func TestInventoryAuthResolutionKeyModeClearsInheritedCredential(t *testing.T) {
+	cfg := &Config{}
+	cfg.Inventory.Providers = map[string]InventoryProviderConfig{
+		"local": {
+			Type: ProviderLocal,
+			Groups: map[string]GroupConfig{
+				"custcbb": {Auth: InventoryAuthConfig{
+					CredentialProvider: "op-expedient",
+					PasswordRef:        "op://Expedient/group/password",
+				}},
+			},
+			Hosts: map[string]InventoryHostConfig{
+				"jump01.custcbb.local": {
+					Group: "custcbb",
+					Auth:  InventoryAuthConfig{Mode: AuthModeKey},
+				},
+			},
+		},
+	}
+
+	got := cfg.ResolveInventoryAuth(InventoryAuthContext{
+		Host:     "jump01.custcbb.local",
+		Group:    "local/custcbb",
+		Provider: "local",
+	})
+
+	if got.CredentialProvider != "" || got.PasswordRef != "" {
+		t.Fatalf("key auth retained password binding: provider %q ref %q", got.CredentialProvider, got.PasswordRef)
+	}
+	if got.PasswordSource != "host jump01.custcbb.local" {
+		t.Fatalf("password source = %q, want host jump01.custcbb.local", got.PasswordSource)
+	}
+}
+
+func TestInventoryAuthResolutionProviderHostDisabledClearsInheritedCredential(t *testing.T) {
+	cfg := &Config{}
+	cfg.Inventory.Providers = map[string]InventoryProviderConfig{
+		"netbox-prod": {
+			Type: ProviderNetBox,
+			Auth: InventoryAuthConfig{
+				CredentialProvider: "op-expedient",
+				PasswordRef:        "op://Expedient/provider/password",
+			},
+			Hosts: map[string]InventoryHostConfig{
+				"edge01": {AuthDisabled: true},
+			},
+		},
+	}
+
+	got := cfg.ResolveInventoryAuth(InventoryAuthContext{Host: "edge01", Provider: "netbox-prod"})
+	if !got.Disabled {
+		t.Fatal("provider-scoped host auth was not disabled")
+	}
+	if got.CredentialProvider != "" || got.PasswordRef != "" || got.PasswordSource != "disabled" {
+		t.Fatalf("disabled host retained credential: provider=%q ref=%q source=%q", got.CredentialProvider, got.PasswordRef, got.PasswordSource)
+	}
+}
+
 func TestDefaultCredentialConfigCreatesSOPSAgeProvider(t *testing.T) {
 	cfg := CredentialConfig{}
 	if err := cfg.Validate(); err != nil {
