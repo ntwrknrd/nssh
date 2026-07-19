@@ -1327,6 +1327,23 @@ func prepareLocalHostCompatibilityProbe(
 	return localHostProbeEntry(paths, patch, proxyCommand, user), askpassEnv, cleanup, nil
 }
 
+func runPreparedLocalHostCompatibilityProbe(
+	ctx context.Context,
+	cfg *config.Config,
+	paths *config.Paths,
+	patch hostPatch,
+	user string,
+	targetPassword *secret.Secret,
+	maxIterations int,
+) (*localHostCompatResult, error) {
+	draft, askpassEnv, cleanup, err := prepareLocalHostCompatibilityProbe(ctx, cfg, paths, patch, user, targetPassword)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	return runLocalHostCompatCheck(ctx, cfg, draft, maxIterations, askpassEnv)
+}
+
 func localHostProbeEntry(paths *config.Paths, patch hostPatch, proxyCommand, user string) *sshconfig.HostEntry {
 	draft := localHostEntryFromPatch(paths, patch)
 	if proxyCommand != "" {

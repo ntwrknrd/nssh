@@ -444,19 +444,15 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 				if credentialSecret != nil {
 					defer credentialSecret.Destroy()
 				}
-				draft, askpassEnv, cleanupProbe, err := prepareLocalHostCompatibilityProbe(
+				result, err := runPreparedLocalHostCompatibilityProbe(
 					context.Background(),
 					cfg,
 					paths,
 					patch,
 					localHostProbeUser(cfg, patch, credentialRecord),
 					credentialSecret,
+					5,
 				)
-				if err != nil {
-					return err
-				}
-				defer cleanupProbe()
-				result, err := runLocalHostCompatCheck(context.Background(), cfg, draft, 5, askpassEnv)
 				if err != nil {
 					return err
 				}

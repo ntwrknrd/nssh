@@ -212,7 +212,7 @@ func TestServerProxyEnvUsesIsolatedNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	entries := server.ProxyEnv("/tmp/nssh-askpass")
 	env := strings.Join(entries, "\n")
