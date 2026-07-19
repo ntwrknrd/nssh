@@ -3,8 +3,8 @@ module github.com/ntwrknrd/nssh
 go 1.25.5
 
 require (
-	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/awnumar/memguard v0.23.0
+	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/charmbracelet/bubbles v0.21.1-0.20250623103423-23b8fd6302d7
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/huh v0.8.0

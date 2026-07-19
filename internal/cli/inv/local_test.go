@@ -217,6 +217,53 @@ func TestPromptLocalHostAddDetailsPromptsUserForPublicKey(t *testing.T) {
 	}
 }
 
+func TestPromptLocalHostConnectionDetailsSelectsSSHProxyFromInventory(t *testing.T) {
+	prompter := &fakeLocalHostAddPrompter{
+		inputs: map[string]string{
+			"User": "admin",
+		},
+		selects: map[string]string{
+			"Enable SSH proxy?": "yes",
+			"Authentication":    config.AuthModeKey,
+		},
+		hostSelects: map[string]string{
+			"Proxy host": "jump02.example.com",
+		},
+	}
+
+	patch, err := promptLocalHostConnectionDetailsWithProxyHosts(nil, hostPatch{Host: "edge01.example.com"}, prompter, []string{
+		"jump01.example.com",
+		"jump02.example.com",
+	})
+	if err != nil {
+		t.Fatalf("promptLocalHostConnectionDetailsWithProxyHosts: %v", err)
+	}
+	if patch.ProxyJump != "jump02.example.com" {
+		t.Fatalf("proxy jump = %q, want jump02.example.com", patch.ProxyJump)
+	}
+	wantPrompts := "Port,Enable SSH proxy?,Proxy host,Authentication,User"
+	if got := strings.Join(prompter.prompts, ","); got != wantPrompts {
+		t.Fatalf("prompts = %s, want %s", got, wantPrompts)
+	}
+	if got := strings.Join(prompter.hostOptions["Proxy host"], ","); got != "jump01.example.com,jump02.example.com" {
+		t.Fatalf("proxy host options = %s", got)
+	}
+}
+
+func TestLocalHostEntryFromPatchIncludesProxyJumpInConnectionDraft(t *testing.T) {
+	host := localHostEntryFromPatch(&config.Paths{SSHConfigDir: t.TempDir()}, hostPatch{
+		Host:      "edge01.example.com",
+		ProxyJump: "jump01.example.com",
+	})
+
+	if got := host.Properties["proxyjump"]; got != "jump01.example.com" {
+		t.Fatalf("proxyjump property = %q", got)
+	}
+	if got := strings.Join(host.Lines, ""); !strings.Contains(got, "ProxyJump jump01.example.com") {
+		t.Fatalf("connection draft missing ProxyJump:\n%s", got)
+	}
+}
+
 func TestPromptLocalHostAddDetailsPasswordWithoutStoredCredentialPromptsUser(t *testing.T) {
 	cfg := &config.Config{
 		Inventory: config.InventoryConfig{Group: map[string]config.GroupConfig{
@@ -465,6 +512,48 @@ func TestResolveLocalHostCredentialUsesHostAuthMapping(t *testing.T) {
 	defer secret.Destroy()
 }
 
+func TestLocalHostProbeCredentialSecretPromptsForUnstoredPassword(t *testing.T) {
+	old := promptLocalHostProbePassword
+	defer func() { promptLocalHostProbePassword = old }()
+	promptLocalHostProbePassword = func() (string, error) {
+		return "one-time-password", nil
+	}
+
+	got, err := localHostProbeCredentialSecret(hostPatch{AuthMode: config.AuthModePassword}, nil)
+	if err != nil {
+		t.Fatalf("localHostProbeCredentialSecret: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected prompted password secret")
+	}
+	defer got.Destroy()
+	if err := got.Use(func(password []byte) error {
+		if string(password) != "one-time-password" {
+			t.Fatalf("password = %q", password)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("use password: %v", err)
+	}
+}
+
+func TestLocalHostProbeCredentialSecretDoesNotPromptForKeyAuth(t *testing.T) {
+	old := promptLocalHostProbePassword
+	defer func() { promptLocalHostProbePassword = old }()
+	promptLocalHostProbePassword = func() (string, error) {
+		t.Fatal("password prompt called for key auth")
+		return "", nil
+	}
+
+	got, err := localHostProbeCredentialSecret(hostPatch{AuthMode: config.AuthModeKey}, nil)
+	if err != nil {
+		t.Fatalf("localHostProbeCredentialSecret: %v", err)
+	}
+	if got != nil {
+		t.Fatal("key auth returned a password secret")
+	}
+}
+
 func TestUpsertLocalHostWritesSelectedAuthModeAndCompatFixes(t *testing.T) {
 	tmp := t.TempDir()
 	sshDir := filepath.Join(tmp, ".ssh")
@@ -483,10 +572,11 @@ func TestUpsertLocalHostWritesSelectedAuthModeAndCompatFixes(t *testing.T) {
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
 
 	err := upsertLocalHost(parser, cfg, paths, hostPatch{
-		Host:     "edge01",
-		Group:    "local/lab",
-		HostName: "edge01.lab.local",
-		AuthMode: config.AuthModePassword,
+		Host:      "edge01",
+		Group:     "local/lab",
+		HostName:  "edge01.lab.local",
+		ProxyJump: "jump01.example.com",
+		AuthMode:  config.AuthModePassword,
 		CompatFixes: []compat.FloorSelection{{
 			Category:  compat.CategoryKex,
 			Directive: "KexAlgorithms",
@@ -504,6 +594,7 @@ func TestUpsertLocalHostWritesSelectedAuthModeAndCompatFixes(t *testing.T) {
 	got := string(content)
 	for _, want := range []string{
 		"mode: password",
+		"ProxyJump: jump01.example.com",
 		"compatibility:",
 		"kex: diffie-hellman-group14-sha1",
 	} {
@@ -656,6 +747,9 @@ func TestLocalHostCompatibilityAppliesDetectedFixesBeforeRetry(t *testing.T) {
 	var calls int
 	localHostConnectionTest = func(ctx context.Context, host *sshconfig.HostEntry, cfg connector.TestConfig) (*connector.TestResult, error) {
 		calls++
+		if !cfg.UseSystemKnownHosts {
+			t.Fatal("host enrollment probe must persist the accepted host key")
+		}
 		if calls == 1 {
 			return &connector.TestResult{
 				ExitCode: 255,
@@ -669,11 +763,7 @@ func TestLocalHostCompatibilityAppliesDetectedFixesBeforeRetry(t *testing.T) {
 		if !strings.Contains(string(content), "KexAlgorithms") {
 			t.Fatalf("retry temp config missing compat fix:\n%s", content)
 		}
-		return &connector.TestResult{
-			ExitCode: 255,
-			Stderr: `debug1: kex: algorithm: diffie-hellman-group14-sha1
-Permission denied (publickey,password).`,
-		}, nil
+		return &connector.TestResult{Success: true, ExitCode: 0}, nil
 	}
 
 	host := sshconfig.CreateHostEntry("edge01", "edge01.lab.local", "admin", 22, false, "provider_local.conf")
@@ -689,6 +779,31 @@ Permission denied (publickey,password).`,
 	}
 	if len(result.FixesApplied) != 1 || result.FixesApplied[0].Category != compat.CategoryKex || result.FixesApplied[0].Floor != "diffie-hellman-group14-sha1" {
 		t.Fatalf("fixes = %v, want kex floor diffie-hellman-group14-sha1", result.FixesApplied)
+	}
+}
+
+func TestLocalHostCompatibilityRequiresSuccessfulAuthentication(t *testing.T) {
+	old := localHostConnectionTest
+	defer func() { localHostConnectionTest = old }()
+	localHostConnectionTest = func(context.Context, *sshconfig.HostEntry, connector.TestConfig) (*connector.TestResult, error) {
+		return &connector.TestResult{
+			ExitCode: 255,
+			Stderr: `debug1: kex: algorithm: curve25519-sha256
+debug1: Server accepts key: /Users/test/.ssh/id_ed25519
+Permission denied (publickey,password).`,
+		}, nil
+	}
+
+	host := sshconfig.CreateHostEntry("edge01", "edge01.lab.local", "admin", 22, false, "provider_local.conf")
+	result, err := testLocalHostCompatibility(context.Background(), config.DefaultConfig(), host, 5, nil)
+	if err != nil {
+		t.Fatalf("testLocalHostCompatibility: %v", err)
+	}
+	if result.Success {
+		t.Fatal("authentication failure was treated as successful login")
+	}
+	if result.StoppedReason != "authentication_failed" {
+		t.Fatalf("stopped reason = %q, want authentication_failed", result.StoppedReason)
 	}
 }
 
@@ -1333,6 +1448,34 @@ func TestImportLocalCSVAddsHostsToLocalProviderFile(t *testing.T) {
 	}
 }
 
+func TestInventoryProxyHostNamesSortsDeduplicatesAndExcludesNewHost(t *testing.T) {
+	cfg := &config.Config{Inventory: config.InventoryConfig{Providers: map[string]config.InventoryProviderConfig{
+		"local": {
+			Type: "local",
+			Hosts: map[string]config.InventoryHostConfig{
+				"jump02.example.com": {},
+				"edge01.example.com": {},
+			},
+		},
+		"netbox-prod": {
+			Type: "netbox",
+			Hosts: map[string]config.InventoryHostConfig{
+				"Jump01.example.com": {},
+				"jump02.example.com": {},
+			},
+		},
+	}}}
+	paths := &config.Paths{StateDir: t.TempDir()}
+
+	names, err := inventoryProxyHostNames(nil, cfg, paths, "edge01.example.com")
+	if err != nil {
+		t.Fatalf("inventoryProxyHostNames: %v", err)
+	}
+	if got := strings.Join(names, ","); got != "Jump01.example.com,jump02.example.com" {
+		t.Fatalf("proxy hosts = %s", got)
+	}
+}
+
 func TestImportLocalCSVRequiresExplicitGroup(t *testing.T) {
 	tmp := t.TempDir()
 	sshDir := filepath.Join(tmp, ".ssh")
@@ -1406,9 +1549,26 @@ type fakeLocalHostAddPrompter struct {
 	selects     map[string]string
 	inputQueue  map[string][]string
 	selectQueue map[string][]string
+	hostSelects map[string]string
 	secrets     map[string]string
 	options     map[string][]ui.SelectOption
+	hostOptions map[string][]string
 	prompts     []string
+}
+
+func (p *fakeLocalHostAddPrompter) SelectHost(title string, hosts []string) (string, error) {
+	p.prompts = append(p.prompts, title)
+	if p.hostOptions == nil {
+		p.hostOptions = make(map[string][]string)
+	}
+	p.hostOptions[title] = append([]string(nil), hosts...)
+	if value, ok := p.hostSelects[title]; ok {
+		return value, nil
+	}
+	if len(hosts) == 0 {
+		return "", nil
+	}
+	return hosts[0], nil
 }
 
 func (p *fakeLocalHostAddPrompter) InputWithDefault(title, defaultValue string) (string, error) {

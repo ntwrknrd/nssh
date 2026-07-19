@@ -244,3 +244,17 @@ func InputWithDefaultSilent(title, defaultValue string) (string, error) {
 
 	return result, nil
 }
+
+// Password shows a masked password input without printing the entered value.
+func Password(title string) (string, error) {
+	var result string
+	input := huh.NewInput().
+		Title(title).
+		EchoMode(huh.EchoModePassword).
+		Value(&result)
+	form := huh.NewForm(huh.NewGroup(input)).WithTheme(huhTheme())
+	if err := form.Run(); err != nil {
+		return "", err
+	}
+	return result, nil
+}

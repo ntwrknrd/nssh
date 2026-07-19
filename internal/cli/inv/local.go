@@ -32,6 +32,7 @@ type hostPatch struct {
 	Host         string
 	Group        string
 	HostName     string
+	ProxyJump    string
 	Aliases      []string
 	User         string
 	Port         int
@@ -53,6 +54,7 @@ type groupPromptFunc func([]string) (string, error)
 type localHostAddPrompter interface {
 	InputWithDefault(title, defaultValue string) (string, error)
 	Select(title string, options []ui.SelectOption) (string, error)
+	SelectHost(title string, hosts []string) (string, error)
 }
 
 type uiLocalHostAddPrompter struct{}
@@ -63,6 +65,10 @@ func (uiLocalHostAddPrompter) InputWithDefault(title, defaultValue string) (stri
 
 func (uiLocalHostAddPrompter) Select(title string, options []ui.SelectOption) (string, error) {
 	return ui.Select(title, options)
+}
+
+func (uiLocalHostAddPrompter) SelectHost(title string, hosts []string) (string, error) {
+	return ui.FuzzySelectString(title, hosts)
 }
 
 type importResult struct {
@@ -98,6 +104,10 @@ var promptNewInventoryGroupName = func() (string, error) {
 
 var localHostConnectionTest = func(ctx context.Context, host *sshconfig.HostEntry, cfg connector.TestConfig) (*connector.TestResult, error) {
 	return connector.TestConnection(ctx, host.Host, host.User(), cfg)
+}
+
+var promptLocalHostProbePassword = func() (string, error) {
+	return ui.Password("Password (used only for connection test)")
 }
 
 type credentialRegistry interface {
@@ -156,6 +166,12 @@ func upsertLocalHostYAML(cfg *config.Config, paths *config.Paths, patch hostPatc
 	host := provider.Hosts[hostName]
 	host.Group = shortInventoryGroup(groupName)
 	setHostNameOption(&host.SSH, hostName, patch.HostName)
+	if strings.TrimSpace(patch.ProxyJump) != "" {
+		if host.SSH.Options == nil {
+			host.SSH.Options = make(config.SSHOptions)
+		}
+		host.SSH.Options["ProxyJump"] = config.NewSSHOptionString(strings.TrimSpace(patch.ProxyJump))
+	}
 	host.Aliases = mergeHostAliases(hostName, host.Aliases, autoLocalHostAliases(hostName), patch.Aliases)
 	if patch.PortSet {
 		host.Port = patch.Port
@@ -413,12 +429,17 @@ func promptLocalHostHost(patch hostPatch, prompter localHostAddPrompter) (hostPa
 }
 
 func promptLocalHostConnectionDetails(cfg *config.Config, patch hostPatch, prompter localHostAddPrompter) (hostPatch, error) {
+	return promptLocalHostConnectionDetailsWithProxyHosts(cfg, patch, prompter, nil)
+}
+
+func promptLocalHostConnectionDetailsWithProxyHosts(cfg *config.Config, patch hostPatch, prompter localHostAddPrompter, proxyHosts []string) (hostPatch, error) {
 	if prompter == nil {
 		prompter = uiLocalHostAddPrompter{}
 	}
 	type promptStep int
 	const (
 		stepPort promptStep = iota
+		stepProxy
 		stepAuth
 		stepCredentialSource
 		stepUser
@@ -444,6 +465,38 @@ func promptLocalHostConnectionDetails(cfg *config.Config, patch hostPatch, promp
 			}
 			patch.Port = port
 			patch.PortSet = true
+			step = stepProxy
+		case stepProxy:
+			if len(proxyHosts) == 0 {
+				patch.ProxyJump = ""
+				step = stepAuth
+				continue
+			}
+			proxyChoice, err := promptSelectWithBack(prompter, "Enable SSH proxy?", []ui.SelectOption{
+				{Label: "No", Value: "no"},
+				{Label: "Yes", Value: "yes"},
+			}, true)
+			if errors.Is(err, errPromptBack) {
+				step = stepPort
+				continue
+			}
+			if err != nil {
+				return patch, err
+			}
+			if proxyChoice != "yes" {
+				patch.ProxyJump = ""
+				step = stepAuth
+				continue
+			}
+			proxyHost, err := prompter.SelectHost("Proxy host", proxyHosts)
+			if err != nil {
+				return patch, err
+			}
+			proxyHost = strings.TrimSpace(proxyHost)
+			if proxyHost == "" {
+				continue
+			}
+			patch.ProxyJump = proxyHost
 			step = stepAuth
 		case stepAuth:
 			authOptions := []ui.SelectOption{
@@ -458,7 +511,7 @@ func promptLocalHostConnectionDetails(cfg *config.Config, patch hostPatch, promp
 			}
 			authMode, err := promptSelectWithBack(prompter, "Authentication", authOptions, true)
 			if errors.Is(err, errPromptBack) {
-				step = stepPort
+				step = stepProxy
 				continue
 			}
 			if err != nil {
@@ -568,7 +621,7 @@ func localHostEntryFromPatch(paths *config.Paths, patch hostPatch) *sshconfig.Ho
 	if port <= 0 {
 		port = 22
 	}
-	return sshconfig.CreateHostEntry(
+	host := sshconfig.CreateHostEntry(
 		patch.Host,
 		patch.HostName,
 		"",
@@ -576,6 +629,11 @@ func localHostEntryFromPatch(paths *config.Paths, patch hostPatch) *sshconfig.Ho
 		patch.AuthMode == config.AuthModePassword,
 		localFilePath(paths, inventory.LocalProviderIncludeFile()),
 	)
+	if strings.TrimSpace(patch.ProxyJump) != "" {
+		upsertDirective(host, "ProxyJump", strings.TrimSpace(patch.ProxyJump))
+		host.Properties["proxyjump"] = strings.TrimSpace(patch.ProxyJump)
+	}
+	return host
 }
 
 func promptCredentialSource(cfg *config.Config, group, host string, prompter localHostAddPrompter) (config.InventoryAuthConfig, string, error) {
@@ -779,6 +837,23 @@ func resolveLocalHostCredentialRecord(cfg *config.Config, patch hostPatch) (*cre
 		return provider.GetRef(auth.CredentialRef())
 	}
 	return nil, nil
+}
+
+func localHostProbeCredentialSecret(patch hostPatch, record *credential.Record) (*secret.Secret, error) {
+	if record != nil && record.Secret != nil {
+		return record.Secret, nil
+	}
+	if patch.AuthMode != config.AuthModePassword {
+		return nil, nil
+	}
+	password, err := promptLocalHostProbePassword()
+	if err != nil {
+		return nil, err
+	}
+	if password == "" {
+		return nil, nil
+	}
+	return secret.NewFromString(password), nil
 }
 
 func applyInteractiveHostAuthSelection(cfg *config.Config, patch hostPatch) bool {
@@ -1063,8 +1138,9 @@ func testLocalHostCompatibility(
 	if maxIterations <= 0 {
 		maxIterations = 5
 	}
-	if cfg == nil {
-		cfg = config.DefaultConfig()
+	timeout := 10 * time.Second
+	if cfg != nil && cfg.SSH.Connection.Timeout.Duration() > 0 {
+		timeout = cfg.SSH.Connection.Timeout.Duration()
 	}
 	testHost := cloneHostEntry(host)
 	tmp, err := os.CreateTemp("", "nssh-host-add-*.conf")
@@ -1088,11 +1164,13 @@ func testLocalHostCompatibility(
 	for iteration := 1; iteration <= maxIterations; iteration++ {
 		ui.Info("Testing connection to %s (%d/%d)...", testHost.Host, iteration, maxIterations)
 		testResult, err := localHostConnectionTest(ctx, testHost, connector.TestConfig{
-			Timeout:             10 * time.Second,
-			Password:            password,
-			ConfigFile:          tmpPath,
-			Port:                testHost.Port(),
-			UseSystemKnownHosts: cfg.SSH.Security.CompatPersistProbes,
+			Timeout:    timeout,
+			Password:   password,
+			ConfigFile: tmpPath,
+			Port:       testHost.Port(),
+			// Host add is enrollment, not a read-only compatibility probe. Keep the
+			// accepted key so the first normal connection does not prompt again.
+			UseSystemKnownHosts: true,
 		})
 		if err != nil {
 			result.TestResult = &connector.TestResult{Success: false, ExitCode: 1, Stderr: err.Error()}
@@ -1100,13 +1178,13 @@ func testLocalHostCompatibility(
 			return result, nil
 		}
 		result.TestResult = testResult
-		if testResult.Success || compat.IsAuthFailureAfterKex(testResult.Stderr) {
+		if testResult.Success {
 			result.Success = true
-			if testResult.Success {
-				result.StoppedReason = "connection_succeeded"
-			} else {
-				result.StoppedReason = "auth_failed_after_kex_success"
-			}
+			result.StoppedReason = "connection_succeeded"
+			return result, nil
+		}
+		if compat.IsAuthFailureAfterKex(testResult.Stderr) {
+			result.StoppedReason = "authentication_failed"
 			return result, nil
 		}
 
@@ -1189,6 +1267,32 @@ func inventoryHosts(parser *sshconfig.Parser, cfg *config.Config, paths *config.
 	}
 	sort.Slice(hosts, func(i, j int) bool { return hosts[i].Host < hosts[j].Host })
 	return hosts, nil
+}
+
+func inventoryProxyHostNames(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, exclude string) ([]string, error) {
+	hosts, err := inventoryHosts(parser, cfg, paths)
+	if err != nil {
+		return nil, err
+	}
+	exclude = strings.TrimSpace(exclude)
+	seen := make(map[string]bool, len(hosts))
+	names := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		if host == nil {
+			continue
+		}
+		name := strings.TrimSpace(host.Host)
+		key := strings.ToLower(name)
+		if name == "" || strings.EqualFold(name, exclude) || seen[key] {
+			continue
+		}
+		seen[key] = true
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		return strings.ToLower(names[i]) < strings.ToLower(names[j])
+	})
+	return names, nil
 }
 
 func findInventoryHostWithLocation(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, pattern string) (*sshconfig.HostEntry, *sshconfig.ParsedConfig, error) {
