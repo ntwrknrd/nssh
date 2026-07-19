@@ -444,12 +444,22 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 				if credentialSecret != nil {
 					defer credentialSecret.Destroy()
 				}
+				passwordResolver, cleanupPasswordResolver, proxyCommand, err := localHostProbePasswordResolver(cfg, patch, credentialSecret)
+				if err != nil {
+					return err
+				}
+				defer cleanupPasswordResolver()
 				draft := localHostEntryFromPatch(paths, patch)
+				if proxyCommand != "" {
+					deleteDirective(draft, "ProxyJump")
+					delete(draft.Properties, "proxyjump")
+					upsertDirective(draft, "ProxyCommand", proxyCommand)
+				}
 				if user := localHostProbeUser(cfg, patch, credentialRecord); user != "" {
 					upsertDirective(draft, "User", user)
 					draft.Properties["user"] = user
 				}
-				result, err := runLocalHostCompatCheck(context.Background(), cfg, draft, 5, credentialSecret)
+				result, err := runLocalHostCompatCheck(context.Background(), cfg, draft, 5, credentialSecret, passwordResolver)
 				if err != nil {
 					return err
 				}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/ssh/askpass"
@@ -18,7 +19,8 @@ func main() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	password, err := askpass.RequestPassword(ctx, socketPath, nonce)
+	prompt := strings.Join(os.Args[1:], " ")
+	password, err := askpass.RequestPassword(ctx, socketPath, nonce, prompt)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "nssh-askpass:", err)
 		os.Exit(1)

@@ -14,9 +14,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/connect"
 	"github.com/ntwrknrd/nssh/internal/credential"
 	"github.com/ntwrknrd/nssh/internal/inventory"
 	"github.com/ntwrknrd/nssh/internal/secret"
@@ -117,6 +119,8 @@ type credentialRegistry interface {
 var newCredentialRegistry = func(cfg *config.Config) (credentialRegistry, error) {
 	return credential.NewRegistry(cfg)
 }
+
+var resolveLocalHostProxy = connect.ResolveHostForConnect
 
 func upsertLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, patch hostPatch) error {
 	return upsertLocalHostYAML(cfg, paths, patch)
@@ -1134,6 +1138,7 @@ func testLocalHostCompatibility(
 	host *sshconfig.HostEntry,
 	maxIterations int,
 	password *secret.Secret,
+	passwordResolver func(context.Context, string) (*secret.Secret, error),
 ) (*localHostCompatResult, error) {
 	if maxIterations <= 0 {
 		maxIterations = 5
@@ -1164,10 +1169,11 @@ func testLocalHostCompatibility(
 	for iteration := 1; iteration <= maxIterations; iteration++ {
 		ui.Info("Testing connection to %s (%d/%d)...", testHost.Host, iteration, maxIterations)
 		testResult, err := localHostConnectionTest(ctx, testHost, connector.TestConfig{
-			Timeout:    timeout,
-			Password:   password,
-			ConfigFile: tmpPath,
-			Port:       testHost.Port(),
+			Timeout:          timeout,
+			Password:         password,
+			PasswordResolver: passwordResolver,
+			ConfigFile:       tmpPath,
+			Port:             testHost.Port(),
 			// Host add is enrollment, not a read-only compatibility probe. Keep the
 			// accepted key so the first normal connection does not prompt again.
 			UseSystemKnownHosts: true,
@@ -1226,6 +1232,82 @@ func testLocalHostCompatibility(
 	}
 	result.StoppedReason = "max_iterations_reached"
 	return result, nil
+}
+
+func localHostProbePasswordResolver(cfg *config.Config, patch hostPatch, targetPassword *secret.Secret) (func(context.Context, string) (*secret.Secret, error), func(), string, error) {
+	var proxy *connect.ResolvedProxy
+	var proxyCommand string
+	if strings.TrimSpace(patch.ProxyJump) != "" {
+		resolved, err := resolveLocalHostProxy(patch.ProxyJump, "", cfg)
+		if err != nil {
+			return nil, func() {}, "", fmt.Errorf("resolve SSH proxy credential: %w", err)
+		}
+		proxyCommand = connect.RenderManagedProxyCommand(resolved)
+		proxy = &connect.ResolvedProxy{
+			Canonical:  resolved.Canonical,
+			Hostname:   resolved.Hostname,
+			Port:       resolved.Port,
+			Username:   resolved.Username,
+			AuthMode:   resolved.AuthMode,
+			Credential: resolved.Credential,
+		}
+	}
+
+	var proxyPassword *secret.Secret
+	var proxyErr error
+	var proxyOnce sync.Once
+	if proxy != nil && proxy.Credential != nil {
+		proxyPassword = proxy.Credential.Password
+	}
+	resolveProxy := func(ctx context.Context) (*secret.Secret, error) {
+		if proxy == nil || proxy.AuthMode == config.AuthModeKey || proxy.Credential == nil {
+			return nil, fmt.Errorf("no password configured for SSH proxy")
+		}
+		proxyOnce.Do(func() {
+			if proxyPassword != nil {
+				return
+			}
+			if proxy.Credential.PasswordResolver == nil {
+				proxyErr = fmt.Errorf("no password configured for SSH proxy")
+				return
+			}
+			proxyPassword, proxyErr = proxy.Credential.PasswordResolver(ctx)
+		})
+		return proxyPassword, proxyErr
+	}
+	cleanup := func() {
+		if proxyPassword != nil {
+			proxyPassword.Destroy()
+			proxyPassword = nil
+		}
+	}
+	hasProxyPassword := proxy != nil && proxy.AuthMode != config.AuthModeKey && proxy.Credential != nil
+	if targetPassword == nil && !hasProxyPassword {
+		return nil, cleanup, proxyCommand, nil
+	}
+	return func(ctx context.Context, prompt string) (*secret.Secret, error) {
+		if localHostPromptMatchesProxy(prompt, proxy) {
+			return resolveProxy(ctx)
+		}
+		if targetPassword == nil {
+			return nil, fmt.Errorf("no password configured for SSH target")
+		}
+		return targetPassword, nil
+	}, cleanup, proxyCommand, nil
+}
+
+func localHostPromptMatchesProxy(prompt string, proxy *connect.ResolvedProxy) bool {
+	if proxy == nil {
+		return false
+	}
+	prompt = strings.ToLower(prompt)
+	for _, host := range []string{proxy.Hostname, proxy.Canonical} {
+		host = strings.ToLower(strings.TrimSpace(host))
+		if host != "" && strings.Contains(prompt, host) {
+			return true
+		}
+	}
+	return false
 }
 
 func inventoryHosts(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths) ([]*sshconfig.HostEntry, error) {

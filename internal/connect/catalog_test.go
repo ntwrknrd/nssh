@@ -91,6 +91,109 @@ func TestCatalogAllowsLocalHostWithoutGroup(t *testing.T) {
 	}
 }
 
+func TestCatalogResolvesLocalInventoryProxyAfterCatalogBuild(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type: config.ProviderLocal,
+			Groups: map[string]config.GroupConfig{
+				"custcbb": {},
+			},
+			Hosts: map[string]config.InventoryHostConfig{
+				"810-neteng01.custcbb.local": {
+					Group:   "custcbb",
+					Aliases: []string{"810-neteng01"},
+					Auth:    config.InventoryAuthConfig{Mode: config.AuthModeKey, Username: "netops"},
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"IdentityFile": config.NewSSHOptionString("~/.ssh/netops.pub"),
+					}},
+				},
+				"pla-ts01.custcbb.local": {
+					Group: "custcbb",
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"ProxyJump": config.NewSSHOptionString("ops@810-neteng01:2200"),
+					}},
+				},
+			},
+		},
+	}
+
+	cat := buildCatalogForTest(t, cfg, nil)
+	target, ok := cat.Find("pla-ts01")
+	if !ok {
+		t.Fatal("Find(pla-ts01) failed")
+	}
+	if target.ManagedProxy == nil {
+		t.Fatal("target has no managed proxy")
+	}
+	if hasSSHOption(target.SSH.Options, "ProxyJump") {
+		t.Fatalf("managed target retained ProxyJump: %#v", target.SSH.Options)
+	}
+	command := target.SSH.Options["ProxyCommand"].StringValue()
+	for _, want := range []string{"IdentityFile=~/.ssh/netops.pub", "-W %h:%p", "ops@810-neteng01.custcbb.local:2200"} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("ProxyCommand = %q, want %q", command, want)
+		}
+	}
+
+	proxy, ok := cat.Find("810-neteng01")
+	if !ok {
+		t.Fatal("Find(810-neteng01) failed")
+	}
+	if proxy.Username != "netops" || proxy.Port != 22 {
+		t.Fatalf("direct proxy mutated by target override: user=%q port=%d", proxy.Username, proxy.Port)
+	}
+}
+
+func TestCatalogLeavesUnmanagedAndNestedProxyJumpsNative(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type:   config.ProviderLocal,
+			Groups: map[string]config.GroupConfig{"lab": {}},
+			Hosts: map[string]config.InventoryHostConfig{
+				"nested-proxy": {
+					Group: "lab",
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"ProxyJump": config.NewSSHOptionString("outer-proxy"),
+					}},
+				},
+				"nested-target": {
+					Group: "lab",
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"ProxyJump": config.NewSSHOptionString("nested-proxy"),
+					}},
+				},
+				"multi-target": {
+					Group: "lab",
+					SSH: config.SSHHostConfig{Options: config.SSHOptions{
+						"ProxyJump": config.NewSSHOptionString("jump-a,jump-b"),
+					}},
+				},
+			},
+		},
+	}
+
+	cat := buildCatalogForTest(t, cfg, nil)
+	for host, want := range map[string]string{
+		"nested-target": "nested-proxy",
+		"multi-target":  "jump-a,jump-b",
+	} {
+		got, ok := cat.Find(host)
+		if !ok {
+			t.Fatalf("Find(%s) failed", host)
+		}
+		if got.ManagedProxy != nil {
+			t.Fatalf("%s unexpectedly managed proxy %#v", host, got.ManagedProxy)
+		}
+		if value := got.SSH.Options["ProxyJump"].StringValue(); value != want {
+			t.Fatalf("%s ProxyJump = %q, want %q", host, value, want)
+		}
+	}
+}
+
 func TestCatalogRejectsUnknownLocalHostGroup(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Inventory.Provider = nil

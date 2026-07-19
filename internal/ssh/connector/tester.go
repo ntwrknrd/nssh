@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/creack/pty"
@@ -27,9 +28,10 @@ type TestResult struct {
 
 // TestConfig configures the connection test.
 type TestConfig struct {
-	Timeout  time.Duration  // Connection timeout (default 10s)
-	Password *secret.Secret // Password for auth testing (nil = BatchMode)
-	Port     string         // SSH port (empty = use SSH config default)
+	Timeout          time.Duration  // Connection timeout (default 10s)
+	Password         *secret.Secret // Password for auth testing (nil = BatchMode)
+	PasswordResolver func(context.Context, string) (*secret.Secret, error)
+	Port             string // SSH port (empty = use SSH config default)
 	// UseSystemKnownHosts controls whether probes write to the user's real
 	// known_hosts file. Default false uses a temp file to avoid persistence.
 	UseSystemKnownHosts bool
@@ -73,7 +75,7 @@ func buildTestSSHArgs(hostname, username string, cfg TestConfig) ([]string, func
 		cleanup = func() { _ = os.Remove(tmpFile.Name()) }
 	}
 
-	if cfg.Password == nil {
+	if cfg.Password == nil && cfg.PasswordResolver == nil {
 		args = append(args, "-o", "BatchMode=yes")
 	} else {
 		args = append(args, "-o", "PreferredAuthentications=password,keyboard-interactive,publickey")
@@ -131,8 +133,13 @@ func TestConnection(ctx context.Context, hostname, username string, cfg TestConf
 	testCtx, cancel := context.WithTimeout(ctx, cfg.Timeout+5*time.Second)
 	defer cancel()
 
+	if cfg.PasswordResolver != nil {
+		return testWithPasswordResolver(testCtx, args, cfg.PasswordResolver)
+	}
 	if cfg.Password != nil {
-		return testWithPassword(testCtx, args, cfg.Password)
+		return testWithPasswordResolver(testCtx, args, func(context.Context, string) (*secret.Secret, error) {
+			return cfg.Password, nil
+		})
 	}
 	return testBatchMode(testCtx, args), nil
 }
@@ -184,8 +191,8 @@ func testBatchMode(ctx context.Context, args []string) *TestResult {
 	return result
 }
 
-// testWithPassword runs SSH via PTY with password injection.
-func testWithPassword(ctx context.Context, args []string, password *secret.Secret) (*TestResult, error) {
+// testWithPasswordResolver runs SSH via PTY with prompt-aware password injection.
+func testWithPasswordResolver(ctx context.Context, args []string, resolve func(context.Context, string) (*secret.Secret, error)) (*TestResult, error) {
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 
 	// Start with PTY
@@ -198,7 +205,13 @@ func testWithPassword(ctx context.Context, args []string, password *secret.Secre
 	// Read output with password injection
 	var output bytes.Buffer
 	ringBuf := NewRingBuffer(DefaultRingBufferSize)
-	passwordSent := false
+	var resolverErr error
+	var resolverErrMu sync.Mutex
+	setResolverErr := func(err error) {
+		resolverErrMu.Lock()
+		resolverErr = err
+		resolverErrMu.Unlock()
+	}
 	done := make(chan error, 1)
 
 	go func() {
@@ -213,10 +226,23 @@ func testWithPassword(ctx context.Context, args []string, password *secret.Secre
 			ringBuf.Write(buf[:n])
 
 			// Check for password prompt and inject if needed
-			if !passwordSent && matchPasswordPrompt(ringBuf.LinearBytes()) {
-				if err := injectTestPassword(ptmx, password); err == nil {
-					passwordSent = true
+			if matchPasswordPrompt(ringBuf.LinearBytes()) {
+				prompt := string(ringBuf.LinearBytes())
+				password, err := resolve(ctx, prompt)
+				if err != nil {
+					setResolverErr(err)
+					ringBuf.Reset()
+					continue
 				}
+				if password == nil {
+					setResolverErr(fmt.Errorf("no password configured for SSH prompt"))
+					ringBuf.Reset()
+					continue
+				}
+				if err := injectTestPassword(ptmx, password); err != nil {
+					setResolverErr(err)
+				}
+				ringBuf.Reset()
 			}
 		}
 	}()
@@ -239,6 +265,12 @@ func testWithPassword(ctx context.Context, args []string, password *secret.Secre
 	result := &TestResult{
 		Stderr:     stderr,
 		AuthMethod: compat.ExtractAuthMethod(stderr),
+	}
+	resolverErrMu.Lock()
+	promptErr := resolverErr
+	resolverErrMu.Unlock()
+	if promptErr != nil {
+		return result, promptErr
 	}
 
 	if waitErr == nil {

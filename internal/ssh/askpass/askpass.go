@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -25,11 +26,13 @@ type Server struct {
 	dir        string
 	socketPath string
 	nonce      string
-	resolve    func(context.Context) (*secret.Secret, error)
+	resolve    PromptResolver
 	listener   *net.UnixListener
 	closeOnce  sync.Once
 	closeErr   error
 }
+
+type PromptResolver func(context.Context, string) (*secret.Secret, error)
 
 func NewServer(password *secret.Secret) (*Server, error) {
 	if password == nil {
@@ -41,6 +44,15 @@ func NewServer(password *secret.Secret) (*Server, error) {
 }
 
 func NewServerWithResolver(resolve func(context.Context) (*secret.Secret, error)) (*Server, error) {
+	if resolve == nil {
+		return nil, fmt.Errorf("askpass password resolver is required")
+	}
+	return NewServerWithPromptResolver(func(ctx context.Context, _ string) (*secret.Secret, error) {
+		return resolve(ctx)
+	})
+}
+
+func NewServerWithPromptResolver(resolve PromptResolver) (*Server, error) {
 	if resolve == nil {
 		return nil, fmt.Errorf("askpass password resolver is required")
 	}
@@ -156,7 +168,15 @@ func (s *Server) serveConn(ctx context.Context, conn *net.UnixConn) error {
 	if strings.TrimSuffix(nonce, "\n") != s.nonce {
 		return fmt.Errorf("askpass nonce mismatch")
 	}
-	password, err := s.resolve(ctx)
+	promptLine, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("read askpass prompt: %w", err)
+	}
+	promptBytes, err := base64.RawStdEncoding.DecodeString(strings.TrimSuffix(promptLine, "\n"))
+	if err != nil {
+		return fmt.Errorf("decode askpass prompt: %w", err)
+	}
+	password, err := s.resolve(ctx, string(promptBytes))
 	if err != nil {
 		return err
 	}
@@ -185,7 +205,7 @@ func (s *Server) Close() error {
 	return s.closeErr
 }
 
-func RequestPassword(ctx context.Context, socketPath, nonce string) ([]byte, error) {
+func RequestPassword(ctx context.Context, socketPath, nonce string, prompt ...string) ([]byte, error) {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", socketPath)
 	if err != nil {
@@ -193,7 +213,12 @@ func RequestPassword(ctx context.Context, socketPath, nonce string) ([]byte, err
 	}
 	defer func() { _ = conn.Close() }()
 
-	if _, err := io.WriteString(conn, nonce+"\n"); err != nil {
+	promptValue := ""
+	if len(prompt) > 0 {
+		promptValue = prompt[0]
+	}
+	request := nonce + "\n" + base64.RawStdEncoding.EncodeToString([]byte(promptValue)) + "\n"
+	if _, err := io.WriteString(conn, request); err != nil {
 		return nil, fmt.Errorf("write askpass nonce: %w", err)
 	}
 	password, err := io.ReadAll(conn)

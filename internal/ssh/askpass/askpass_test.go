@@ -204,3 +204,37 @@ func TestServerWithResolverWaitsForPassword(t *testing.T) {
 		t.Fatalf("ServeOnce: %v", err)
 	}
 }
+
+func TestServerRoutesDecodedPromptToResolver(t *testing.T) {
+	var gotPrompt string
+	password := secret.NewFromString("proxy-secret")
+	defer password.Destroy()
+	server, err := NewServerWithPromptResolver(func(_ context.Context, prompt string) (*secret.Secret, error) {
+		gotPrompt = prompt
+		return password, nil
+	})
+	if err != nil {
+		t.Fatalf("NewServerWithPromptResolver: %v", err)
+	}
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- server.ServeOnce(ctx) }()
+
+	prompt := "(netops@jump01.example) Password:"
+	got, err := RequestPassword(ctx, server.SocketPath(), server.Nonce(), prompt)
+	if err != nil {
+		t.Fatalf("RequestPassword: %v", err)
+	}
+	if string(got) != "proxy-secret" {
+		t.Fatalf("password = %q", got)
+	}
+	if gotPrompt != prompt {
+		t.Fatalf("prompt = %q, want %q", gotPrompt, prompt)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("ServeOnce: %v", err)
+	}
+}

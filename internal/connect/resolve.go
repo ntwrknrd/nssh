@@ -46,7 +46,17 @@ type ResolvedHost struct {
 	IncludeFile string
 	HostEntry   *sshconfig.HostEntry
 	Credential  *ResolvedCredential
+	Proxy       *ResolvedProxy
 	Config      *config.Config
+}
+
+type ResolvedProxy struct {
+	Canonical  string
+	Hostname   string
+	Port       int
+	Username   string
+	AuthMode   string
+	Credential *ResolvedCredential
 }
 
 // ResolveHostForConnect performs host lookup, include-file discovery, and
@@ -121,37 +131,17 @@ func splitConnectQuery(query, explicitUser string) (string, string) {
 }
 
 func resolveCatalogHostForConnect(query, explicitUser string, c *config.Config, hostData *ResolvedHostData) (*ResolvedHost, error) {
-	authCtx := config.InventoryAuthContext{
-		Host:     hostData.Canonical,
-		Provider: hostData.Provider,
-		Group:    catalogGroupID(hostData.Provider, hostData.Group),
-	}
-	authTimer := connector.StartTiming(connector.TimingAuthResolve)
-	auth := c.ResolveInventoryAuth(authCtx)
-	authTimer.Emit()
-
-	// Resolve credentials
-	var cred *ResolvedCredential
-	credentialUser := auth.Username
 	registryTimer := connector.StartTiming(connector.TimingCredentialRegistry)
-	registry, err := credential.NewRegistry(c)
+	registry, err := newConnectCredentialRegistry(c)
 	registryTimer.Emit()
 	if err != nil {
 		slog.Debug("credential registry not available", "err", err)
-	} else {
-		lookupTimer := connector.StartTiming(connector.TimingCredentialLookup)
-		cred, err = resolveInventoryCredential(registry, auth, explicitUser)
-		lookupTimer.Emit()
-		if err != nil {
-			slog.Warn("credential resolution failed", "err", err)
-		} else if cred != nil && credentialUser == "" {
-			credentialUser = cred.Username
-		}
+		registry = nil
 	}
 
-	username := selectConnectionUsername(true, explicitUser, "", "", credentialUser, "")
+	auth, cred, username := resolveCatalogAuthCredential(c, registry, hostData, explicitUser)
 
-	return &ResolvedHost{
+	resolved := &ResolvedHost{
 		Query:      query,
 		Canonical:  hostData.Canonical,
 		Hostname:   hostData.Hostname,
@@ -165,7 +155,48 @@ func resolveCatalogHostForConnect(query, explicitUser string, c *config.Config, 
 		Highlight:  hostData.Highlight,
 		Credential: cred,
 		Config:     c,
-	}, nil
+	}
+	if hostData.ManagedProxy != nil {
+		proxyAuth, proxyCredential, proxyUsername := resolveCatalogAuthCredential(c, registry, hostData.ManagedProxy, hostData.ManagedProxy.Username)
+		resolved.Proxy = &ResolvedProxy{
+			Canonical:  hostData.ManagedProxy.Canonical,
+			Hostname:   hostData.ManagedProxy.Hostname,
+			Port:       hostData.ManagedProxy.Port,
+			Username:   proxyUsername,
+			AuthMode:   proxyAuth.AuthMode,
+			Credential: proxyCredential,
+		}
+	}
+	return resolved, nil
+}
+
+func resolveCatalogAuthCredential(c *config.Config, registry providerRegistry, host *ResolvedHostData, explicitUser string) (config.InventoryAuthResolution, *ResolvedCredential, string) {
+	if c == nil || host == nil {
+		return config.InventoryAuthResolution{}, nil, strings.TrimSpace(explicitUser)
+	}
+	authTimer := connector.StartTiming(connector.TimingAuthResolve)
+	auth := c.ResolveInventoryAuth(config.InventoryAuthContext{
+		Host:     host.Canonical,
+		Provider: host.Provider,
+		Group:    catalogGroupID(host.Provider, host.Group),
+	})
+	authTimer.Emit()
+
+	credentialUser := auth.Username
+	var cred *ResolvedCredential
+	if registry != nil {
+		lookupTimer := connector.StartTiming(connector.TimingCredentialLookup)
+		var err error
+		cred, err = resolveInventoryCredential(registry, auth, explicitUser)
+		lookupTimer.Emit()
+		if err != nil {
+			slog.Warn("credential resolution failed", "host", host.Hostname, "err", err)
+		} else if cred != nil && credentialUser == "" {
+			credentialUser = cred.Username
+		}
+	}
+	username := selectConnectionUsername(true, explicitUser, "", "", credentialUser, "")
+	return auth, cred, username
 }
 
 // ResolveLiteralHostForConnect resolves a literal destination without fuzzy
@@ -218,6 +249,10 @@ func ResolveLiteralHostForConnect(query, explicitUser string, cfg ...*config.Con
 
 type providerRegistry interface {
 	Provider(name string) credential.Provider
+}
+
+var newConnectCredentialRegistry = func(cfg *config.Config) (providerRegistry, error) {
+	return credential.NewRegistry(cfg)
 }
 
 func resolveBoundCredential(cfg *config.Config, registry providerRegistry, hostname, group, username string) (*ResolvedCredential, error) {

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/audit"
@@ -247,6 +248,12 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 	if passwordFuture != nil {
 		defer passwordFuture.Close()
 	}
+	proxyPasswordFuture := prepareProxyPasswordFuture(resolved)
+	if proxyPasswordFuture != nil {
+		defer proxyPasswordFuture.Close()
+	}
+	defer destroyImmediateResolvedPasswords(resolved)
+	resolvePassword := interactiveAskpassResolver(resolved, passwordFuture, proxyPasswordFuture)
 	var hostKeyPrep *connector.HostKeyPreparation
 	if resolved.Credential != nil {
 		if !muxHot {
@@ -265,7 +272,7 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 	if !muxHot {
 		muxStartReq := muxStartRequest(resolved, req.SSHArgs, cfg, opts, nil)
 		if _, ok := connector.BuildMuxStartArgs(muxStartReq); ok {
-			muxAskpass, err := startMuxAskpass(ctx, resolved.Credential, passwordFuture)
+			muxAskpass, err := startMuxAskpass(ctx, resolvePassword)
 			if err != nil {
 				return err
 			}
@@ -289,41 +296,18 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 		}
 	}
 
-	if resolved.Credential != nil && !muxHot {
+	if resolvePassword != nil && !muxHot {
 		askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
 		slog.Debug("setting up askpass", "host", resolved.Hostname, "password_future", passwordFuture != nil, "mux_hot", muxHot)
-		if passwordFuture != nil {
-			if !muxHot {
-				var env []string
-				var err error
-				askpassServer, askpassCancel, askpassDone, env, err = startAskpassServerEnv(ctx, passwordFuture.Resolve)
-				if err != nil {
-					askpassTimer.Emit()
-					return err
-				}
-				req.Env = append(req.Env, env...)
-				slog.Debug("askpass setup complete", "host", resolved.Hostname)
-			}
-		} else {
-			password, err := remoteCommandPassword(ctx, resolved.Credential)
-			if err != nil {
-				askpassTimer.Emit()
-				return err
-			}
-			if password != nil {
-				defer password.Destroy()
-				var env []string
-				askpassServer, askpassCancel, askpassDone, env, err = startAskpassServerEnv(ctx, func(context.Context) (*secret.Secret, error) {
-					return password, nil
-				})
-				if err != nil {
-					askpassTimer.Emit()
-					return err
-				}
-				req.Env = append(req.Env, env...)
-				slog.Debug("askpass setup complete", "host", resolved.Hostname)
-			}
+		var env []string
+		var err error
+		askpassServer, askpassCancel, askpassDone, env, err = startPromptAskpassServerEnv(ctx, resolvePassword)
+		if err != nil {
+			askpassTimer.Emit()
+			return err
 		}
+		req.Env = append(req.Env, env...)
+		slog.Debug("askpass setup complete", "host", resolved.Hostname)
 		askpassTimer.Emit()
 	}
 	if askpassServer != nil {
@@ -340,11 +324,17 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 }
 
 func startAskpassServerEnv(ctx context.Context, resolve func(context.Context) (*secret.Secret, error)) (*askpass.Server, context.CancelFunc, chan error, []string, error) {
+	return startPromptAskpassServerEnv(ctx, func(ctx context.Context, _ string) (*secret.Secret, error) {
+		return resolve(ctx)
+	})
+}
+
+func startPromptAskpassServerEnv(ctx context.Context, resolve askpass.PromptResolver) (*askpass.Server, context.CancelFunc, chan error, []string, error) {
 	helper, err := askpassHelperPathFunc()
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	askpassServer, err := askpass.NewServerWithResolver(resolve)
+	askpassServer, err := askpass.NewServerWithPromptResolver(resolve)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -413,64 +403,27 @@ func muxCheckRequest(resolved *ResolvedHost, sshArgs []string, cfg *config.Confi
 	return req
 }
 
-func remoteCommandPassword(ctx context.Context, cred *ResolvedCredential) (*secret.Secret, error) {
-	if cred == nil {
-		return nil, nil
-	}
-	if cred.Password != nil {
-		return cred.Password, nil
-	}
-	if cred.PasswordResolver == nil {
-		return nil, nil
-	}
-	password, err := cred.PasswordResolver(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return password, nil
-}
-
 type muxAskpassHandle struct {
-	env      []string
-	password *secret.Secret
-	server   *askpass.Server
-	cancel   context.CancelFunc
-	done     chan error
+	env    []string
+	server *askpass.Server
+	cancel context.CancelFunc
+	done   chan error
 }
 
 func (h *muxAskpassHandle) cleanup() {
 	if h.server != nil {
 		stopAskpassServer(h.server, h.cancel, h.done)
 	}
-	if h.password != nil {
-		h.password.Destroy()
-	}
 }
 
-func startMuxAskpass(ctx context.Context, cred *ResolvedCredential, passwordFuture *sshpassword.Future) (*muxAskpassHandle, error) {
-	if cred == nil {
+func startMuxAskpass(ctx context.Context, resolve askpass.PromptResolver) (*muxAskpassHandle, error) {
+	if resolve == nil {
 		return nil, nil
 	}
 	handle := &muxAskpassHandle{}
-	var resolve func(context.Context) (*secret.Secret, error)
-	if passwordFuture != nil {
-		resolve = passwordFuture.Resolve
-	} else {
-		password, err := remoteCommandPassword(ctx, cred)
-		if err != nil {
-			return nil, err
-		}
-		if password == nil {
-			return nil, nil
-		}
-		handle.password = password
-		resolve = func(context.Context) (*secret.Secret, error) {
-			return password, nil
-		}
-	}
 
 	askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
-	server, cancel, done, env, err := startAskpassServerEnv(ctx, resolve)
+	server, cancel, done, env, err := startPromptAskpassServerEnv(ctx, resolve)
 	askpassTimer.Emit()
 	if err != nil {
 		handle.cleanup()
@@ -634,7 +587,12 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 	if passwordFuture != nil {
 		defer passwordFuture.Close()
 	}
-	resolvePassword := interactiveAskpassResolver(resolved, passwordFuture)
+	proxyPasswordFuture := prepareProxyPasswordFuture(resolved)
+	if proxyPasswordFuture != nil {
+		defer proxyPasswordFuture.Close()
+	}
+	defer destroyImmediateProxyPassword(resolved)
+	resolvePassword := interactiveAskpassResolver(resolved, passwordFuture, proxyPasswordFuture)
 	if resolvePassword != nil && passwordFuture == nil {
 		muxHot, _ = checkMuxSessionFunc(ctx, muxCheckRequest(resolved, sshArgs, cfg, opts))
 	}
@@ -658,7 +616,7 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 		askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
 		var env []string
 		var err error
-		askpassServer, askpassCancel, askpassDone, env, err = startAskpassServerEnv(ctx, resolvePassword)
+		askpassServer, askpassCancel, askpassDone, env, err = startPromptAskpassServerEnv(ctx, resolvePassword)
 		if err != nil {
 			askpassTimer.Emit()
 			return connectionResult{Err: err}
@@ -690,19 +648,88 @@ func interactiveAskpassEnabled() bool {
 	return true
 }
 
-func interactiveAskpassResolver(resolved *ResolvedHost, passwordFuture *sshpassword.Future) func(context.Context) (*secret.Secret, error) {
-	if resolved == nil || resolved.AuthMode != config.AuthModePassword || resolved.Credential == nil {
+func interactiveAskpassResolver(resolved *ResolvedHost, passwordFuture, proxyPasswordFuture *sshpassword.Future) askpass.PromptResolver {
+	if resolved == nil {
 		return nil
 	}
-	if passwordFuture != nil {
-		return passwordFuture.Resolve
+	targetResolve := credentialPasswordResolver(resolved.AuthMode, resolved.Credential, passwordFuture)
+	var proxyResolve func(context.Context) (*secret.Secret, error)
+	if resolved.Proxy != nil {
+		proxyResolve = credentialPasswordResolver(resolved.Proxy.AuthMode, resolved.Proxy.Credential, proxyPasswordFuture)
 	}
-	if resolved.Credential.Password != nil {
-		return func(context.Context) (*secret.Secret, error) {
-			return resolved.Credential.Password, nil
+	if targetResolve == nil && proxyResolve == nil {
+		return nil
+	}
+	return func(ctx context.Context, prompt string) (*secret.Secret, error) {
+		if promptMatchesProxy(prompt, resolved.Proxy) {
+			if proxyResolve == nil {
+				return nil, fmt.Errorf("no password configured for SSH proxy")
+			}
+			return proxyResolve(ctx)
+		}
+		if targetResolve == nil {
+			return nil, fmt.Errorf("no password configured for SSH target")
+		}
+		return targetResolve(ctx)
+	}
+}
+
+func credentialPasswordResolver(authMode string, credential *ResolvedCredential, future *sshpassword.Future) func(context.Context) (*secret.Secret, error) {
+	if authMode == config.AuthModeKey || credential == nil {
+		return nil
+	}
+	if future != nil {
+		return future.Resolve
+	}
+	if credential.Password != nil {
+		return func(context.Context) (*secret.Secret, error) { return credential.Password, nil }
+	}
+	if credential.PasswordResolver != nil {
+		var once sync.Once
+		var password *secret.Secret
+		var err error
+		return func(ctx context.Context) (*secret.Secret, error) {
+			once.Do(func() { password, err = credential.PasswordResolver(ctx) })
+			return password, err
 		}
 	}
 	return nil
+}
+
+func promptMatchesProxy(prompt string, proxy *ResolvedProxy) bool {
+	if proxy == nil {
+		return false
+	}
+	prompt = strings.ToLower(prompt)
+	for _, host := range []string{proxy.Hostname, proxy.Canonical} {
+		host = strings.ToLower(strings.TrimSpace(host))
+		if host != "" && strings.Contains(prompt, host) {
+			return true
+		}
+	}
+	return false
+}
+
+func prepareProxyPasswordFuture(resolved *ResolvedHost) *sshpassword.Future {
+	if resolved == nil || resolved.Proxy == nil || resolved.Proxy.AuthMode == config.AuthModeKey || resolved.Proxy.Credential == nil || resolved.Proxy.Credential.PasswordResolver == nil {
+		return nil
+	}
+	return sshpassword.NewFuture(resolved.Proxy.Credential.PasswordResolver)
+}
+
+func destroyImmediateProxyPassword(resolved *ResolvedHost) {
+	if resolved != nil && resolved.Proxy != nil && resolved.Proxy.Credential != nil && resolved.Proxy.Credential.Password != nil {
+		resolved.Proxy.Credential.Password.Destroy()
+		resolved.Proxy.Credential.Password = nil
+	}
+}
+
+func destroyImmediateResolvedPasswords(resolved *ResolvedHost) {
+	if resolved != nil && resolved.Credential != nil && resolved.Credential.Password != nil {
+		resolved.Credential.Password.Destroy()
+		resolved.Credential.Password = nil
+	}
+	destroyImmediateProxyPassword(resolved)
 }
 
 func prepareInteractiveHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options) (*connector.HostKeyPreparation, error) {
@@ -930,7 +957,12 @@ func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArg
 	if passwordFuture != nil {
 		defer passwordFuture.Close()
 	}
-	resolvePassword := interactiveAskpassResolver(retryResolved, passwordFuture)
+	proxyPasswordFuture := prepareProxyPasswordFuture(retryResolved)
+	if proxyPasswordFuture != nil {
+		defer proxyPasswordFuture.Close()
+	}
+	defer destroyImmediateProxyPassword(retryResolved)
+	resolvePassword := interactiveAskpassResolver(retryResolved, passwordFuture, proxyPasswordFuture)
 	if resolvePassword != nil && passwordFuture == nil {
 		muxHot, _ = checkMuxSessionFunc(ctx, muxCheckRequest(retryResolved, sshArgs, cfg, opts))
 	}
@@ -954,7 +986,7 @@ func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArg
 		askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
 		var env []string
 		var err error
-		askpassServer, askpassCancel, askpassDone, env, err = startAskpassServerEnv(ctx, resolvePassword)
+		askpassServer, askpassCancel, askpassDone, env, err = startPromptAskpassServerEnv(ctx, resolvePassword)
 		if err != nil {
 			askpassTimer.Emit()
 			return err
