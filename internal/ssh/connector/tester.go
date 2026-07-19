@@ -40,11 +40,21 @@ type TestConfig struct {
 
 // buildTestSSHArgs builds SSH arguments for a probe and returns a cleanup
 // function for any temporary resources (e.g., temp known_hosts).
-func buildTestSSHArgs(hostname, username string, cfg TestConfig) ([]string, func(), error) {
-	cleanup := func() {}
+func buildTestSSHArgs(hostname, username string, cfg TestConfig) ([]string, string, func(), error) {
+	clientLog, err := os.CreateTemp("", "nssh-test-client-log-*")
+	if err != nil {
+		return nil, "", func() {}, fmt.Errorf("create SSH client log: %w", err)
+	}
+	clientLogPath := clientLog.Name()
+	if err := clientLog.Close(); err != nil {
+		_ = os.Remove(clientLogPath)
+		return nil, "", func() {}, fmt.Errorf("close SSH client log: %w", err)
+	}
+	cleanup := func() { _ = os.Remove(clientLogPath) }
 
 	args := []string{
 		"-vv",
+		"-E", clientLogPath,
 		"-o", fmt.Sprintf("ConnectTimeout=%d", int(cfg.Timeout.Seconds())),
 		"-o", "NumberOfPasswordPrompts=1",
 		"-o", "StrictHostKeyChecking=accept-new",
@@ -61,14 +71,19 @@ func buildTestSSHArgs(hostname, username string, cfg TestConfig) ([]string, func
 	if !cfg.UseSystemKnownHosts {
 		tmpFile, err := os.CreateTemp("", "nssh-test-known-hosts-*")
 		if err != nil {
-			return nil, cleanup, fmt.Errorf("create temp known_hosts: %w", err)
+			cleanup()
+			return nil, "", func() {}, fmt.Errorf("create temp known_hosts: %w", err)
 		}
 		_ = tmpFile.Close()
 		args = append(args,
 			"-o", "UserKnownHostsFile="+tmpFile.Name(),
 			"-o", "GlobalKnownHostsFile=/dev/null",
 		)
-		cleanup = func() { _ = os.Remove(tmpFile.Name()) }
+		cleanupClientLog := cleanup
+		cleanup = func() {
+			_ = os.Remove(tmpFile.Name())
+			cleanupClientLog()
+		}
 	}
 
 	if !hasTestEnv(cfg.Env, "SSH_ASKPASS") {
@@ -88,7 +103,7 @@ func buildTestSSHArgs(hostname, username string, cfg TestConfig) ([]string, func
 	}
 	args = append(args, target, "--", "exit")
 
-	return args, cleanup, nil
+	return args, clientLogPath, cleanup, nil
 }
 
 func hasTestEnv(env []string, name string) bool {
@@ -129,7 +144,7 @@ func TestConnection(ctx context.Context, hostname, username string, cfg TestConf
 		cfg.Timeout = 10 * time.Second
 	}
 
-	args, cleanup, err := buildTestSSHArgs(hostname, username, cfg)
+	args, clientLogPath, cleanup, err := buildTestSSHArgs(hostname, username, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -139,12 +154,12 @@ func TestConnection(ctx context.Context, hostname, username string, cfg TestConf
 	testCtx, cancel := context.WithTimeout(ctx, cfg.Timeout+5*time.Second)
 	defer cancel()
 
-	return testNonInteractive(testCtx, args, cfg.Env), nil
+	return testNonInteractive(testCtx, args, cfg.Env, clientLogPath), nil
 }
 
 // testNonInteractive runs SSH without a PTY. Authentication is either batch
 // mode or isolated askpass, as selected by buildTestSSHArgs.
-func testNonInteractive(ctx context.Context, args, env []string) *TestResult {
+func testNonInteractive(ctx context.Context, args, env []string, clientLogPath string) *TestResult {
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
@@ -156,35 +171,44 @@ func testNonInteractive(ctx context.Context, args, env []string) *TestResult {
 	cmd.Stderr = &output
 
 	err := cmd.Run()
-	stderr := output.String()
+	clientLog, _ := os.ReadFile(clientLogPath)
+	return connectionTestResult(err, ctx.Err(), string(clientLog), output.String())
+}
+
+func connectionTestResult(runErr, contextErr error, clientLog, remoteOutput string) *TestResult {
+	stderr := strings.TrimSuffix(clientLog, "\n")
+	if stderr != "" && remoteOutput != "" {
+		stderr += "\n"
+	}
+	stderr += remoteOutput
 
 	result := &TestResult{
 		Stderr:     stderr,
-		AuthMethod: compat.ExtractAuthMethod(stderr),
+		AuthMethod: compat.ExtractAuthMethod(clientLog),
 	}
 
-	if err == nil {
+	if runErr == nil {
 		result.Success = true
 		result.ExitCode = 0
 		return result
 	}
 
 	// Extract exit code
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	if exitErr, ok := runErr.(*exec.ExitError); ok {
 		result.ExitCode = exitErr.ExitCode()
 	} else {
 		result.ExitCode = 1
 	}
 
 	// Check for timeout
-	if ctx.Err() == context.DeadlineExceeded || strings.Contains(strings.ToLower(stderr), "timed out") {
+	if contextErr == context.DeadlineExceeded || strings.Contains(strings.ToLower(stderr), "timed out") {
 		result.ExitCode = 124
 		return result
 	}
 
 	// Check if auth actually succeeded despite non-zero exit
 	// (remote may reject "exit" command on some devices)
-	if compat.DidAuthSucceed(stderr) {
+	if compat.DidAuthSucceed(clientLog) {
 		result.Success = true
 		result.Stderr = "[nssh] Remote CLI rejected probe command 'exit'; treating connection as successful.\n" + stderr
 		return result
