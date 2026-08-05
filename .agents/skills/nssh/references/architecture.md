@@ -12,7 +12,7 @@ OpenSSH behavior while adding:
 - smart host lookup and fuzzy selection
 - local and external inventory resolved from nssh YAML config and provider state
 - provider-backed SSH credentials from SOPS+age, 1Password, or Bitwarden
-- request-scoped password injection through a PTY
+- request-scoped password injection through isolated askpass channels
 - optional asciinema session recording and log management
 - typed legacy SSH compatibility fixes under nssh host SSH config
 - status, diagnostics, benchmarking, install, reset, and uninstall commands
@@ -177,10 +177,11 @@ Resolved passwords must be wrapped in `*secret.Secret` from `internal/secret`.
 Use `secret.Use()` for temporary byte access. Do not format, log, or retain
 secret bytes.
 
-Password resolver execution is prompt-driven. The connector must not prefetch a
-password before OpenSSH asks for one because an existing control session can
-complete without any password prompt, and in that case nssh should not touch the
-credential provider at all.
+Password delivery is prompt-driven through askpass. For a cold, managed
+password connection, nssh may begin provider resolution concurrently with
+OpenSSH setup to reduce latency. It skips prefetch and askpass setup when an
+existing multiplexed control session can satisfy the connection. Unmanaged
+proxy transports also disable target password prefetch and autofill.
 
 ## Agent Runtime
 
@@ -225,29 +226,39 @@ Root SSH-style execution is routed through `internal/connect.ConnectRequest`.
    entry from YAML config and provider state, resolves inventory group metadata,
    selects a username, and resolves any provider-backed credential.
 6. Interactive sessions build an `internal/ssh/connector.Connector` with the
-   host alias, optional username, optional secret, host-key policy, and timeout
-   config.
-7. The connector runs OpenSSH in a PTY, detects prompts, injects credentials only
-   when prompted, handles host-key prompts, relays stdio and signals, and emits
-   timing markers when enabled.
+   host alias, optional username, rendered SSH policy, host-key policy, timeout
+   config, and any askpass environment prepared by the connection layer.
+7. Interactive password sessions start request-scoped target and, when needed,
+   managed-proxy askpass servers. OpenSSH still runs in a PTY for terminal I/O,
+   signals, timing, and fallback prompt handling, but password bytes travel
+   through the separately installed `nssh-askpass` helper and authenticated
+   local sockets.
 8. Remote-command sessions run OpenSSH without a local PTY through the captured
    runner. stdout and stderr are captured separately; stdout may be highlighted
    after the command completes.
-9. Password-backed remote commands use `nssh-askpass` through OpenSSH
-   `SSH_ASKPASS`, backed by a one-shot local Unix socket. Passwords are not
-   placed in argv, environment variables, or temp files.
-10. On legacy SSH negotiation failure, nssh can persist compatibility floors
+9. Password-backed remote commands use the same askpass design without a local
+   PTY. The server supports the bounded prompt sequence needed by OpenSSH while
+   keeping passwords out of argv, environment values, and temporary files.
+10. A single-hop `ProxyJump` that resolves to another nssh inventory host is
+   rendered as a managed `ProxyCommand`. Target and proxy credentials use
+   separate askpass variables and sockets. Arbitrary or nested OpenSSH proxy
+   configurations remain unmanaged and do not receive nssh password autofill.
+11. New or changed host keys are scanned before password-backed connection
+   setup. Accept-once uses a temporary pinned `known_hosts`; accept-always adds
+   a new key or explicitly replaces the changed entry after user confirmation.
+12. On legacy SSH negotiation failure, nssh can persist compatibility floors
    under the owning provider YAML host `ssh.compatibility` field.
-11. Optional recording wraps the outer interactive connection before connector
+13. Optional recording wraps the outer interactive connection before connector
     execution.
 
 SCP uses the same host and credential resolver through `internal/cli/cp`.
 
 ## SSH Connector
 
-`internal/ssh/connector` owns PTY lifecycle, prompt detection, host-key handling,
-password injection, timing, and stdio relay. It should not import higher-level
-CLI, UI, recording, or agent packages.
+`internal/ssh/connector` owns PTY lifecycle, fallback prompt detection, host-key
+handling, timing, and stdio relay. `internal/ssh/askpass` owns the authenticated
+password channel used by normal 0.3 connections. Neither package should import
+higher-level CLI, UI, recording, or agent packages.
 
 Key files:
 

@@ -37,8 +37,15 @@ Username precedence in `internal/connect.ResolveHostForConnect`:
 3. Inventory provider group auth `username`.
 4. Credential item username.
 
-OpenSSH owns transport. nssh starts OpenSSH inside a PTY and injects a resolved
-password only after prompt detection.
+OpenSSH owns transport. Interactive connections still use a PTY, but 0.3 sends
+resolved passwords through `nssh-askpass` over an authenticated, request-scoped
+Unix socket. Credential lookup remains demand-driven; a hot multiplexed session
+does not need an askpass server or provider lookup.
+
+For a single `ProxyJump` that resolves to an nssh inventory host, nssh renders a
+managed proxy command and maintains separate target and proxy askpass channels.
+Password autofill is disabled for arbitrary `ProxyCommand`, unresolved
+`ProxyJump`, comma-separated jumps, and nested proxy chains.
 
 ## Agent Runtime
 
@@ -89,7 +96,11 @@ ssh:
 ```
 
 `accept_once_mode = "pin"` uses a stricter accept-once flow. `accept-new` uses
-OpenSSH trust-on-first-use behavior.
+OpenSSH trust-on-first-use behavior. Password-backed setup scans the presented
+key before credential use. New-key prompts offer reject, accept once, or accept
+always. Changed-key prompts label both acceptance choices dangerous;
+accept-always removes the stale entry and writes the verified replacement only
+after explicit confirmation.
 
 On legacy SSH algorithm failures, `internal/connect.handleCompatibilityFixes`
 maps stderr through `internal/ssh/compat`, selects supported algorithm floors,
@@ -152,3 +163,6 @@ For provider credential failures, separate these causes:
 - Inventory host is in a provider-owned group without password auth and
   defaults to key mode.
 - External inventory cache is stale; run `nssh inv refresh`.
+- `nssh-askpass` is not installed beside the `nssh` binary.
+- A password-backed target uses an unmanaged or nested SSH proxy; only a
+  single-hop inventory-resolved proxy receives nssh password autofill.

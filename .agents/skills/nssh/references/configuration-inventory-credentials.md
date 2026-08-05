@@ -28,6 +28,10 @@ Use `nssh self cfg` or the first-run config template for field-level details
 instead of repeating the whole schema. Bare `nssh self init` is first-run only;
 add provider files later with repeatable `--cred` and `--inv` flags.
 
+`nssh self import ssh-config` is a reviewed, one-way import from
+`~/.ssh/config` and its includes. It can populate root SSH defaults and local
+inventory hosts, but it does not import 0.2 vault credentials or convert TOML.
+
 ## Inventory
 
 Commands:
@@ -57,6 +61,11 @@ External inventory providers write non-secret state under
 `~/.local/state/nssh/inventory/providers/<name>.json`. Provider groups,
 auth mappings, SSH options, and host overrides live in provider-scoped YAML
 inventory config.
+
+An inventory host may use `ProxyJump` in its resolved SSH options. When that
+single proxy target resolves to another nssh inventory host, nssh builds a
+managed proxy and resolves the proxy host's auth independently. Nested proxies,
+comma-separated jumps, and explicit `ProxyCommand` values stay OpenSSH-native.
 
 Current external providers:
 

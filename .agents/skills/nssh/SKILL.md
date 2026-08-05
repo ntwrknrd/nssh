@@ -20,24 +20,14 @@ source.
    - `internal/config/example_config.yaml`
    - `references/architecture.md`
 3. Describe only the current release/0.3 command surface.
+4. For upgrades from the latest stable release (0.2.x), read the migration
+   reference before suggesting init, reset, uninstall, config, inventory, or
+   credential changes. The 0.2 vault is not a 0.3 credential provider.
 
 ## Progressive References
 
-Read only what matches the user request:
-
-- [architecture.md](references/architecture.md) for architecture, package
-  boundaries, command flow, storage model, credential model, agent runtime, SSH
-  connector behavior, and recordings.
-- [configuration-inventory-credentials.md](references/configuration-inventory-credentials.md)
-  for config files, includes, inventory groups, local inventory, NetBox,
-  containerlab, credential providers, and auth mappings.
-- [connections-logs-troubleshooting.md](references/connections-logs-troubleshooting.md)
-  for connect/SCP behavior, fuzzy matching, provider refresh on lookup miss,
-  agent runtime, host keys, legacy SSH fixes, recordings, logs, benchmarks, and
-  diagnostics.
-- [terminal-highlighting.md](references/terminal-highlighting.md) for the
-  highlighting config/profile contract, why interactive PTY highlighting is not
-  used, and future captured-output or TUI highlighting direction.
+Read [the nssh reference index](references/index.md) and load only the terminal
+reference selected by its request-specific conditions.
 
 ## Recording Guidance
 
@@ -72,6 +62,9 @@ nssh [flags] [ssh-options] HOST [command]
   short flags.
 - Interactive sessions add default remote `-tt` unless the user passes `-t`,
   `-tt`, or `-T`; remote command mode does not add default `-tt`.
+- Password-backed sessions use the separately installed `nssh-askpass` helper
+  and request-scoped local sockets. Inventory-resolved single-hop proxies can
+  resolve and inject target and proxy credentials independently.
 
 ## Common Commands
 

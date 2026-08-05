@@ -31,8 +31,7 @@ The interactive connector must preserve raw terminal behavior:
 ```text
 PTY read
 -> host-key and password prompt detection
--> password injection
--> password prompt and password echo filtering
+-> fallback prompt handling and display filtering
 -> os.Stdout
 ```
 
@@ -52,6 +51,9 @@ Password-backed remote commands use OpenSSH askpass with the separate
 `nssh-askpass` helper, not a fake PTY. A future TUI mode is also an appropriate
 place to revisit richer highlighting because the TUI can own the screen model
 and renderer instead of injecting ANSI into an arbitrary live PTY stream.
+
+Interactive password-backed commands also use `nssh-askpass`; the PTY relay is
+not the normal password transport.
 
 ## Config Contract
 
