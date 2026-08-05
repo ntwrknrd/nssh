@@ -19,7 +19,8 @@ Default paths:
 - Inventory includes: `~/.config/nssh/inventory/*.yaml`
 - Runtime state: `~/.local/state/nssh/`
 - Recordings: `~/.local/state/nssh/casts`
-- Data/benchmarks: `~/.local/share/nssh/`
+- Data: `~/.local/share/nssh/` (SOPS credentials, backups, and benchmarks)
+- Benchmarks: `~/.local/share/nssh/benchmarks/`
 
 Config is YAML. `include: [...]` can appear at the root or under sections.
 Included files are merged first; the importing file wins.
@@ -166,11 +167,20 @@ literal `username` plus a direct password field reference such as
 `op://Network/edge01/password`. Use `username_ref` when treating the SSH username
 as sensitive; it remains supported, but it may add provider lookup time.
 
-Resolution order:
+Inventory auth is merged field by field in this order, with each later layer
+overriding only the fields it sets:
 
-1. Host auth override.
-2. Inventory provider group auth mapping.
-3. Key auth or SSH agent auth without an nssh credential.
+1. Root `inventory.auth` defaults.
+2. `inventory.providers.<provider>.auth` defaults.
+3. The provider-owned group auth mapping.
+4. A root `inventory.hosts.<host>.auth` override.
+5. A provider-scoped `inventory.providers.<provider>.hosts.<host>.auth`
+   override.
+
+Either host layer can set `auth_disabled: true` to suppress credential
+resolution. A resolved `mode: key` also clears inherited password-provider
+fields. With no resolved password mapping, OpenSSH key or agent authentication
+remains available.
 
 If a provider record returns a username that conflicts with the selected SSH
 username, nssh skips that credential. This prevents injecting the wrong password

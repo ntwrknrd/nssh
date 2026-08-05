@@ -353,6 +353,36 @@ func TestRunResolvedRemoteCommandPreservesCapturedOutputOrder(t *testing.T) {
 	}
 }
 
+func TestRunResolvedRemoteCommandHighlightsAcrossCapturedChunks(t *testing.T) {
+	oldRunCapturedCommand := runCapturedCommandFunc
+	defer func() { runCapturedCommandFunc = oldRunCapturedCommand }()
+
+	highlightEnabled := true
+	runCapturedCommandFunc = func(_ context.Context, _ captured.Request) (captured.Result, error) {
+		return captured.Result{
+			Stdout: []byte("set protocols bgp\n"),
+			Output: []captured.OutputEvent{
+				{Stream: captured.StreamStdout, Data: []byte("set proto")},
+				{Stream: captured.StreamStdout, Data: []byte("cols bgp\n")},
+			},
+		}, nil
+	}
+
+	stdout, _ := captureOutput(t, func() {
+		err := runResolvedRemoteCommand(context.Background(), &ResolvedHost{
+			Hostname:  "edge01",
+			Highlight: config.HighlightConfig{Enabled: &highlightEnabled, Profile: config.HighlightProfileJunos},
+		}, nil, []string{"show"}, config.DefaultConfig(), Options{})
+		if err != nil {
+			t.Fatalf("runResolvedRemoteCommand: %v", err)
+		}
+	})
+
+	if !bytes.Contains([]byte(stdout), []byte("\x1b[")) {
+		t.Fatalf("split stdout token was not highlighted: %q", stdout)
+	}
+}
+
 func TestRunResolvedRemoteCommandLeavesDisabledHighlightUnchanged(t *testing.T) {
 	oldRunCapturedCommand := runCapturedCommandFunc
 	defer func() { runCapturedCommandFunc = oldRunCapturedCommand }()

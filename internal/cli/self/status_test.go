@@ -78,3 +78,24 @@ func TestRunStatusShowsCredentialProviderReadiness(t *testing.T) {
 		}
 	}
 }
+
+func TestRunStatusUsesResolvedRecordingDirectory(t *testing.T) {
+	recordingDir := filepath.Join(t.TempDir(), "custom-recordings")
+	t.Setenv("NSSH_RECORD_DIR", recordingDir)
+	if err := os.MkdirAll(recordingDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recordingDir, "session.cast"), []byte("cast\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := captureStdout(t, func() {
+		if err := runStatus(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if !strings.Contains(got, recordingDir) {
+		t.Fatalf("status output does not use resolved recording directory %q:\n%s", recordingDir, got)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/recording"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -97,16 +98,17 @@ func runStatus() error {
 
 	// Logging
 	ui.SubSection("Logging")
+	recordingDir := recording.LoadRecordingSettings().Directory
 
 	// Audit log
 	auditLogPath := filepath.Join(paths.StateDir, "audit.log")
 	printFileStatus(auditLogPath, "Audit log")
 
 	// Recordings directory with total size
-	if DirExists(paths.RecordingsDir) {
+	if DirExists(recordingDir) {
 		var castCount int
 		var totalSize int64
-		_ = filepath.WalkDir(paths.RecordingsDir, func(path string, d os.DirEntry, err error) error {
+		_ = filepath.WalkDir(recordingDir, func(path string, d os.DirEntry, err error) error {
 			if err == nil && !d.IsDir() && strings.HasSuffix(path, ".cast") {
 				castCount++
 				if info, err := d.Info(); err == nil {
@@ -121,7 +123,7 @@ func runStatus() error {
 		} else {
 			stats = formatBytes(totalSize)
 		}
-		ui.StatusLineNeutral("Recordings", fmt.Sprintf("%s (%s)", AbbreviatePath(paths.RecordingsDir), stats))
+		ui.StatusLineNeutral("Recordings", fmt.Sprintf("%s (%s)", AbbreviatePath(recordingDir), stats))
 	} else {
 		printStatus(false, "Recordings", "not configured")
 	}

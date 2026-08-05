@@ -1,0 +1,26 @@
+[
+  {
+    "query": "Why does nssh select the wrong credential for this inventory host?",
+    "should_trigger": true
+  },
+  {
+    "query": "Migrate my nssh 0.2 config, credentials, recordings, and SSH config to 0.3.",
+    "should_trigger": true
+  },
+  {
+    "query": "Troubleshoot nssh host-key verification through a managed proxy.",
+    "should_trigger": true
+  },
+  {
+    "query": "How do I play or export an nssh session recording?",
+    "should_trigger": true
+  },
+  {
+    "query": "Show me the OpenSSH syntax for ProxyJump.",
+    "should_trigger": false
+  },
+  {
+    "query": "Write a generic SCP wrapper in Bash.",
+    "should_trigger": false
+  }
+]

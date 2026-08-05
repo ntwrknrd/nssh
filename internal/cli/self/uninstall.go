@@ -78,6 +78,15 @@ func runUninstall(keepConfig, keepRecordings, dryRun, yes bool) error {
 		} else {
 			ui.Success("Removed %s", AbbreviatePath(binaryPath))
 		}
+		askpassPath := filepath.Join(filepath.Dir(binaryPath), "nssh-askpass")
+		if FileExists(askpassPath) {
+			if err := removeFile(askpassPath, dryRun); err != nil {
+				ui.Warning("Failed to remove askpass helper: %v", err)
+				hasErrors = true
+			} else {
+				ui.Success("Removed %s", AbbreviatePath(askpassPath))
+			}
+		}
 	} else {
 		ui.Info("Binary not found on PATH")
 	}

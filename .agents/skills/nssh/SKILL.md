@@ -58,8 +58,8 @@ nssh [flags] [ssh-options] HOST [command]
 - `--target HOST` bypasses subcommand parsing and fuzzy resolution; exact
   managed targets still use inventory metadata, unmanaged targets use SSH
   defaults.
-- nssh-specific root flags are long-only so they do not collide with OpenSSH
-  short flags.
+- The connection-specific `--select` and `--target` flags are long-only;
+  `-v`, `-V`, and `-h` remain nssh root flags.
 - Interactive sessions add default remote `-tt` unless the user passes `-t`,
   `-tt`, or `-T`; remote command mode does not add default `-tt`.
 - Password-backed sessions use the separately installed `nssh-askpass` helper
@@ -85,6 +85,9 @@ nssh agent status
 nssh agent stop
 nssh agent reset
 nssh log list
+nssh log play
+nssh log export
+nssh log delete --select <pattern> --dry-run
 nssh -v <command>
 NSSH_DEBUG=1 nssh <host>
 ```

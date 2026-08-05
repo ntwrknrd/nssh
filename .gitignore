@@ -32,3 +32,5 @@ go.work.sum
 # Sensitive dirs
 benchmarks/
 import/
+!docs/examples/help/self/import/
+!docs/examples/help/self/import/ssh-config.txt

@@ -52,15 +52,18 @@ credential provider, verify, and remove obsolete files only after acceptance.
 
    ```bash
    backup_dir="$HOME/nssh-0.2-backup-$(date +%Y%m%d-%H%M%S)"
+   nssh_config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+   nssh_data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+   nssh_state_home="${XDG_STATE_HOME:-$HOME/.local/state}"
    mkdir -m 700 "$backup_dir"
    copy_if_present() {
      if [ -e "$1" ]; then
        cp -a "$1" "$2"
      fi
    }
-   copy_if_present "$HOME/.config/nssh" "$backup_dir/config-nssh"
-   copy_if_present "$HOME/.local/share/nssh" "$backup_dir/share-nssh"
-   copy_if_present "$HOME/.local/state/nssh" "$backup_dir/state-nssh"
+   copy_if_present "$nssh_config_home/nssh" "$backup_dir/config-nssh"
+   copy_if_present "$nssh_data_home/nssh" "$backup_dir/share-nssh"
+   copy_if_present "$nssh_state_home/nssh" "$backup_dir/state-nssh"
    copy_if_present "$HOME/.ssh/config" "$backup_dir/ssh-config"
    copy_if_present "$HOME/.ssh/conf.d" "$backup_dir/ssh-conf.d"
    ```
@@ -141,7 +144,11 @@ credential provider, verify, and remove obsolete files only after acceptance.
 
    Create groups before importing SSH config. The importer can assign an
    imported host to a single matching local group by domain suffix; ambiguous or
-   unmatched hosts remain ungrouped and are still valid.
+   unmatched hosts remain ungrouped and are still valid. This is not exact
+   parity with 0.2: a context domain such as `example.com` matched both the apex
+   host `example.com` and its subdomains, while 0.3 `domain_suffix` matching
+   covers only subdomains. Assign an apex host to the group explicitly or give
+   it a host-level auth mapping.
 
 5. Import the existing OpenSSH tree:
 
@@ -160,9 +167,11 @@ credential provider, verify, and remove obsolete files only after acceptance.
    per-host directives may be preserved as typed SSH options only when the 0.3
    schema accepts them.
 
-6. Add auth mappings after import. Imported `User` values become usernames, but
-   passwords and context fallback credentials do not migrate. Prefer group auth
-   for shared credentials and host auth only for exceptions:
+6. Review imported auth modes, then add auth mappings. Imported `User` values
+   become usernames; when a host has `User` but no inferred auth mode, the
+   importer marks it as password mode. Correct imported key-auth hosts before
+   testing. Passwords and context fallback credentials do not migrate. Prefer
+   group auth for shared credentials and host auth only for exceptions:
 
    ```bash
    nssh inv set local/work --auth password --cred op-work:op://Work/network-admin/password --user netops
@@ -192,12 +201,15 @@ rollback backup until migration is accepted:
 - legacy credential and SSH-config backups under
   `~/.local/share/nssh/backups/`
 - `~/.local/share/nssh/nssh-shell-integration.sh` or `.fish`
-- old nssh completion files
+- old nssh completion files:
+  `~/.config/fish/completions/nssh.fish`,
+  `~/.zsh/completions/_nssh`, and `~/.bash_completion.d/nssh`
 - nssh-managed host files under `~/.ssh/conf.d/`
 
 Do not delete the whole `~/.ssh/conf.d` directory: it may contain files owned by
 the user or other tools. After 0.3 validation, remove only known nssh-owned
-includes and shell startup lines. The OpenSSH files may also be intentionally
+includes, the completion file for the user's shell, and the nssh source stanza
+from the detected shell startup file. The OpenSSH files may also be intentionally
 retained for direct `ssh` compatibility, but nssh 0.3 does not use them as its
 inventory authority.
 

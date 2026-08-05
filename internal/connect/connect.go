@@ -1,6 +1,7 @@
 package connect
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -431,6 +432,51 @@ type connectionAskpassHandle struct {
 	servers []runningAskpassServer
 }
 
+// AskpassEnvironment contains the target and managed-proxy askpass variables
+// for an externally executed OpenSSH-family command.
+type AskpassEnvironment struct {
+	Env      []string
+	ProxyEnv []string
+	handle   *connectionAskpassHandle
+}
+
+// Cleanup stops the request-scoped askpass servers.
+func (e *AskpassEnvironment) Cleanup() {
+	if e == nil || e.handle == nil {
+		return
+	}
+	e.handle.cleanup()
+	e.handle = nil
+}
+
+// StartResolvedAskpassEnvironment starts target and managed-proxy askpass
+// channels for a resolved host. It returns nil when the host has no eligible
+// password credential.
+func StartResolvedAskpassEnvironment(ctx context.Context, resolved *ResolvedHost) (*AskpassEnvironment, error) {
+	resolvers := interactiveAskpassResolvers(resolved, nil, nil)
+	if !resolvers.any() {
+		return nil, nil
+	}
+	handle, err := startConnectionAskpass(ctx, resolvers)
+	if err != nil {
+		return nil, err
+	}
+	return &AskpassEnvironment{
+		Env:      append([]string(nil), handle.env...),
+		ProxyEnv: proxyAskpassEnv(handle),
+		handle:   handle,
+	}, nil
+}
+
+// PrepareResolvedHostKey applies the same verified host-key flow used by SSH
+// connections before an external OpenSSH-family command uses credentials.
+func PrepareResolvedHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs, proxyEnv []string) (*connector.HostKeyPreparation, error) {
+	if resolved == nil {
+		return nil, fmt.Errorf("resolved host is required")
+	}
+	return prepareInteractiveHostKey(ctx, resolved, sshArgs, resolved.Config, Options{}, proxyEnv)
+}
+
 func (h *connectionAskpassHandle) cleanup() {
 	if h == nil {
 		return
@@ -557,17 +603,24 @@ func writeCapturedCommandOutput(result captured.Result, cfg config.HighlightConf
 		Enabled: cfg.EnabledValue(),
 		Profile: cfg.EffectiveProfile(),
 	})
+	var pendingStdout []byte
+	writeStdout := func(data []byte) {
+		if highlighter != nil {
+			data = highlighter.Highlight(data)
+		}
+		if len(data) > 0 {
+			if _, writeErr := os.Stdout.Write(data); writeErr != nil {
+				slog.Debug("failed to write remote stdout", "err", writeErr)
+			}
+		}
+	}
 	for _, event := range result.Output {
 		switch event.Stream {
 		case captured.StreamStdout:
-			data := event.Data
-			if highlighter != nil {
-				data = highlighter.Highlight(data)
-			}
-			if len(data) > 0 {
-				if _, writeErr := os.Stdout.Write(data); writeErr != nil {
-					slog.Debug("failed to write remote stdout", "err", writeErr)
-				}
+			pendingStdout = append(pendingStdout, event.Data...)
+			if end := bytes.LastIndexByte(pendingStdout, '\n'); end >= 0 {
+				writeStdout(pendingStdout[:end+1])
+				pendingStdout = append(pendingStdout[:0], pendingStdout[end+1:]...)
 			}
 		case captured.StreamStderr:
 			if len(event.Data) > 0 {
@@ -577,6 +630,7 @@ func writeCapturedCommandOutput(result captured.Result, cfg config.HighlightConf
 			}
 		}
 	}
+	writeStdout(pendingStdout)
 }
 
 func ConnectLiteralHost(ctx context.Context, hostname string, sshArgs []string, opts ...Options) error {

@@ -1,0 +1,7 @@
+interface:
+  display_name: "nssh"
+  short_description: "Develop, operate, and troubleshoot nssh"
+  default_prompt: "Use $nssh to answer this nssh question from current source and the focused references."
+
+policy:
+  allow_implicit_invocation: true

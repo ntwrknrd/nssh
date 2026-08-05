@@ -217,14 +217,17 @@ Root SSH-style execution is routed through `internal/connect.ConnectRequest`.
    `smart-connect`.
 2. `smart-connect` preserves the OpenSSH grammar split: tokens before `HOST`
    are SSH args, tokens after `HOST` are a remote command.
-3. `connect.ResolveHostname` checks the nssh host catalog, exact matches,
-   suggestions, and fuzzy selection. On misses, it returns host-not-found
+3. `connect.ResolveSmartHostForConnect` checks the nssh host catalog, exact
+   matches, suggestions, and fuzzy selection, then performs full host resolution
+   in the same config and catalog pass. On misses, it returns host-not-found
    immediately.
 4. On host-not-found, `internal/app.Run` spawns `nssh inv set <host>` for local
    inventory creation.
-5. `connect.ResolveHostForConnect` loads config, finds the nssh host catalog
-   entry from YAML config and provider state, resolves inventory group metadata,
-   selects a username, and resolves any provider-backed credential.
+5. Smart resolution finds the catalog entry from YAML config and provider state,
+   resolves inventory group metadata, selects a username, and prepares any
+   provider-backed credential. Literal `--target` connections instead use
+   `connect.ResolveLiteralHostForConnect`; exact managed targets retain inventory
+   metadata while unmanaged targets use SSH defaults.
 6. Interactive sessions build an `internal/ssh/connector.Connector` with the
    host alias, optional username, rendered SSH policy, host-key policy, timeout
    config, and any askpass environment prepared by the connection layer.
@@ -243,9 +246,11 @@ Root SSH-style execution is routed through `internal/connect.ConnectRequest`.
    rendered as a managed `ProxyCommand`. Target and proxy credentials use
    separate askpass variables and sockets. Arbitrary or nested OpenSSH proxy
    configurations remain unmanaged and do not receive nssh password autofill.
-11. New or changed host keys are scanned before password-backed connection
-   setup. Accept-once uses a temporary pinned `known_hosts`; accept-always adds
-   a new key or explicitly replaces the changed entry after user confirmation.
+11. New or changed host keys are scanned before the target credential is used.
+   Reaching a target through a managed password-backed proxy may require the
+   proxy credential during that scan. Accept-once uses a temporary pinned
+   `known_hosts`; accept-always adds a new key or explicitly replaces the changed
+   entry after user confirmation.
 12. On legacy SSH negotiation failure, nssh can persist compatibility floors
    under the owning provider YAML host `ssh.compatibility` field.
 13. Optional recording wraps the outer interactive connection before connector
@@ -288,10 +293,17 @@ explicit `nssh log archive` command; automation belongs in cron, launchd,
 systemd timers, or another operator-owned scheduler. Archive policy lives in
 `internal/recording`, not `internal/agent`.
 
+`log play`, `log export`, and `log upload` select one recording interactively;
+they do not accept a positional recording ID. Bare `log delete` is interactive
+multi-select, with `--select` and `--older-than` for filtered deletion.
+
 ## Audit, UI, And Exit Codes
 
 Audit logging lives in `internal/audit` and writes security-relevant events to
-the state directory when enabled.
+`$XDG_STATE_HOME/nssh/audit.log`. It is enabled by default, uses a 10 MB
+rotation threshold, and retains three rotated files. Connection events include
+host and command metadata, so audit files are sensitive operational records even
+though credential secrets must never be logged.
 
 Terminal rendering and prompts live in `internal/ui`. User-facing command output
 should go through this package.
@@ -305,3 +317,14 @@ Exit codes are centralized in `internal/exit`:
 - 4: host not found
 - 126: command not executable
 - 127: command not found
+
+These are shared constants, not a promise that every command uses only these
+meanings. OpenSSH remote-command exit codes are propagated when available. A
+smart host miss launches `nssh inv set <host>` and returns success if that child
+succeeds. `nssh self reset` also uses exit 2 for cancellation.
+
+`nssh self reset` stops the agent and recursively deletes all nssh XDG config,
+data, and state directories. `nssh self uninstall` has separate
+`--keep-config` and `--keep-recordings` controls; preserving config does not by
+itself preserve recordings. Treat both commands as migration-sensitive and use
+their dry-run modes before destructive cleanup.
