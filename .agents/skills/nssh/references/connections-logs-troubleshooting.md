@@ -22,9 +22,12 @@ miss; use `nssh inv refresh` when provider caches need to be updated.
 Username precedence:
 
 1. Explicit `user@host` or `-l user`.
-2. Inventory host auth `username`.
-3. Inventory provider group auth `username`.
-4. Credential item username.
+2. The username from the fully merged inventory auth policy.
+3. The credential-provider record username.
+
+The merged auth username can originate from inventory defaults, provider
+defaults, the provider group, the root host override, or the provider-scoped
+host override as described in the configuration reference.
 
 OpenSSH owns transport. Interactive connections still use a PTY, but 0.3 sends
 resolved passwords through `nssh-askpass` over an authenticated, request-scoped

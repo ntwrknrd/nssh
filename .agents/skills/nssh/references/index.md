@@ -15,7 +15,7 @@ Select the smallest reference set that covers the request:
 - For highlighting configuration, the Junos profile, remote-command output, or
   the interactive PTY highlighting boundary, read
   [terminal-highlighting.md](terminal-highlighting.md).
-- For an upgrade from the latest stable 0.2 release to future 0.3, including
+- For an upgrade from nssh 0.2.4 to the target 0.3 release, including
   backups, YAML initialization, OpenSSH import, context/inventory conversion,
   external credentials, retained or obsolete files, validation, and rollback,
   read [migration-0.2-to-0.3.md](migration-0.2-to-0.3.md).

@@ -28,4 +28,4 @@ NSSH_DEBUG=1 nssh ...
 - Keep shared connect/SCP host and credential resolution in `internal/connect`.
 - Use `*secret.Secret` for resolved passwords and `secret.Use()` for byte access.
 - Update `docs/examples/help/` snapshots when command help changes.
-- Validate edited Markdown with
+- Validate edited Markdown with the configured `validate-markdown` skill helper.

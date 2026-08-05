@@ -16,11 +16,31 @@
     "should_trigger": true
   },
   {
+    "query": "Use nssh as an SSH-compatible way to log in to these switches without manually typing each password.",
+    "should_trigger": true
+  },
+  {
+    "query": "Change the nssh connection resolver without breaking automatic authentication for SCP or managed jump hosts.",
+    "should_trigger": true
+  },
+  {
+    "query": "Which nssh package should own host-key verification and askpass orchestration?",
+    "should_trigger": true
+  },
+  {
     "query": "Show me the OpenSSH syntax for ProxyJump.",
     "should_trigger": false
   },
   {
     "query": "Write a generic SCP wrapper in Bash.",
+    "should_trigger": false
+  },
+  {
+    "query": "Configure OpenSSH keys so I can log in to a switch without a password.",
+    "should_trigger": false
+  },
+  {
+    "query": "Why is the 1Password CLI signed out?",
     "should_trigger": false
   }
 ]

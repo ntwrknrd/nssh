@@ -1,7 +1,9 @@
 # Migrate nssh 0.2 To 0.3
 
-Audience: agents helping a user move from the latest stable nssh release,
-currently 0.2.4, to the future 0.3 release.
+Audience: agents helping a user move from nssh 0.2.4 to the target 0.3 release.
+Version baseline: v0.2.4 was the latest stable tag when this guide was authored
+on 2026-08-05. Verify the installed version and current release tags before
+calling either side current or latest.
 
 ## Migration Contract
 

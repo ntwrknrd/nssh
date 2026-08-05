@@ -20,6 +20,16 @@
       "id": 4,
       "prompt": "Play recording abc123, export it as text, and then delete it.",
       "expected_output": "Does not invent positional recording IDs; explains the interactive selectors and supported flags for play, export, and delete, including delete selection modes."
+    },
+    {
+      "id": 5,
+      "prompt": "Change nssh so automatic password authentication still works when SSH and SCP use a managed password-backed jump host.",
+      "expected_output": "Resolves the owning checkout; reads SPEC.md and current source in one revision; traces inventory, merged auth, credential providers, distinct target and proxy askpass channels, host-key verification, and shared SSH/SCP resolution; makes the smallest owning-layer change; runs focused tests; and reports the affected contract and anything not verified."
+    },
+    {
+      "id": 6,
+      "prompt": "Why did nssh automatically log in to one switch but prompt for a password on another?",
+      "expected_output": "Treats nssh as the SSH-compatible automatic-authentication layer and traces resolved inventory identity, merged auth mapping, provider reference and username agreement, askpass helper/channel availability, proxy eligibility, multiplexing, and the final OpenSSH path without requesting or exposing password values."
     }
   ]
 }
