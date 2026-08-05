@@ -5,14 +5,6 @@ questions.
 
 ## Config Files
 
-Source paths:
-
-- `internal/config/paths.go`
-- `internal/config/settings.go`
-- `internal/config/include.go`
-- `internal/config/inventory.go`
-- `internal/config/example_config.yaml`
-
 Default paths:
 
 - Main config: `~/.config/nssh/config.yaml`
@@ -86,15 +78,6 @@ For containerlab, use `state: [running]` to select any running node; add
 node kinds.
 
 ## Credential Providers
-
-Source paths:
-
-- `internal/credential/provider.go`
-- `internal/credential/sops_age.go`
-- `internal/credential/sopsdoc/doc.go`
-- `internal/credential/onepassword.go`
-- `internal/credential/bitwarden.go`
-- `internal/connect/resolve.go`
 
 Supported providers:
 

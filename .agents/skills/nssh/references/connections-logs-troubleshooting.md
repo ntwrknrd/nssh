@@ -5,20 +5,9 @@ questions.
 
 ## Connection Behavior
 
-Source paths:
-
-- `internal/app/command.go`
-- `internal/app/app.go`
-- `internal/connect/lookup.go`
-- `internal/connect/resolve.go`
-- `internal/connect/connect.go`
-- `internal/ssh/connector/`
-- `internal/ssh/compat/`
-
-`nssh [ssh-options] HOST [command...]` is rewritten by
-`internal/app.PreprocessArgs` to hidden `smart-connect`. Use `nssh --select` for
-the smart picker and `nssh --target HOST` for literal destinations that collide
-with nssh command names or should bypass fuzzy resolution.
+Use `nssh --select` for the smart picker and `nssh --target HOST` for literal
+destinations that collide with nssh command names or should bypass fuzzy
+resolution.
 
 Smart lookup behavior:
 
@@ -30,7 +19,7 @@ Smart lookup behavior:
 Smart lookup does not refresh external inventory providers automatically on a
 miss; use `nssh inv refresh` when provider caches need to be updated.
 
-Username precedence in `internal/connect.ResolveHostForConnect`:
+Username precedence:
 
 1. Explicit `user@host` or `-l user`.
 2. Inventory host auth `username`.
@@ -105,10 +94,9 @@ reject, accept once, or accept always. Changed-key prompts label both acceptance
 choices dangerous; accept-always removes the stale entry and writes the verified
 replacement only after explicit confirmation.
 
-On legacy SSH algorithm failures, `internal/connect.handleCompatibilityFixes`
-maps stderr through `internal/ssh/compat`, selects supported algorithm floors,
-and can persist them under the owning provider YAML host `ssh.compatibility`
-field.
+On recognized legacy SSH algorithm failures, nssh can select supported
+algorithm floors and persist them under the owning provider YAML host
+`ssh.compatibility` field.
 
 ## Recordings And Logs
 

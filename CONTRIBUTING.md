@@ -1,8 +1,8 @@
 # Contributing to nssh
 
-This file is for humans and coding agents changing the repo. Read the
-[nssh architecture reference](.agents/skills/nssh/references/architecture.md)
-before changing architecture or command behavior.
+This file is for humans and coding agents changing the repo. Read
+[SPEC.md](SPEC.md) before changing product contracts or package boundaries,
+then inspect current source for implementation details.
 
 ## Setup
 
@@ -85,10 +85,9 @@ When creating or editing Markdown, validate it:
 ```
 
 Keep narrative docs limited to [README.md](README.md),
-[CONTRIBUTING.md](CONTRIBUTING.md), and the nssh skill under
-[.agents/skills/nssh/](.agents/skills/nssh/). Prefer links to code paths,
-function names, generated help, or the config template over duplicating volatile
-details.
+[CONTRIBUTING.md](CONTRIBUTING.md), [SPEC.md](SPEC.md), and the nssh skill under
+[.agents/skills/nssh/](.agents/skills/nssh/). Prefer current source, generated
+help, or the config template over duplicating volatile implementation details.
 
 ## Opening a PR
 

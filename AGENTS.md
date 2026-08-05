@@ -2,9 +2,9 @@
 
 Audience: coding agents working in this repository or with the 'nssh' application.
 
-Read source before reasoning about behavior. For architecture, command flow,
-package boundaries, and non-goals, start with
-[.agents/skills/nssh/references/architecture.md](.agents/skills/nssh/references/architecture.md).
+Read source before reasoning about behavior. For durable product contracts,
+package boundaries, and non-goals, start with [SPEC.md](SPEC.md), then inspect
+the current source for implementation details.
 For nssh usage and operations questions, use
 [.agents/skills/nssh/SKILL.md](.agents/skills/nssh/SKILL.md).
 

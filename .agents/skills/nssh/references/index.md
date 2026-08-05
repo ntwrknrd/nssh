@@ -2,9 +2,9 @@
 
 Select the smallest reference set that covers the request:
 
-- For architecture, package boundaries, command flow, storage, credentials,
-  agent internals, SSH connector behavior, or recordings, read
-  [architecture.md](architecture.md).
+- For product contracts, package boundaries, and non-goals, read the file named
+  SPEC.md at the repository root, then inspect current source for implementation
+  details.
 - For config files, includes, inventory groups, local inventory, NetBox,
   containerlab, credential providers, or auth mappings, read
   [configuration-inventory-credentials.md](configuration-inventory-credentials.md).
