@@ -194,7 +194,9 @@ func readOutputEvents(stream Stream, r io.Reader, sink *bytes.Buffer, events cha
 }
 
 func buildOpenSSHArgs(req Request) []string {
-	args := connector.RenderSSHOptions(req.SSHOptions, req.SSHVerbosity)
+	pinnedOptions, sshArgs := connector.SplitPinnedHostKeyOptions(req.SSHArgs)
+	args := append([]string{}, pinnedOptions...)
+	args = append(args, connector.RenderSSHOptions(req.SSHOptions, req.SSHVerbosity)...)
 	if hasAskpassEnv(req.Env) {
 		args = append(args, "-o", "NumberOfPasswordPrompts=1")
 	} else {
@@ -203,10 +205,10 @@ func buildOpenSSHArgs(req Request) []string {
 	if req.Timeout > 0 {
 		args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", int(req.Timeout.Seconds())))
 	}
-	if req.Port != 0 && req.Port != 22 && explicitPort(req.SSHArgs) == "" {
+	if req.Port != 0 && req.Port != 22 && explicitPort(sshArgs) == "" {
 		args = append(args, "-p", fmt.Sprintf("%d", req.Port))
 	}
-	args = append(args, req.SSHArgs...)
+	args = append(args, sshArgs...)
 
 	target := req.Hostname
 	if req.Username != "" {

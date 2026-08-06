@@ -770,7 +770,7 @@ func TestRunResolvedRemoteCommandColdPersistentMuxStartsMuxBeforeCapturedCommand
 	hostKeyProbeFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) hostKeyProbeStatus {
 		return hostKeyProbeNeedsPrompt
 	}
-	hostKeyPrepareFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, bool) (*connector.HostKeyPreparation, error) {
+	hostKeyPrepareFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, bool, []string) (*connector.HostKeyPreparation, error) {
 		return &connector.HostKeyPreparation{TempKnownHosts: "/tmp/nssh-known-hosts-prep"}, nil
 	}
 	askpassHelperPathFunc = func() (string, error) {
@@ -1003,7 +1003,7 @@ func TestRunResolvedRemoteCommandPreparesHostKeyBeforeAskpass(t *testing.T) {
 		return hostKeyProbeNeedsPrompt
 	}
 	var prepareCalled atomic.Bool
-	hostKeyPrepareFunc = func(_ context.Context, _ *ResolvedHost, _ []string, _ *config.Config, _ Options, changed bool) (*connector.HostKeyPreparation, error) {
+	hostKeyPrepareFunc = func(_ context.Context, _ *ResolvedHost, _ []string, _ *config.Config, _ Options, changed bool, _ []string) (*connector.HostKeyPreparation, error) {
 		if changed {
 			t.Fatal("unknown host-key preparation was marked changed")
 		}
@@ -1062,7 +1062,7 @@ func TestPrepareInteractiveHostKeyPassesChangedStatus(t *testing.T) {
 		return hostKeyProbeChanged
 	}
 	var sawChanged bool
-	hostKeyPrepareFunc = func(_ context.Context, _ *ResolvedHost, _ []string, _ *config.Config, _ Options, changed bool) (*connector.HostKeyPreparation, error) {
+	hostKeyPrepareFunc = func(_ context.Context, _ *ResolvedHost, _ []string, _ *config.Config, _ Options, changed bool, _ []string) (*connector.HostKeyPreparation, error) {
 		sawChanged = changed
 		return nil, nil
 	}
