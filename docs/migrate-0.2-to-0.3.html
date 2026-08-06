@@ -442,9 +442,8 @@
       <p class="eyebrow">Release candidate beta guide</p>
       <h1>Migrate nssh 0.2 to 0.3</h1>
       <p class="lede">
-        A rollback-safe migration from the 0.2 local vault and context model to
-        0.3 YAML inventory, external credential providers, and SSH-compatible
-        automatic authentication.
+        A short guide for moving your saved hosts and automatic logins to the
+        nssh 0.3 release candidate.
       </p>
       <div class="badges" aria-label="Guide scope">
         <span class="badge">Source: nssh 0.2.4</span>
@@ -457,361 +456,157 @@
 
   <div class="layout">
     <main id="main">
-      <aside class="callout danger" role="alert">
-        <strong>This is a cutover, not an in-place config upgrade.</strong>
+      <aside class="callout warning" role="alert">
+        <strong>Keep your nssh 0.2 files until you finish testing.</strong>
         <p>
-          nssh 0.3 does not read <code>config.toml</code>, open the 0.2
-          <code>credentials.age</code> vault, or use 0.2 contexts as runtime
-          inventory. Back up first. Do not run reset or a non-preserving
-          uninstall during migration.
+          Version 0.3 uses new settings and does not automatically convert your
+          0.2 setup. Do not run <code>nssh self reset</code> or delete your old
+          files during the beta.
         </p>
       </aside>
 
       <section id="overview">
         <span class="step-label">Start here</span>
-        <h2>Migration at a glance</h2>
+        <h2>Choose how you want to migrate</h2>
         <p>
-          Preserve the complete 0.2 installation, install the matching 0.3 RC
-          binaries, create new YAML configuration, import OpenSSH hosts, map
-          authentication to an external provider, then test representative SSH
-          and SCP paths before cleaning anything up.
+          Most users should ask an agent that has the nssh skill to guide or
+          perform the migration. If you prefer to do it yourself, the manual
+          path below has four steps.
         </p>
-
-        <div class="checklist" data-checklist="nssh-migration">
-          <label class="check"><input type="checkbox"><span>Back up config, data, state, and managed SSH files.</span></label>
-          <label class="check"><input type="checkbox"><span>Record 0.2 contexts, hosts, usernames, and auth modes.</span></label>
-          <label class="check"><input type="checkbox"><span>Install matching 0.3 RC <code>nssh</code> and <code>nssh-askpass</code> binaries.</span></label>
-          <label class="check"><input type="checkbox"><span>Initialize YAML config and selected providers.</span></label>
-          <label class="check"><input type="checkbox"><span>Import and review the existing OpenSSH configuration.</span></label>
-          <label class="check"><input type="checkbox"><span>Recreate auth mappings without putting passwords in YAML.</span></label>
-          <label class="check"><input type="checkbox"><span>Verify key, password, proxy, SCP, and optional recording paths.</span></label>
-          <label class="check"><input type="checkbox"><span>Keep rollback files until the beta is accepted.</span></label>
-        </div>
-        <div class="progress">
-          <progress value="0" max="8" aria-label="Migration progress"></progress>
-          <span><strong data-progress-count>0</strong> of 8 complete</span>
+        <div class="two-col">
+          <div class="summary-card">
+            <h3>Ask an agent</h3>
+            <p>Give this prompt to Codex or another agent with the nssh skill installed:</p>
+            <div class="code-block">
+              <button class="copy" type="button">Copy</button>
+              <pre><code>Use the nssh skill to migrate my nssh 0.2 setup to 0.3. Back up my existing setup first, explain any choices I need to make, never display or copy my passwords, and test a host with me before cleanup.</code></pre>
+            </div>
+            <p class="muted">The skill teaches agents the current nssh commands, file changes, credential options, and safe migration process.</p>
+          </div>
+          <div class="summary-card">
+            <h3>Do it yourself</h3>
+            <ol>
+              <li>Back up nssh 0.2.</li>
+              <li>Install and set up nssh 0.3.</li>
+              <li>Import your hosts and reconnect credentials.</li>
+              <li>Test your usual logins.</li>
+            </ol>
+          </div>
         </div>
       </section>
 
       <section id="changes">
-        <span class="step-label">Understand the cutover</span>
-        <h2>What changed</h2>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th>0.2</th><th>0.3</th><th>What you do</th></tr>
-            </thead>
-            <tbody>
-              <tr><td><code>config.toml</code></td><td><code>config.yaml</code></td><td>Recreate supported settings in YAML.</td></tr>
-              <tr><td>Local <code>credentials.age</code> vault</td><td>SOPS+age, 1Password, or Bitwarden</td><td>Move secrets to an external provider; store only references in nssh.</td></tr>
-              <tr><td>Contexts</td><td>Inventory provider groups</td><td>Convert shared domains, SSH policy, usernames, and auth intent into groups.</td></tr>
-              <tr><td>Vault host credentials</td><td>Host or group auth mappings</td><td>Map inventory to provider references.</td></tr>
-              <tr><td>Managed <code>~/.ssh/conf.d</code> hosts</td><td>Local inventory YAML</td><td>Import with <code>nssh self import ssh-config</code>, then review.</td></tr>
-              <tr><td><code>nssh host</code> / <code>nssh ctx</code></td><td><code>nssh inv</code></td><td>Manage local and external inventory through one command group.</td></tr>
-              <tr><td><code>nssh connect HOST</code></td><td><code>nssh HOST</code></td><td>Use the OpenSSH-compatible root command.</td></tr>
-              <tr><td><code>lock</code> / <code>unlock</code></td><td><code>agent stop</code> / <code>status</code> / <code>reset</code></td><td>Treat the agent as a provider-access broker, not a password vault.</td></tr>
-              <tr><td>Generated shell integration</td><td>Unsupported</td><td>Remove stale shell startup references only after validation.</td></tr>
-            </tbody>
-          </table>
-        </div>
+        <span class="step-label">What to expect</span>
+        <h2>The three changes that matter</h2>
+        <ul>
+          <li><strong>Setup is new.</strong> nssh 0.3 creates new YAML settings instead of using the old TOML file.</li>
+          <li><strong>Passwords live elsewhere.</strong> Choose SOPS+age, 1Password, or Bitwarden; nssh securely retrieves them when you connect.</li>
+          <li><strong>Connecting is simpler.</strong> Use <code>nssh HOST</code>, just as you would use <code>ssh HOST</code>.</li>
+        </ul>
       </section>
 
       <section id="prepare">
         <span class="step-label">Step 1</span>
-        <h2>Preserve your 0.2 installation</h2>
+        <h2>Back up nssh 0.2</h2>
         <p>
-          Run these commands while the 0.2 binary and vault are still usable.
-          The backup honors XDG overrides and preserves permissions.
+          Before installing the RC, make a private backup of your nssh folder
+          and SSH configuration:
         </p>
         <div class="code-block">
           <button class="copy" type="button">Copy</button>
-          <pre><code>nssh --version
-nssh lock
-
-backup_dir="$HOME/nssh-0.2-backup-$(date +%Y%m%d-%H%M%S)"
-nssh_config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
-nssh_data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
-nssh_state_home="${XDG_STATE_HOME:-$HOME/.local/state}"
-
-mkdir -m 700 "$backup_dir"
-copy_if_present() {
-  if [ -e "$1" ]; then
-    cp -a "$1" "$2"
-  fi
-}
-
-copy_if_present "$nssh_config_home/nssh" "$backup_dir/config-nssh"
-copy_if_present "$nssh_data_home/nssh" "$backup_dir/share-nssh"
-copy_if_present "$nssh_state_home/nssh" "$backup_dir/state-nssh"
-copy_if_present "$HOME/.ssh/config" "$backup_dir/ssh-config"
-copy_if_present "$HOME/.ssh/conf.d" "$backup_dir/ssh-conf.d"
-
-printf 'Backup: %s\n' "$backup_dir"</code></pre>
-        </div>
-
-        <aside class="callout warning">
-          <strong>Check custom paths.</strong>
-          <p>
-            If 0.2 used custom recording, archive, SSH include, or XDG paths,
-            copy those too. Keep the old binary and backup until every required
-            credential has been tested in 0.3.
-          </p>
-        </aside>
-
-        <h3>Capture the old model</h3>
-        <div class="code-block">
-          <button class="copy" type="button">Copy</button>
-          <pre><code>nssh ctx list
-nssh host list
-nssh self cfg</code></pre>
+          <pre><code>backup="$HOME/nssh-0.2-backup-$(date +%Y%m%d-%H%M%S)"
+mkdir -m 700 "$backup"
+cp -a "$HOME/.config/nssh" "$backup/config-nssh" 2&gt;/dev/null || true
+cp -a "$HOME/.local/share/nssh" "$backup/share-nssh" 2&gt;/dev/null || true
+cp -a "$HOME/.local/state/nssh" "$backup/state-nssh" 2&gt;/dev/null || true
+cp -a "$HOME/.ssh/config" "$backup/ssh-config" 2&gt;/dev/null || true
+cp -a "$HOME/.ssh/conf.d" "$backup/ssh-conf.d" 2&gt;/dev/null || true</code></pre>
         </div>
         <p>
-          Record context names and domains, host aliases, destination names,
-          ports, usernames, SSH include files, and whether each representative
-          host uses key or password authentication. Transfer passwords directly
-          to the new provider; never paste them into notes, tickets, YAML, or
-          shell history.
+          If you customized where nssh stores files, ask your beta coordinator
+          or an agent using the nssh skill to help confirm the backup. Keep this
+          folder private because it may contain encrypted credentials and host names.
         </p>
       </section>
 
       <section id="install">
         <span class="step-label">Step 2</span>
-        <h2>Install the 0.3 release candidate</h2>
+        <h2>Install and set up nssh 0.3</h2>
         <p>
-          Use the RC download or installation instructions supplied with your
-          beta invitation. Install <code>nssh</code> and
-          <code>nssh-askpass</code> from the same build. Password-backed login
-          fails when the helper is missing or mismatched.
+          Follow the RC installation instructions from your beta invitation,
+          then start the guided setup:
         </p>
         <div class="code-block">
           <button class="copy" type="button">Copy</button>
           <pre><code>nssh --version
-
-nssh_bin="$(command -v nssh)"
-askpass_bin="$(dirname "$nssh_bin")/nssh-askpass"
-printf 'nssh: %s\naskpass: %s\n' "$nssh_bin" "$askpass_bin"
-test -x "$askpass_bin" &amp;&amp; echo "askpass helper: ready"</code></pre>
+nssh self init</code></pre>
         </div>
         <aside class="callout">
-          <strong>The retained 0.2 TOML file is safe.</strong>
+          <strong>Which credential option should I choose?</strong>
           <p>
-            A preserved <code>config.toml</code> does not block 0.3 initialization
-            because 0.3 looks for <code>config.yaml</code>.
+            Choose the password manager you already use. If you do not use
+            1Password or Bitwarden, choose SOPS+age. Never type a password into
+            an nssh YAML file.
           </p>
         </aside>
-      </section>
-
-      <section id="initialize">
-        <span class="step-label">Step 3</span>
-        <h2>Create the 0.3 YAML configuration</h2>
-        <p>Initialize once, then add the credential and inventory providers you need.</p>
-        <div class="code-block">
-          <button class="copy" type="button">Copy</button>
-          <pre><code>nssh self init
-
-# Add providers explicitly if they were not selected during setup.
-nssh self init --cred sops-age
-nssh self init --inv local
-
-nssh self cfg --paths
-nssh self cfg --source</code></pre>
-        </div>
-        <p>
-          Provider includes live beneath <code>~/.config/nssh/credential/</code>
-          and <code>~/.config/nssh/inventory/</code> by default. The root YAML
-          activates them through includes.
-        </p>
-
-        <details>
-          <summary>Settings that do not translate directly</summary>
-          <div>
-            <ul>
-              <li>Remove 0.2 vault lockout, KDF, and <code>agent.security</code> settings.</li>
-              <li>Move default usernames into inventory auth policy.</li>
-              <li>Move recording dimensions to <code>logging.export.gif</code>.</li>
-              <li>Schedule <code>nssh log archive</code> externally; archive jitter and background scheduling do not migrate.</li>
-              <li>Put reusable OpenSSH options under <code>ssh.defaults.options</code>.</li>
-              <li>Keep agent settings only when retained 1Password or Bitwarden access is intentional.</li>
-            </ul>
-          </div>
-        </details>
       </section>
 
       <section id="inventory">
-        <span class="step-label">Step 4</span>
-        <h2>Convert contexts and import hosts</h2>
-        <p>
-          Create local groups for shared policy before importing SSH config. A
-          0.2 context domain generally becomes a 0.3
-          <code>match.domain_suffix</code>; context fallback auth becomes group
-          auth policy.
-        </p>
-        <div class="code-block">
-          <button class="copy" type="button">Copy</button>
-          <pre><code>inventory:
-  providers:
-    local:
-      type: local
-      groups:
-        work:
-          match:
-            domain_suffix:
-              - .example.com
-          auth:
-            mode: password
-            credential_provider: op-work
-            username: netops
-            password_ref: op://Work/network-admin/password</code></pre>
-        </div>
-        <aside class="callout warning">
-          <strong>Apex domains need review.</strong>
-          <p>
-            In 0.2, <code>example.com</code> could match both the apex and its
-            subdomains. In 0.3, <code>.example.com</code> matches subdomains, not
-            the apex host itself. Assign the apex host explicitly when needed.
-          </p>
-        </aside>
-
-        <h3>Import the OpenSSH tree</h3>
+        <span class="step-label">Step 3</span>
+        <h2>Import your hosts</h2>
+        <p>nssh can import the hosts you already use from your SSH configuration:</p>
         <div class="code-block">
           <button class="copy" type="button">Copy</button>
           <pre><code>nssh self import ssh-config</code></pre>
         </div>
         <p>
-          Review the presented diff and every warning. The importer follows
-          <code>Include</code> directives, writes global <code>Host *</code>
-          options to the root config, and writes concrete hosts to local
-          inventory. Existing inventory identities are skipped rather than
-          overwritten.
+          Review the preview and accept it when the host names and usernames
+          look right. Then use the guided inventory command to connect a host
+          or group to the credential provider you chose:
         </p>
-        <ul>
-          <li>Wildcard or negated host patterns and <code>Match</code> blocks are not inventory entries.</li>
-          <li><code>CanonicalizeHostname</code> is not imported.</li>
-          <li>Unknown directives are retained only when accepted by the typed 0.3 schema.</li>
-          <li>An imported <code>User</code> without an inferred auth mode becomes password mode; correct key-auth hosts before testing.</li>
-        </ul>
-      </section>
-
-      <section id="credentials">
-        <span class="step-label">Step 5</span>
-        <h2>Recreate authentication mappings</h2>
-        <p>
-          nssh 0.3 has no local password vault. Put secrets in SOPS+age,
-          1Password, or Bitwarden, then store only provider names and references
-          in inventory auth policy.
-        </p>
-        <div class="two-col">
-          <div class="summary-card">
-            <h3>Shared credential</h3>
-            <p>Prefer group auth when several hosts use the same account and provider item.</p>
-            <div class="code-block">
-              <button class="copy" type="button">Copy</button>
-              <pre><code>nssh inv set local/work \
-  --auth password \
-  --cred op-work:op://Work/network-admin/password \
-  --user netops</code></pre>
-            </div>
-          </div>
-          <div class="summary-card">
-            <h3>Host exception</h3>
-            <p>Use host auth for key-only hosts or exceptions to shared group policy.</p>
-            <div class="code-block">
-              <button class="copy" type="button">Copy</button>
-              <pre><code>nssh inv set edge01.example.com \
-  --auth key \
-  --user netops</code></pre>
-            </div>
-          </div>
+        <div class="code-block">
+          <button class="copy" type="button">Copy</button>
+          <pre><code>nssh inv list
+nssh inv set --help</code></pre>
         </div>
-        <aside class="callout danger">
-          <strong>Never migrate plaintext passwords through files or flags.</strong>
-          <p>
-            Add the secret directly to the external provider. Confirm the exact
-            <code>--cred</code> syntax with <code>nssh inv set --help</code>;
-            interactive selection is safer when a reference contains shell
-            punctuation.
-          </p>
-        </aside>
+        <p class="muted">The help shows how to update a host or group. If your 0.2 setup used contexts or shared passwords across many hosts, this is the point where the nssh skill is especially useful.</p>
       </section>
 
       <section id="verify">
-        <span class="step-label">Step 6</span>
-        <h2>Verify before cleanup</h2>
-        <p>Run the bounded checks in order. Replace placeholders with non-sensitive test targets.</p>
+        <span class="step-label">Step 4</span>
+        <h2>Test the hosts you normally use</h2>
+        <p>Start with one familiar host. The login should work without putting a password on the command line:</p>
         <div class="code-block">
           <button class="copy" type="button">Copy</button>
-          <pre><code>nssh self status
-nssh self cfg --paths
-nssh self cfg --source
-nssh inv status
-nssh inv list
-nssh inv get &lt;representative-host&gt;
-
-nssh -v &lt;representative-key-host&gt; true
-nssh -v &lt;representative-password-host&gt; true
-nssh agent status</code></pre>
+          <pre><code>nssh YOUR-HOST</code></pre>
         </div>
-        <div class="checklist">
-          <label class="check"><input type="checkbox"><span>One host from every migrated group resolves to the intended destination and port.</span></label>
-          <label class="check"><input type="checkbox"><span>A key-auth host connects without being forced into password mode.</span></label>
-          <label class="check"><input type="checkbox"><span>A password-auth host automatically authenticates with the intended username and provider record.</span></label>
-          <label class="check"><input type="checkbox"><span>A host-specific auth override wins over group policy.</span></label>
-          <label class="check"><input type="checkbox"><span><code>nssh cp</code> succeeds using the same host and auth policy.</span></label>
-          <label class="check"><input type="checkbox"><span>Any managed jump/proxy path verifies both proxy and target authentication.</span></label>
-          <label class="check"><input type="checkbox"><span>External inventory refresh and grouping work, if used.</span></label>
-          <label class="check"><input type="checkbox"><span>A recording is created and listed, if recording is enabled.</span></label>
+        <div class="checklist" data-checklist="nssh-migration">
+          <label class="check"><input type="checkbox"><span>A normal host connects.</span></label>
+          <label class="check"><input type="checkbox"><span>A password login retrieves the correct credential automatically.</span></label>
+          <label class="check"><input type="checkbox"><span>A host reached through a jump host connects, if you use one.</span></label>
+          <label class="check"><input type="checkbox"><span><code>nssh cp</code> copies a test file, if you use file copying.</span></label>
         </div>
-        <aside class="callout good">
-          <strong>Acceptance criterion</strong>
-          <p>
-            Migration is complete only when identity, username, destination,
-            port, SSH options, auth provider/reference, proxy behavior, SSH, and
-            SCP match the intended 0.2 behavior.
-          </p>
-        </aside>
-      </section>
-
-      <section id="cleanup">
-        <span class="step-label">Step 7</span>
-        <h2>Clean up only after acceptance</h2>
-        <p>
-          Existing recordings, archives, audit logs, and benchmark artifacts can
-          remain in their XDG locations. External inventory provider JSON is a
-          refreshable non-secret cache; do not hand-edit it.
-        </p>
-        <p>Keep these 0.2 artifacts in the rollback backup until the RC is accepted:</p>
-        <ul>
-          <li><code>config.toml</code>, <code>credentials.age</code>, <code>age.pub</code>, <code>age.key.enc</code>, and <code>piv.json</code></li>
-          <li>legacy backup files and nssh shell-integration scripts</li>
-          <li>old Fish, Zsh, or Bash completion files</li>
-          <li>nssh-managed files beneath <code>~/.ssh/conf.d/</code></li>
-        </ul>
-        <aside class="callout warning">
-          <strong>Do not delete all of <code>~/.ssh/conf.d</code>.</strong>
-          <p>
-            It may contain files owned by you or another tool. Remove only
-            confirmed nssh-owned includes and shell startup lines. You may keep
-            OpenSSH files intentionally for direct <code>ssh</code> compatibility.
-          </p>
-        </aside>
+        <div class="progress">
+          <progress value="0" max="4" aria-label="Migration progress"></progress>
+          <span><strong data-progress-count>0</strong> of 4 tests complete</span>
+        </div>
+        <p>Keep your 0.2 backup for the entire beta, even after all four tests pass.</p>
       </section>
 
       <section id="rollback">
-        <span class="step-label">Recovery</span>
-        <h2>Rollback</h2>
-        <p>
-          Reinstall the saved 0.2 binary and restore the preserved 0.2 config,
-          vault, SSH includes, and XDG state paths as one set. Do not point a 0.2
-          binary at 0.3 YAML or a 0.3 binary at the 0.2
-          <code>credentials.age</code> vault.
-        </p>
-        <ol>
-          <li>Stop using the 0.3 RC.</li>
-          <li>Restore the saved 0.2 binary and matching helper files.</li>
-          <li>Restore config, data, state, and managed SSH files from the same backup.</li>
-          <li>Verify <code>nssh --version</code>, contexts, hosts, and one representative connection.</li>
-          <li>Keep the 0.3 YAML separate for diagnosis or a later retry.</li>
-        </ol>
+        <span class="step-label">If something goes wrong</span>
+        <h2>Stop and get help</h2>
+        <p>Do not reset nssh or delete files. Ask your beta coordinator or an agent using the nssh skill to inspect the setup.</p>
+        <div class="code-block">
+          <button class="copy" type="button">Copy</button>
+          <pre><code>Use the nssh skill to troubleshoot my 0.2 to 0.3 migration. Inspect my setup without showing secrets or connecting to a host until I approve it. Preserve my 0.2 backup.</code></pre>
+        </div>
+        <details>
+          <summary>I need to return to 0.2 now</summary>
+          <div>
+            <p>Reinstall the saved 0.2 release and restore the nssh and SSH folders from the same backup. Keep the 0.3 files separate so they can be inspected later.</p>
+          </div>
+        </details>
       </section>
 
       <section id="feedback">
@@ -820,8 +615,8 @@ nssh agent status</code></pre>
         <p>
           Open an issue at
           <a href="https://github.com/ntwrknrd/nssh/issues">github.com/ntwrknrd/nssh/issues</a>
-          and include the sanitized details below. Never attach configs or logs
-          containing passwords, provider sessions, tokens, or private host data.
+          and describe what you were doing, what you expected, and what happened.
+          Never attach passwords, tokens, private host names, or your complete config.
         </p>
         <div class="code-block">
           <button class="copy" type="button">Copy</button>
@@ -831,21 +626,14 @@ nssh agent status</code></pre>
 - OS and architecture:
 - Installation method:
 - Previous nssh version:
-- Credential provider: SOPS+age / 1Password / Bitwarden
-- Inventory provider: local / NetBox / containerlab
-- Direct, managed proxy, or unmanaged proxy:
-- Command category: init / import / inventory / SSH / SCP / log / agent
+- Credential option: SOPS+age / 1Password / Bitwarden
+- Command I ran:
 
 ### Expected behavior
 
 ### Observed behavior
 
 ### Reproduction steps
-
-### Sanitized diagnostics
-
-`nssh self status`
-`nssh inv status`
 
 ### Rollback required?
 Yes / No</code></pre>
@@ -856,16 +644,13 @@ Yes / No</code></pre>
     <nav aria-label="Migration guide contents">
       <strong>On this page</strong>
       <ol>
-        <li><a href="#overview">Migration at a glance</a></li>
+        <li><a href="#overview">Choose a path</a></li>
         <li><a href="#changes">What changed</a></li>
-        <li><a href="#prepare">Preserve 0.2</a></li>
-        <li><a href="#install">Install the RC</a></li>
-        <li><a href="#initialize">Initialize YAML</a></li>
-        <li><a href="#inventory">Convert inventory</a></li>
-        <li><a href="#credentials">Map credentials</a></li>
-        <li><a href="#verify">Verify</a></li>
-        <li><a href="#cleanup">Clean up</a></li>
-        <li><a href="#rollback">Rollback</a></li>
+        <li><a href="#prepare">1. Back up</a></li>
+        <li><a href="#install">2. Set up 0.3</a></li>
+        <li><a href="#inventory">3. Import hosts</a></li>
+        <li><a href="#verify">4. Test logins</a></li>
+        <li><a href="#rollback">Get help</a></li>
         <li><a href="#feedback">Report feedback</a></li>
       </ol>
     </nav>
