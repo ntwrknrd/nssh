@@ -1,0 +1,927 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>nssh 0.2 to 0.3 RC Migration Guide</title>
+  <style>
+    :root {
+      --ink: #18212b;
+      --muted: #5c6b78;
+      --paper: #f4f7f8;
+      --panel: #ffffff;
+      --line: #d9e1e5;
+      --accent: #087f8c;
+      --accent-dark: #075b63;
+      --accent-soft: #dff4f5;
+      --warn: #9a5b00;
+      --warn-soft: #fff3d9;
+      --danger: #a83232;
+      --danger-soft: #fde7e7;
+      --good: #246b45;
+      --good-soft: #e4f4ea;
+      --code: #13202a;
+      --code-ink: #e8f0f2;
+      --shadow: 0 16px 40px rgba(24, 33, 43, 0.08);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink: #e6edf1;
+        --muted: #aebcc5;
+        --paper: #10171c;
+        --panel: #182128;
+        --line: #33414a;
+        --accent: #5bc7ce;
+        --accent-dark: #8ce0e5;
+        --accent-soft: #153a3d;
+        --warn: #ffc46b;
+        --warn-soft: #422f13;
+        --danger: #ff9999;
+        --danger-soft: #412020;
+        --good: #8bd6aa;
+        --good-soft: #173828;
+        --code: #0b1115;
+        --code-ink: #e7eff2;
+        --shadow: none;
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: 1.5rem;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    a { color: var(--accent-dark); }
+    a:hover { text-decoration-thickness: 2px; }
+
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        "Liberation Mono", monospace;
+    }
+
+    code {
+      padding: 0.12rem 0.32rem;
+      border-radius: 0.3rem;
+      background: var(--accent-soft);
+      font-size: 0.92em;
+    }
+
+    .hero {
+      color: #f7ffff;
+      background:
+        radial-gradient(circle at 88% 10%, rgba(119, 224, 228, 0.3), transparent 27rem),
+        linear-gradient(135deg, #063b43 0%, #087f8c 58%, #0a6570 100%);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+    }
+
+    .hero-inner,
+    .layout,
+    .footer-inner {
+      width: min(1180px, calc(100% - 2rem));
+      margin-inline: auto;
+    }
+
+    .hero-inner { padding: 4.5rem 0 3.6rem; }
+
+    .eyebrow {
+      margin: 0 0 0.8rem;
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+      opacity: 0.88;
+    }
+
+    h1 {
+      max-width: 850px;
+      margin: 0;
+      font-size: clamp(2.2rem, 6vw, 4.8rem);
+      line-height: 1.02;
+      letter-spacing: -0.045em;
+    }
+
+    .lede {
+      max-width: 760px;
+      margin: 1.2rem 0 1.5rem;
+      font-size: clamp(1rem, 2vw, 1.24rem);
+      color: rgba(247, 255, 255, 0.9);
+    }
+
+    .badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 2rem;
+      padding: 0.28rem 0.72rem;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 999px;
+      background: rgba(4, 35, 39, 0.24);
+      font-size: 0.84rem;
+      font-weight: 700;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 260px;
+      gap: 2.2rem;
+      padding: 2rem 0 4rem;
+      align-items: start;
+    }
+
+    main { min-width: 0; }
+
+    nav {
+      position: sticky;
+      top: 1rem;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 0.9rem;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    nav strong {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-size: 0.8rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    nav ol {
+      margin: 0;
+      padding-left: 1.3rem;
+      font-size: 0.88rem;
+    }
+
+    nav li + li { margin-top: 0.28rem; }
+    nav a { color: var(--muted); text-decoration: none; }
+    nav a:hover { color: var(--accent-dark); }
+
+    section,
+    .callout,
+    .summary-card {
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    section {
+      margin-bottom: 1.25rem;
+      padding: clamp(1.2rem, 3vw, 2rem);
+    }
+
+    section > :first-child { margin-top: 0; }
+    section > :last-child { margin-bottom: 0; }
+
+    h2 {
+      margin: 0 0 0.7rem;
+      font-size: clamp(1.4rem, 3vw, 2rem);
+      line-height: 1.2;
+      letter-spacing: -0.025em;
+    }
+
+    h3 {
+      margin: 1.55rem 0 0.5rem;
+      font-size: 1.1rem;
+      line-height: 1.3;
+    }
+
+    .step-label {
+      display: inline-block;
+      margin-bottom: 0.45rem;
+      color: var(--accent-dark);
+      font-size: 0.76rem;
+      font-weight: 850;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .muted { color: var(--muted); }
+
+    .callout {
+      margin-bottom: 1.25rem;
+      padding: 1.15rem 1.25rem;
+      border-left: 0.38rem solid var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .callout.warning {
+      border-left-color: var(--warn);
+      background: var(--warn-soft);
+    }
+
+    .callout.danger {
+      border-left-color: var(--danger);
+      background: var(--danger-soft);
+    }
+
+    .callout.good {
+      border-left-color: var(--good);
+      background: var(--good-soft);
+    }
+
+    .callout strong { display: block; margin-bottom: 0.2rem; }
+    .callout p { margin: 0; }
+
+    .code-block {
+      position: relative;
+      margin: 0.9rem 0 1.15rem;
+      overflow: hidden;
+      border: 1px solid #2d3b44;
+      border-radius: 0.75rem;
+      background: var(--code);
+    }
+
+    pre {
+      margin: 0;
+      padding: 1.15rem;
+      overflow-x: auto;
+      color: var(--code-ink);
+      font-size: 0.86rem;
+      line-height: 1.55;
+      tab-size: 2;
+    }
+
+    pre code {
+      padding: 0;
+      color: inherit;
+      background: transparent;
+      font-size: inherit;
+    }
+
+    .copy {
+      position: absolute;
+      top: 0.55rem;
+      right: 0.55rem;
+      padding: 0.35rem 0.6rem;
+      color: #dcebed;
+      border: 1px solid #52636d;
+      border-radius: 0.45rem;
+      background: #24343e;
+      font: inherit;
+      font-size: 0.72rem;
+      font-weight: 750;
+      cursor: pointer;
+    }
+
+    .copy:hover { background: #314550; }
+
+    .checklist {
+      display: grid;
+      gap: 0.6rem;
+      margin: 1rem 0;
+    }
+
+    .check {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.7rem;
+      align-items: start;
+      padding: 0.72rem 0.8rem;
+      border: 1px solid var(--line);
+      border-radius: 0.65rem;
+      background: color-mix(in srgb, var(--panel) 92%, var(--accent-soft));
+    }
+
+    .check input {
+      width: 1.1rem;
+      height: 1.1rem;
+      margin-top: 0.2rem;
+      accent-color: var(--accent);
+    }
+
+    .check:has(input:checked) span {
+      color: var(--muted);
+      text-decoration: line-through;
+    }
+
+    .progress {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      margin: 1rem 0 0;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    progress {
+      width: min(22rem, 70%);
+      height: 0.75rem;
+      accent-color: var(--accent);
+    }
+
+    .table-wrap {
+      margin: 1rem 0;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 0.75rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+
+    th, td {
+      padding: 0.72rem 0.8rem;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--accent-dark);
+      background: var(--accent-soft);
+      font-size: 0.78rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    details {
+      margin: 0.8rem 0;
+      border: 1px solid var(--line);
+      border-radius: 0.7rem;
+      background: var(--panel);
+    }
+
+    summary {
+      padding: 0.75rem 0.9rem;
+      color: var(--accent-dark);
+      font-weight: 750;
+      cursor: pointer;
+    }
+
+    details > div { padding: 0 0.9rem 0.9rem; }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+    }
+
+    .summary-card {
+      min-width: 0;
+      padding: 1rem;
+      box-shadow: none;
+    }
+
+    .summary-card h3 { margin-top: 0; }
+
+    footer {
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      background: var(--panel);
+    }
+
+    .footer-inner { padding: 1.4rem 0 2.2rem; }
+
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: 1fr; }
+      nav { position: static; order: -1; }
+      nav ol { columns: 2; column-gap: 2rem; }
+    }
+
+    @media (max-width: 620px) {
+      .hero-inner { padding: 3rem 0 2.5rem; }
+      .layout { width: min(100% - 1rem, 1180px); gap: 1rem; }
+      section { border-radius: 0.75rem; }
+      .two-col { grid-template-columns: 1fr; }
+      nav ol { columns: 1; }
+      th, td { min-width: 9rem; }
+    }
+
+    @media print {
+      :root {
+        --ink: #111;
+        --muted: #444;
+        --paper: #fff;
+        --panel: #fff;
+        --line: #bbb;
+        --accent-dark: #075b63;
+      }
+
+      body { font-size: 10.5pt; }
+      .hero { color: #111; background: #fff; }
+      .hero-inner { padding: 1rem 0; }
+      .lede { color: #333; }
+      .badge { border-color: #777; background: #fff; }
+      .layout { display: block; width: 100%; padding: 0; }
+      nav, .copy, .progress { display: none !important; }
+      section, .callout { box-shadow: none; break-inside: avoid; }
+      section { border-left: 0; border-right: 0; border-radius: 0; }
+      details > div { display: block; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <p class="eyebrow">Release candidate beta guide</p>
+      <h1>Migrate nssh 0.2 to 0.3</h1>
+      <p class="lede">
+        A rollback-safe migration from the 0.2 local vault and context model to
+        0.3 YAML inventory, external credential providers, and SSH-compatible
+        automatic authentication.
+      </p>
+      <div class="badges" aria-label="Guide scope">
+        <span class="badge">Source: nssh 0.2.4</span>
+        <span class="badge">Target: nssh 0.3 RC</span>
+        <span class="badge">macOS and Linux</span>
+        <span class="badge">Updated 2026-08-06</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <main id="main">
+      <aside class="callout danger" role="alert">
+        <strong>This is a cutover, not an in-place config upgrade.</strong>
+        <p>
+          nssh 0.3 does not read <code>config.toml</code>, open the 0.2
+          <code>credentials.age</code> vault, or use 0.2 contexts as runtime
+          inventory. Back up first. Do not run reset or a non-preserving
+          uninstall during migration.
+        </p>
+      </aside>
+
+      <section id="overview">
+        <span class="step-label">Start here</span>
+        <h2>Migration at a glance</h2>
+        <p>
+          Preserve the complete 0.2 installation, install the matching 0.3 RC
+          binaries, create new YAML configuration, import OpenSSH hosts, map
+          authentication to an external provider, then test representative SSH
+          and SCP paths before cleaning anything up.
+        </p>
+
+        <div class="checklist" data-checklist="nssh-migration">
+          <label class="check"><input type="checkbox"><span>Back up config, data, state, and managed SSH files.</span></label>
+          <label class="check"><input type="checkbox"><span>Record 0.2 contexts, hosts, usernames, and auth modes.</span></label>
+          <label class="check"><input type="checkbox"><span>Install matching 0.3 RC <code>nssh</code> and <code>nssh-askpass</code> binaries.</span></label>
+          <label class="check"><input type="checkbox"><span>Initialize YAML config and selected providers.</span></label>
+          <label class="check"><input type="checkbox"><span>Import and review the existing OpenSSH configuration.</span></label>
+          <label class="check"><input type="checkbox"><span>Recreate auth mappings without putting passwords in YAML.</span></label>
+          <label class="check"><input type="checkbox"><span>Verify key, password, proxy, SCP, and optional recording paths.</span></label>
+          <label class="check"><input type="checkbox"><span>Keep rollback files until the beta is accepted.</span></label>
+        </div>
+        <div class="progress">
+          <progress value="0" max="8" aria-label="Migration progress"></progress>
+          <span><strong data-progress-count>0</strong> of 8 complete</span>
+        </div>
+      </section>
+
+      <section id="changes">
+        <span class="step-label">Understand the cutover</span>
+        <h2>What changed</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>0.2</th><th>0.3</th><th>What you do</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>config.toml</code></td><td><code>config.yaml</code></td><td>Recreate supported settings in YAML.</td></tr>
+              <tr><td>Local <code>credentials.age</code> vault</td><td>SOPS+age, 1Password, or Bitwarden</td><td>Move secrets to an external provider; store only references in nssh.</td></tr>
+              <tr><td>Contexts</td><td>Inventory provider groups</td><td>Convert shared domains, SSH policy, usernames, and auth intent into groups.</td></tr>
+              <tr><td>Vault host credentials</td><td>Host or group auth mappings</td><td>Map inventory to provider references.</td></tr>
+              <tr><td>Managed <code>~/.ssh/conf.d</code> hosts</td><td>Local inventory YAML</td><td>Import with <code>nssh self import ssh-config</code>, then review.</td></tr>
+              <tr><td><code>nssh host</code> / <code>nssh ctx</code></td><td><code>nssh inv</code></td><td>Manage local and external inventory through one command group.</td></tr>
+              <tr><td><code>nssh connect HOST</code></td><td><code>nssh HOST</code></td><td>Use the OpenSSH-compatible root command.</td></tr>
+              <tr><td><code>lock</code> / <code>unlock</code></td><td><code>agent stop</code> / <code>status</code> / <code>reset</code></td><td>Treat the agent as a provider-access broker, not a password vault.</td></tr>
+              <tr><td>Generated shell integration</td><td>Unsupported</td><td>Remove stale shell startup references only after validation.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="prepare">
+        <span class="step-label">Step 1</span>
+        <h2>Preserve your 0.2 installation</h2>
+        <p>
+          Run these commands while the 0.2 binary and vault are still usable.
+          The backup honors XDG overrides and preserves permissions.
+        </p>
+        <div class="code-block">
+          <button class="copy" type="button">Copy</button>
+          <pre><code>nssh --version
+nssh lock
+
+backup_dir="$HOME/nssh-0.2-backup-$(date +%Y%m%d-%H%M%S)"
+nssh_config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+nssh_data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+nssh_state_home="${XDG_STATE_HOME:-$HOME/.local/state}"
+
+mkdir -m 700 "$backup_dir"
+copy_if_present() {
+  if [ -e "$1" ]; then
+    cp -a "$1" "$2"
+  fi
+}
+
+copy_if_present "$nssh_config_home/nssh" "$backup_dir/config-nssh"
+copy_if_present "$nssh_data_home/nssh" "$backup_dir/share-nssh"
+copy_if_present "$nssh_state_home/nssh" "$backup_dir/state-nssh"
+copy_if_present "$HOME/.ssh/config" "$backup_dir/ssh-config"
+copy_if_present "$HOME/.ssh/conf.d" "$backup_dir/ssh-conf.d"
+
+printf 'Backup: %s\n' "$backup_dir"</code></pre>
+        </div>
+
+        <aside class="callout warning">
+          <strong>Check custom paths.</strong>
+          <p>
+            If 0.2 used custom recording, archive, SSH include, or XDG paths,
+            copy those too. Keep the old binary and backup until every required
+            credential has been tested in 0.3.
+          </p>
+        </aside>
+
+        <h3>Capture the old model</h3>
+        <div class="code-block">
+          <button class="copy" type="button">Copy</button>
+          <pre><code>nssh ctx list
+nssh host list
+nssh self cfg</code></pre>
+        </div>
+        <p>
+          Record context names and domains, host aliases, destination names,
+          ports, usernames, SSH include files, and whether each representative
+          host uses key or password authentication. Transfer passwords directly
+          to the new provider; never paste them into notes, tickets, YAML, or
+          shell history.
+        </p>
+      </section>
+
+      <section id="install">
+        <span class="step-label">Step 2</span>
+        <h2>Install the 0.3 release candidate</h2>
+        <p>
+          Use the RC download or installation instructions supplied with your
+          beta invitation. Install <code>nssh</code> and
+          <code>nssh-askpass</code> from the same build. Password-backed login
+          fails when the helper is missing or mismatched.
+        </p>
+        <div class="code-block">
+          <button class="copy" type="button">Copy</button>
+          <pre><code>nssh --version
+
+nssh_bin="$(command -v nssh)"
+askpass_bin="$(dirname "$nssh_bin")/nssh-askpass"
+printf 'nssh: %s\naskpass: %s\n' "$nssh_bin" "$askpass_bin"
+test -x "$askpass_bin" &amp;&amp; echo "askpass helper: ready"</code></pre>
+        </div>
+        <aside class="callout">
+          <strong>The retained 0.2 TOML file is safe.</strong>
+          <p>
+            A preserved <code>config.toml</code> does not block 0.3 initialization
+            because 0.3 looks for <code>config.yaml</code>.
+          </p>
+        </aside>
+      </section>
+
+      <section id="initialize">
+        <span class="step-label">Step 3</span>
+        <h2>Create the 0.3 YAML configuration</h2>
+        <p>Initialize once, then add the credential and inventory providers you need.</p>
+        <div class="code-block">
+          <button class="copy" type="button">Copy</button>
+          <pre><code>nssh self init
+
+# Add providers explicitly if they were not selected during setup.
+nssh self init --cred sops-age
+nssh self init --inv local
+
+nssh self cfg --paths
+nssh self cfg --source</code></pre>
+        </div>
+        <p>
+          Provider includes live beneath <code>~/.config/nssh/credential/</code>
+          and <code>~/.config/nssh/inventory/</code> by default. The root YAML
+          activates them through includes.
+        </p>
+
+        <details>
+          <summary>Settings that do not translate directly</summary>
+          <div>
+            <ul>
+              <li>Remove 0.2 vault lockout, KDF, and <code>agent.security</code> settings.</li>
+              <li>Move default usernames into inventory auth policy.</li>
+              <li>Move recording dimensions to <code>logging.export.gif</code>.</li>
+              <li>Schedule <code>nssh log archive</code> externally; archive jitter and background scheduling do not migrate.</li>
+              <li>Put reusable OpenSSH options under <code>ssh.defaults.options</code>.</li>
+              <li>Keep agent settings only when retained 1Password or Bitwarden access is intentional.</li>
+            </ul>
+          </div>
+        </details>
+      </section>
+
+      <section id="inventory">
+        <span class="step-label">Step 4</span>
+        <h2>Convert contexts and import hosts</h2>
+        <p>
+          Create local groups for shared policy before importing SSH config. A
+          0.2 context domain generally becomes a 0.3
+          <code>match.domain_suffix</code>; context fallback auth becomes group
+          auth policy.
+        </p>
+        <div class="code-block">
+          <button class="copy" type="button">Copy</button>
+          <pre><code>inventory:
+  providers:
+    local:
+      type: local
+      groups:
+        work:
+          match:
+            domain_suffix:
+              - .example.com
+          auth:
+            mode: password
+            credential_provider: op-work
+            username: netops
+            password_ref: op://Work/network-admin/password</code></pre>
+        </div>
+        <aside class="callout warning">
+          <strong>Apex domains need review.</strong>
+          <p>
+            In 0.2, <code>example.com</code> could match both the apex and its
+            subdomains. In 0.3, <code>.example.com</code> matches subdomains, not
+            the apex host itself. Assign the apex host explicitly when needed.
+          </p>
+        </aside>
+
+        <h3>Import the OpenSSH tree</h3>
+        <div class="code-block">
+          <button class="copy" type="button">Copy</button>
+          <pre><code>nssh self import ssh-config</code></pre>
+        </div>
+        <p>
+          Review the presented diff and every warning. The importer follows
+          <code>Include</code> directives, writes global <code>Host *</code>
+          options to the root config, and writes concrete hosts to local
+          inventory. Existing inventory identities are skipped rather than
+          overwritten.
+        </p>
+        <ul>
+          <li>Wildcard or negated host patterns and <code>Match</code> blocks are not inventory entries.</li>
+          <li><code>CanonicalizeHostname</code> is not imported.</li>
+          <li>Unknown directives are retained only when accepted by the typed 0.3 schema.</li>
+          <li>An imported <code>User</code> without an inferred auth mode becomes password mode; correct key-auth hosts before testing.</li>
+        </ul>
+      </section>
+
+      <section id="credentials">
+        <span class="step-label">Step 5</span>
+        <h2>Recreate authentication mappings</h2>
+        <p>
+          nssh 0.3 has no local password vault. Put secrets in SOPS+age,
+          1Password, or Bitwarden, then store only provider names and references
+          in inventory auth policy.
+        </p>
+        <div class="two-col">
+          <div class="summary-card">
+            <h3>Shared credential</h3>
+            <p>Prefer group auth when several hosts use the same account and provider item.</p>
+            <div class="code-block">
+              <button class="copy" type="button">Copy</button>
+              <pre><code>nssh inv set local/work \
+  --auth password \
+  --cred op-work:op://Work/network-admin/password \
+  --user netops</code></pre>
+            </div>
+          </div>
+          <div class="summary-card">
+            <h3>Host exception</h3>
+            <p>Use host auth for key-only hosts or exceptions to shared group policy.</p>
+            <div class="code-block">
+              <button class="copy" type="button">Copy</button>
+              <pre><code>nssh inv set edge01.example.com \
+  --auth key \
+  --user netops</code></pre>
+            </div>
+          </div>
+        </div>
+        <aside class="callout danger">
+          <strong>Never migrate plaintext passwords through files or flags.</strong>
+          <p>
+            Add the secret directly to the external provider. Confirm the exact
+            <code>--cred</code> syntax with <code>nssh inv set --help</code>;
+            interactive selection is safer when a reference contains shell
+            punctuation.
+          </p>
+        </aside>
+      </section>
+
+      <section id="verify">
+        <span class="step-label">Step 6</span>
+        <h2>Verify before cleanup</h2>
+        <p>Run the bounded checks in order. Replace placeholders with non-sensitive test targets.</p>
+        <div class="code-block">
+          <button class="copy" type="button">Copy</button>
+          <pre><code>nssh self status
+nssh self cfg --paths
+nssh self cfg --source
+nssh inv status
+nssh inv list
+nssh inv get &lt;representative-host&gt;
+
+nssh -v &lt;representative-key-host&gt; true
+nssh -v &lt;representative-password-host&gt; true
+nssh agent status</code></pre>
+        </div>
+        <div class="checklist">
+          <label class="check"><input type="checkbox"><span>One host from every migrated group resolves to the intended destination and port.</span></label>
+          <label class="check"><input type="checkbox"><span>A key-auth host connects without being forced into password mode.</span></label>
+          <label class="check"><input type="checkbox"><span>A password-auth host automatically authenticates with the intended username and provider record.</span></label>
+          <label class="check"><input type="checkbox"><span>A host-specific auth override wins over group policy.</span></label>
+          <label class="check"><input type="checkbox"><span><code>nssh cp</code> succeeds using the same host and auth policy.</span></label>
+          <label class="check"><input type="checkbox"><span>Any managed jump/proxy path verifies both proxy and target authentication.</span></label>
+          <label class="check"><input type="checkbox"><span>External inventory refresh and grouping work, if used.</span></label>
+          <label class="check"><input type="checkbox"><span>A recording is created and listed, if recording is enabled.</span></label>
+        </div>
+        <aside class="callout good">
+          <strong>Acceptance criterion</strong>
+          <p>
+            Migration is complete only when identity, username, destination,
+            port, SSH options, auth provider/reference, proxy behavior, SSH, and
+            SCP match the intended 0.2 behavior.
+          </p>
+        </aside>
+      </section>
+
+      <section id="cleanup">
+        <span class="step-label">Step 7</span>
+        <h2>Clean up only after acceptance</h2>
+        <p>
+          Existing recordings, archives, audit logs, and benchmark artifacts can
+          remain in their XDG locations. External inventory provider JSON is a
+          refreshable non-secret cache; do not hand-edit it.
+        </p>
+        <p>Keep these 0.2 artifacts in the rollback backup until the RC is accepted:</p>
+        <ul>
+          <li><code>config.toml</code>, <code>credentials.age</code>, <code>age.pub</code>, <code>age.key.enc</code>, and <code>piv.json</code></li>
+          <li>legacy backup files and nssh shell-integration scripts</li>
+          <li>old Fish, Zsh, or Bash completion files</li>
+          <li>nssh-managed files beneath <code>~/.ssh/conf.d/</code></li>
+        </ul>
+        <aside class="callout warning">
+          <strong>Do not delete all of <code>~/.ssh/conf.d</code>.</strong>
+          <p>
+            It may contain files owned by you or another tool. Remove only
+            confirmed nssh-owned includes and shell startup lines. You may keep
+            OpenSSH files intentionally for direct <code>ssh</code> compatibility.
+          </p>
+        </aside>
+      </section>
+
+      <section id="rollback">
+        <span class="step-label">Recovery</span>
+        <h2>Rollback</h2>
+        <p>
+          Reinstall the saved 0.2 binary and restore the preserved 0.2 config,
+          vault, SSH includes, and XDG state paths as one set. Do not point a 0.2
+          binary at 0.3 YAML or a 0.3 binary at the 0.2
+          <code>credentials.age</code> vault.
+        </p>
+        <ol>
+          <li>Stop using the 0.3 RC.</li>
+          <li>Restore the saved 0.2 binary and matching helper files.</li>
+          <li>Restore config, data, state, and managed SSH files from the same backup.</li>
+          <li>Verify <code>nssh --version</code>, contexts, hosts, and one representative connection.</li>
+          <li>Keep the 0.3 YAML separate for diagnosis or a later retry.</li>
+        </ol>
+      </section>
+
+      <section id="feedback">
+        <span class="step-label">Beta feedback</span>
+        <h2>Report an RC issue</h2>
+        <p>
+          Open an issue at
+          <a href="https://github.com/ntwrknrd/nssh/issues">github.com/ntwrknrd/nssh/issues</a>
+          and include the sanitized details below. Never attach configs or logs
+          containing passwords, provider sessions, tokens, or private host data.
+        </p>
+        <div class="code-block">
+          <button class="copy" type="button">Copy</button>
+          <pre><code>## nssh 0.3 RC migration report
+
+- nssh version:
+- OS and architecture:
+- Installation method:
+- Previous nssh version:
+- Credential provider: SOPS+age / 1Password / Bitwarden
+- Inventory provider: local / NetBox / containerlab
+- Direct, managed proxy, or unmanaged proxy:
+- Command category: init / import / inventory / SSH / SCP / log / agent
+
+### Expected behavior
+
+### Observed behavior
+
+### Reproduction steps
+
+### Sanitized diagnostics
+
+`nssh self status`
+`nssh inv status`
+
+### Rollback required?
+Yes / No</code></pre>
+        </div>
+      </section>
+    </main>
+
+    <nav aria-label="Migration guide contents">
+      <strong>On this page</strong>
+      <ol>
+        <li><a href="#overview">Migration at a glance</a></li>
+        <li><a href="#changes">What changed</a></li>
+        <li><a href="#prepare">Preserve 0.2</a></li>
+        <li><a href="#install">Install the RC</a></li>
+        <li><a href="#initialize">Initialize YAML</a></li>
+        <li><a href="#inventory">Convert inventory</a></li>
+        <li><a href="#credentials">Map credentials</a></li>
+        <li><a href="#verify">Verify</a></li>
+        <li><a href="#cleanup">Clean up</a></li>
+        <li><a href="#rollback">Rollback</a></li>
+        <li><a href="#feedback">Report feedback</a></li>
+      </ol>
+    </nav>
+  </div>
+
+  <footer>
+    <div class="footer-inner">
+      <strong>nssh 0.3 RC migration guide</strong><br>
+      Source baseline: nssh 0.2.4 to the 0.3 release candidate. Verify the
+      installed version and use the RC artifact supplied by the release coordinator.
+    </div>
+  </footer>
+
+  <script>
+    (() => {
+      document.querySelectorAll('.code-block').forEach((block) => {
+        const button = block.querySelector('.copy');
+        const code = block.querySelector('code');
+        if (!button || !code) return;
+
+        button.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(code.textContent);
+            button.textContent = 'Copied';
+            window.setTimeout(() => { button.textContent = 'Copy'; }, 1400);
+          } catch {
+            button.textContent = 'Select text';
+          }
+        });
+      });
+
+      const checklist = document.querySelector('[data-checklist="nssh-migration"]');
+      if (!checklist) return;
+
+      const boxes = [...checklist.querySelectorAll('input[type="checkbox"]')];
+      const progress = document.querySelector('progress');
+      const count = document.querySelector('[data-progress-count]');
+      const storageKey = 'nssh-migration-0.2-to-0.3-progress';
+
+      const update = () => {
+        const complete = boxes.filter((box) => box.checked).length;
+        if (progress) progress.value = complete;
+        if (count) count.textContent = String(complete);
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(boxes.map((box) => box.checked)));
+        } catch { /* Local files or strict browsers may disable storage. */ }
+      };
+
+      try {
+        const saved = JSON.parse(localStorage.getItem(storageKey) || '[]');
+        boxes.forEach((box, index) => { box.checked = Boolean(saved[index]); });
+      } catch { /* Start with an empty checklist when storage is unavailable. */ }
+
+      boxes.forEach((box) => box.addEventListener('change', update));
+      update();
+    })();
+  </script>
+</body>
+</html>

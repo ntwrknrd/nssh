@@ -66,6 +66,8 @@ password-manager records are not removed.
 
 ## Documentation
 
+- [0.2 to 0.3 RC migration guide](docs/migrate-0.2-to-0.3.html) - standalone
+  beta-tester guide with backup, conversion, verification, and rollback steps.
 - [CONTRIBUTING.md](CONTRIBUTING.md) - development workflow, tests, releases,
   and doc rules.
 - [.agents/skills/nssh/SKILL.md](.agents/skills/nssh/SKILL.md) - nssh skill
