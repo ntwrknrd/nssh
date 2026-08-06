@@ -98,11 +98,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # A hyphen in the tag marks a prerelease, e.g. v0.3.0-rc.1.
+          PRERELEASE=""
+          case "${{ github.ref_name }}" in
+            *-*) PRERELEASE="--prerelease" ;;
+          esac
           # Create release if it doesn't exist
           if ! gh release view ${{ github.ref_name }} &>/dev/null; then
             gh release create ${{ github.ref_name }} \
               --title "${{ github.ref_name }}" \
-              --generate-notes
+              --generate-notes ${PRERELEASE}
           fi
           # Upload assets (overwrites existing)
           gh release upload ${{ github.ref_name }} \
@@ -111,7 +116,8 @@ jobs:
             --clobber
 
   homebrew-nssh:
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Skip prerelease tags so the tap formula keeps tracking the stable release.
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     needs: release-create
     runs-on: ubuntu-latest
     steps:
