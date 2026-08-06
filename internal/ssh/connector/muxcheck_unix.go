@@ -53,6 +53,7 @@ func CheckMuxSession(ctx context.Context, req MuxCheckRequest, execFn MuxCheckEx
 
 func BuildMuxCheckArgs(req MuxCheckRequest) ([]string, bool) {
 	options, _ := splitSSHArgs(req.SSHArgs)
+	pinnedOptions, options := SplitPinnedHostKeyOptions(options)
 	rendered := RenderSSHOptions(req.SSHOptions, req.SSHVerbosity)
 	allOptions := append([]string{}, rendered...)
 	allOptions = append(allOptions, options...)
@@ -60,7 +61,8 @@ func BuildMuxCheckArgs(req MuxCheckRequest) ([]string, bool) {
 		return nil, false
 	}
 
-	args := append([]string{}, rendered...)
+	args := append([]string{}, pinnedOptions...)
+	args = append(args, rendered...)
 	if req.Timeout > 0 && effectiveSSHOption(allOptions, "ConnectTimeout") == "" {
 		args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", req.Timeout))
 	}
@@ -92,6 +94,7 @@ func StartMuxSession(ctx context.Context, req MuxStartRequest, execFn MuxStartEx
 
 func BuildMuxStartArgs(req MuxStartRequest) ([]string, bool) {
 	options, _ := splitSSHArgs(req.SSHArgs)
+	pinnedOptions, options := SplitPinnedHostKeyOptions(options)
 	rendered := RenderSSHOptions(req.SSHOptions, req.SSHVerbosity)
 	allOptions := append([]string{}, rendered...)
 	allOptions = append(allOptions, options...)
@@ -99,7 +102,8 @@ func BuildMuxStartArgs(req MuxStartRequest) ([]string, bool) {
 		return nil, false
 	}
 
-	args := append([]string{}, rendered...)
+	args := append([]string{}, pinnedOptions...)
+	args = append(args, rendered...)
 	if len(req.Env) > 0 {
 		if effectiveSSHOption(allOptions, "NumberOfPasswordPrompts") == "" {
 			args = append(args, "-o", "NumberOfPasswordPrompts=1")

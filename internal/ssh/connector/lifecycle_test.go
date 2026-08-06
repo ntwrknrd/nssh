@@ -54,8 +54,12 @@ func TestStartPTYInheritsCurrentTerminalSizeBeforeChildRuns(t *testing.T) {
 }
 
 func TestHostKeyPreparationRendersTemporaryKnownHostsArgs(t *testing.T) {
-	prep := HostKeyPreparation{TempKnownHosts: "/tmp/nssh-known-hosts-test"}
+	prep := HostKeyPreparation{
+		TempKnownHosts:   "/tmp/nssh-known-hosts-test",
+		HostKeyAlgorithm: "ssh-rsa",
+	}
 	want := []string{
+		"-o", "HostKeyAlgorithms=ssh-rsa",
 		"-o", "UserKnownHostsFile=/tmp/nssh-known-hosts-test",
 		"-o", "StrictHostKeyChecking=yes",
 	}

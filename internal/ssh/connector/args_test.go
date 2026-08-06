@@ -3,12 +3,71 @@
 package connector
 
 import (
+	"os"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 )
+
+func TestBuildSSHArgsPinsAcceptedRSAKeyBeforeConfiguredPreferences(t *testing.T) {
+	tempKnownHosts, err := os.CreateTemp(t.TempDir(), "known-hosts-*")
+	if err != nil {
+		t.Fatalf("create temp known_hosts: %v", err)
+	}
+	if err := tempKnownHosts.Close(); err != nil {
+		t.Fatalf("close temp known_hosts: %v", err)
+	}
+
+	conn := NewConnector("edge01", "", nil, []string{"-o", "HostKeyAlgorithms=ecdsa-sha2-nistp256,ssh-rsa"})
+	conn.useTemporaryKnownHosts = true
+	conn.tempKnownHosts = tempKnownHosts.Name()
+	conn.pinnedHostKey = &pinnedKey{
+		fingerprint:       "SHA256:accepted-rsa-key",
+		hostKeyAlgorithms: "rsa-sha2-512,rsa-sha2-256,ssh-rsa",
+	}
+
+	args, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatalf("buildSSHArgs: %v", err)
+	}
+	wantPrefix := []string{
+		"-tt",
+		"-o", "HostKeyAlgorithms=rsa-sha2-512,rsa-sha2-256,ssh-rsa",
+		"-o", "UserKnownHostsFile=" + tempKnownHosts.Name(),
+		"-o", "StrictHostKeyChecking=yes",
+	}
+	if len(args) < len(wantPrefix) || !slices.Equal(args[:len(wantPrefix)], wantPrefix) {
+		t.Fatalf("buildSSHArgs() = %#v, want prefix %#v", args, wantPrefix)
+	}
+}
+
+func TestBuildSSHArgsPrioritizesPreparedHostKeyOptions(t *testing.T) {
+	conn := NewConnector("edge01", "", nil, []string{
+		"-o", "HostKeyAlgorithms=ssh-rsa",
+		"-o", "UserKnownHostsFile=/tmp/pinned",
+		"-o", "StrictHostKeyChecking=yes",
+		"-o", "LogLevel=ERROR",
+	})
+	conn.SetSSHOptions(config.SSHHostConfig{Options: config.SSHOptions{
+		"HostKeyAlgorithms": config.NewSSHOptionItems("ecdsa-sha2-nistp256", "ssh-rsa"),
+	}})
+
+	args, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatalf("buildSSHArgs: %v", err)
+	}
+	wantPrefix := []string{
+		"-tt",
+		"-o", "HostKeyAlgorithms=ssh-rsa",
+		"-o", "UserKnownHostsFile=/tmp/pinned",
+		"-o", "StrictHostKeyChecking=yes",
+	}
+	if len(args) < len(wantPrefix) || !slices.Equal(args[:len(wantPrefix)], wantPrefix) {
+		t.Fatalf("buildSSHArgs() = %#v, want prefix %#v", args, wantPrefix)
+	}
+}
 
 func TestBuildSSHArgsPreservesOptionsTargetAndCommand(t *testing.T) {
 	conn := NewConnector("edge01", "netops", nil, []string{"-p", "2222", "-o", "LogLevel=ERROR", "--", "show version"})

@@ -2,6 +2,10 @@ package connect
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,7 +13,62 @@ import (
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
+	"golang.org/x/crypto/ssh"
 )
+
+func TestParseNegotiatedHostKey(t *testing.T) {
+	algorithm, fingerprint, err := parseNegotiatedHostKey([]byte("debug1: Server host key: ssh-rsa SHA256:acceptedRSA123\n"))
+	if err != nil {
+		t.Fatalf("parseNegotiatedHostKey: %v", err)
+	}
+	if algorithm != "ssh-rsa" || fingerprint != "SHA256:acceptedRSA123" {
+		t.Fatalf("negotiated key = %q %q", algorithm, fingerprint)
+	}
+}
+
+func TestKeyScanTypeForNegotiatedAlgorithm(t *testing.T) {
+	tests := map[string]string{
+		ssh.KeyAlgoRSASHA512: "rsa",
+		ssh.KeyAlgoRSA:       "rsa",
+		ssh.KeyAlgoECDSA256:  "ecdsa",
+		ssh.KeyAlgoED25519:   "ed25519",
+	}
+	for algorithm, want := range tests {
+		if got := keyScanTypeForAlgorithm(algorithm); got != want {
+			t.Errorf("keyScanTypeForAlgorithm(%q) = %q, want %q", algorithm, got, want)
+		}
+	}
+}
+
+func TestScannedHostKeyByFingerprintSelectsNegotiatedKey(t *testing.T) {
+	ecdsaPrivate, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ECDSA key: %v", err)
+	}
+	rsaPrivate, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatalf("generate RSA key: %v", err)
+	}
+	ecdsaKey, err := ssh.NewPublicKey(&ecdsaPrivate.PublicKey)
+	if err != nil {
+		t.Fatalf("create ECDSA SSH key: %v", err)
+	}
+	rsaKey, err := ssh.NewPublicKey(&rsaPrivate.PublicKey)
+	if err != nil {
+		t.Fatalf("create RSA SSH key: %v", err)
+	}
+	output := append([]byte("edge01 "), ssh.MarshalAuthorizedKey(ecdsaKey)...)
+	output = append(output, []byte("edge01 ")...)
+	output = append(output, ssh.MarshalAuthorizedKey(rsaKey)...)
+
+	got, err := scannedHostKeyByFingerprint(output, ssh.FingerprintSHA256(rsaKey))
+	if err != nil {
+		t.Fatalf("scannedHostKeyByFingerprint: %v", err)
+	}
+	if got.KeyType != ssh.KeyAlgoRSA || got.Fingerprint != ssh.FingerprintSHA256(rsaKey) {
+		t.Fatalf("selected key = %+v, want negotiated RSA key", got)
+	}
+}
 
 func TestRunHostKeyPreparationAcceptOnceWritesTemporaryKnownHosts(t *testing.T) {
 	oldPrompt := hostKeyPromptFunc
@@ -31,15 +90,16 @@ func TestRunHostKeyPreparationAcceptOnceWritesTemporaryKnownHosts(t *testing.T) 
 			return connector.HostKeyAcceptOnce
 		}
 	}
-	scanHostKeyFunc = func(context.Context, *ResolvedHost, []string) (scannedHostKey, error) {
+	scanHostKeyFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) (scannedHostKey, error) {
 		return scannedHostKey{
 			KeyType:     "ssh-ed25519",
+			Algorithm:   "ssh-ed25519",
 			Fingerprint: "SHA256:Gxy6lCTHwEEnHYy0j4LxmDP+NTRPSv6KRjCJj/q6bYs",
 			Line:        line,
 		}, nil
 	}
 
-	prep, err := runHostKeyPreparation(context.Background(), &ResolvedHost{Hostname: "edge01", Port: 22}, nil, config.DefaultConfig(), Options{}, false)
+	prep, err := runHostKeyPreparation(context.Background(), &ResolvedHost{Hostname: "edge01", Port: 22}, nil, config.DefaultConfig(), Options{}, false, nil)
 	if err != nil {
 		t.Fatalf("runHostKeyPreparation: %v", err)
 	}
@@ -52,7 +112,7 @@ func TestRunHostKeyPreparationAcceptOnceWritesTemporaryKnownHosts(t *testing.T) 
 	if string(data) != line+"\n" {
 		t.Fatalf("temp known_hosts = %q, want %q", data, line+"\\n")
 	}
-	wantArgs := []string{"-o", "UserKnownHostsFile=" + prep.TempKnownHosts, "-o", "StrictHostKeyChecking=yes"}
+	wantArgs := []string{"-o", "HostKeyAlgorithms=ssh-ed25519", "-o", "UserKnownHostsFile=" + prep.TempKnownHosts, "-o", "StrictHostKeyChecking=yes"}
 	if got := prep.SSHArgs(); !slices.Equal(got, wantArgs) {
 		t.Fatalf("SSHArgs() = %#v, want %#v", got, wantArgs)
 	}
@@ -87,7 +147,7 @@ func TestRunHostKeyPreparationAcceptAlwaysReplacesChangedKnownHosts(t *testing.T
 			return connector.HostKeyAcceptAlways
 		}
 	}
-	scanHostKeyFunc = func(context.Context, *ResolvedHost, []string) (scannedHostKey, error) {
+	scanHostKeyFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) (scannedHostKey, error) {
 		return scannedHostKey{
 			KeyType:     "ssh-ed25519",
 			Fingerprint: "SHA256:Gxy6lCTHwEEnHYy0j4LxmDP+NTRPSv6KRjCJj/q6bYs",
@@ -103,7 +163,7 @@ func TestRunHostKeyPreparationAcceptAlwaysReplacesChangedKnownHosts(t *testing.T
 		return os.WriteFile(path, nil, 0600)
 	}
 
-	prep, err := runHostKeyPreparation(context.Background(), &ResolvedHost{Hostname: "edge01", Port: 22}, nil, config.DefaultConfig(), Options{}, true)
+	prep, err := runHostKeyPreparation(context.Background(), &ResolvedHost{Hostname: "edge01", Port: 22}, nil, config.DefaultConfig(), Options{}, true, nil)
 	if err != nil {
 		t.Fatalf("runHostKeyPreparation: %v", err)
 	}
@@ -152,9 +212,10 @@ func TestRunHostKeyPreparationAcceptOnceForChangedHostDoesNotReplaceKnownHosts(t
 			return connector.HostKeyAcceptOnce
 		}
 	}
-	scanHostKeyFunc = func(context.Context, *ResolvedHost, []string) (scannedHostKey, error) {
+	scanHostKeyFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) (scannedHostKey, error) {
 		return scannedHostKey{
 			KeyType:     "ssh-ed25519",
+			Algorithm:   "ssh-ed25519",
 			Fingerprint: "SHA256:Gxy6lCTHwEEnHYy0j4LxmDP+NTRPSv6KRjCJj/q6bYs",
 			Line:        line,
 		}, nil
@@ -164,7 +225,7 @@ func TestRunHostKeyPreparationAcceptOnceForChangedHostDoesNotReplaceKnownHosts(t
 		return nil
 	}
 
-	prep, err := runHostKeyPreparation(context.Background(), &ResolvedHost{Hostname: "edge01", Port: 22}, nil, config.DefaultConfig(), Options{}, true)
+	prep, err := runHostKeyPreparation(context.Background(), &ResolvedHost{Hostname: "edge01", Port: 22}, nil, config.DefaultConfig(), Options{}, true, nil)
 	if err != nil {
 		t.Fatalf("runHostKeyPreparation: %v", err)
 	}
@@ -207,7 +268,7 @@ func TestRunHostKeyPreparationAcceptAlwaysDoesNotRemoveForNewHost(t *testing.T) 
 			return connector.HostKeyAcceptAlways
 		}
 	}
-	scanHostKeyFunc = func(context.Context, *ResolvedHost, []string) (scannedHostKey, error) {
+	scanHostKeyFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) (scannedHostKey, error) {
 		return scannedHostKey{KeyType: "ssh-ed25519", Fingerprint: "SHA256:test", Line: line}, nil
 	}
 	removeKnownHostsEntryFunc = func(target, path string) error {
@@ -215,7 +276,7 @@ func TestRunHostKeyPreparationAcceptAlwaysDoesNotRemoveForNewHost(t *testing.T) 
 		return nil
 	}
 
-	if _, err := runHostKeyPreparation(context.Background(), &ResolvedHost{Hostname: "edge01", Port: 22}, nil, config.DefaultConfig(), Options{}, false); err != nil {
+	if _, err := runHostKeyPreparation(context.Background(), &ResolvedHost{Hostname: "edge01", Port: 22}, nil, config.DefaultConfig(), Options{}, false, nil); err != nil {
 		t.Fatalf("runHostKeyPreparation: %v", err)
 	}
 }
@@ -243,11 +304,11 @@ func TestRunHostKeyPreparationMarksChangedHostPrompt(t *testing.T) {
 			return connector.HostKeyReject
 		}
 	}
-	scanHostKeyFunc = func(context.Context, *ResolvedHost, []string) (scannedHostKey, error) {
+	scanHostKeyFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) (scannedHostKey, error) {
 		return scannedHostKey{KeyType: "ssh-ed25519", Fingerprint: "SHA256:test", Line: "edge01 ssh-ed25519 AAAA"}, nil
 	}
 
-	_, _ = runHostKeyPreparation(context.Background(), &ResolvedHost{Hostname: "edge01", Port: 22}, nil, config.DefaultConfig(), Options{}, true)
+	_, _ = runHostKeyPreparation(context.Background(), &ResolvedHost{Hostname: "edge01", Port: 22}, nil, config.DefaultConfig(), Options{}, true, nil)
 	if !sawChanged {
 		t.Fatal("changed host-key preparation did not mark the prompt as changed")
 	}
@@ -266,11 +327,11 @@ func TestRunHostKeyPreparationRejectsHostKey(t *testing.T) {
 			return connector.HostKeyReject
 		}
 	}
-	scanHostKeyFunc = func(context.Context, *ResolvedHost, []string) (scannedHostKey, error) {
+	scanHostKeyFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) (scannedHostKey, error) {
 		return scannedHostKey{KeyType: "ssh-ed25519", Fingerprint: "SHA256:test", Line: "edge01 ssh-ed25519 AAAA"}, nil
 	}
 
-	prep, err := runHostKeyPreparation(context.Background(), &ResolvedHost{Hostname: "edge01", Port: 22}, nil, config.DefaultConfig(), Options{}, false)
+	prep, err := runHostKeyPreparation(context.Background(), &ResolvedHost{Hostname: "edge01", Port: 22}, nil, config.DefaultConfig(), Options{}, false, nil)
 	if err == nil {
 		t.Fatal("runHostKeyPreparation returned nil error for reject")
 	}

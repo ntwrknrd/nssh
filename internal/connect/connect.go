@@ -814,9 +814,9 @@ func destroyImmediateResolvedPasswords(resolved *ResolvedHost) {
 func prepareInteractiveHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options, proxyEnv []string) (*connector.HostKeyPreparation, error) {
 	switch hostKeyProbeFunc(ctx, resolved, sshArgs, cfg, opts, proxyEnv) {
 	case hostKeyProbeNeedsPrompt:
-		return hostKeyPrepareFunc(ctx, resolved, sshArgs, cfg, opts, false)
+		return hostKeyPrepareFunc(ctx, resolved, sshArgs, cfg, opts, false, proxyEnv)
 	case hostKeyProbeChanged:
-		return hostKeyPrepareFunc(ctx, resolved, sshArgs, cfg, opts, true)
+		return hostKeyPrepareFunc(ctx, resolved, sshArgs, cfg, opts, true, proxyEnv)
 	default:
 		return nil, nil
 	}
@@ -830,8 +830,13 @@ func appendHostKeyPreparationSSHArgs(sshArgs []string, prep *connector.HostKeyPr
 	if len(prepArgs) == 0 {
 		return sshArgs
 	}
-	nextArgs := append([]string{}, sshArgs...)
-	nextArgs = append(nextArgs, prepArgs...)
+	options, command := splitConnectSSHArgs(sshArgs)
+	nextArgs := append([]string{}, prepArgs...)
+	nextArgs = append(nextArgs, options...)
+	if len(command) > 0 {
+		nextArgs = append(nextArgs, "--")
+		nextArgs = append(nextArgs, command...)
+	}
 	return nextArgs
 }
 

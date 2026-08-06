@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
@@ -21,13 +22,16 @@ import (
 
 type scannedHostKey struct {
 	KeyType     string
+	Algorithm   string
 	Fingerprint string
 	Line        string
 }
 
-func runHostKeyPreparation(ctx context.Context, resolved *ResolvedHost, sshArgs []string, _ *config.Config, _ Options, changed bool) (*connector.HostKeyPreparation, error) {
+var negotiatedHostKeyRE = regexp.MustCompile(`(?m)Server host key: ([^\s]+) (SHA256:[A-Za-z0-9+/=]+)`)
+
+func runHostKeyPreparation(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options, changed bool, proxyEnv []string) (*connector.HostKeyPreparation, error) {
 	slog.Debug("preparing host key", "host", resolved.Hostname)
-	key, err := scanHostKeyFunc(ctx, resolved, sshArgs)
+	key, err := scanHostKeyFunc(ctx, resolved, sshArgs, cfg, opts, proxyEnv)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +47,7 @@ func runHostKeyPreparation(ctx context.Context, resolved *ResolvedHost, sshArgs 
 	case connector.HostKeyReject:
 		return nil, exit.ErrAuthFailed
 	case connector.HostKeyAcceptOnce:
-		return writeTemporaryKnownHosts(key.Line)
+		return writeTemporaryKnownHosts(key.Line, key.Algorithm)
 	case connector.HostKeyAcceptAlways:
 		var err error
 		if changed {
@@ -60,7 +64,7 @@ func runHostKeyPreparation(ctx context.Context, resolved *ResolvedHost, sshArgs 
 	}
 }
 
-func writeTemporaryKnownHosts(line string) (*connector.HostKeyPreparation, error) {
+func writeTemporaryKnownHosts(line, algorithm string) (*connector.HostKeyPreparation, error) {
 	file, err := os.CreateTemp("", "nssh-known-hosts-*")
 	if err != nil {
 		return nil, fmt.Errorf("create temp known_hosts: %w", err)
@@ -75,7 +79,7 @@ func writeTemporaryKnownHosts(line string) (*connector.HostKeyPreparation, error
 		_ = os.Remove(path)
 		return nil, fmt.Errorf("close temp known_hosts: %w", err)
 	}
-	return &connector.HostKeyPreparation{TempKnownHosts: path}, nil
+	return &connector.HostKeyPreparation{TempKnownHosts: path, HostKeyAlgorithm: algorithm}, nil
 }
 
 func appendKnownHosts(line string) error {
@@ -156,7 +160,16 @@ func removeKnownHostsEntry(target, path string) error {
 	return nil
 }
 
-func scanHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string) (scannedHostKey, error) {
+func scanHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options, proxyEnv []string) (scannedHostKey, error) {
+	probeArgs := append([]string{"-vv"}, buildHostKeyProbeArgs(resolved, sshArgs, cfg, opts)...)
+	probe := exec.CommandContext(ctx, "ssh", probeArgs...)
+	probe.Env = append(withoutAskpassEnv(os.Environ()), proxyEnv...)
+	probeOutput, _ := probe.CombinedOutput()
+	algorithm, fingerprint, err := parseNegotiatedHostKey(probeOutput)
+	if err != nil {
+		return scannedHostKey{}, err
+	}
+
 	host := resolved.Hostname
 	port := fmt.Sprintf("%d", resolved.Port)
 	if explicit := explicitConnectSSHPort(sshArgs); explicit != "" {
@@ -166,7 +179,7 @@ func scanHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string) 
 		port = "22"
 	}
 
-	args := []string{"-T", "5"}
+	args := []string{"-T", "5", "-t", keyScanTypeForAlgorithm(algorithm)}
 	if port != "22" {
 		args = append(args, "-p", port)
 	}
@@ -176,14 +189,42 @@ func scanHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string) 
 	if err != nil {
 		return scannedHostKey{}, fmt.Errorf("ssh-keyscan failed: %w (%s)", err, strings.TrimSpace(string(output)))
 	}
-	key, err := firstScannedHostKey(output)
+	key, err := scannedHostKeyByFingerprint(output, fingerprint)
 	if err != nil {
 		return scannedHostKey{}, err
 	}
+	key.Algorithm = algorithm
 	return key, nil
 }
 
-func firstScannedHostKey(output []byte) (scannedHostKey, error) {
+func parseNegotiatedHostKey(output []byte) (algorithm, fingerprint string, err error) {
+	matches := negotiatedHostKeyRE.FindSubmatch(output)
+	if len(matches) != 3 {
+		return "", "", fmt.Errorf("failed to identify the host key negotiated by OpenSSH")
+	}
+	return string(matches[1]), string(matches[2]), nil
+}
+
+func keyScanTypeForAlgorithm(algorithm string) string {
+	switch algorithm {
+	case ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256, ssh.KeyAlgoRSA:
+		return "rsa"
+	case "ssh-dss":
+		return "dsa"
+	case ssh.KeyAlgoED25519:
+		return "ed25519"
+	case ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521:
+		return "ecdsa"
+	case ssh.KeyAlgoSKECDSA256:
+		return "ecdsa-sk"
+	case ssh.KeyAlgoSKED25519:
+		return "ed25519-sk"
+	default:
+		return algorithm
+	}
+}
+
+func scannedHostKeyByFingerprint(output []byte, fingerprint string) (scannedHostKey, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(output))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -194,14 +235,17 @@ func firstScannedHostKey(output []byte) (scannedHostKey, error) {
 		if err != nil {
 			continue
 		}
+		if ssh.FingerprintSHA256(pubKey) != fingerprint {
+			continue
+		}
 		return scannedHostKey{
 			KeyType:     pubKey.Type(),
-			Fingerprint: ssh.FingerprintSHA256(pubKey),
+			Fingerprint: fingerprint,
 			Line:        line,
 		}, nil
 	}
 	if err := scanner.Err(); err != nil {
 		return scannedHostKey{}, fmt.Errorf("read ssh-keyscan output: %w", err)
 	}
-	return scannedHostKey{}, fmt.Errorf("ssh-keyscan returned no usable host keys")
+	return scannedHostKey{}, fmt.Errorf("ssh-keyscan did not return the host key negotiated by OpenSSH")
 }

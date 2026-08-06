@@ -21,17 +21,22 @@ var errRestartRequired = errors.New("restart required")
 var errHostKeyPrepared = errors.New("host key prepared")
 
 type HostKeyPreparation struct {
-	TempKnownHosts string
+	TempKnownHosts   string
+	HostKeyAlgorithm string
 }
 
 func (p HostKeyPreparation) SSHArgs() []string {
 	if p.TempKnownHosts == "" {
 		return nil
 	}
-	return []string{
-		"-o", "UserKnownHostsFile=" + p.TempKnownHosts,
-		"-o", "StrictHostKeyChecking=yes",
+	args := make([]string, 0, 6)
+	if p.HostKeyAlgorithm != "" {
+		args = append(args, "-o", "HostKeyAlgorithms="+p.HostKeyAlgorithm)
 	}
+	return append(args,
+		"-o", "UserKnownHostsFile="+p.TempKnownHosts,
+		"-o", "StrictHostKeyChecking=yes",
+	)
 }
 
 func (p HostKeyPreparation) Cleanup() {
@@ -48,6 +53,9 @@ func (c *Connector) PrepareHostKey(ctx context.Context) (*HostKeyPreparation, er
 		return nil, err
 	}
 	prep := &HostKeyPreparation{TempKnownHosts: c.tempKnownHosts}
+	if c.pinnedHostKey != nil {
+		prep.HostKeyAlgorithm = c.pinnedHostKey.hostKeyAlgorithms
+	}
 	c.tempKnownHosts = ""
 	return prep, nil
 }

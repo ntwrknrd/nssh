@@ -52,6 +52,22 @@ func TestHandleHostKeyPromptUsesCallbackAndPinsAcceptOnce(t *testing.T) {
 	}
 }
 
+func TestHandleChangedHostKeyPromptPinsAcceptOnce(t *testing.T) {
+	withTerminalStdin(t)
+	conn := NewConnector("edge01", "", nil, nil)
+	conn.ptyFile = tempPTYFile(t)
+	conn.SetHostKeyPromptFunc(func(HostKeyPrompt) HostKeyAction { return HostKeyAcceptOnce })
+
+	output := []byte("WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!\nThe fingerprint for the ECDSA key sent by the remote host is\nSHA256:abcdefghijklmnopqrstuvwxyz123456789ABCDEF.")
+	handled, result := conn.handleHostKeyPrompt(output)
+	if !handled || result != HostKeyResultRestart {
+		t.Fatalf("handleHostKeyPrompt() = %v, %v", handled, result)
+	}
+	if conn.pinnedHostKey == nil || conn.pinnedHostKey.fingerprint != "SHA256:abcdefghijklmnopqrstuvwxyz123456789ABCDEF" {
+		t.Fatalf("pinnedHostKey = %+v", conn.pinnedHostKey)
+	}
+}
+
 func withTerminalStdin(t *testing.T) {
 	t.Helper()
 	ptmx, tty, err := pty.Open()

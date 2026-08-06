@@ -16,8 +16,9 @@ import (
 // pinnedKey stores the host key type and fingerprint observed during the
 // initial prompt. Used to pin the AcceptOnce retry to the exact key.
 type pinnedKey struct {
-	typeName    string // e.g., "ED25519"
-	fingerprint string // e.g., "SHA256:abcd..."
+	typeName          string // e.g., "ED25519"
+	fingerprint       string // e.g., "SHA256:abcd..."
+	hostKeyAlgorithms string // Algorithms that can authenticate this exact public key.
 }
 
 // populateTempKnownHosts writes exactly one pinned host key (captured during
@@ -78,10 +79,20 @@ func (c *Connector) populateTempKnownHosts() error {
 		if err := os.WriteFile(c.tempKnownHosts, []byte(line+"\n"), 0600); err != nil {
 			return fmt.Errorf("write temp known_hosts: %w", err)
 		}
+		c.pinnedHostKey.hostKeyAlgorithms = hostKeyAlgorithmsForPublicKey(pubKey.Type())
 		return nil
 	}
 
 	return fmt.Errorf("failed to pin host key: fingerprint mismatch after ssh-keyscan")
+}
+
+func hostKeyAlgorithmsForPublicKey(keyType string) string {
+	switch keyType {
+	case ssh.KeyAlgoRSA:
+		return strings.Join([]string{ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256, ssh.KeyAlgoRSA}, ",")
+	default:
+		return keyType
+	}
 }
 
 // parsePortFromSSHArgs extracts an explicit port from sshArgs (-p or -o Port=...)
