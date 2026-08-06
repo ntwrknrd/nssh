@@ -4,709 +4,255 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>nssh 0.2 to 0.3 RC Migration Guide</title>
+  <title>Migrate nssh 0.2 to 0.3</title>
   <style>
     :root {
-      --ink: #18212b;
-      --muted: #5c6b78;
-      --paper: #f4f7f8;
-      --panel: #ffffff;
-      --line: #d9e1e5;
-      --accent: #087f8c;
-      --accent-dark: #075b63;
-      --accent-soft: #dff4f5;
-      --warn: #9a5b00;
-      --warn-soft: #fff3d9;
-      --danger: #a83232;
-      --danger-soft: #fde7e7;
-      --good: #246b45;
-      --good-soft: #e4f4ea;
-      --code: #13202a;
-      --code-ink: #e8f0f2;
-      --shadow: 0 16px 40px rgba(24, 33, 43, 0.08);
+      --ink: #1a1a1a;
+      --muted: #656d76;
+      --paper: #ffffff;
+      --line: #e2e5e9;
+      --accent: #0b6b74;
+      --note: #f6f8f9;
+      --warn-line: #c98a12;
+      --warn-bg: #fdf6e6;
+      --code-bg: #f6f8f9;
     }
 
     @media (prefers-color-scheme: dark) {
       :root {
-        --ink: #e6edf1;
-        --muted: #aebcc5;
-        --paper: #10171c;
-        --panel: #182128;
-        --line: #33414a;
-        --accent: #5bc7ce;
-        --accent-dark: #8ce0e5;
-        --accent-soft: #153a3d;
-        --warn: #ffc46b;
-        --warn-soft: #422f13;
-        --danger: #ff9999;
-        --danger-soft: #412020;
-        --good: #8bd6aa;
-        --good-soft: #173828;
-        --code: #0b1115;
-        --code-ink: #e7eff2;
-        --shadow: none;
+        --ink: #e6e9ec;
+        --muted: #9aa4ad;
+        --paper: #14181b;
+        --line: #2b3238;
+        --accent: #6fc9d1;
+        --note: #1b2126;
+        --warn-line: #d5a13a;
+        --warn-bg: #2a2214;
+        --code-bg: #1b2126;
       }
     }
 
     * { box-sizing: border-box; }
 
-    html {
-      scroll-behavior: smooth;
-      scroll-padding-top: 1.5rem;
-    }
-
     body {
-      margin: 0;
+      max-width: 44rem;
+      margin: 0 auto;
+      padding: 3rem 1.25rem 5rem;
       color: var(--ink);
       background: var(--paper);
-      font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-        "Segoe UI", sans-serif;
+      font: 17px/1.7 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
     }
 
-    a { color: var(--accent-dark); }
-    a:hover { text-decoration-thickness: 2px; }
-
-    code, pre {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-        "Liberation Mono", monospace;
-    }
-
-    code {
-      padding: 0.12rem 0.32rem;
-      border-radius: 0.3rem;
-      background: var(--accent-soft);
-      font-size: 0.92em;
-    }
-
-    .hero {
-      color: #f7ffff;
-      background:
-        radial-gradient(circle at 88% 10%, rgba(119, 224, 228, 0.3), transparent 27rem),
-        linear-gradient(135deg, #063b43 0%, #087f8c 58%, #0a6570 100%);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.16);
-    }
-
-    .hero-inner,
-    .layout,
-    .footer-inner {
-      width: min(1180px, calc(100% - 2rem));
-      margin-inline: auto;
-    }
-
-    .hero-inner { padding: 4.5rem 0 3.6rem; }
-
-    .eyebrow {
-      margin: 0 0 0.8rem;
-      font-size: 0.78rem;
-      font-weight: 800;
-      letter-spacing: 0.13em;
-      text-transform: uppercase;
-      opacity: 0.88;
-    }
+    a { color: var(--accent); }
 
     h1 {
-      max-width: 850px;
-      margin: 0;
-      font-size: clamp(2.2rem, 6vw, 4.8rem);
-      line-height: 1.02;
-      letter-spacing: -0.045em;
+      margin: 0 0 0.4rem;
+      font-size: 2rem;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
     }
-
-    .lede {
-      max-width: 760px;
-      margin: 1.2rem 0 1.5rem;
-      font-size: clamp(1rem, 2vw, 1.24rem);
-      color: rgba(247, 255, 255, 0.9);
-    }
-
-    .badges {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.6rem;
-    }
-
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      min-height: 2rem;
-      padding: 0.28rem 0.72rem;
-      border: 1px solid rgba(255, 255, 255, 0.3);
-      border-radius: 999px;
-      background: rgba(4, 35, 39, 0.24);
-      font-size: 0.84rem;
-      font-weight: 700;
-    }
-
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 260px;
-      gap: 2.2rem;
-      padding: 2rem 0 4rem;
-      align-items: start;
-    }
-
-    main { min-width: 0; }
-
-    nav {
-      position: sticky;
-      top: 1rem;
-      padding: 1rem;
-      border: 1px solid var(--line);
-      border-radius: 0.9rem;
-      background: var(--panel);
-      box-shadow: var(--shadow);
-    }
-
-    nav strong {
-      display: block;
-      margin-bottom: 0.5rem;
-      font-size: 0.8rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-
-    nav ol {
-      margin: 0;
-      padding-left: 1.3rem;
-      font-size: 0.88rem;
-    }
-
-    nav li + li { margin-top: 0.28rem; }
-    nav a { color: var(--muted); text-decoration: none; }
-    nav a:hover { color: var(--accent-dark); }
-
-    section,
-    .callout,
-    .summary-card {
-      border: 1px solid var(--line);
-      border-radius: 1rem;
-      background: var(--panel);
-      box-shadow: var(--shadow);
-    }
-
-    section {
-      margin-bottom: 1.25rem;
-      padding: clamp(1.2rem, 3vw, 2rem);
-    }
-
-    section > :first-child { margin-top: 0; }
-    section > :last-child { margin-bottom: 0; }
 
     h2 {
-      margin: 0 0 0.7rem;
-      font-size: clamp(1.4rem, 3vw, 2rem);
-      line-height: 1.2;
-      letter-spacing: -0.025em;
-    }
-
-    h3 {
-      margin: 1.55rem 0 0.5rem;
-      font-size: 1.1rem;
+      margin: 2.75rem 0 0.75rem;
+      padding-top: 1.75rem;
+      border-top: 1px solid var(--line);
+      font-size: 1.25rem;
       line-height: 1.3;
     }
 
-    .step-label {
-      display: inline-block;
-      margin-bottom: 0.45rem;
-      color: var(--accent-dark);
-      font-size: 0.76rem;
-      font-weight: 850;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
+    h1 + p.sub {
+      margin: 0 0 2rem;
+      color: var(--muted);
     }
 
-    .muted { color: var(--muted); }
+    ul, ol { padding-left: 1.3rem; }
+    li { margin: 0.3rem 0; }
 
-    .callout {
-      margin-bottom: 1.25rem;
-      padding: 1.15rem 1.25rem;
-      border-left: 0.38rem solid var(--accent);
-      background: var(--accent-soft);
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
 
-    .callout.warning {
-      border-left-color: var(--warn);
-      background: var(--warn-soft);
-    }
-
-    .callout.danger {
-      border-left-color: var(--danger);
-      background: var(--danger-soft);
-    }
-
-    .callout.good {
-      border-left-color: var(--good);
-      background: var(--good-soft);
-    }
-
-    .callout strong { display: block; margin-bottom: 0.2rem; }
-    .callout p { margin: 0; }
-
-    .code-block {
-      position: relative;
-      margin: 0.9rem 0 1.15rem;
-      overflow: hidden;
-      border: 1px solid #2d3b44;
-      border-radius: 0.75rem;
-      background: var(--code);
+    code {
+      padding: 0.1em 0.35em;
+      border-radius: 0.25rem;
+      background: var(--code-bg);
+      font-size: 0.88em;
     }
 
     pre {
-      margin: 0;
-      padding: 1.15rem;
-      overflow-x: auto;
-      color: var(--code-ink);
-      font-size: 0.86rem;
-      line-height: 1.55;
-      tab-size: 2;
-    }
-
-    pre code {
-      padding: 0;
-      color: inherit;
-      background: transparent;
-      font-size: inherit;
-    }
-
-    .copy {
-      position: absolute;
-      top: 0.55rem;
-      right: 0.55rem;
-      padding: 0.35rem 0.6rem;
-      color: #dcebed;
-      border: 1px solid #52636d;
-      border-radius: 0.45rem;
-      background: #24343e;
-      font: inherit;
-      font-size: 0.72rem;
-      font-weight: 750;
-      cursor: pointer;
-    }
-
-    .copy:hover { background: #314550; }
-
-    .checklist {
-      display: grid;
-      gap: 0.6rem;
       margin: 1rem 0;
-    }
-
-    .check {
-      display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 0.7rem;
-      align-items: start;
-      padding: 0.72rem 0.8rem;
-      border: 1px solid var(--line);
-      border-radius: 0.65rem;
-      background: color-mix(in srgb, var(--panel) 92%, var(--accent-soft));
-    }
-
-    .check input {
-      width: 1.1rem;
-      height: 1.1rem;
-      margin-top: 0.2rem;
-      accent-color: var(--accent);
-    }
-
-    .check:has(input:checked) span {
-      color: var(--muted);
-      text-decoration: line-through;
-    }
-
-    .progress {
-      display: flex;
-      gap: 0.75rem;
-      align-items: center;
-      margin: 1rem 0 0;
-      color: var(--muted);
-      font-size: 0.88rem;
-    }
-
-    progress {
-      width: min(22rem, 70%);
-      height: 0.75rem;
-      accent-color: var(--accent);
-    }
-
-    .table-wrap {
-      margin: 1rem 0;
+      padding: 0.9rem 1rem;
       overflow-x: auto;
       border: 1px solid var(--line);
-      border-radius: 0.75rem;
+      border-radius: 0.5rem;
+      background: var(--code-bg);
+      font-size: 0.85rem;
+      line-height: 1.6;
     }
 
-    table {
-      width: 100%;
-      border-collapse: collapse;
+    pre code { padding: 0; background: none; font-size: inherit; }
+
+    .note {
+      margin: 1.25rem 0;
+      padding: 0.85rem 1rem;
+      border-left: 3px solid var(--line);
+      background: var(--note);
+    }
+
+    .note.warn {
+      border-left-color: var(--warn-line);
+      background: var(--warn-bg);
+    }
+
+    .note > :first-child { margin-top: 0; }
+    .note > :last-child { margin-bottom: 0; }
+
+    .muted { color: var(--muted); font-size: 0.94rem; }
+
+    footer {
+      margin-top: 3.5rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
       font-size: 0.9rem;
     }
 
-    th, td {
-      padding: 0.72rem 0.8rem;
-      border-bottom: 1px solid var(--line);
-      text-align: left;
-      vertical-align: top;
-    }
-
-    th {
-      color: var(--accent-dark);
-      background: var(--accent-soft);
-      font-size: 0.78rem;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-    }
-
-    tr:last-child td { border-bottom: 0; }
-
-    details {
-      margin: 0.8rem 0;
-      border: 1px solid var(--line);
-      border-radius: 0.7rem;
-      background: var(--panel);
-    }
-
-    summary {
-      padding: 0.75rem 0.9rem;
-      color: var(--accent-dark);
-      font-weight: 750;
-      cursor: pointer;
-    }
-
-    details > div { padding: 0 0.9rem 0.9rem; }
-
-    .two-col {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 1rem;
-    }
-
-    .summary-card {
-      min-width: 0;
-      padding: 1rem;
-      box-shadow: none;
-    }
-
-    .summary-card h3 { margin-top: 0; }
-
-    footer {
-      border-top: 1px solid var(--line);
-      color: var(--muted);
-      background: var(--panel);
-    }
-
-    .footer-inner { padding: 1.4rem 0 2.2rem; }
-
-    @media (max-width: 860px) {
-      .layout { grid-template-columns: 1fr; }
-      nav { position: static; order: -1; }
-      nav ol { columns: 2; column-gap: 2rem; }
-    }
-
-    @media (max-width: 620px) {
-      .hero-inner { padding: 3rem 0 2.5rem; }
-      .layout { width: min(100% - 1rem, 1180px); gap: 1rem; }
-      section { border-radius: 0.75rem; }
-      .two-col { grid-template-columns: 1fr; }
-      nav ol { columns: 1; }
-      th, td { min-width: 9rem; }
-    }
-
     @media print {
-      :root {
-        --ink: #111;
-        --muted: #444;
-        --paper: #fff;
-        --panel: #fff;
-        --line: #bbb;
-        --accent-dark: #075b63;
-      }
-
-      body { font-size: 10.5pt; }
-      .hero { color: #111; background: #fff; }
-      .hero-inner { padding: 1rem 0; }
-      .lede { color: #333; }
-      .badge { border-color: #777; background: #fff; }
-      .layout { display: block; width: 100%; padding: 0; }
-      nav, .copy, .progress { display: none !important; }
-      section, .callout { box-shadow: none; break-inside: avoid; }
-      section { border-left: 0; border-right: 0; border-radius: 0; }
-      details > div { display: block; }
-      a { color: inherit; text-decoration: none; }
+      body { max-width: none; font-size: 11pt; }
+      pre, .note { break-inside: avoid; }
     }
   </style>
 </head>
 <body>
-  <header class="hero">
-    <div class="hero-inner">
-      <p class="eyebrow">Release candidate beta guide</p>
-      <h1>Migrate nssh 0.2 to 0.3</h1>
-      <p class="lede">
-        A short guide for moving your saved hosts and automatic logins to the
-        nssh 0.3 release candidate.
-      </p>
-      <div class="badges" aria-label="Guide scope">
-        <span class="badge">Source: nssh 0.2.4</span>
-        <span class="badge">Target: nssh 0.3 RC</span>
-        <span class="badge">macOS and Linux</span>
-        <span class="badge">Updated 2026-08-06</span>
-      </div>
-    </div>
-  </header>
+  <h1>Migrate nssh 0.2 to 0.3</h1>
+  <p class="sub">
+    Moving your hosts and automatic logins to the 0.3 release candidate.
+    Baseline 0.2.4, macOS and Linux. Updated 2026-08-06.
+  </p>
 
-  <div class="layout">
-    <main id="main">
-      <aside class="callout warning" role="alert">
-        <strong>Keep your nssh 0.2 files until you finish testing.</strong>
-        <p>
-          Version 0.3 uses new settings and does not automatically convert your
-          0.2 setup. Do not run <code>nssh self reset</code> or delete your old
-          files during the beta.
-        </p>
-      </aside>
+  <div class="note warn">
+    <p>
+      <strong>Keep your 0.2 files until you finish testing.</strong>
+      0.3 uses new settings and does not convert your 0.2 setup for you.
+      Do not run <code>nssh self reset</code> or delete old files during the beta.
+    </p>
+  </div>
 
-      <section id="overview">
-        <span class="step-label">Start here</span>
-        <h2>Choose how you want to migrate</h2>
-        <p>
-          Most users should ask an agent that has the nssh skill to guide or
-          perform the migration. If you prefer to do it yourself, the manual
-          path below has four steps.
-        </p>
-        <div class="two-col">
-          <div class="summary-card">
-            <h3>Ask an agent</h3>
-            <p>Give this prompt to Codex or another agent with the nssh skill installed:</p>
-            <div class="code-block">
-              <button class="copy" type="button">Copy</button>
-              <pre><code>Use the nssh skill to migrate my nssh 0.2 setup to 0.3. Back up my existing setup first, explain any choices I need to make, never display or copy my passwords, and test a host with me before cleanup.</code></pre>
-            </div>
-            <p class="muted">The skill teaches agents the current nssh commands, file changes, credential options, and safe migration process.</p>
-          </div>
-          <div class="summary-card">
-            <h3>Do it yourself</h3>
-            <ol>
-              <li>Back up nssh 0.2.</li>
-              <li>Install and set up nssh 0.3.</li>
-              <li>Import your hosts and reconnect credentials.</li>
-              <li>Test your usual logins.</li>
-            </ol>
-          </div>
-        </div>
-      </section>
+  <h2>What changed</h2>
+  <ul>
+    <li><strong>New config format.</strong> 0.3 writes YAML settings instead of the old TOML file.</li>
+    <li><strong>Passwords move out of config.</strong> Pick SOPS+age, 1Password, or Bitwarden; nssh fetches the password when you connect.</li>
+    <li><strong>Connecting is simpler.</strong> <code>nssh HOST</code>, the same way you would run <code>ssh HOST</code>.</li>
+  </ul>
 
-      <section id="changes">
-        <span class="step-label">What to expect</span>
-        <h2>The three changes that matter</h2>
-        <ul>
-          <li><strong>Setup is new.</strong> nssh 0.3 creates new YAML settings instead of using the old TOML file.</li>
-          <li><strong>Passwords live elsewhere.</strong> Choose SOPS+age, 1Password, or Bitwarden; nssh securely retrieves them when you connect.</li>
-          <li><strong>Connecting is simpler.</strong> Use <code>nssh HOST</code>, just as you would use <code>ssh HOST</code>.</li>
-        </ul>
-      </section>
+  <h2>Let an agent do it</h2>
+  <p>
+    If you use Codex or another agent with the nssh skill installed, this is the
+    shortest path. Give it:
+  </p>
+  <pre><code>Use the nssh skill to migrate my nssh 0.2 setup to 0.3. Back up my
+existing setup first, explain any choices I need to make, never
+display or copy my passwords, and test a host with me before cleanup.</code></pre>
+  <p class="muted">
+    The skill knows the current commands, file layout, and credential options.
+    Otherwise, follow the four steps below.
+  </p>
 
-      <section id="prepare">
-        <span class="step-label">Step 1</span>
-        <h2>Back up nssh 0.2</h2>
-        <p>
-          Before installing the RC, make a private backup of your nssh folder
-          and SSH configuration:
-        </p>
-        <div class="code-block">
-          <button class="copy" type="button">Copy</button>
-          <pre><code>backup="$HOME/nssh-0.2-backup-$(date +%Y%m%d-%H%M%S)"
+  <h2>1. Back up 0.2</h2>
+  <p>Before installing the RC, copy your nssh and SSH files somewhere private:</p>
+  <pre><code>backup="$HOME/nssh-0.2-backup-$(date +%Y%m%d-%H%M%S)"
 mkdir -m 700 "$backup"
-cp -a "$HOME/.config/nssh" "$backup/config-nssh" 2&gt;/dev/null || true
-cp -a "$HOME/.local/share/nssh" "$backup/share-nssh" 2&gt;/dev/null || true
-cp -a "$HOME/.local/state/nssh" "$backup/state-nssh" 2&gt;/dev/null || true
-cp -a "$HOME/.ssh/config" "$backup/ssh-config" 2&gt;/dev/null || true
-cp -a "$HOME/.ssh/conf.d" "$backup/ssh-conf.d" 2&gt;/dev/null || true</code></pre>
-        </div>
-        <p>
-          If you customized where nssh stores files, ask your beta coordinator
-          or an agent using the nssh skill to help confirm the backup. Keep this
-          folder private because it may contain encrypted credentials and host names.
-        </p>
-      </section>
+cp -a "$HOME/.config/nssh"       "$backup/config-nssh" 2&gt;/dev/null || true
+cp -a "$HOME/.local/share/nssh"  "$backup/share-nssh"  2&gt;/dev/null || true
+cp -a "$HOME/.local/state/nssh"  "$backup/state-nssh"  2&gt;/dev/null || true
+cp -a "$HOME/.ssh/config"        "$backup/ssh-config"  2&gt;/dev/null || true
+cp -a "$HOME/.ssh/conf.d"        "$backup/ssh-conf.d"  2&gt;/dev/null || true</code></pre>
+  <p class="muted">
+    Keep the folder private; it can contain encrypted credentials and host names.
+    If you moved nssh's storage locations, confirm the backup with your beta
+    coordinator first.
+  </p>
 
-      <section id="install">
-        <span class="step-label">Step 2</span>
-        <h2>Install and set up nssh 0.3</h2>
-        <p>
-          Follow the RC installation instructions from your beta invitation,
-          then start the guided setup:
-        </p>
-        <div class="code-block">
-          <button class="copy" type="button">Copy</button>
-          <pre><code>nssh --version
+  <h2>2. Install and initialize 0.3</h2>
+  <p>Install the RC build from your beta invitation, then run the guided setup:</p>
+  <pre><code>nssh --version
 nssh self init</code></pre>
-        </div>
-        <aside class="callout">
-          <strong>Which credential option should I choose?</strong>
-          <p>
-            Choose the password manager you already use. If you do not use
-            1Password or Bitwarden, choose SOPS+age. Never type a password into
-            an nssh YAML file.
-          </p>
-        </aside>
-      </section>
+  <div class="note">
+    <p>
+      <strong>Which credential provider?</strong> Whichever password manager you
+      already use. If you use neither 1Password nor Bitwarden, choose SOPS+age.
+      Never put a plaintext password in an nssh YAML file.
+    </p>
+  </div>
 
-      <section id="inventory">
-        <span class="step-label">Step 3</span>
-        <h2>Import your hosts</h2>
-        <p>nssh can import the hosts you already use from your SSH configuration:</p>
-        <div class="code-block">
-          <button class="copy" type="button">Copy</button>
-          <pre><code>nssh self import ssh-config</code></pre>
-        </div>
-        <p>
-          Review the preview and accept it when the host names and usernames
-          look right. Then use the guided inventory command to connect a host
-          or group to the credential provider you chose:
-        </p>
-        <div class="code-block">
-          <button class="copy" type="button">Copy</button>
-          <pre><code>nssh inv list
-nssh inv set --help</code></pre>
-        </div>
-        <p class="muted">The help shows how to update a host or group. If your 0.2 setup used contexts or shared passwords across many hosts, this is the point where the nssh skill is especially useful.</p>
-      </section>
+  <h2>3. Import your hosts</h2>
+  <p>Pull in the hosts you already have in your SSH config:</p>
+  <pre><code>nssh self import ssh-config</code></pre>
+  <p>
+    Review the preview and accept it if the host names and usernames look right.
+    Then point each host or group at the credential provider you chose:
+  </p>
+  <pre><code>nssh inv list
+nssh inv set myhost --user admin --auth password --cred onepassword
+nssh inv set local/switches --cred sops</code></pre>
+  <p class="muted">
+    Run <code>nssh inv set --help</code> for the full flag list. If your 0.2 setup
+    shared one password across many hosts, set it on the group rather than on each
+    host — this is where the nssh skill saves the most time.
+  </p>
 
-      <section id="verify">
-        <span class="step-label">Step 4</span>
-        <h2>Test the hosts you normally use</h2>
-        <p>Start with one familiar host. The login should work without putting a password on the command line:</p>
-        <div class="code-block">
-          <button class="copy" type="button">Copy</button>
-          <pre><code>nssh YOUR-HOST</code></pre>
-        </div>
-        <div class="checklist" data-checklist="nssh-migration">
-          <label class="check"><input type="checkbox"><span>A normal host connects.</span></label>
-          <label class="check"><input type="checkbox"><span>A password login retrieves the correct credential automatically.</span></label>
-          <label class="check"><input type="checkbox"><span>A host reached through a jump host connects, if you use one.</span></label>
-          <label class="check"><input type="checkbox"><span><code>nssh cp</code> copies a test file, if you use file copying.</span></label>
-        </div>
-        <div class="progress">
-          <progress value="0" max="4" aria-label="Migration progress"></progress>
-          <span><strong data-progress-count>0</strong> of 4 tests complete</span>
-        </div>
-        <p>Keep your 0.2 backup for the entire beta, even after all four tests pass.</p>
-      </section>
+  <h2>4. Test your usual logins</h2>
+  <p>Start with one familiar host. It should log in with no password on the command line:</p>
+  <pre><code>nssh YOUR-HOST</code></pre>
+  <p>Then confirm each case you actually rely on:</p>
+  <ul>
+    <li>A normal host connects.</li>
+    <li>A password host pulls the right credential automatically.</li>
+    <li>A host behind a jump host connects.</li>
+    <li><code>nssh cp</code> copies a test file.</li>
+  </ul>
+  <p>Keep the 0.2 backup for the whole beta, even after everything passes.</p>
 
-      <section id="rollback">
-        <span class="step-label">If something goes wrong</span>
-        <h2>Stop and get help</h2>
-        <p>Do not reset nssh or delete files. Ask your beta coordinator or an agent using the nssh skill to inspect the setup.</p>
-        <div class="code-block">
-          <button class="copy" type="button">Copy</button>
-          <pre><code>Use the nssh skill to troubleshoot my 0.2 to 0.3 migration. Inspect my setup without showing secrets or connecting to a host until I approve it. Preserve my 0.2 backup.</code></pre>
-        </div>
-        <details>
-          <summary>I need to return to 0.2 now</summary>
-          <div>
-            <p>Reinstall the saved 0.2 release and restore the nssh and SSH folders from the same backup. Keep the 0.3 files separate so they can be inspected later.</p>
-          </div>
-        </details>
-      </section>
+  <h2>If something breaks</h2>
+  <p>
+    Do not reset nssh or delete files. Ask your beta coordinator, or hand an agent
+    with the nssh skill this:
+  </p>
+  <pre><code>Use the nssh skill to troubleshoot my 0.2 to 0.3 migration. Inspect my
+setup without showing secrets or connecting to a host until I approve
+it. Preserve my 0.2 backup.</code></pre>
+  <p class="muted">
+    To go back to 0.2 immediately: reinstall the 0.2 release and restore the nssh
+    and SSH folders from your backup. Leave the 0.3 files in place so they can
+    still be inspected.
+  </p>
 
-      <section id="feedback">
-        <span class="step-label">Beta feedback</span>
-        <h2>Report an RC issue</h2>
-        <p>
-          Open an issue at
-          <a href="https://github.com/ntwrknrd/nssh/issues">github.com/ntwrknrd/nssh/issues</a>
-          and describe what you were doing, what you expected, and what happened.
-          Never attach passwords, tokens, private host names, or your complete config.
-        </p>
-        <div class="code-block">
-          <button class="copy" type="button">Copy</button>
-          <pre><code>## nssh 0.3 RC migration report
+  <h2>Report an issue</h2>
+  <p>
+    File it at
+    <a href="https://github.com/ntwrknrd/nssh/issues">github.com/ntwrknrd/nssh/issues</a>.
+    Never attach passwords, tokens, internal host names, or a full config dump.
+  </p>
+  <pre><code>## nssh 0.3 RC migration report
 
 - nssh version:
 - OS and architecture:
-- Installation method:
+- Install method:
 - Previous nssh version:
-- Credential option: SOPS+age / 1Password / Bitwarden
+- Credential provider: SOPS+age / 1Password / Bitwarden
 - Command I ran:
 
-### Expected behavior
+### Expected
 
-### Observed behavior
+### Observed
 
-### Reproduction steps
+### Steps to reproduce
 
-### Rollback required?
-Yes / No</code></pre>
-        </div>
-      </section>
-    </main>
-
-    <nav aria-label="Migration guide contents">
-      <strong>On this page</strong>
-      <ol>
-        <li><a href="#overview">Choose a path</a></li>
-        <li><a href="#changes">What changed</a></li>
-        <li><a href="#prepare">1. Back up</a></li>
-        <li><a href="#install">2. Set up 0.3</a></li>
-        <li><a href="#inventory">3. Import hosts</a></li>
-        <li><a href="#verify">4. Test logins</a></li>
-        <li><a href="#rollback">Get help</a></li>
-        <li><a href="#feedback">Report feedback</a></li>
-      </ol>
-    </nav>
-  </div>
+### Rollback required? Yes / No</code></pre>
 
   <footer>
-    <div class="footer-inner">
-      <strong>nssh 0.3 RC migration guide</strong><br>
-      Source baseline: nssh 0.2.4 to the 0.3 release candidate. Verify the
-      installed version and use the RC artifact supplied by the release coordinator.
-    </div>
+    nssh 0.3 RC migration guide. Verify your installed version and use the RC
+    artifact supplied by the release coordinator.
   </footer>
-
-  <script>
-    (() => {
-      document.querySelectorAll('.code-block').forEach((block) => {
-        const button = block.querySelector('.copy');
-        const code = block.querySelector('code');
-        if (!button || !code) return;
-
-        button.addEventListener('click', async () => {
-          try {
-            await navigator.clipboard.writeText(code.textContent);
-            button.textContent = 'Copied';
-            window.setTimeout(() => { button.textContent = 'Copy'; }, 1400);
-          } catch {
-            button.textContent = 'Select text';
-          }
-        });
-      });
-
-      const checklist = document.querySelector('[data-checklist="nssh-migration"]');
-      if (!checklist) return;
-
-      const boxes = [...checklist.querySelectorAll('input[type="checkbox"]')];
-      const progress = document.querySelector('progress');
-      const count = document.querySelector('[data-progress-count]');
-      const storageKey = 'nssh-migration-0.2-to-0.3-progress';
-
-      const update = () => {
-        const complete = boxes.filter((box) => box.checked).length;
-        if (progress) progress.value = complete;
-        if (count) count.textContent = String(complete);
-        try {
-          localStorage.setItem(storageKey, JSON.stringify(boxes.map((box) => box.checked)));
-        } catch { /* Local files or strict browsers may disable storage. */ }
-      };
-
-      try {
-        const saved = JSON.parse(localStorage.getItem(storageKey) || '[]');
-        boxes.forEach((box, index) => { box.checked = Boolean(saved[index]); });
-      } catch { /* Start with an empty checklist when storage is unavailable. */ }
-
-      boxes.forEach((box) => box.addEventListener('change', update));
-      update();
-    })();
-  </script>
 </body>
 </html>
