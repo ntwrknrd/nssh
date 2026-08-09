@@ -64,8 +64,7 @@ func buildHostKeyProbeArgs(resolved *ResolvedHost, sshArgs []string, cfg *config
 		args = append(args, "-p", fmt.Sprintf("%d", resolved.Port))
 	}
 	args = append(args, options...)
-	args = append(args,
-		"-o", "BatchMode=yes",
+	args = append(args, "-o", "BatchMode=yes",
 		"-o", "NumberOfPasswordPrompts=0",
 		"-o", "KbdInteractiveAuthentication=no",
 	)

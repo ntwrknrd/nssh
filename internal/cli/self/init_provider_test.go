@@ -1050,9 +1050,10 @@ func TestBuildSourceInstallBuildsAskpassBesideNSSH(t *testing.T) {
 }
 
 func TestInitNextStepsFollowSelectedInventoryProviders(t *testing.T) {
+	configDir := filepath.Join(t.TempDir(), "nssh-config")
 	paths := &config.Paths{
-		ConfigDir:  filepath.Join("/tmp", "nssh-config"),
-		ConfigFile: filepath.Join("/tmp", "nssh-config", "config.yaml"),
+		ConfigDir:  configDir,
+		ConfigFile: filepath.Join(configDir, "config.yaml"),
 	}
 	steps := initNextSteps(paths, []initInventoryProviderRequest{
 		{Name: "local", Type: config.ProviderLocal},
@@ -1062,13 +1063,13 @@ func TestInitNextStepsFollowSelectedInventoryProviders(t *testing.T) {
 	text := strings.Join(steps, "\n")
 
 	for _, want := range []string{
-		"/tmp/nssh-config/config.yaml",
-		"/tmp/nssh-config/inventory/local.yaml",
+		filepath.Join(configDir, "config.yaml"),
+		filepath.Join(configDir, "inventory", "local.yaml"),
 		"nssh inv set -g local/<group>",
-		"/tmp/nssh-config/inventory/netbox-prod.yaml",
+		filepath.Join(configDir, "inventory", "netbox-prod.yaml"),
 		"create match groups",
 		"nssh inv refresh netbox-prod",
-		"/tmp/nssh-config/inventory/containerlab.yaml",
+		filepath.Join(configDir, "inventory", "containerlab.yaml"),
 		"kind/state match groups",
 		"nssh inv refresh containerlab",
 	} {
@@ -1087,15 +1088,16 @@ func TestInitNextStepsFollowSelectedInventoryProviders(t *testing.T) {
 }
 
 func TestInitNextStepsWithoutInventoryProvidersRecommendsAddingInventory(t *testing.T) {
+	configDir := filepath.Join(t.TempDir(), "nssh-config")
 	paths := &config.Paths{
-		ConfigDir:  filepath.Join("/tmp", "nssh-config"),
-		ConfigFile: filepath.Join("/tmp", "nssh-config", "config.yaml"),
+		ConfigDir:  configDir,
+		ConfigFile: filepath.Join(configDir, "config.yaml"),
 	}
 	steps := initNextSteps(paths, nil)
 	text := strings.Join(steps, "\n")
 
 	for _, want := range []string{
-		"/tmp/nssh-config/config.yaml",
+		filepath.Join(configDir, "config.yaml"),
 		"Add inventory later with nssh self init --inv local, --inv netbox, or --inv containerlab.",
 	} {
 		if !strings.Contains(text, want) {

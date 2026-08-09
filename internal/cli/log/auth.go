@@ -35,9 +35,6 @@ func NewAuthCmd() *cobra.Command {
 func runAuth(serverURL string, quiet bool) error {
 	settings := recording.LoadRecordingSettings()
 
-	if !quiet {
-	}
-
 	// Determine server URL (flag > env > config > default)
 	if serverURL == "" {
 		serverURL = os.Getenv("NSSH_ASCIINEMA_SERVER_URL")
@@ -80,7 +77,5 @@ func runAuth(serverURL string, quiet bool) error {
 		return &exit.ExitError{Code: 1}
 	}
 
-	if !quiet {
-	}
 	return nil
 }

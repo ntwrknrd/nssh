@@ -82,5 +82,5 @@ func (t agentProviderTransport) ProviderRequest(req providerexec.ProviderRequest
 		return nil, err
 	}
 	defer func() { _ = client.Close() }()
-	return client.ProviderRequest(agent.ProviderRequest(req))
+	return client.ProviderRequest(req)
 }

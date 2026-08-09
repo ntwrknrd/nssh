@@ -107,10 +107,10 @@ func runImportSSHConfig(paths *config.Paths, prompter sshImportPrompter, out io.
 		return err
 	}
 	for _, warning := range importer.warnings {
-		fmt.Fprintf(out, "warning: %s\n", warning)
+		_, _ = fmt.Fprintf(out, "warning: %s\n", warning)
 	}
 	for _, path := range importer.written {
-		fmt.Fprintf(out, "wrote %s\n", path)
+		_, _ = fmt.Fprintf(out, "wrote %s\n", path)
 	}
 	return nil
 }
@@ -1058,8 +1058,7 @@ func cleanSSHValue(value string) string {
 
 func applySSHImportHostDirectives(host *config.InventoryHostConfig, directives []sshImportDirective) {
 	for _, directive := range directives {
-		switch strings.ToLower(directive.Key) {
-		case "port":
+		if strings.ToLower(directive.Key) == "port" {
 			if n, err := strconv.Atoi(directive.Value); err == nil {
 				host.Port = n
 			}

@@ -19,7 +19,7 @@ func TestServerEnvDoesNotExposePasswordAndUsesPrivateDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	info, err := os.Stat(server.Dir())
 	if err != nil {
@@ -49,7 +49,7 @@ func TestServerSendsPasswordOnceForMatchingNonce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	done := make(chan error, 1)
 	go func() {
@@ -80,7 +80,7 @@ func TestServerServesMultiplePasswordRequestsUntilCanceled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -112,7 +112,7 @@ func TestServerRejectsWrongNonce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	done := make(chan error, 1)
 	go func() {
@@ -159,7 +159,7 @@ func TestServerWithResolverWaitsForPassword(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServerWithResolver: %v", err)
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -112,9 +112,7 @@ func isYAMLBoolNull(value string) bool {
 }
 
 func isYAMLNumber(value string) bool {
-	if strings.ContainsFunc(value, func(r rune) bool {
-		return unicode.IsLetter(r)
-	}) {
+	if strings.ContainsFunc(value, unicode.IsLetter) {
 		return false
 	}
 	normalized := strings.ReplaceAll(value, "_", "")

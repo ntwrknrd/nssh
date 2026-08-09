@@ -1,6 +1,7 @@
 package highlight
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -8,7 +9,7 @@ import (
 func TestHighlightDisabledPassesThrough(t *testing.T) {
 	input := []byte("ge-0/0/0 down 192.0.2.1/32\n")
 	out := New(Options{Enabled: false, Profile: ProfileJunos}).Highlight(input)
-	if string(out) != string(input) {
+	if !bytes.Equal(out, input) {
 		t.Fatalf("output = %q, want passthrough", out)
 	}
 }
@@ -335,7 +336,7 @@ func TestHighlightExistingANSIReturnsOriginalBytes(t *testing.T) {
 	h := New(Options{Enabled: true, Profile: ProfileJunos})
 	input := []byte("set protocols bgp\n\x1b[31mdown\x1b[0m\n")
 	out := h.Highlight(input)
-	if string(out) != string(input) {
+	if !bytes.Equal(out, input) {
 		t.Fatalf("ANSI output should pass through unchanged:\nwant %q\n got %q", input, out)
 	}
 }

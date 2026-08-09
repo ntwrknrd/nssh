@@ -126,7 +126,7 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ..
 	result := runResolvedConnection(ctx, resolved, sshArgs, cfg, audit, options)
 	if result.Err != nil && isCompatibilityError(result.Err) {
 		var err error
-		if result, resolved, err = handleCompatibilityFixes(ctx, hostname, explicitUser, true, resolved, sshArgs, cfg, audit, options, result); err != nil {
+		if result, err = handleCompatibilityFixes(ctx, hostname, explicitUser, true, resolved, sshArgs, cfg, audit, options, result); err != nil {
 			return err
 		}
 	}
@@ -662,7 +662,7 @@ func ConnectLiteralHost(ctx context.Context, hostname string, sshArgs []string, 
 	result := runResolvedConnection(ctx, resolved, sshArgs, cfg, audit, options)
 	if result.Err != nil && resolved.Provider != "" && isCompatibilityError(result.Err) {
 		var compatErr error
-		if result, resolved, compatErr = handleCompatibilityFixes(ctx, hostname, explicitUser, false, resolved, sshArgs, cfg, audit, options, result); compatErr != nil {
+		if result, compatErr = handleCompatibilityFixes(ctx, hostname, explicitUser, false, resolved, sshArgs, cfg, audit, options, result); compatErr != nil {
 			return compatErr
 		}
 	}
@@ -840,21 +840,21 @@ func appendHostKeyPreparationSSHArgs(sshArgs []string, prep *connector.HostKeyPr
 	return nextArgs
 }
 
-func handleCompatibilityFixes(ctx context.Context, query, explicitUser string, smart bool, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger, opts Options, result connectionResult) (connectionResult, *ResolvedHost, error) {
+func handleCompatibilityFixes(ctx context.Context, query, explicitUser string, smart bool, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger, opts Options, result connectionResult) (connectionResult, error) {
 	for iteration := 1; iteration <= maxCompatibilityFixIterations; iteration++ {
 		fixes := discoverCompatibilityFixes(ctx, resolved, cfg, result.Output)
 		if len(fixes) == 0 {
 			slog.Debug("connection failed with possible compatibility issue; configure inventory host ssh.compatibility in nssh YAML", "host", resolved.Hostname)
-			return result, resolved, nil
+			return result, nil
 		}
 		if !confirmCompatibilityFixes(iteration, fixes) {
-			return result, resolved, nil
+			return result, nil
 		}
 		if err := appendResolvedHostCompatFixes(cfg, resolved, fixes); err != nil {
-			return result, resolved, err
+			return result, err
 		}
 		if err := config.SaveInventoryProviderHost(config.DefaultPaths().ConfigFile, cfg, resolved.Provider, resolved.Canonical); err != nil {
-			return result, resolved, err
+			return result, err
 		}
 		ui.Success("Compatibility fixes applied")
 		var nextResolved *ResolvedHost
@@ -865,15 +865,15 @@ func handleCompatibilityFixes(ctx context.Context, query, explicitUser string, s
 			nextResolved, err = ResolveHostForConnect(query, explicitUser, cfg)
 		}
 		if err != nil {
-			return result, resolved, err
+			return result, err
 		}
 		resolved = nextResolved
 		result = runResolvedConnection(ctx, resolved, sshArgs, cfg, audit, opts)
 		if result.Err == nil || !isCompatibilityError(result.Err) {
-			return result, resolved, nil
+			return result, nil
 		}
 	}
-	return result, resolved, nil
+	return result, nil
 }
 
 func discoverCompatibilityFixes(ctx context.Context, resolved *ResolvedHost, cfg *config.Config, output string) []compat.FloorSelection {
@@ -1026,64 +1026,6 @@ func setCompatibilityFloor(compatibility *config.SSHCompatibility, fix compat.Fl
 	case compat.CategoryPublicKey:
 		compatibility.PublicKey = fix.Floor
 	}
-}
-
-func retryResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options) error {
-	var retryPassword *secret.Secret
-	retryResolved, retryErr := ResolveHostForConnect(resolved.Hostname, resolved.Username, cfg)
-	if retryErr != nil {
-		slog.Warn("credential re-resolution failed", "err", retryErr)
-	} else if retryResolved.Credential != nil {
-		retryPassword = retryResolved.Credential.Password
-	}
-
-	passwordFuture, muxHot := preparePasswordPrefetch(ctx, retryResolved, sshArgs, cfg, opts)
-	if passwordFuture != nil {
-		defer passwordFuture.Close()
-	}
-	proxyPasswordFuture := prepareProxyPasswordFuture(retryResolved)
-	if proxyPasswordFuture != nil {
-		defer proxyPasswordFuture.Close()
-	}
-	defer destroyImmediateProxyPassword(retryResolved)
-	passwordResolvers := interactiveAskpassResolvers(retryResolved, passwordFuture, proxyPasswordFuture)
-	if passwordResolvers.any() && passwordFuture == nil {
-		muxHot, _ = checkMuxSessionFunc(ctx, muxCheckRequest(retryResolved, sshArgs, cfg, opts))
-	}
-	var askpassHandle *connectionAskpassHandle
-	if interactiveAskpassEnabled() && passwordResolvers.any() && !muxHot {
-		askpassTimer := connector.StartTiming(connector.TimingAskpassSetup)
-		var err error
-		askpassHandle, err = startConnectionAskpass(ctx, passwordResolvers)
-		askpassTimer.Emit()
-		if err != nil {
-			return err
-		}
-		defer askpassHandle.cleanup()
-	}
-	var hostKeyPrep *connector.HostKeyPreparation
-	if interactiveAskpassEnabled() && passwordResolvers.any() && !muxHot {
-		var prepErr error
-		hostKeyPrep, prepErr = prepareInteractiveHostKey(ctx, retryResolved, sshArgs, cfg, opts, proxyAskpassEnv(askpassHandle))
-		if prepErr != nil {
-			return prepErr
-		}
-		if hostKeyPrep != nil {
-			defer hostKeyPrep.Cleanup()
-			sshArgs = appendHostKeyPreparationSSHArgs(sshArgs, hostKeyPrep)
-		}
-	}
-	conn := connector.NewConnector(resolved.Hostname, resolved.Username, retryPassword, sshArgs)
-	if askpassHandle != nil {
-		conn.SetEnv(askpassHandle.env)
-	}
-	conn.SetHostKeyPromptFunc(newHostKeyPromptFunc())
-	conn.SetSSHOptions(resolved.SSH)
-	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
-	conn.SetTimeouts(&cfg.SSH.Connection)
-	conn.SetSSHVerbosity(opts.SSHVerbosity)
-	conn.SetResolvedEndpoint(resolved.Hostname, fmt.Sprintf("%d", resolved.Port))
-	return conn.Run(ctx)
 }
 
 func newConnector(resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options) *connector.Connector {

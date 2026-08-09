@@ -511,7 +511,7 @@ func TestResolveLocalHostCredentialUsesHostAuthMapping(t *testing.T) {
 	if secret == nil {
 		t.Fatal("expected credential secret")
 	}
-	defer secret.Destroy()
+	secret.Destroy()
 }
 
 func TestLocalHostProbeCredentialSecretPromptsForUnstoredPassword(t *testing.T) {

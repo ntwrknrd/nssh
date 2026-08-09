@@ -146,7 +146,7 @@ func TestDaemon_ActivityResetsIdleTimeout(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Connect() error = %v", err)
 		}
-		_, err = client.ProviderRequest(ProviderRequest{Provider: "missing", Action: "get"})
+		_, _ = client.ProviderRequest(ProviderRequest{Provider: "missing", Action: "get"})
 		_ = client.Close()
 
 		fc.Advance(200 * time.Millisecond) // less than idle timeout, should keep alive
@@ -560,7 +560,7 @@ func TestDaemon_ProviderRequestResetsIdleTimer(t *testing.T) {
 			t.Fatalf("Connect() #%d error = %v", i, err)
 		}
 
-		_, err = client.ProviderRequest(ProviderRequest{Provider: "missing", Action: "get"})
+		_, _ = client.ProviderRequest(ProviderRequest{Provider: "missing", Action: "get"})
 		_ = client.Close()
 	}
 

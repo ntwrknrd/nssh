@@ -103,7 +103,6 @@ func deleteOlderThan(settings recording.RecordingSettings, days int, dryRun bool
 
 	if dryRun {
 		ui.Warning("Run without --dry-run to actually delete files")
-	} else {
 	}
 
 	return nil

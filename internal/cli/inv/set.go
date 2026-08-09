@@ -442,6 +442,10 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 					return err
 				}
 				if credentialSecret != nil {
+					// The only continue in this loop is above; every path past
+					// here reaches the unconditional break, so this defer is
+					// registered at most once.
+					//nolint:gocritic // deferInLoop: loop body runs once past this point
 					defer credentialSecret.Destroy()
 				}
 				result, err := runPreparedLocalHostCompatibilityProbe(
@@ -456,12 +460,13 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 				if err != nil {
 					return err
 				}
-				if len(result.FixesApplied) > 0 {
+				switch {
+				case len(result.FixesApplied) > 0:
 					patch.CompatFixes = result.FixesApplied
 					ui.Success("Compatibility fixes validated for %s", patch.Host)
-				} else if result.Success {
+				case result.Success:
 					ui.Success("Connection test passed for %s", patch.Host)
-				} else {
+				default:
 					ui.Warning("Connection test did not pass: %s", result.StoppedReason)
 					keep, err := ui.Confirm("Add host entry anyway?", false)
 					if err != nil || !keep {
@@ -474,20 +479,21 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 		if err := upsertLocalHost(parser, cfg, paths, patch); err != nil {
 			return err
 		}
-		if groupCreated && hostAuthChanged {
+		switch {
+		case groupCreated && hostAuthChanged:
 			if err := config.SaveInventoryGroupAndHostAuth(config.DefaultPaths().ConfigFile, cfg, patch.Group, patch.Host); err != nil {
 				return err
 			}
 			ui.Success("Group %q created", patch.Group)
 			stopAgentAfterInventoryAuthMutation()
 			pendingCreatedGroup = ""
-		} else if groupCreated && !authPatch.HasChange() {
+		case groupCreated && !authPatch.HasChange():
 			if err := config.SaveInventoryGroup(config.DefaultPaths().ConfigFile, cfg, patch.Group); err != nil {
 				return err
 			}
 			ui.Success("Group %q created", patch.Group)
 			pendingCreatedGroup = ""
-		} else if hostAuthChanged {
+		case hostAuthChanged:
 			if err := config.SaveInventoryHostAuth(config.DefaultPaths().ConfigFile, cfg, patch.Host); err != nil {
 				return err
 			}

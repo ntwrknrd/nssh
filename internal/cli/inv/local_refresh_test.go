@@ -287,7 +287,7 @@ func newLocalRefreshFixture(t *testing.T, localContent string) (*sshconfig.Parse
 			name = host.Host
 		}
 		if seen[name] > 0 {
-			name = name + "-duplicate"
+			name += "-duplicate"
 		}
 		seen[name]++
 		hostCfg := config.InventoryHostConfig{Group: "lab"}
