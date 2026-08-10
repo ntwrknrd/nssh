@@ -335,7 +335,7 @@ func applyCredentialProviderSetup(paths *config.Paths, cfg *config.Config, provi
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	if provider, providerPath, ok := existingCredentialProviderSetup(paths, cfg, providerType); ok {
+	if provider, providerPath, ok := existingCredentialProviderSetup(cfg, providerType); ok {
 		printExistingCredentialProviderSetup(provider, providerPath)
 		return nil
 	}
@@ -379,7 +379,7 @@ func applyInventoryProviderSetup(paths *config.Paths, cfg *config.Config, provid
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	if provider, providerPath, ok := existingInventoryProviderSetup(paths, cfg, providerType); ok {
+	if provider, providerPath, ok := existingInventoryProviderSetup(cfg, providerType); ok {
 		printExistingInventoryProviderSetup(provider, providerPath)
 		return nil
 	}
@@ -404,14 +404,14 @@ func applyInventoryProviderSetup(paths *config.Paths, cfg *config.Config, provid
 	}
 
 	if dryRun {
-		printInventoryProviderSetup(provider, inventoryProviderSetupPath(paths, provider), dryRun)
+		printInventoryProviderSetup(inventoryProviderSetupPath(paths, provider), dryRun)
 		return nil
 	}
 	providerPath, err := saveInventoryProviderSetup(paths, provider)
 	if err != nil {
 		return err
 	}
-	printInventoryProviderSetup(provider, providerPath, dryRun)
+	printInventoryProviderSetup(providerPath, dryRun)
 	ui.Success("Config file: %s", AbbreviatePath(paths.ConfigFile))
 	return nil
 }
@@ -444,7 +444,7 @@ func applyProviderSetups(paths *config.Paths, cfg *config.Config, opts InitOptio
 	return nil
 }
 
-func existingCredentialProviderSetup(paths *config.Paths, cfg *config.Config, providerType string) (initCredentialProviderRequest, string, bool) {
+func existingCredentialProviderSetup(cfg *config.Config, providerType string) (initCredentialProviderRequest, string, bool) {
 	if cfg == nil {
 		return initCredentialProviderRequest{}, "", false
 	}
@@ -465,7 +465,7 @@ func existingCredentialProviderSetup(paths *config.Paths, cfg *config.Config, pr
 	return initCredentialProviderRequest{}, "", false
 }
 
-func existingInventoryProviderSetup(paths *config.Paths, cfg *config.Config, providerType string) (initInventoryProviderRequest, string, bool) {
+func existingInventoryProviderSetup(cfg *config.Config, providerType string) (initInventoryProviderRequest, string, bool) {
 	if cfg == nil {
 		return initInventoryProviderRequest{}, "", false
 	}
@@ -534,7 +534,7 @@ func printCredentialProviderSetup(provider initCredentialProviderRequest, provid
 	}
 }
 
-func printInventoryProviderSetup(provider initInventoryProviderRequest, providerPath string, dryRun bool) {
+func printInventoryProviderSetup(providerPath string, dryRun bool) {
 	ui.SubSection("Inventory Provider")
 	if dryRun {
 		ui.StatusLineNeutral("Provider config", AbbreviatePath(providerPath)+" (dry run)")

@@ -103,7 +103,7 @@ func (c *Connector) Run(ctx context.Context) error {
 		}
 
 		c.closeSession()
-		if !(errors.Is(err, errHostKeyPrepared) && c.preserveTempKnownHosts) {
+		if !errors.Is(err, errHostKeyPrepared) || !c.preserveTempKnownHosts {
 			c.cleanupTempFiles()
 		}
 		return err

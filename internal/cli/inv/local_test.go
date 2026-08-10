@@ -21,8 +21,6 @@ import (
 
 func TestUpsertLocalHostWritesSingleLocalProviderFile(t *testing.T) {
 	tmp := t.TempDir()
-	mainConfig := filepath.Join(tmp, ".ssh", "config")
-	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Group: map[string]config.GroupConfig{
 			"lab": {},
@@ -30,7 +28,7 @@ func TestUpsertLocalHostWritesSingleLocalProviderFile(t *testing.T) {
 	}}
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
-	err := upsertLocalHost(parser, cfg, paths, hostPatch{
+	err := upsertLocalHost(cfg, paths, hostPatch{
 		Host:    "edge01.lab.local",
 		Group:   "local/lab",
 		User:    "admin",
@@ -94,7 +92,7 @@ func TestUpsertLocalHostPatchesHostWithoutRewritingExistingGroup(t *testing.T) {
 		},
 	}}
 
-	if err := upsertLocalHost(nil, cfg, paths, hostPatch{
+	if err := upsertLocalHost(cfg, paths, hostPatch{
 		Host:    "acm-tor-sw50.custcbb.local",
 		Group:   "local/custcbb",
 		Port:    22,
@@ -763,13 +761,12 @@ func TestUpsertLocalHostWritesSelectedAuthModeAndCompatFixes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Group: map[string]config.GroupConfig{"lab": {}},
 	}}
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
 
-	err := upsertLocalHost(parser, cfg, paths, hostPatch{
+	err := upsertLocalHost(cfg, paths, hostPatch{
 		Host:      "edge01",
 		Group:     "local/lab",
 		HostName:  "edge01.lab.local",
@@ -804,13 +801,12 @@ func TestUpsertLocalHostWritesSelectedAuthModeAndCompatFixes(t *testing.T) {
 
 func TestUpsertLocalHostWritesExplicitHostnameOverride(t *testing.T) {
 	tmp := t.TempDir()
-	parser := sshconfig.NewParserWithPaths(filepath.Join(tmp, ".ssh", "config"), filepath.Join(tmp, "backups"), 5)
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Group: map[string]config.GroupConfig{"lab": {}},
 	}}
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
-	err := upsertLocalHost(parser, cfg, paths, hostPatch{
+	err := upsertLocalHost(cfg, paths, hostPatch{
 		Host:     "edge01.lab.local",
 		Group:    "local/lab",
 		HostName: "192.0.2.10",
@@ -833,13 +829,12 @@ func TestUpsertLocalHostWritesExplicitHostnameOverride(t *testing.T) {
 
 func TestUpsertLocalHostDoesNotAddShortAliasForIP(t *testing.T) {
 	tmp := t.TempDir()
-	parser := sshconfig.NewParserWithPaths(filepath.Join(tmp, ".ssh", "config"), filepath.Join(tmp, "backups"), 5)
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Group: map[string]config.GroupConfig{"lab": {}},
 	}}
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
-	err := upsertLocalHost(parser, cfg, paths, hostPatch{
+	err := upsertLocalHost(cfg, paths, hostPatch{
 		Host:  "192.0.2.10",
 		Group: "local/lab",
 	})
@@ -859,7 +854,6 @@ func TestUpsertLocalHostDoesNotAddShortAliasForIP(t *testing.T) {
 
 func TestUpsertLocalHostAddsAliasesAdditively(t *testing.T) {
 	tmp := t.TempDir()
-	parser := sshconfig.NewParserWithPaths(filepath.Join(tmp, ".ssh", "config"), filepath.Join(tmp, "backups"), 5)
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Providers: map[string]config.InventoryProviderConfig{
 			config.ProviderLocal: {
@@ -873,7 +867,7 @@ func TestUpsertLocalHostAddsAliasesAdditively(t *testing.T) {
 	}}
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
-	err := upsertLocalHost(parser, cfg, paths, hostPatch{
+	err := upsertLocalHost(cfg, paths, hostPatch{
 		Host:    "edge01.lab.local",
 		Aliases: []string{"edge"},
 	})
@@ -911,12 +905,11 @@ func TestLocalWrittenHostConfigReturnsPersistedStanza(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Group: map[string]config.GroupConfig{"lab": {}},
 	}}
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
-	if err := upsertLocalHost(parser, cfg, paths, hostPatch{Host: "edge01", Group: "local/lab", HostName: "edge01.lab.local"}); err != nil {
+	if err := upsertLocalHost(cfg, paths, hostPatch{Host: "edge01", Group: "local/lab", HostName: "edge01.lab.local"}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join("inventory", "local.yaml")); err == nil {
@@ -925,7 +918,7 @@ func TestLocalWrittenHostConfigReturnsPersistedStanza(t *testing.T) {
 		t.Fatalf("stat leaked inventory/local.yaml: %v", err)
 	}
 
-	stanza, err := localWrittenHostConfig(parser, cfg, paths, "edge01")
+	stanza, err := localWrittenHostConfig(cfg, paths, "edge01")
 	if err != nil {
 		t.Fatalf("localWrittenHostConfig: %v", err)
 	}
@@ -1047,13 +1040,12 @@ func TestUpsertLocalHostRequiresGroupForNewHost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Group: map[string]config.GroupConfig{"lab": {}},
 	}}
 	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
 
-	err := upsertLocalHost(parser, cfg, paths, hostPatch{Host: "edge01"})
+	err := upsertLocalHost(cfg, paths, hostPatch{Host: "edge01"})
 	if err == nil {
 		t.Fatal("expected missing group error")
 	}
@@ -1221,8 +1213,6 @@ func TestDefaultHostNameForGroupDoesNotAppendDomainSuffix(t *testing.T) {
 
 func TestUpsertLocalHostPreservesExistingGroupWhenGroupOmitted(t *testing.T) {
 	tmp := t.TempDir()
-	mainConfig := filepath.Join(tmp, ".ssh", "config")
-	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Providers: map[string]config.InventoryProviderConfig{
 			config.ProviderLocal: {
@@ -1239,7 +1229,7 @@ func TestUpsertLocalHostPreservesExistingGroupWhenGroupOmitted(t *testing.T) {
 	}}
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
-	if err := upsertLocalHost(parser, cfg, paths, hostPatch{Host: "edge01", HostName: "new.lab.local"}); err != nil {
+	if err := upsertLocalHost(cfg, paths, hostPatch{Host: "edge01", HostName: "new.lab.local"}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	content, err := os.ReadFile(localProviderYAMLPath(cfg, paths))
@@ -1256,8 +1246,6 @@ func TestUpsertLocalHostPreservesExistingGroupWhenGroupOmitted(t *testing.T) {
 
 func TestUpsertLocalHostRefusesProviderOwnedHost(t *testing.T) {
 	tmp := t.TempDir()
-	mainConfig := filepath.Join(tmp, ".ssh", "config")
-	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Group: map[string]config.GroupConfig{
 			"lab": {},
@@ -1271,7 +1259,7 @@ func TestUpsertLocalHostRefusesProviderOwnedHost(t *testing.T) {
 	}}
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
-	err := upsertLocalHost(parser, cfg, paths, hostPatch{Host: "edge01", Group: "local/lab", User: "admin"})
+	err := upsertLocalHost(cfg, paths, hostPatch{Host: "edge01", Group: "local/lab", User: "admin"})
 	if err == nil {
 		t.Fatal("expected provider-owned mutation refusal")
 	}
@@ -1282,8 +1270,6 @@ func TestUpsertLocalHostRefusesProviderOwnedHost(t *testing.T) {
 
 func TestRemoveLocalHostRemovesOnlyLocalHosts(t *testing.T) {
 	tmp := t.TempDir()
-	mainConfig := filepath.Join(tmp, ".ssh", "config")
-	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Providers: map[string]config.InventoryProviderConfig{
 			config.ProviderLocal: {
@@ -1298,7 +1284,7 @@ func TestRemoveLocalHostRemovesOnlyLocalHosts(t *testing.T) {
 	}}
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
-	removed, err := removeLocalHost(parser, cfg, paths, "edge01")
+	removed, err := removeLocalHost(cfg, paths, "edge01")
 	if err != nil {
 		t.Fatalf("remove: %v", err)
 	}
@@ -1469,7 +1455,6 @@ func TestInventoryHostsIgnoresNonNsshIncludes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Providers: map[string]config.InventoryProviderConfig{
 			config.ProviderLocal: {
@@ -1481,7 +1466,7 @@ func TestInventoryHostsIgnoresNonNsshIncludes(t *testing.T) {
 	}}
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
 
-	hosts, err := inventoryHosts(parser, cfg, paths)
+	hosts, err := inventoryHosts(cfg, paths)
 	if err != nil {
 		t.Fatalf("inventoryHosts: %v", err)
 	}
@@ -1615,7 +1600,6 @@ func TestRemoveLocalHostIgnoresNonInventoryIncludes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Group: map[string]config.GroupConfig{
 			"lab": {},
@@ -1623,7 +1607,7 @@ func TestRemoveLocalHostIgnoresNonInventoryIncludes(t *testing.T) {
 	}}
 	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
 
-	removed, err := removeLocalHost(parser, cfg, paths, "unmanaged")
+	removed, err := removeLocalHost(cfg, paths, "unmanaged")
 	if err != nil {
 		t.Fatalf("remove: %v", err)
 	}
@@ -1641,13 +1625,11 @@ func TestRemoveLocalHostIgnoresNonInventoryIncludes(t *testing.T) {
 
 func TestImportLocalCSVAddsHostsToLocalProviderFile(t *testing.T) {
 	tmp := t.TempDir()
-	mainConfig := filepath.Join(tmp, ".ssh", "config")
 	csvPath := filepath.Join(tmp, "hosts.csv")
 	if err := os.WriteFile(csvPath, []byte("host,hostname,user,port\nedge02,edge02.lab.local,admin,2222\nedge01,edge01.lab.local,netops,\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Group: map[string]config.GroupConfig{
 			"lab": {},
@@ -1655,7 +1637,7 @@ func TestImportLocalCSVAddsHostsToLocalProviderFile(t *testing.T) {
 	}}
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
-	result, err := importLocalCSV(parser, cfg, paths, csvPath, "local/lab")
+	result, err := importLocalCSV(cfg, paths, csvPath, "local/lab")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -1696,7 +1678,7 @@ func TestInventoryProxyHostNamesSortsDeduplicatesAndExcludesNewHost(t *testing.T
 	}}}
 	paths := &config.Paths{StateDir: t.TempDir()}
 
-	names, err := inventoryProxyHostNames(nil, cfg, paths, "edge01.example.com")
+	names, err := inventoryProxyHostNames(cfg, paths, "edge01.example.com")
 	if err != nil {
 		t.Fatalf("inventoryProxyHostNames: %v", err)
 	}
@@ -1720,13 +1702,12 @@ func TestImportLocalCSVRequiresExplicitGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := &config.Config{Inventory: config.InventoryConfig{
 		Group: map[string]config.GroupConfig{"lab": {}},
 	}}
 	paths := &config.Paths{SSHConfigDir: sshDir, BackupDir: filepath.Join(tmp, "backups")}
 
-	result, err := importLocalCSV(parser, cfg, paths, csvPath, "")
+	result, err := importLocalCSV(cfg, paths, csvPath, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -1779,7 +1760,6 @@ type fakeLocalHostAddPrompter struct {
 	inputQueue  map[string][]string
 	selectQueue map[string][]string
 	hostSelects map[string]string
-	secrets     map[string]string
 	options     map[string][]ui.SelectOption
 	hostOptions map[string][]string
 	prompts     []string

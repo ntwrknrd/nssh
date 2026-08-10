@@ -27,7 +27,7 @@ Host edge01
   ForwardAgent no
   LocalForward 127.0.0.1:15432 db:5432
 `
-	out, warnings, err := importSSHConfigText(strings.NewReader(input), "imported")
+	out, warnings, err := importSSHConfigText(strings.NewReader(input))
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -59,7 +59,7 @@ Host edge01
   PreferredAuthentications keyboard-interactive,password
   PubkeyAuthentication no
 `
-	out, warnings, err := importSSHConfigText(strings.NewReader(input), "imported")
+	out, warnings, err := importSSHConfigText(strings.NewReader(input))
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}

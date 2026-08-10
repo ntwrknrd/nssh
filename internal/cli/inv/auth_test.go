@@ -6,17 +6,14 @@ import (
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 )
 
 func TestApplyInventoryAuthPatchWritesInventoryHostAuth(t *testing.T) {
 	tmp := t.TempDir()
-	mainConfig := filepath.Join(tmp, ".ssh", "config")
-	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := testAuthPatchConfig("local", config.ProviderLocal, "lab", "edge01", "edge01.lab.local")
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
-	err := applyInventoryAuthPatch(parser, cfg, paths, "edge01", inventoryAuthPatch{
+	err := applyInventoryAuthPatch(cfg, paths, "edge01", inventoryAuthPatch{
 		Auth: config.InventoryAuthConfig{
 			CredentialProvider: "sops",
 			PasswordRef:        "hosts.edge01.password",
@@ -34,15 +31,13 @@ func TestApplyInventoryAuthPatchWritesInventoryHostAuth(t *testing.T) {
 
 func TestApplyInventoryAuthPatchClearsOnlyHostAuth(t *testing.T) {
 	tmp := t.TempDir()
-	mainConfig := filepath.Join(tmp, ".ssh", "config")
-	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := testAuthPatchConfig("local", config.ProviderLocal, "lab", "edge01", "edge01.lab.local")
 	cfg.Inventory.Host = map[string]config.InventoryHostConfig{
 		"edge01": {Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "hosts.edge01.password"}},
 	}
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
-	err := applyInventoryAuthPatch(parser, cfg, paths, "edge01", inventoryAuthPatch{Clear: true})
+	err := applyInventoryAuthPatch(cfg, paths, "edge01", inventoryAuthPatch{Clear: true})
 	if err != nil {
 		t.Fatalf("clear auth: %v", err)
 	}
@@ -53,12 +48,10 @@ func TestApplyInventoryAuthPatchClearsOnlyHostAuth(t *testing.T) {
 
 func TestApplyInventoryAuthPatchAllowsProviderOwnedHost(t *testing.T) {
 	tmp := t.TempDir()
-	mainConfig := filepath.Join(tmp, ".ssh", "config")
-	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := testAuthPatchConfig("netbox-prod", config.ProviderNetBox, "cbb", "edge01", "edge01.example.com")
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
-	err := applyInventoryAuthPatch(parser, cfg, paths, "edge01", inventoryAuthPatch{
+	err := applyInventoryAuthPatch(cfg, paths, "edge01", inventoryAuthPatch{
 		Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "hosts.edge01.password"},
 	})
 	if err != nil {
@@ -71,8 +64,6 @@ func TestApplyInventoryAuthPatchAllowsProviderOwnedHost(t *testing.T) {
 
 func TestApplyInventoryAuthPatchPreservesExistingUsername(t *testing.T) {
 	tmp := t.TempDir()
-	mainConfig := filepath.Join(tmp, ".ssh", "config")
-	parser := sshconfig.NewParserWithPaths(mainConfig, filepath.Join(tmp, "backups"), 5)
 	cfg := testAuthPatchConfig("local", config.ProviderLocal, "lab", "edge01", "edge01.lab.local")
 	cfg.Inventory.Host = map[string]config.InventoryHostConfig{
 		"edge01": {Auth: config.InventoryAuthConfig{
@@ -83,7 +74,7 @@ func TestApplyInventoryAuthPatchPreservesExistingUsername(t *testing.T) {
 	}
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
-	err := applyInventoryAuthPatch(parser, cfg, paths, "edge01", inventoryAuthPatch{
+	err := applyInventoryAuthPatch(cfg, paths, "edge01", inventoryAuthPatch{
 		Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "expedient.password", Mode: config.AuthModePassword},
 	})
 	if err != nil {

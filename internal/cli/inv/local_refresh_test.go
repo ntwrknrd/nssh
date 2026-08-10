@@ -58,19 +58,19 @@ func TestVisitLocalRefreshFindingsEmitsBeforeCheckingLaterHosts(t *testing.T) {
 }
 
 func TestApplyLocalRefreshFixesRemovesSelectedLocalStaleHost(t *testing.T) {
-	parser, cfg, paths, localFile := newLocalRefreshFixture(t, ""+
+	cfg, paths, localFile := newLocalRefreshFixture(t, ""+
 		"Host stale01\n"+
 		"  HostName stale01.example.com\n"+
 		"\n"+
 		"Host keep01\n"+
 		"  HostName keep01.example.com\n")
-	hosts, err := inventoryHosts(parser, cfg, paths)
+	hosts, err := inventoryHosts(cfg, paths)
 	if err != nil {
 		t.Fatalf("inventoryHosts: %v", err)
 	}
 	stale := findLocalRefreshTestHost(t, hosts, "stale01")
 
-	applied, err := applyLocalRefreshFixes(parser, paths, []localRefreshFinding{{
+	applied, err := applyLocalRefreshFixes(paths, []localRefreshFinding{{
 		Host:   stale.Host,
 		Group:  "local/lab",
 		Issue:  "stale-dns",
@@ -95,13 +95,13 @@ func TestApplyLocalRefreshFixesRemovesSelectedLocalStaleHost(t *testing.T) {
 }
 
 func TestApplyLocalRefreshFixesRemovesOnlySelectedDuplicateBlock(t *testing.T) {
-	parser, cfg, paths, localFile := newLocalRefreshFixture(t, ""+
+	cfg, paths, localFile := newLocalRefreshFixture(t, ""+
 		"Host edge01\n"+
 		"  HostName edge01-primary.example.com\n"+
 		"\n"+
 		"Host edge01\n"+
 		"  HostName edge01-duplicate.example.com\n")
-	hosts, err := inventoryHosts(parser, cfg, paths)
+	hosts, err := inventoryHosts(cfg, paths)
 	if err != nil {
 		t.Fatalf("inventoryHosts: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestApplyLocalRefreshFixesRemovesOnlySelectedDuplicateBlock(t *testing.T) {
 		t.Fatalf("duplicate host not found: %+v", hosts)
 	}
 
-	applied, err := applyLocalRefreshFixes(parser, paths, []localRefreshFinding{{
+	applied, err := applyLocalRefreshFixes(paths, []localRefreshFinding{{
 		Host:   duplicate.Host,
 		Group:  "local/lab",
 		Issue:  "duplicate",
@@ -144,17 +144,17 @@ func TestApplyLocalRefreshFixesRemovesOnlySelectedDuplicateBlock(t *testing.T) {
 }
 
 func TestApplyLocalRefreshFixesRenamesCNAMEAndPreservesAlias(t *testing.T) {
-	parser, cfg, paths, localFile := newLocalRefreshFixture(t, ""+
+	cfg, paths, localFile := newLocalRefreshFixture(t, ""+
 		"Host old01\n"+
 		"  HostName old01.example.com\n"+
 		"  User admin\n")
-	hosts, err := inventoryHosts(parser, cfg, paths)
+	hosts, err := inventoryHosts(cfg, paths)
 	if err != nil {
 		t.Fatalf("inventoryHosts: %v", err)
 	}
 	old := findLocalRefreshTestHost(t, hosts, "old01")
 
-	applied, err := applyLocalRefreshFixes(parser, paths, []localRefreshFinding{{
+	applied, err := applyLocalRefreshFixes(paths, []localRefreshFinding{{
 		Host:   old.Host,
 		Group:  "local/lab",
 		Issue:  "cname-rename",
@@ -183,20 +183,20 @@ func TestApplyLocalRefreshFixesRenamesCNAMEAndPreservesAlias(t *testing.T) {
 }
 
 func TestApplyLocalRefreshFixesMergesCNAMEIntoExistingLocalHost(t *testing.T) {
-	parser, cfg, paths, localFile := newLocalRefreshFixture(t, ""+
+	cfg, paths, localFile := newLocalRefreshFixture(t, ""+
 		"Host old01\n"+
 		"  HostName old01.example.com\n"+
 		"\n"+
 		"Host new01\n"+
 		"  HostName new01.example.com\n")
-	hosts, err := inventoryHosts(parser, cfg, paths)
+	hosts, err := inventoryHosts(cfg, paths)
 	if err != nil {
 		t.Fatalf("inventoryHosts: %v", err)
 	}
 	old := findLocalRefreshTestHost(t, hosts, "old01")
 	target := findLocalRefreshTestHost(t, hosts, "new01")
 
-	applied, err := applyLocalRefreshFixes(parser, paths, []localRefreshFinding{{
+	applied, err := applyLocalRefreshFixes(paths, []localRefreshFinding{{
 		Host:   old.Host,
 		Group:  "local/lab",
 		Issue:  "cname-rename",
@@ -226,13 +226,13 @@ func TestApplyLocalRefreshFixesMergesCNAMEIntoExistingLocalHost(t *testing.T) {
 }
 
 func TestVisitLocalRefreshFindingsDoesNotEmitStaleFixForDuplicateBlock(t *testing.T) {
-	parser, cfg, paths, _ := newLocalRefreshFixture(t, ""+
+	cfg, paths, _ := newLocalRefreshFixture(t, ""+
 		"Host edge01\n"+
 		"  HostName edge01-primary.example.com\n"+
 		"\n"+
 		"Host edge01\n"+
 		"  HostName edge01-duplicate.example.com\n")
-	hosts, err := inventoryHosts(parser, cfg, paths)
+	hosts, err := inventoryHosts(cfg, paths)
 	if err != nil {
 		t.Fatalf("inventoryHosts: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestVisitLocalRefreshFindingsDoesNotEmitStaleFixForDuplicateBlock(t *testin
 	}
 }
 
-func newLocalRefreshFixture(t *testing.T, localContent string) (*sshconfig.Parser, *config.Config, *config.Paths, string) {
+func newLocalRefreshFixture(t *testing.T, localContent string) (*config.Config, *config.Paths, string) {
 	t.Helper()
 	tmp := t.TempDir()
 	sshDir := filepath.Join(tmp, ".ssh")
@@ -330,7 +330,7 @@ func newLocalRefreshFixture(t *testing.T, localContent string) (*sshconfig.Parse
 		t.Fatal(err)
 	}
 	localFile := localProviderYAMLPath(cfg, paths)
-	return parser, cfg, paths, localFile
+	return cfg, paths, localFile
 }
 
 func findLocalRefreshTestHost(t *testing.T, hosts []*sshconfig.HostEntry, name string) *sshconfig.HostEntry {

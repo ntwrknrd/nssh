@@ -56,7 +56,7 @@ func runLocalRefresh() error {
 	if err != nil {
 		return err
 	}
-	hosts, err := inventoryHosts(nil, cfg, config.DefaultPaths())
+	hosts, err := inventoryHosts(cfg, config.DefaultPaths())
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func runLocalRefresh() error {
 	}
 
 	ui.SubSection("Applying")
-	applied, err := applyLocalRefreshFixes(nil, config.DefaultPaths(), selected)
+	applied, err := applyLocalRefreshFixes(config.DefaultPaths(), selected)
 	if err != nil {
 		return err
 	}
@@ -239,7 +239,7 @@ func selectLocalRefreshFixes(findings []localRefreshFinding) ([]localRefreshFind
 	return selected, nil
 }
 
-func applyLocalRefreshFixes(parser *sshconfig.Parser, paths *config.Paths, findings []localRefreshFinding) (int, error) {
+func applyLocalRefreshFixes(paths *config.Paths, findings []localRefreshFinding) (int, error) {
 	if paths == nil {
 		paths = config.DefaultPaths()
 	}
@@ -297,64 +297,6 @@ func applyLocalRefreshFixes(parser *sshconfig.Parser, paths *config.Paths, findi
 		}
 	}
 	return applied, nil
-}
-
-func renameLocalRefreshHost(host *sshconfig.HostEntry, newID, cnameTarget string) {
-	if strings.TrimSpace(newID) == "" {
-		newID = host.Host
-	}
-	if !strings.EqualFold(newID, host.Host) {
-		setLocalRefreshHostPatterns(host, append([]string{newID}, hostPatterns(host)...))
-		host.Host = newID
-	}
-	upsertDirective(host, "HostName", cnameTarget)
-	host.HostName = cnameTarget
-	host.Properties["hostname"] = cnameTarget
-}
-
-func addLocalRefreshHostAlias(host *sshconfig.HostEntry, alias string) {
-	if strings.TrimSpace(alias) == "" {
-		return
-	}
-	setLocalRefreshHostPatterns(host, append(hostPatterns(host), alias))
-}
-
-func setLocalRefreshHostPatterns(host *sshconfig.HostEntry, patterns []string) {
-	patterns = uniqueHostPatterns(patterns)
-	for i, line := range host.Lines {
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(line)), "host ") {
-			host.Lines[i] = fmt.Sprintf("Host %s\n", strings.Join(patterns, " "))
-			host.Patterns = patterns
-			return
-		}
-	}
-	host.Lines = append([]string{fmt.Sprintf("Host %s\n", strings.Join(patterns, " "))}, host.Lines...)
-	host.Patterns = patterns
-}
-
-func removeHostEntryByLines(hosts []*sshconfig.HostEntry, lines []string) []*sshconfig.HostEntry {
-	removed := false
-	result := make([]*sshconfig.HostEntry, 0, len(hosts))
-	for _, host := range hosts {
-		if !removed && linesEqual(host.Lines, lines) {
-			removed = true
-			continue
-		}
-		result = append(result, host)
-	}
-	return result
-}
-
-func linesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func localHostPatternIndex(hosts []*sshconfig.HostEntry, cfg *config.Config, paths *config.Paths, index map[string]*inventory.HostInfo) map[string]*sshconfig.HostEntry {

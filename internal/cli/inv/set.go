@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -204,7 +203,7 @@ func promptGroupAuthPatchWithPrompter(cfg *config.Config, group string, prompter
 		{Label: "Password", Value: config.AuthModePassword},
 		{Label: "SSH key", Value: config.AuthModeKey},
 		{Label: "No stored credential", Value: "none"},
-	}, true)
+	})
 	if err != nil {
 		return inventoryAuthPatch{}, err
 	}
@@ -353,11 +352,10 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 	if err := authPatch.Validate(cfg); err != nil {
 		return err
 	}
-	var parser *sshconfig.Parser
 	paths := config.DefaultPaths()
 	pendingCreatedGroup := ""
 	if group != "" || hostname != "" || len(aliases) > 0 || user != "" || portSet || !authPatch.HasChange() {
-		existing, _, err := findInventoryHostWithLocation(parser, cfg, paths, host)
+		existing, err := findInventoryHost(cfg, paths, host)
 		if err != nil {
 			return err
 		}
@@ -384,7 +382,7 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 					return err
 				}
 				host = patch.Host
-				existing, _, err = findInventoryHostWithLocation(parser, cfg, paths, host)
+				existing, err = findInventoryHost(cfg, paths, host)
 				if err != nil {
 					return err
 				}
@@ -393,7 +391,7 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 				}
 			}
 			groupPrompt := promptInventoryGroup
-			if summaries, err := loadInventoryGroupSummaries(cfg, parser, paths); err == nil {
+			if summaries, err := loadInventoryGroupSummaries(cfg, paths); err == nil {
 				options := inventoryGroupSelectOptions(summaries, patch.Host)
 				groupPrompt = func(groups []string) (string, error) {
 					return promptInventoryGroupOptions(inventoryGroupSelectOptionsForNames(groups, options))
@@ -411,7 +409,7 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 			}
 			patch.Group = resolvedGroup
 			if interactiveAdd {
-				proxyHosts, listErr := inventoryProxyHostNames(parser, cfg, paths, patch.Host)
+				proxyHosts, listErr := inventoryProxyHostNames(cfg, paths, patch.Host)
 				if listErr != nil {
 					return listErr
 				}
@@ -476,7 +474,7 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 			}
 			break
 		}
-		if err := upsertLocalHost(parser, cfg, paths, patch); err != nil {
+		if err := upsertLocalHost(cfg, paths, patch); err != nil {
 			return err
 		}
 		switch {
@@ -500,11 +498,11 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 			stopAgentAfterInventoryAuthMutation()
 		}
 		if interactiveAdd {
-			printLocalWrittenHostConfig(parser, cfg, paths, patch.Host)
+			printLocalWrittenHostConfig(cfg, paths, patch.Host)
 		}
 	}
 	if authPatch.HasChange() {
-		if err := applyInventoryAuthPatch(parser, cfg, config.DefaultPaths(), host, authPatch); err != nil {
+		if err := applyInventoryAuthPatch(cfg, config.DefaultPaths(), host, authPatch); err != nil {
 			return err
 		}
 		if pendingCreatedGroup != "" {

@@ -124,7 +124,7 @@ var newCredentialRegistry = func(cfg *config.Config) (credentialRegistry, error)
 
 var resolveLocalHostProxy = connect.ResolveHostForConnect
 
-func upsertLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, patch hostPatch) error {
+func upsertLocalHost(cfg *config.Config, paths *config.Paths, patch hostPatch) error {
 	return upsertLocalHostYAML(cfg, paths, patch)
 }
 
@@ -142,7 +142,7 @@ func upsertLocalHostYAML(cfg *config.Config, paths *config.Paths, patch hostPatc
 		return err
 	}
 
-	existing, _, err := findInventoryHostWithLocation(nil, cfg, paths, patch.Host)
+	existing, err := findInventoryHost(cfg, paths, patch.Host)
 	if err != nil {
 		return err
 	}
@@ -380,26 +380,24 @@ func defaultHostNameForGroup(cfg *config.Config, host, group string) string {
 	return host
 }
 
-func promptInputWithBack(prompter localHostAddPrompter, title, defaultValue string, allowBack bool) (string, error) {
+func promptInputWithBack(prompter localHostAddPrompter, title, defaultValue string) (string, error) {
 	value, err := prompter.InputWithDefault(title, defaultValue)
 	if err != nil {
 		return "", err
 	}
-	if allowBack && strings.TrimSpace(value) == promptBackInput {
+	if strings.TrimSpace(value) == promptBackInput {
 		return "", errPromptBack
 	}
 	return value, nil
 }
 
-func promptSelectWithBack(prompter localHostAddPrompter, title string, options []ui.SelectOption, allowBack bool) (string, error) {
-	if allowBack {
-		options = append(append([]ui.SelectOption(nil), options...), ui.SelectOption{Label: "Back", Value: promptBackValue})
-	}
+func promptSelectWithBack(prompter localHostAddPrompter, title string, options []ui.SelectOption) (string, error) {
+	options = append(append([]ui.SelectOption(nil), options...), ui.SelectOption{Label: "Back", Value: promptBackValue})
 	selected, err := prompter.Select(title, options)
 	if err != nil {
 		return "", err
 	}
-	if allowBack && selected == promptBackValue {
+	if selected == promptBackValue {
 		return "", errPromptBack
 	}
 	return selected, nil
@@ -422,7 +420,7 @@ func promptLocalHostHost(patch hostPatch, prompter localHostAddPrompter) (hostPa
 		prompter = uiLocalHostAddPrompter{}
 	}
 	hostDefault := strings.TrimSpace(patch.Host)
-	host, err := promptInputWithBack(prompter, "Host", hostDefault, true)
+	host, err := promptInputWithBack(prompter, "Host", hostDefault)
 	if err != nil {
 		return patch, err
 	}
@@ -458,7 +456,7 @@ func promptLocalHostConnectionDetailsWithProxyHosts(cfg *config.Config, patch ho
 			if patch.PortSet && patch.Port > 0 {
 				portDefault = strconv.Itoa(patch.Port)
 			}
-			portValue, err := promptInputWithBack(prompter, "Port", portDefault, true)
+			portValue, err := promptInputWithBack(prompter, "Port", portDefault)
 			if errors.Is(err, errPromptBack) {
 				return patch, err
 			}
@@ -481,7 +479,7 @@ func promptLocalHostConnectionDetailsWithProxyHosts(cfg *config.Config, patch ho
 			proxyChoice, err := promptSelectWithBack(prompter, "Enable SSH proxy?", []ui.SelectOption{
 				{Label: "No", Value: "no"},
 				{Label: "Yes", Value: "yes"},
-			}, true)
+			})
 			if errors.Is(err, errPromptBack) {
 				step = stepPort
 				continue
@@ -515,7 +513,7 @@ func promptLocalHostConnectionDetailsWithProxyHosts(cfg *config.Config, patch ho
 					{Label: "Public key", Value: config.AuthModeKey},
 				}
 			}
-			authMode, err := promptSelectWithBack(prompter, "Authentication", authOptions, true)
+			authMode, err := promptSelectWithBack(prompter, "Authentication", authOptions)
 			if errors.Is(err, errPromptBack) {
 				step = stepProxy
 				continue
@@ -614,7 +612,7 @@ func promptLocalHostUser(cfg *config.Config, patch *hostPatch, prompter localHos
 	if userDefault == "" {
 		userDefault = defaultUserForGroup(cfg, patch.Group)
 	}
-	user, err := promptInputWithBack(prompter, "User", userDefault, true)
+	user, err := promptInputWithBack(prompter, "User", userDefault)
 	if err != nil {
 		return err
 	}
@@ -659,7 +657,7 @@ func promptCredentialSource(cfg *config.Config, group, host string, prompter loc
 			ui.SelectOption{Label: "Set host stored credential", Value: "host"},
 			ui.SelectOption{Label: "No stored credential", Value: "none"},
 		)
-		selected, err := promptSelectWithBack(prompter, "Credential source", options, true)
+		selected, err := promptSelectWithBack(prompter, "Credential source", options)
 		if err != nil {
 			return config.InventoryAuthConfig{}, "", err
 		}
@@ -702,7 +700,7 @@ func promptStoredCredentialAuth(cfg *config.Config, target string, groupTarget b
 		return config.InventoryAuthConfig{}, fmt.Errorf("no credential providers configured")
 	}
 	for {
-		provider, err := promptSelectWithBack(prompter, "Credential provider", providers, true)
+		provider, err := promptSelectWithBack(prompter, "Credential provider", providers)
 		if err != nil {
 			return config.InventoryAuthConfig{}, err
 		}
@@ -761,7 +759,7 @@ func promptPasswordRef(cfg *config.Config, provider, target string, groupTarget 
 			options = append(options, ui.SelectOption{Label: item.Label, Value: item.Ref})
 		}
 		options = append(options, ui.SelectOption{Label: "Manual password ref", Value: "__manual__"})
-		selected, err := promptSelectWithBack(prompter, "Credential item", options, true)
+		selected, err := promptSelectWithBack(prompter, "Credential item", options)
 		if err != nil {
 			return "", err
 		}
@@ -769,10 +767,10 @@ func promptPasswordRef(cfg *config.Config, provider, target string, groupTarget 
 			return selected, nil
 		}
 	}
-	return promptInputWithBack(prompter, credentialRefPromptTitle(cfg, provider, groupTarget), config.DefaultCredentialRef(provider, target, groupTarget), true)
+	return promptInputWithBack(prompter, credentialRefPromptTitle(cfg, provider), config.DefaultCredentialRef(provider, target, groupTarget))
 }
 
-func credentialRefPromptTitle(cfg *config.Config, provider string, groupTarget bool) string {
+func credentialRefPromptTitle(cfg *config.Config, provider string) string {
 	if cfg != nil {
 		if providerCfg, ok := cfg.Credential.Provider[provider]; ok {
 			switch providerCfg.Type {
@@ -883,33 +881,6 @@ func applyInteractiveHostAuthSelection(cfg *config.Config, patch hostPatch) bool
 	return true
 }
 
-func credentialSecret(provider credential.Provider, scope, name string) (*secret.Secret, error) {
-	record, err := credentialRecord(provider, scope, name)
-	if err != nil || record == nil {
-		return nil, err
-	}
-	return record.Secret, nil
-}
-
-func credentialRecord(provider credential.Provider, scope, name string) (*credential.Record, error) {
-	if provider == nil {
-		return nil, nil
-	}
-	var (
-		record *credential.Record
-		err    error
-	)
-	if scope == "host" {
-		record, err = provider.GetHost(name)
-	} else {
-		record, err = provider.GetGroup(name)
-	}
-	if err != nil || record == nil {
-		return nil, err
-	}
-	return record, nil
-}
-
 func promptInventoryGroup(groups []string) (string, error) {
 	options := make([]ui.SelectOption, 0, len(groups))
 	for _, group := range groups {
@@ -966,7 +937,7 @@ func normalizePromptedLocalGroup(group string) (string, error) {
 	return group, nil
 }
 
-func removeLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, hostName string) (bool, error) {
+func removeLocalHost(cfg *config.Config, paths *config.Paths, hostName string) (bool, error) {
 	if hostName == "" {
 		return false, fmt.Errorf("host is required")
 	}
@@ -979,7 +950,7 @@ func removeLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config
 	if err := cfg.Inventory.Validate(); err != nil {
 		return false, err
 	}
-	host, _, err := findInventoryHostWithLocation(nil, cfg, paths, hostName)
+	host, err := findInventoryHost(cfg, paths, hostName)
 	if err != nil {
 		return false, err
 	}
@@ -996,7 +967,7 @@ func removeLocalHost(parser *sshconfig.Parser, cfg *config.Config, paths *config
 	return true, saveLocalProviderInventory(cfg, paths)
 }
 
-func importLocalCSV(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, csvPath, group string) (*importResult, error) {
+func importLocalCSV(cfg *config.Config, paths *config.Paths, csvPath, group string) (*importResult, error) {
 	if csvPath == "" {
 		return nil, fmt.Errorf("CSV file is required")
 	}
@@ -1062,7 +1033,7 @@ func importLocalCSV(parser *sshconfig.Parser, cfg *config.Config, paths *config.
 			patch.Port = port
 			patch.PortSet = true
 		}
-		if err := upsertLocalHost(parser, cfg, paths, patch); err != nil {
+		if err := upsertLocalHost(cfg, paths, patch); err != nil {
 			result.Failed++
 			result.Errors = append(result.Errors, fmt.Sprintf("line %d host %s: %v", line, patch.Host, err))
 			continue
@@ -1097,8 +1068,8 @@ func localProviderOwnerLabel(paths *config.Paths) string {
 	return "Inventory Filepath: " + localProviderYAMLPath(config.DefaultConfig(), paths)
 }
 
-func localWrittenHostConfig(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, host string) (string, error) {
-	entry, _, err := findInventoryHostWithLocation(nil, cfg, paths, host)
+func localWrittenHostConfig(cfg *config.Config, paths *config.Paths, host string) (string, error) {
+	entry, err := findInventoryHost(cfg, paths, host)
 	if err != nil {
 		return "", err
 	}
@@ -1122,8 +1093,8 @@ func localWrittenHostConfig(parser *sshconfig.Parser, cfg *config.Config, paths 
 	return text, nil
 }
 
-func printLocalWrittenHostConfig(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, host string) {
-	stanza, err := localWrittenHostConfig(parser, cfg, paths, host)
+func printLocalWrittenHostConfig(cfg *config.Config, paths *config.Paths, host string) {
+	stanza, err := localWrittenHostConfig(cfg, paths, host)
 	if err != nil {
 		ui.Warning("Failed to print written config: %v", err)
 		return
@@ -1359,7 +1330,7 @@ func localHostProbeEntry(paths *config.Paths, patch hostPatch, proxyCommand, use
 	return draft
 }
 
-func inventoryHosts(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths) ([]*sshconfig.HostEntry, error) {
+func inventoryHosts(cfg *config.Config, paths *config.Paths) ([]*sshconfig.HostEntry, error) {
 	hosts := make([]*sshconfig.HostEntry, 0)
 	if cfg == nil {
 		cfg = config.DefaultConfig()
@@ -1400,8 +1371,8 @@ func inventoryHosts(parser *sshconfig.Parser, cfg *config.Config, paths *config.
 	return hosts, nil
 }
 
-func inventoryProxyHostNames(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, exclude string) ([]string, error) {
-	hosts, err := inventoryHosts(parser, cfg, paths)
+func inventoryProxyHostNames(cfg *config.Config, paths *config.Paths, exclude string) ([]string, error) {
+	hosts, err := inventoryHosts(cfg, paths)
 	if err != nil {
 		return nil, err
 	}
@@ -1426,15 +1397,12 @@ func inventoryProxyHostNames(parser *sshconfig.Parser, cfg *config.Config, paths
 	return names, nil
 }
 
-func findInventoryHostWithLocation(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, pattern string) (*sshconfig.HostEntry, *sshconfig.ParsedConfig, error) {
-	hosts, err := inventoryHosts(nil, cfg, paths)
+func findInventoryHost(cfg *config.Config, paths *config.Paths, pattern string) (*sshconfig.HostEntry, error) {
+	hosts, err := inventoryHosts(cfg, paths)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if host := sshconfig.FindHostByPattern(hosts, pattern); host != nil {
-		return host, &sshconfig.ParsedConfig{Path: host.SourceFile, Hosts: hosts}, nil
-	}
-	return nil, nil, nil
+	return sshconfig.FindHostByPattern(hosts, pattern), nil
 }
 
 func hostEntryFromInventoryHost(cfg *config.Config, paths *config.Paths, providerName, name string, hostCfg config.InventoryHostConfig) *sshconfig.HostEntry {
@@ -1758,34 +1726,6 @@ func setLocalHostCompatibilityFloor(cfg *config.SSHCompatibility, fix compat.Flo
 	}
 }
 
-func inventoryFiles(cfg *config.Config, paths *config.Paths) ([]string, error) {
-	if cfg == nil {
-		cfg = config.DefaultConfig()
-	}
-	if paths == nil {
-		paths = config.DefaultPaths()
-	}
-	if err := cfg.Inventory.Validate(); err != nil {
-		return nil, err
-	}
-	seen := make(map[string]bool)
-	files := make([]string, 0, 1+len(cfg.Inventory.Provider))
-	add := func(path string) {
-		clean := filepath.Clean(path)
-		if seen[clean] {
-			return
-		}
-		seen[clean] = true
-		files = append(files, clean)
-	}
-	add(localFilePath(paths, inventory.LocalProviderIncludeFile()))
-	for name := range cfg.Inventory.Provider {
-		add(localFilePath(paths, inventory.ProviderIncludeFile(name)))
-	}
-	sort.Strings(files)
-	return files, nil
-}
-
 func metadataForHost(host *sshconfig.HostEntry, cfg *config.Config, paths *config.Paths, index map[string]*inventory.HostInfo) hostMetadata {
 	if host == nil {
 		return hostMetadata{Owner: "local"}
@@ -1850,20 +1790,6 @@ func samePath(a, b string) bool {
 	return filepath.Clean(a) == filepath.Clean(b)
 }
 
-func applyHostPatch(host *sshconfig.HostEntry, patch hostPatch) {
-	deleteDirective(host, "User")
-	delete(host.Properties, "user")
-	if patch.HostName != "" {
-		upsertDirective(host, "HostName", patch.HostName)
-		host.HostName = patch.HostName
-		host.Properties["hostname"] = patch.HostName
-	}
-	if patch.PortSet {
-		upsertDirective(host, "Port", fmt.Sprintf("%d", patch.Port))
-		host.Properties["port"] = fmt.Sprintf("%d", patch.Port)
-	}
-}
-
 func deleteDirective(host *sshconfig.HostEntry, key string) {
 	if host == nil {
 		return
@@ -1907,13 +1833,6 @@ func cloneHostEntry(host *sshconfig.HostEntry) *sshconfig.HostEntry {
 		clone.Properties[key] = value
 	}
 	return &clone
-}
-
-func writeParsedConfig(parser *sshconfig.Parser, parsed *sshconfig.ParsedConfig, paths *config.Paths) error {
-	if err := backupFile(parsed.Path, paths.BackupDir); err != nil {
-		return err
-	}
-	return parser.WriteFile(parsed)
 }
 
 func backupFile(srcPath, backupDir string) error {

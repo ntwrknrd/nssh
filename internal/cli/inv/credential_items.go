@@ -93,16 +93,6 @@ func listOnePasswordCredentialItems(providerCfg config.CredentialProviderConfig)
 	return items, nil
 }
 
-func nonEmptyStrings(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if value != "" {
-			out = append(out, value)
-		}
-	}
-	return out
-}
-
 func sortCredentialItems(items []credentialItem) {
 	sort.Slice(items, func(i, j int) bool {
 		return strings.ToLower(items[i].Label) < strings.ToLower(items[j].Label)

@@ -498,29 +498,6 @@ func credentialProviderTable(cfg CredentialProviderConfig) map[string]any {
 	return table
 }
 
-func providerDetailTable(cfg CredentialProviderDetailConfig) map[string]any {
-	table := make(map[string]any)
-	addString(table, "account", cfg.Account)
-	addString(table, "vault", cfg.Vault)
-	addString(table, "command", cfg.Command)
-	addString(table, "prefix", cfg.Prefix)
-	addString(table, "file", cfg.File)
-	addString(table, "age_key_file", cfg.AgeKeyFile)
-	if cfg.WarmSession {
-		table["warm_session"] = cfg.WarmSession
-	}
-	if cfg.Keepalive {
-		table["keepalive"] = cfg.Keepalive
-	}
-	if cfg.KeepaliveInterval.Duration() > 0 {
-		table["keepalive_interval"] = cfg.KeepaliveInterval.Duration().String()
-	}
-	if cfg.KeepaliveTimeout.Duration() > 0 {
-		table["keepalive_timeout"] = cfg.KeepaliveTimeout.Duration().String()
-	}
-	return table
-}
-
 func groupTable(cfg GroupConfig) map[string]any {
 	table := make(map[string]any)
 	if len(cfg.DomainSuffix) > 0 {

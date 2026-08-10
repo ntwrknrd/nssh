@@ -22,6 +22,12 @@ linters:
       disabled-checks:
         - commentFormatting
         - hugeParam
+      settings:
+        rangeValCopy:
+          # The config and CLI loops iterate 144-272 byte structs on cold
+          # paths, where the copy costs nothing. Keep the check for structs
+          # large enough to matter.
+          sizeThreshold: 512
     misspell:
       locale: US
   exclusions:

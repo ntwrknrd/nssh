@@ -5,7 +5,6 @@ import (
 
 	runtimeagent "github.com/ntwrknrd/nssh/internal/agent"
 	"github.com/ntwrknrd/nssh/internal/config"
-	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
 
@@ -68,7 +67,7 @@ func (p inventoryAuthPatch) Validate(cfg *config.Config) error {
 	return nil
 }
 
-func applyInventoryAuthPatch(parser *sshconfig.Parser, cfg *config.Config, paths *config.Paths, host string, patch inventoryAuthPatch) error {
+func applyInventoryAuthPatch(cfg *config.Config, paths *config.Paths, host string, patch inventoryAuthPatch) error {
 	if !patch.HasChange() {
 		return nil
 	}
@@ -81,7 +80,7 @@ func applyInventoryAuthPatch(parser *sshconfig.Parser, cfg *config.Config, paths
 	if paths == nil {
 		paths = config.DefaultPaths()
 	}
-	existing, _, err := findInventoryHostWithLocation(parser, cfg, paths, host)
+	existing, err := findInventoryHost(cfg, paths, host)
 	if err != nil {
 		return err
 	}
@@ -231,11 +230,5 @@ func printInventoryDisplaySections(sections []inventoryDisplaySection) {
 		for _, row := range section.Rows {
 			ui.PrintKeyValue(row.Label, row.Value)
 		}
-	}
-}
-
-func printInventoryDisplayRows(rows []inventoryDisplayRow) {
-	for _, row := range rows {
-		ui.PrintKeyValue(row.Label, row.Value)
 	}
 }

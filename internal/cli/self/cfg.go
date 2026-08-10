@@ -58,7 +58,7 @@ func runCfg(edit, pathsOnly, source bool) error {
 	}
 
 	// Default: print effective config
-	return printEffectiveConfig(paths)
+	return printEffectiveConfig()
 }
 
 func printSourceConfig(paths *config.Paths) error {
@@ -130,7 +130,7 @@ func openInEditor(path string) error {
 	return cmd.Run()
 }
 
-func printEffectiveConfig(paths *config.Paths) error {
+func printEffectiveConfig() error {
 
 	cfg, err := config.LoadDefault()
 	if err != nil {

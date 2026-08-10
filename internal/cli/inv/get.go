@@ -38,7 +38,7 @@ func runGet(hostName string) error {
 	if err != nil {
 		return err
 	}
-	host, _, err := findInventoryHostWithLocation(nil, cfg, config.DefaultPaths(), hostName)
+	host, err := findInventoryHost(cfg, config.DefaultPaths(), hostName)
 	if err != nil {
 		return err
 	}

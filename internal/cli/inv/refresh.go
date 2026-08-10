@@ -81,10 +81,6 @@ func validateRefreshTarget(cfg *config.Config, target string) error {
 	return fmt.Errorf("refresh target %q is not \"local\" or a configured provider", target)
 }
 
-func refreshProviderCaches(cfg *config.Config, providerName string) map[string]string {
-	return refreshProviderCachesWithProgress(cfg, providerName, nil)
-}
-
 func refreshProviderCachesWithProgress(cfg *config.Config, providerName string, progress func(string)) map[string]string {
 	results := make(map[string]string)
 	now := time.Now().UTC()

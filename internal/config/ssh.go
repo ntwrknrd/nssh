@@ -266,20 +266,6 @@ func cloneStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-func mergeStringMap(base, override map[string]string) map[string]string {
-	out := cloneStringMap(base)
-	if len(override) == 0 {
-		return out
-	}
-	if out == nil {
-		out = make(map[string]string, len(override))
-	}
-	for key, value := range override {
-		out[key] = value
-	}
-	return out
-}
-
 func cloneSSHOptions(in SSHOptions) SSHOptions {
 	if len(in) == 0 {
 		return nil

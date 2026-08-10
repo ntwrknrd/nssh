@@ -102,7 +102,7 @@ func buildHostCatalog(cfg *config.Config, states []*inventory.ProviderState) (*H
 			if host == nil {
 				continue
 			}
-			data := resolvedHostFromState(cfg, state, provider, host, cat)
+			data := resolvedHostFromState(cfg, state, provider, host)
 			cat.add(data)
 		}
 	}
@@ -145,7 +145,7 @@ func catalogGroupID(providerName, group string) string {
 	return config.FormatInventoryGroupID(providerName, group)
 }
 
-func resolvedHostFromState(cfg *config.Config, state *inventory.ProviderState, provider config.InventoryProviderConfig, host *inventory.ProviderHost, cat *HostCatalog) *ResolvedHostData {
+func resolvedHostFromState(cfg *config.Config, state *inventory.ProviderState, provider config.InventoryProviderConfig, host *inventory.ProviderHost) *ResolvedHostData {
 	providerName := ""
 	if state != nil {
 		providerName = state.Provider

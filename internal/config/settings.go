@@ -582,10 +582,6 @@ func validateInventoryAuthProvider(scope string, auth InventoryAuthConfig, crede
 	return nil
 }
 
-func legacySyncSourcesError() error {
-	return fmt.Errorf("sync.sources is no longer supported; configure inventory.provider instead")
-}
-
 // Validate checks AgentConfig values are within acceptable bounds.
 func (c *AgentConfig) Validate() error {
 	idleTimeout := c.IdleTimeout.Duration()

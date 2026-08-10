@@ -16,12 +16,6 @@ func passwordPromptInjectionEnabled() bool {
 	return false
 }
 
-func (c *Connector) hasPasswordSource() bool {
-	c.passwordMu.Lock()
-	defer c.passwordMu.Unlock()
-	return c.password != nil || c.passwordResolver != nil
-}
-
 func (c *Connector) resolvePassword(ctx context.Context) (*secret.Secret, error) {
 	c.passwordMu.Lock()
 	if c.password != nil {

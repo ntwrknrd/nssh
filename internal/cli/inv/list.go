@@ -48,7 +48,7 @@ func runList(selectPattern string) error {
 	if err != nil {
 		return err
 	}
-	hosts, err := inventoryHosts(nil, cfg, config.DefaultPaths())
+	hosts, err := inventoryHosts(cfg, config.DefaultPaths())
 	if err != nil {
 		return err
 	}
@@ -117,12 +117,12 @@ func filterInventoryHosts(
 	return filtered, nil
 }
 
-func loadInventoryGroupSummaries(cfg *config.Config, parser *sshconfig.Parser, paths *config.Paths) ([]inventoryGroupSummary, error) {
+func loadInventoryGroupSummaries(cfg *config.Config, paths *config.Paths) ([]inventoryGroupSummary, error) {
 	index, err := inventory.BuildProviderIndex()
 	if err != nil {
 		return nil, err
 	}
-	hosts, err := inventoryHosts(parser, cfg, paths)
+	hosts, err := inventoryHosts(cfg, paths)
 	if err != nil {
 		return nil, err
 	}

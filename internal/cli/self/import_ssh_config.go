@@ -509,10 +509,6 @@ func readTextIfExists(path string) (string, error) {
 	return string(content), nil
 }
 
-func (i *sshConfigImporter) mergedLocalProvider(path string) (config.InventoryProviderConfig, error) {
-	return i.mergedLocalProviderWithHosts(path, i.local.Groups, i.local.Hosts)
-}
-
 func (i *sshConfigImporter) marshalLocalInventoryHosts(oldText string, hosts map[string]config.InventoryHostConfig) (string, error) {
 	added := make(map[string]config.InventoryHostConfig)
 	existing, ok, err := loadLocalProviderOnly(i.inventoryTarget)
@@ -908,7 +904,7 @@ func hostMatchesDomainSuffix(hostname, suffix string) bool {
 	return strings.HasSuffix(hostname, suffix)
 }
 
-func importSSHConfigText(r io.Reader, group string) (string, []string, error) {
+func importSSHConfigText(r io.Reader) (string, []string, error) {
 	blocks, warnings, err := parseSSHImportBlocks(r)
 	if err != nil {
 		return "", warnings, err
@@ -1058,7 +1054,7 @@ func cleanSSHValue(value string) string {
 
 func applySSHImportHostDirectives(host *config.InventoryHostConfig, directives []sshImportDirective) {
 	for _, directive := range directives {
-		if strings.ToLower(directive.Key) == "port" {
+		if strings.EqualFold(directive.Key, "port") {
 			if n, err := strconv.Atoi(directive.Value); err == nil {
 				host.Port = n
 			}

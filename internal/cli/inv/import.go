@@ -28,7 +28,7 @@ func runImport(path, group string) error {
 	if err != nil {
 		return err
 	}
-	result, err := importLocalCSV(nil, cfg, config.DefaultPaths(), path, group)
+	result, err := importLocalCSV(cfg, config.DefaultPaths(), path, group)
 	if err != nil {
 		return err
 	}

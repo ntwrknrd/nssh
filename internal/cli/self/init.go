@@ -102,10 +102,6 @@ func runInit(opts InitOptions) error {
 	paths := config.DefaultPaths()
 	initOutcome := initConfigOutcome{result: initConfigContinue}
 
-	// Header (skip in quiet mode)
-	if !opts.Quiet {
-	}
-
 	if opts.DryRun {
 		ui.Info("Dry run mode - no changes will be made")
 		fmt.Println()
@@ -255,10 +251,6 @@ func runInit(opts InitOptions) error {
 	// Show next steps for new users (skip in quiet mode)
 	if !opts.Quiet && finalStatus == ui.StatusSuccess {
 		showNextSteps(paths, initOutcome.inventoryProviders)
-	}
-
-	// Footer (skip in quiet mode)
-	if !opts.Quiet {
 	}
 
 	return nil

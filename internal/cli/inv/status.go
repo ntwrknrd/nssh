@@ -100,7 +100,7 @@ func statusProviderSnapshotForName(
 }
 
 func writeLocalFindings(b *strings.Builder, cfg *config.Config, paths *config.Paths) error {
-	hosts, err := inventoryHosts(nil, cfg, paths)
+	hosts, err := inventoryHosts(cfg, paths)
 	if err != nil {
 		return err
 	}
