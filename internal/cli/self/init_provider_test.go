@@ -95,6 +95,30 @@ func TestApplyInitPlanBacksUpExistingConfig(t *testing.T) {
 
 func TestApplyCredentialProviderSetupMergesExistingConfig(t *testing.T) {
 	tmp := t.TempDir()
+	// The default prompter answers create the age key and starter SOPS file
+	// at their default HOME-derived paths; keep everything inside tmp and
+	// stub the age-keygen/sops invocations so the test never touches the
+	// real home directory or requires the binaries.
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("SOPS_AGE_KEY_FILE", "")
+	oldRun := runSelfInitCommand
+	defer func() { runSelfInitCommand = oldRun }()
+	runSelfInitCommand = func(name string, _ []byte, args ...string) ([]byte, error) {
+		for i := 0; i < len(args)-1; i++ {
+			if args[i] != "-o" && args[i] != "--output" {
+				continue
+			}
+			content := "encrypted: true\n"
+			if name == "age-keygen" {
+				content = "# public key: age1testrecipient\nAGE-SECRET-KEY-test\n"
+			}
+			if err := os.WriteFile(args[i+1], []byte(content), 0600); err != nil {
+				return nil, err
+			}
+		}
+		return nil, nil
+	}
 	paths := &config.Paths{
 		ConfigDir:  filepath.Join(tmp, "config", "nssh"),
 		ConfigFile: filepath.Join(tmp, "config", "nssh", "config.yaml"),

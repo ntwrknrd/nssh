@@ -4,6 +4,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/creack/pty"
@@ -40,8 +42,10 @@ func TestStartPTYInheritsCurrentTerminalSizeBeforeChildRuns(t *testing.T) {
 	}
 	defer func() { _ = childPTY.Close() }()
 
+	// Linux reports EIO instead of EOF when reading a pty master after the
+	// child exits and the slave side is closed.
 	out, err := io.ReadAll(childPTY)
-	if err != nil {
+	if err != nil && !errors.Is(err, syscall.EIO) {
 		t.Fatalf("read child pty: %v", err)
 	}
 	if err := cmd.Wait(); err != nil {

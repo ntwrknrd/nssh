@@ -33,7 +33,19 @@ func TestPrintSessionsOmitsSessionColumn(t *testing.T) {
 		}, "")
 	})
 
-	if strings.Contains(got, "Session") {
+	// Check the header row only: the Cast column truncates the temp path,
+	// which contains this test's name and therefore the word "Session".
+	header := ""
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "Last Updated") {
+			header = line
+			break
+		}
+	}
+	if header == "" {
+		t.Fatalf("log list table missing header row:\n%s", got)
+	}
+	if strings.Contains(header, "Session") {
 		t.Fatalf("log list table should not include a Session column:\n%s", got)
 	}
 	for _, want := range []string{"Last Updated", "Host", "Duration", "Cast"} {

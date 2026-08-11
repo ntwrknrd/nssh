@@ -108,24 +108,39 @@ func defaultExec(ctx context.Context, command Command) Result {
 	if command.Stdin != nil {
 		cmd.Stdin = command.Stdin
 	}
-	stdoutPipe, err := cmd.StdoutPipe()
+	// Manage the output pipes here instead of using StdoutPipe/StderrPipe:
+	// cmd.Wait closes those as soon as the process exits, racing the reader
+	// goroutines and dropping buffered output.
+	stdoutRead, stdoutWrite, err := os.Pipe()
 	if err != nil {
 		return Result{Err: err}
 	}
-	stderrPipe, err := cmd.StderrPipe()
+	stderrRead, stderrWrite, err := os.Pipe()
 	if err != nil {
+		_ = stdoutRead.Close()
+		_ = stdoutWrite.Close()
 		return Result{Err: err}
 	}
+	cmd.Stdout = stdoutWrite
+	cmd.Stderr = stderrWrite
 
 	var stdout, stderr bytes.Buffer
 	totalTimer := connector.StartTiming(connector.TimingSSHProcessTotal)
 	startTimer := connector.StartTiming(connector.TimingSSHProcessStart)
 	if err := cmd.Start(); err != nil {
+		_ = stdoutRead.Close()
+		_ = stdoutWrite.Close()
+		_ = stderrRead.Close()
+		_ = stderrWrite.Close()
 		startTimer.Emit()
 		totalTimer.Emit()
 		return Result{Err: err}
 	}
 	startTimer.Emit()
+	// The child holds duplicates of the write ends; close ours so the
+	// readers see EOF when the child exits.
+	_ = stdoutWrite.Close()
+	_ = stderrWrite.Close()
 
 	events := make(chan OutputEvent, 16)
 	readErrs := make(chan error, 2)
@@ -142,20 +157,30 @@ func defaultExec(ctx context.Context, command Command) Result {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		readErrs <- readOutputEvents(StreamStdout, stdoutPipe, &stdout, events)
+		readErrs <- readOutputEvents(StreamStdout, stdoutRead, &stdout, events)
 	}()
 	go func() {
 		defer wg.Done()
-		readErrs <- readOutputEvents(StreamStderr, stderrPipe, &stderr, events)
+		readErrs <- readOutputEvents(StreamStderr, stderrRead, &stderr, events)
 	}()
 
 	waitTimer := connector.StartTiming(connector.TimingSSHProcessWait)
 	err = cmd.Wait()
+	// Background children may inherit the write ends and never close them.
+	// Give the readers a moment to drain buffered output, then time out
+	// rather than waiting for those processes to exit.
+	deadline := time.Now().Add(200 * time.Millisecond)
+	_ = stdoutRead.SetReadDeadline(deadline)
+	_ = stderrRead.SetReadDeadline(deadline)
 	wg.Wait()
+	_ = stdoutRead.Close()
+	_ = stderrRead.Close()
 	close(events)
 	output := <-outputDone
 	for range 2 {
-		if readErr := <-readErrs; readErr != nil && err == nil && !errors.Is(readErr, os.ErrClosed) {
+		readErr := <-readErrs
+		if readErr != nil && err == nil &&
+			!errors.Is(readErr, os.ErrDeadlineExceeded) && !errors.Is(readErr, os.ErrClosed) {
 			err = readErr
 		}
 	}
