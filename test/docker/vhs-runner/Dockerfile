@@ -18,13 +18,10 @@ ARG VERSION=dev
 RUN go build -ldflags "-X main.version=${VERSION}" -o /bin/nssh ./cmd/nssh
 
 # Runtime image - VHS includes everything needed for recording
-FROM ghcr.io/charmbracelet/vhs:latest
+FROM ghcr.io/charmbracelet/vhs:latest@sha256:9d5fc3dc0c160b0fb1d2212baff07e6bdf3fa9438c504a3237484567302fcf93
 
 # Install additional runtime dependencies
 USER root
-# Fix VHS image sources.list which uses 'stable' instead of 'bookworm'
-RUN sed -i 's/stable/bookworm/g' /etc/apt/sources.list.d/*.sources 2>/dev/null || \
-    sed -i 's/stable/bookworm/g' /etc/apt/sources.list 2>/dev/null || true
 RUN apt-get update && apt-get install -y --no-install-recommends \
         openssh-client \
     && rm -rf /var/lib/apt/lists/*
