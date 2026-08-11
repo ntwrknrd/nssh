@@ -1,0 +1,15 @@
+$ nssh agent --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh agent [flags]                Manage nssh agent                        │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────╮
+│   reset                             Reset agent                              │
+│   status                            Show agent status                        │
+│   stop                              Stop agent                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose COUNT               Increase debug verbosity                 │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

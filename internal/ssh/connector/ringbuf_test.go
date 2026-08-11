@@ -9,15 +9,12 @@ func TestRingBuffer_Basic(t *testing.T) {
 	rb := NewRingBuffer(10)
 
 	// Empty buffer
-	if rb.Len() != 0 {
-		t.Errorf("expected len 0, got %d", rb.Len())
+	if got := rb.LinearBytes(); len(got) != 0 {
+		t.Errorf("expected len 0, got %d", len(got))
 	}
 
 	// Write some data
 	rb.Write([]byte("hello"))
-	if rb.Len() != 5 {
-		t.Errorf("expected len 5, got %d", rb.Len())
-	}
 
 	got := rb.LinearBytes()
 	if !bytes.Equal(got, []byte("hello")) {
@@ -30,9 +27,6 @@ func TestRingBuffer_Wrap(t *testing.T) {
 
 	// Fill buffer exactly
 	rb.Write([]byte("12345678"))
-	if rb.Len() != 8 {
-		t.Errorf("expected len 8, got %d", rb.Len())
-	}
 
 	got := rb.LinearBytes()
 	if !bytes.Equal(got, []byte("12345678")) {
@@ -75,10 +69,6 @@ func TestRingBuffer_Reset(t *testing.T) {
 
 	rb.Write([]byte("hello"))
 	rb.Reset()
-
-	if rb.Len() != 0 {
-		t.Errorf("expected len 0 after reset, got %d", rb.Len())
-	}
 
 	got := rb.LinearBytes()
 	if len(got) != 0 {

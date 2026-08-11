@@ -31,32 +31,6 @@ func TestMatchPasswordPrompt(t *testing.T) {
 	}
 }
 
-func TestMatchAuthFailure(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  bool
-	}{
-		{"permission denied", "Permission denied", true},
-		{"permission denied lowercase", "permission denied", true},
-		{"auth failed", "Authentication failed.", true},
-		{"try again", "Please try again", true},
-		{"access denied", "Access denied", true},
-		{"success message", "Welcome to Ubuntu", false},
-		{"password prompt", "Password: ", false},
-		{"empty", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := matchAuthFailure([]byte(tt.input))
-			if got != tt.want {
-				t.Errorf("matchAuthFailure(%q) = %v, want %v", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestMatchUnknownHost(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -106,15 +106,15 @@ func RenderStyledHelp(cmd *cobra.Command, cfg StyledHelpConfig) string {
 		sb.WriteString(commandsPanel)
 	}
 
-	// Options panel (local flags)
-	if optionsPanel := renderOptionsPanel(cmd, width); optionsPanel != "" {
+	// Flags panel (local flags)
+	if flagsPanel := renderFlagsPanel(cmd, width); flagsPanel != "" {
 		sb.WriteString("\n")
-		sb.WriteString(optionsPanel)
+		sb.WriteString(flagsPanel)
 	}
 
-	// Global Options panel (inherited flags)
+	// Global Flags panel (inherited flags)
 	if cfg.ShowGlobalFlags {
-		if globalPanel := renderGlobalOptionsPanel(cmd, width); globalPanel != "" {
+		if globalPanel := renderGlobalFlagsPanel(cmd, width); globalPanel != "" {
 			sb.WriteString("\n")
 			sb.WriteString(globalPanel)
 		}
@@ -124,16 +124,20 @@ func RenderStyledHelp(cmd *cobra.Command, cfg StyledHelpConfig) string {
 }
 
 // descriptionColumn is the fixed column where descriptions start (from content edge).
-// This ensures alignment between Usage and Options panels.
+// This ensures alignment between Usage and Flags panels.
 const descriptionColumn = 36
 
-// globalOptionNames defines flags that appear in Global Options (in display order).
-var globalOptionNames = []string{"explain", "help", "verbose", "version"}
+// UsageLinesAnnotation lets a command provide explicit usage lines for styled
+// help when Cobra's generic "[flags]" suffix obscures the actual command forms.
+const UsageLinesAnnotation = "nssh.usage-lines"
 
-// globalOptionFlags is a set for quick lookup.
-var globalOptionFlags = func() map[string]bool {
+// globalFlagNames defines flags that appear in Global Flags (in display order).
+var globalFlagNames = []string{"explain", "help", "verbose", "version"}
+
+// globalFlagSet is a set for quick lookup.
+var globalFlagSet = func() map[string]bool {
 	m := make(map[string]bool)
-	for _, name := range globalOptionNames {
+	for _, name := range globalFlagNames {
 		m[name] = true
 	}
 	return m
@@ -141,13 +145,14 @@ var globalOptionFlags = func() map[string]bool {
 
 // renderUsagePanel renders the Usage section panel.
 func renderUsagePanel(cmd *cobra.Command, width int) string {
-	// Build usage line
-	usageLine := cmd.UseLine()
-	short := cmd.Short
+	usageLines := []string{cmd.UseLine()}
+	if cmd.Annotations != nil {
+		if annotated := strings.TrimSpace(cmd.Annotations[UsageLinesAnnotation]); annotated != "" {
+			usageLines = strings.Split(annotated, "\n")
+		}
+	}
 
-	// Format: "  nssh ctx add [NAME]              Create new context"
-	content := formatUsageRow(usageLine, short, width-6, descriptionColumn)
-
+	content := formatUsageRows(usageLines, cmd.Short, width-6, descriptionColumn)
 	return renderPanel("Usage", content, width)
 }
 
@@ -203,14 +208,14 @@ func formatCommands(commands []*cobra.Command, width, descCol int) string {
 	return strings.Join(lines, "\n")
 }
 
-// renderOptionsPanel renders the Options panel with local flags only.
-func renderOptionsPanel(cmd *cobra.Command, width int) string {
+// renderFlagsPanel renders the Flags panel with local flags only.
+func renderFlagsPanel(cmd *cobra.Command, width int) string {
 	localFlags := cmd.LocalFlags()
 
-	// Filter out global option flags
+	// Filter out global flags.
 	var flags []*pflag.Flag
 	localFlags.VisitAll(func(f *pflag.Flag) {
-		if !globalOptionFlags[f.Name] {
+		if !globalFlagSet[f.Name] {
 			flags = append(flags, f)
 		}
 	})
@@ -220,23 +225,23 @@ func renderOptionsPanel(cmd *cobra.Command, width int) string {
 	}
 
 	content := formatFlags(flags, width-6, descriptionColumn)
-	return renderPanel("Options", content, width)
+	return renderPanel("Flags", content, width)
 }
 
-// renderGlobalOptionsPanel renders the Global Options panel with inherited flags.
-func renderGlobalOptionsPanel(cmd *cobra.Command, width int) string {
+// renderGlobalFlagsPanel renders the Global Flags panel with inherited flags.
+func renderGlobalFlagsPanel(cmd *cobra.Command, width int) string {
 	var flags []*pflag.Flag
 
-	// Add global option flags first (in defined order, if present)
-	for _, name := range globalOptionNames {
+	// Add global flags first (in defined order, if present).
+	for _, name := range globalFlagNames {
 		if f := cmd.Flags().Lookup(name); f != nil {
 			flags = append(flags, f)
 		}
 	}
 
-	// Add inherited flags (excluding global options already added)
+	// Add inherited flags, excluding global flags already added.
 	cmd.InheritedFlags().VisitAll(func(f *pflag.Flag) {
-		if !globalOptionFlags[f.Name] {
+		if !globalFlagSet[f.Name] {
 			flags = append(flags, f)
 		}
 	})
@@ -246,7 +251,7 @@ func renderGlobalOptionsPanel(cmd *cobra.Command, width int) string {
 	}
 
 	content := formatFlags(flags, width-6, descriptionColumn)
-	return renderPanel("Global Options", content, width)
+	return renderPanel("Global Flags", content, width)
 }
 
 // renderPanel renders content inside a styled panel box.
@@ -258,6 +263,13 @@ func renderPanel(title, content string, width int) string {
 func formatUsageRow(usage, description string, width, descCol int) string {
 	// descCol is where descriptions start (from content edge)
 	cmdCol := descCol - 2 // Account for leading "  "
+	fullCmdCol := width - 2
+	usageStyle := lipgloss.NewStyle().Foreground(ColorWhite)
+	descStyle := lipgloss.NewStyle().Foreground(ColorGray)
+
+	if len(usage) > cmdCol-1 && len(usage) <= fullCmdCol {
+		return fmt.Sprintf("  %s", usageStyle.Render(padRight(usage, fullCmdCol)))
+	}
 
 	// Truncate command if needed
 	if len(usage) > cmdCol-1 {
@@ -270,12 +282,21 @@ func formatUsageRow(usage, description string, width, descCol int) string {
 		description = description[:descWidth-3] + "..."
 	}
 
-	usageStyle := lipgloss.NewStyle().Foreground(ColorWhite)
-	descStyle := lipgloss.NewStyle().Foreground(ColorGray)
-
 	return fmt.Sprintf("  %s%s",
 		usageStyle.Render(padRight(usage, cmdCol)),
 		descStyle.Render(description))
+}
+
+func formatUsageRows(usages []string, description string, width, descCol int) string {
+	lines := make([]string, 0, len(usages))
+	for i, usage := range usages {
+		desc := ""
+		if i == 0 {
+			desc = description
+		}
+		lines = append(lines, formatUsageRow(strings.TrimSpace(usage), desc, width, descCol))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // formatFlags formats a slice of flags into aligned rows.

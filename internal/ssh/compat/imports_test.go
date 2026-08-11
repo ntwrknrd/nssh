@@ -10,7 +10,7 @@ import (
 
 // TestImportBoundaries verifies that SSH subsystem packages do not import forbidden packages.
 // Rules:
-// - internal/ssh/... must NOT import internal/cli, internal/agent, internal/session, or internal/vault packages
+// - internal/ssh/... must NOT import higher-level CLI, UI, recording, or agent packages
 func TestImportBoundaries(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -18,13 +18,13 @@ func TestImportBoundaries(t *testing.T) {
 		forbidden []string
 	}{
 		{
-			name: "ssh must not import cli/agent/session/vault",
+			name: "ssh must not import orchestration packages",
 			pkg:  "github.com/ntwrknrd/nssh/internal/ssh/...",
 			forbidden: []string{
 				"github.com/ntwrknrd/nssh/internal/cli/...",
+				"github.com/ntwrknrd/nssh/internal/ui",
+				"github.com/ntwrknrd/nssh/internal/recording",
 				"github.com/ntwrknrd/nssh/internal/agent/...",
-				"github.com/ntwrknrd/nssh/internal/session/...",
-				"github.com/ntwrknrd/nssh/internal/vault/...",
 			},
 		},
 	}

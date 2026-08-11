@@ -1,0 +1,14 @@
+$ nssh inv rm --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh inv rm HOST                  Remove inventory entries                 │
+│   nssh inv rm -g local/GROUP                                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Flags ──────────────────────────────────────────────────────────────────────╮
+│   -g, --group                       treat argument as a provider-qualif...   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose COUNT               Increase debug verbosity                 │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

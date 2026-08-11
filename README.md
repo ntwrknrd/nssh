@@ -5,18 +5,12 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/ntwrknrd/nssh)](go.mod)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ntwrknrd/nssh)](https://goreportcard.com/report/github.com/ntwrknrd/nssh)
 [![Homebrew](https://img.shields.io/badge/homebrew-available-orange)](https://github.com/ntwrknrd/homebrew-nssh)
-[![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue)]()
+![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue)
 
-SSH wrapper for power users: manage hosts and credentials, inject passwords automatically, and record sessions.
-
-## Table of Contents
-
-- [Demo](#demo)
-- [Features](#features)
-- [Installation](#installation)
-- [Learn More](#learn-more)
-- [Acknowledgements](#acknowledgements)
-- [Roadmap](#roadmap)
+`nssh` is an SSH wrapper for operators who manage many hosts. It keeps host
+inventory, auth policy, routing, and SSH options in nssh YAML config, resolves
+credentials from external password managers, injects passwords through OpenSSH
+prompts, and can record sessions.
 
 ## Demo
 
@@ -24,83 +18,64 @@ SSH wrapper for power users: manage hosts and credentials, inject passwords auto
 
 ## Features
 
-- **Interactive PTY connector** - In-process password injection without external tools (see [ARCHITECTURE.md](docs/ARCHITECTURE.md#pty-connector-architecture))
-- **Fuzzy host selection** - Exact matches connect instantly; partial matches use `fzf` for interactive filtering
-- **Agent-based credential management** - Background daemon holds decrypted credentials with configurable idle/lifetime timeouts; supports passphrase-protected keys and YubiKey PIV hardware tokens
-- **Age-encrypted vault** - Context-aware storage with domain-based resolution and host-specific overrides; passwords never in plaintext or CLI args (streamed directly through the PTY connector)
-- **SSH config management** - Create, remove, sort, and update host entries in SSH config files with automatic alphabetical sorting, timestamped backups, and indexed lookups across SSH 'Include' config files
-- **Legacy device compatibility** - Auto-detects SSH algorithm mismatches and applies KEX/cipher/MAC fixes for older network equipment (see [ARCHITECTURE.md](docs/ARCHITECTURE.md#ssh-compatibility-detection-and-remediation))
-- **Shell integration** - History tracking (Bash/Zsh/Fish) and tab completion for hostnames, contexts, and commands
-- **Session recording & playback** - Automatic asciinema integration with host-based filtering, idle time limiting, automatic archival, and comprehensive session management via `nssh log` CLI (list/play/upload/export/delete with pattern matching and interactive selection)
-- **File transfers** - Standard SCP CLI with credential vault integration (see [USER_GUIDE.md](docs/USER_GUIDE.md#nssh-cp-scp-wrapper))
-- **Host key pinning** - Pin-on-first-use security model with configurable trust-on-first-use fallback
+- Smart connect: `nssh HOST`, `nssh user@HOST`, and `nssh --select` route
+  through nssh inventory lookup, partial host matching, and optional `fzf`
+  selection. Use `nssh --target HOST` for literal destinations that collide
+  with nssh command names.
+- Inventory: `nssh inv` manages local hosts and external providers; current
+  providers are NetBox and containerlab.
+- Credentials: SOPS+age, 1Password, and Bitwarden providers are selected by
+  inventory host or group auth mappings. nssh has no local password vault.
+- Agent runtime: `nssh agent` brokers provider-session requests and runs
+  retained provider access only when configured.
+- Connection behavior: OpenSSH still owns transport; nssh wraps it with a PTY
+  connector for prompt detection, password injection, host-key handling, timing,
+  and typed SSH option rendering.
+- Recordings: optional asciinema session capture is managed with `nssh log`.
+- SCP: `nssh cp` uses the same host and credential resolution path as connect.
+
+Run `nssh --help` or read the generated help snapshots under
+[docs/examples/help](docs/examples/help). The first-run config template is
+[internal/config/example_config.yaml](internal/config/example_config.yaml).
 
 ## Installation
 
-### Install
-
-Automated install script
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ntwrknrd/nssh/main/scripts/install.sh | sh
-```
 
-Homebrew install (if applicable)
-
-```bash
+# or
 brew install ntwrknrd/nssh/nssh
-```
 
-Initialize nssh (interactive setup)
-
-```bash
 nssh self init
+nssh self status
 ```
 
-The `init` command guides you through: passphrase creation, SSH config setup, shell integration, include file creation, and optional context credential setup. **TIP:** After installation, run `nssh self status`
-
-For detailed instructions & manual setup options see [Getting Started](docs/USER_GUIDE.md#getting-started).
-
-### Uninstall
+On first run, `nssh self init` creates the commented root config template and
+offers credential and inventory provider setup. If `config.yaml` already exists,
+bare init skips without changing it; use `nssh self reset` to start fresh. Add
+providers later with `nssh self init --cred <provider>` or
+`nssh self init --inv <provider>`. Inventory auth mappings are added later with
+`nssh inv set`. To remove local nssh state:
 
 ```bash
 nssh self uninstall
-# add --dry-run to preview what would be removed
 ```
 
-This removes shell integration, the binary, config, and recordings. Use `--keep-config` or `--keep-recordings` to preserve specific data.
+Use `--dry-run`, `--keep-config`, or `--keep-recordings` when needed. External
+password-manager records are not removed.
 
-## Learn More
+## Documentation
 
-- Users: [User Guide](docs/USER_GUIDE.md)
-- Contributors: [Contributing](CONTRIBUTING.md)
-- Contributors: [Architecture](docs/ARCHITECTURE.md)
+- [0.2 to 0.3 RC migration guide](docs/migrate-0.2-to-0.3.html) - standalone
+  beta-tester guide with backup, conversion, verification, and rollback steps.
+- [CONTRIBUTING.md](CONTRIBUTING.md) - development workflow, tests, releases,
+  and doc rules.
+- [.agents/skills/nssh/SKILL.md](.agents/skills/nssh/SKILL.md) - nssh skill
+  entrypoint for usage, configuration, inventory, credentials, operations,
+  troubleshooting, and architecture references.
 
-## Acknowledgements
+## Dependencies
 
-nssh is built on the shoulders of exceptional open-source tools and communities. We are deeply grateful to the maintainers and contributors of:
-
-**Core Dependencies:**
-
-- [OpenSSH](https://www.openssh.com/) (BSD/ISC) - The OpenBSD project's SSH connectivity suite
-- [fzf](https://github.com/junegunn/fzf) (MIT) - Command-line fuzzy finder (optional - enhanced fuzzy finding)
-- [asciinema](https://github.com/asciinema/asciinema) (GPLv3) - Terminal session recorder (optional - session recording)
-
-**Go Ecosystem:**
-
-- [Go](https://go.dev/) (BSD-3-Clause) - The Go programming language
-- [creack/pty](https://github.com/creack/pty) (MIT) - PTY handling
-- [Cobra](https://github.com/spf13/cobra) (Apache-2.0) - CLI framework
-- [Charm](https://github.com/charmbracelet) (MIT) - Terminal UI libraries (Huh, Lipgloss, Bubble Tea)
-- [age](https://github.com/FiloSottile/age) (BSD-3-Clause) - Modern file encryption
-- [memguard](https://github.com/awnumar/memguard) (Apache-2.0) - Secure memory management
-- [go-piv](https://github.com/go-piv/piv-go) (Apache-2.0) - YubiKey PIV library (optional - hardware key support)
-
-**License Compatibility:**
-This project is licensed under [GNU GPL-3.0](https://github.com/ntwrknrd/nssh/blob/main/LICENSE), which is compatible with all the above dependencies.
-
-## Roadmap
-- **Additional Hardware Authentication Support:**
-   - FIDO2/WebAuthn (wider range of hardware security key support)
-   - Secure Enclave (native macOS hardware security)
-- **Native Recording Engine:** Potentially replace asciinema subprocess
+nssh builds around OpenSSH, Cobra, Charm terminal UI packages, `creack/pty`,
+optional `fzf`, optional `asciinema`, and external credential CLIs such as
+`sops`, `op`, and `bw`. See [LICENSE](LICENSE).

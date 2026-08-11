@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
+	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
-	"github.com/ntwrknrd/nssh/internal/ssh/recording"
+	"github.com/ntwrknrd/nssh/internal/recording"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -40,20 +42,21 @@ Format is automatically inferred from the output file extension:
 
 func runExport(yes, dryRun bool) error {
 	settings := recording.LoadRecordingSettings()
-	sessions := LoadSessions(settings)
-
-	ui.CommandStart("EXPORT RECORDING")
+	cfg, err := config.LoadDefault()
+	if err != nil {
+		ui.Error("%s", err)
+		return &exit.ExitError{Code: 1}
+	}
+	sessions := recording.IterSessionRecords(settings)
 
 	if len(sessions) == 0 {
 		ui.Warning("No recordings found in %s", settings.Directory)
-		ui.CommandEnd(ui.StatusWarning)
 		return nil
 	}
 
 	session, err := SelectSession(sessions, "Select recording:")
 	if err != nil {
 		ui.Abort("%s", err)
-		ui.CommandEnd(ui.StatusAbort)
 		return nil
 	}
 
@@ -67,7 +70,6 @@ func runExport(yes, dryRun bool) error {
 		result, err := ui.InputWithDefault("Output path (.txt or .gif)", defaultDest)
 		if err != nil {
 			ui.Abort("%s", err)
-			ui.CommandEnd(ui.StatusAbort)
 			return err
 		}
 		destination = result
@@ -77,7 +79,6 @@ func runExport(yes, dryRun bool) error {
 	format, err := resolveExportFormat(destination)
 	if err != nil {
 		ui.Error("%s", err)
-		ui.CommandEnd(ui.StatusError)
 		return &exit.ExitError{Code: 1}
 	}
 
@@ -89,19 +90,21 @@ func runExport(yes, dryRun bool) error {
 		toolPath, err := findGifConverter()
 		if err != nil {
 			ui.Error("%s", err)
-			ui.CommandEnd(ui.StatusError)
 			return &exit.ExitError{Code: 1}
 		}
-		cmd = []string{toolPath, session.CastPath, destination}
+		cmd, err = buildGIFExportCommand(toolPath, session.CastPath, destination, cfg.Logging.Export.GIF)
+		if err != nil {
+			ui.Error("%s", err)
+			return &exit.ExitError{Code: 1}
+		}
 		useProgress = true
 	} else {
 		asciinemaPath, err := RequireBinary("asciinema")
 		if err != nil {
 			ui.Error("%s", err)
-			ui.CommandEnd(ui.StatusError)
 			return &exit.ExitError{Code: 1}
 		}
-		cmd = []string{asciinemaPath, "convert", "--overwrite", session.CastPath, destination}
+		cmd = buildTextExportCommand(asciinemaPath, session.CastPath, destination)
 	}
 
 	var runErr error
@@ -112,16 +115,13 @@ func runExport(yes, dryRun bool) error {
 	}
 	if runErr != nil {
 		ui.Error("%s", runErr)
-		ui.CommandEnd(ui.StatusError)
 		return &exit.ExitError{Code: 1}
 	}
 
 	if dryRun {
 		ui.Warning("Run without --dry-run to actually export")
-		ui.CommandEnd(ui.StatusWarning)
 	} else {
 		ui.Success("Exported to %s", destination)
-		ui.CommandEnd(ui.StatusSuccess)
 	}
 
 	return nil
@@ -140,15 +140,46 @@ func resolveExportFormat(destination string) (string, error) {
 	}
 }
 
-// findGifConverter looks for agg (brew) or asciicast2gif (npm) in PATH.
+// findGifConverter looks for agg in PATH.
 func findGifConverter() (string, error) {
-	// Try agg first (modern Rust-based converter, available via brew)
 	if path, err := exec.LookPath("agg"); err == nil {
 		return path, nil
 	}
-	// Fall back to asciicast2gif (original, available via npm)
-	if path, err := exec.LookPath("asciicast2gif"); err == nil {
-		return path, nil
+	return "", fmt.Errorf("GIF converter not found. Install 'agg' (brew install agg)")
+}
+
+func buildGIFExportCommand(toolPath, castPath, destination string, settings config.GIFExportConfig) ([]string, error) {
+	cmd := []string{toolPath}
+	if settings.WindowSize != "" {
+		cols, rows, err := parseGIFWindowSize(settings.WindowSize)
+		if err != nil {
+			return nil, err
+		}
+		cmd = append(cmd, "--cols", strconv.Itoa(cols), "--rows", strconv.Itoa(rows))
 	}
-	return "", fmt.Errorf("GIF converter not found. Install 'agg' (brew install agg) or 'asciicast2gif' (npm install -g asciicast2gif)")
+	if settings.FontSize > 0 {
+		cmd = append(cmd, "--font-size", strconv.Itoa(settings.FontSize))
+	}
+	cmd = append(cmd, castPath, destination)
+	return cmd, nil
+}
+
+func buildTextExportCommand(asciinemaPath, castPath, destination string) []string {
+	return []string{asciinemaPath, "convert", "--overwrite", castPath, destination}
+}
+
+func parseGIFWindowSize(value string) (int, int, error) {
+	colsText, rowsText, ok := strings.Cut(strings.TrimSpace(value), "x")
+	if !ok || strings.TrimSpace(colsText) == "" || strings.TrimSpace(rowsText) == "" {
+		return 0, 0, fmt.Errorf("logging.export.gif.window_size must be COLSxROWS, got %q", value)
+	}
+	cols, err := strconv.Atoi(strings.TrimSpace(colsText))
+	if err != nil || cols <= 0 {
+		return 0, 0, fmt.Errorf("logging.export.gif.window_size has invalid columns %q", colsText)
+	}
+	rows, err := strconv.Atoi(strings.TrimSpace(rowsText))
+	if err != nil || rows <= 0 {
+		return 0, 0, fmt.Errorf("logging.export.gif.window_size has invalid rows %q", rowsText)
+	}
+	return cols, rows, nil
 }

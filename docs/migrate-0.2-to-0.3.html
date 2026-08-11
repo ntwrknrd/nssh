@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Migrate nssh 0.2 to 0.3</title>
+  <style>
+    :root {
+      --ink: #1a1a1a;
+      --muted: #656d76;
+      --paper: #ffffff;
+      --line: #e2e5e9;
+      --accent: #0b6b74;
+      --note: #f6f8f9;
+      --warn-line: #c98a12;
+      --warn-bg: #fdf6e6;
+      --code-bg: #f6f8f9;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink: #e6e9ec;
+        --muted: #9aa4ad;
+        --paper: #14181b;
+        --line: #2b3238;
+        --accent: #6fc9d1;
+        --note: #1b2126;
+        --warn-line: #d5a13a;
+        --warn-bg: #2a2214;
+        --code-bg: #1b2126;
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      max-width: 44rem;
+      margin: 0 auto;
+      padding: 3rem 1.25rem 5rem;
+      color: var(--ink);
+      background: var(--paper);
+      font: 17px/1.7 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    a { color: var(--accent); }
+
+    h1 {
+      margin: 0 0 0.4rem;
+      font-size: 2rem;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+    }
+
+    h2 {
+      margin: 2.75rem 0 0.75rem;
+      padding-top: 1.75rem;
+      border-top: 1px solid var(--line);
+      font-size: 1.25rem;
+      line-height: 1.3;
+    }
+
+    h1 + p.sub {
+      margin: 0 0 2rem;
+      color: var(--muted);
+    }
+
+    ul, ol { padding-left: 1.3rem; }
+    li { margin: 0.3rem 0; }
+
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    code {
+      padding: 0.1em 0.35em;
+      border-radius: 0.25rem;
+      background: var(--code-bg);
+      font-size: 0.88em;
+    }
+
+    pre {
+      margin: 1rem 0;
+      padding: 0.9rem 1rem;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 0.5rem;
+      background: var(--code-bg);
+      font-size: 0.85rem;
+      line-height: 1.6;
+    }
+
+    pre code { padding: 0; background: none; font-size: inherit; }
+
+    .note {
+      margin: 1.25rem 0;
+      padding: 0.85rem 1rem;
+      border-left: 3px solid var(--line);
+      background: var(--note);
+    }
+
+    .note.warn {
+      border-left-color: var(--warn-line);
+      background: var(--warn-bg);
+    }
+
+    .note > :first-child { margin-top: 0; }
+    .note > :last-child { margin-bottom: 0; }
+
+    .muted { color: var(--muted); font-size: 0.94rem; }
+
+    footer {
+      margin-top: 3.5rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    @media print {
+      body { max-width: none; font-size: 11pt; }
+      pre, .note { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Migrate nssh 0.2 to 0.3</h1>
+  <p class="sub">
+    Moving your hosts and automatic logins to the 0.3 release candidate.
+    Baseline 0.2.4, macOS and Linux. Updated 2026-08-06.
+  </p>
+
+  <div class="note warn">
+    <p>
+      <strong>Keep your 0.2 files until you finish testing.</strong>
+      0.3 uses new settings and does not convert your 0.2 setup for you.
+      Do not run <code>nssh self reset</code> or delete old files during the beta.
+    </p>
+  </div>
+
+  <h2>What changed</h2>
+  <ul>
+    <li><strong>New config format.</strong> 0.3 writes YAML settings instead of the old TOML file.</li>
+    <li><strong>Passwords move out of config.</strong> Pick SOPS+age, 1Password, or Bitwarden; nssh fetches the password when you connect.</li>
+    <li><strong>Connecting is simpler.</strong> <code>nssh HOST</code>, the same way you would run <code>ssh HOST</code>.</li>
+  </ul>
+
+  <h2>Let an agent do it</h2>
+  <p>
+    If you use Codex or another agent with the nssh skill installed, this is the
+    shortest path. Give it:
+  </p>
+  <pre><code>Use the nssh skill to migrate my nssh 0.2 setup to 0.3. Back up my
+existing setup first, explain any choices I need to make, never
+display or copy my passwords, and test a host with me before cleanup.</code></pre>
+  <p class="muted">
+    The skill knows the current commands, file layout, and credential options.
+    Otherwise, follow the four steps below.
+  </p>
+
+  <h2>1. Back up 0.2</h2>
+  <p>Before installing the RC, copy your nssh and SSH files somewhere private:</p>
+  <pre><code>backup="$HOME/nssh-0.2-backup-$(date +%Y%m%d-%H%M%S)"
+mkdir -m 700 "$backup"
+cp -a "$HOME/.config/nssh"       "$backup/config-nssh" 2&gt;/dev/null || true
+cp -a "$HOME/.local/share/nssh"  "$backup/share-nssh"  2&gt;/dev/null || true
+cp -a "$HOME/.local/state/nssh"  "$backup/state-nssh"  2&gt;/dev/null || true
+cp -a "$HOME/.ssh/config"        "$backup/ssh-config"  2&gt;/dev/null || true
+cp -a "$HOME/.ssh/conf.d"        "$backup/ssh-conf.d"  2&gt;/dev/null || true</code></pre>
+  <p class="muted">
+    Keep the folder private; it can contain encrypted credentials and host names.
+    If you moved nssh's storage locations, confirm the backup with your beta
+    coordinator first.
+  </p>
+
+  <h2>2. Install and initialize 0.3</h2>
+  <p>Install the RC build from your beta invitation, then run the guided setup:</p>
+  <pre><code>nssh --version
+nssh self init</code></pre>
+  <div class="note">
+    <p>
+      <strong>Which credential provider?</strong> Whichever password manager you
+      already use. If you use neither 1Password nor Bitwarden, choose SOPS+age.
+      Never put a plaintext password in an nssh YAML file.
+    </p>
+  </div>
+
+  <h2>3. Import your hosts</h2>
+  <p>Pull in the hosts you already have in your SSH config:</p>
+  <pre><code>nssh self import ssh-config</code></pre>
+  <p>
+    Review the preview and accept it if the host names and usernames look right.
+    Then point each host or group at the credential provider you chose:
+  </p>
+  <pre><code>nssh inv list
+nssh inv set myhost --user admin --auth password --cred onepassword
+nssh inv set local/switches --cred sops</code></pre>
+  <p class="muted">
+    Run <code>nssh inv set --help</code> for the full flag list. If your 0.2 setup
+    shared one password across many hosts, set it on the group rather than on each
+    host — this is where the nssh skill saves the most time.
+  </p>
+
+  <h2>4. Test your usual logins</h2>
+  <p>Start with one familiar host. It should log in with no password on the command line:</p>
+  <pre><code>nssh YOUR-HOST</code></pre>
+  <p>Then confirm each case you actually rely on:</p>
+  <ul>
+    <li>A normal host connects.</li>
+    <li>A password host pulls the right credential automatically.</li>
+    <li>A host behind a jump host connects.</li>
+    <li><code>nssh cp</code> copies a test file.</li>
+  </ul>
+  <p>Keep the 0.2 backup for the whole beta, even after everything passes.</p>
+
+  <h2>If something breaks</h2>
+  <p>
+    Do not reset nssh or delete files. Ask your beta coordinator, or hand an agent
+    with the nssh skill this:
+  </p>
+  <pre><code>Use the nssh skill to troubleshoot my 0.2 to 0.3 migration. Inspect my
+setup without showing secrets or connecting to a host until I approve
+it. Preserve my 0.2 backup.</code></pre>
+  <p class="muted">
+    To go back to 0.2 immediately: reinstall the 0.2 release and restore the nssh
+    and SSH folders from your backup. Leave the 0.3 files in place so they can
+    still be inspected.
+  </p>
+
+  <h2>Report an issue</h2>
+  <p>
+    File it at
+    <a href="https://github.com/ntwrknrd/nssh/issues">github.com/ntwrknrd/nssh/issues</a>.
+    Never attach passwords, tokens, internal host names, or a full config dump.
+  </p>
+  <pre><code>## nssh 0.3 RC migration report
+
+- nssh version:
+- OS and architecture:
+- Install method:
+- Previous nssh version:
+- Credential provider: SOPS+age / 1Password / Bitwarden
+- Command I ran:
+
+### Expected
+
+### Observed
+
+### Steps to reproduce
+
+### Rollback required? Yes / No</code></pre>
+
+  <footer>
+    nssh 0.3 RC migration guide. Verify your installed version and use the RC
+    artifact supplied by the release coordinator.
+  </footer>
+</body>
+</html>

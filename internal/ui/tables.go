@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -14,6 +16,17 @@ type Table struct {
 	headers    []string
 	rows       [][]string
 	footerRows [][]string // footer rows rendered with separator border
+}
+
+// StreamTable renders rows as they are added. Column widths must be known up
+// front because already-printed rows cannot be resized.
+type StreamTable struct {
+	headers        []string
+	preferredWidth []int
+	widths         []int
+	writer         io.Writer
+	margin         int
+	started        bool
 }
 
 // Truncate shortens a string to maxWidth display width, adding ellipsis if needed.
@@ -54,6 +67,164 @@ func NewTable(headers ...string) *Table {
 	}
 }
 
+// NewStreamTable creates a table that writes each row immediately.
+func NewStreamTable(headers ...string) *StreamTable {
+	widths := make([]int, len(headers))
+	for i, header := range headers {
+		widths[i] = runewidth.StringWidth(header)
+	}
+	return &StreamTable{
+		headers:        headers,
+		preferredWidth: widths,
+		writer:         os.Stdout,
+	}
+}
+
+// WithColumnWidths sets preferred content widths for each column.
+func (t *StreamTable) WithColumnWidths(widths ...int) *StreamTable {
+	for i := range t.preferredWidth {
+		if i < len(widths) && widths[i] > t.preferredWidth[i] {
+			t.preferredWidth[i] = widths[i]
+		}
+	}
+	return t
+}
+
+// WithWriter directs table output to writer. It is mainly useful in tests.
+func (t *StreamTable) WithWriter(writer io.Writer) *StreamTable {
+	if writer != nil {
+		t.writer = writer
+	}
+	return t
+}
+
+// AddRow writes a row immediately, starting the table if needed.
+func (t *StreamTable) AddRow(cells ...string) {
+	if !t.started {
+		t.start()
+	}
+	row := make([]string, len(t.headers))
+	for i := range row {
+		if i < len(cells) {
+			row[i] = cells[i]
+		}
+	}
+	_, _ = fmt.Fprintln(t.writer, t.prefix()+t.renderRow(row, false))
+}
+
+// Close writes the bottom border if the table was started.
+func (t *StreamTable) Close() {
+	if !t.started {
+		return
+	}
+	_, _ = fmt.Fprintln(t.writer, t.prefix()+t.renderBorder("╰", "┴", "╯"))
+	t.started = false
+}
+
+func (t *StreamTable) start() {
+	termW := termWidth()
+	t.widths = fitStreamColumnWidths(t.headers, t.preferredWidth, termW)
+	t.margin = 0
+	_, _ = fmt.Fprintln(t.writer, t.prefix()+t.renderBorder("╭", "┬", "╮"))
+	_, _ = fmt.Fprintln(t.writer, t.prefix()+t.renderRow(t.headers, true))
+	_, _ = fmt.Fprintln(t.writer, t.prefix()+t.renderBorder("├", "┼", "┤"))
+	t.started = true
+}
+
+func (t *StreamTable) prefix() string {
+	if t.margin <= 0 {
+		return ""
+	}
+	return strings.Repeat(" ", t.margin)
+}
+
+func (t *StreamTable) renderBorder(left, middle, right string) string {
+	borderStyle := lipgloss.NewStyle().Foreground(ColorDim)
+	var sb strings.Builder
+	sb.WriteString(borderStyle.Render(left))
+	for i, width := range t.widths {
+		sb.WriteString(borderStyle.Render(strings.Repeat("─", width+2)))
+		if i == len(t.widths)-1 {
+			sb.WriteString(borderStyle.Render(right))
+		} else {
+			sb.WriteString(borderStyle.Render(middle))
+		}
+	}
+	return sb.String()
+}
+
+func (t *StreamTable) renderRow(cells []string, header bool) string {
+	borderStyle := lipgloss.NewStyle().Foreground(ColorDim)
+	cellStyle := lipgloss.NewStyle().Foreground(ColorWhite)
+	if header {
+		cellStyle = lipgloss.NewStyle().Foreground(ColorCyan).Bold(true)
+	}
+	var sb strings.Builder
+	sb.WriteString(borderStyle.Render("│"))
+	for i, width := range t.widths {
+		cell := ""
+		if i < len(cells) {
+			cell = Truncate(cells[i], width)
+		}
+		padding := width - runewidth.StringWidth(cell)
+		if padding < 0 {
+			padding = 0
+		}
+		sb.WriteString(" ")
+		sb.WriteString(cellStyle.Render(cell))
+		sb.WriteString(strings.Repeat(" ", padding))
+		sb.WriteString(" ")
+		sb.WriteString(borderStyle.Render("│"))
+	}
+	return sb.String()
+}
+
+func fitStreamColumnWidths(headers []string, preferred []int, termW int) []int {
+	widths := make([]int, len(headers))
+	minWidths := make([]int, len(headers))
+	for i, header := range headers {
+		headerWidth := runewidth.StringWidth(header)
+		minWidths[i] = headerWidth
+		widths[i] = headerWidth
+		if i < len(preferred) && preferred[i] > widths[i] {
+			widths[i] = preferred[i]
+		}
+	}
+
+	available := termW - streamTableOverhead(len(widths))
+	if available <= 0 {
+		return widths
+	}
+	for sumInts(widths) > available {
+		shrinkIdx := -1
+		for i, width := range widths {
+			if width <= minWidths[i] {
+				continue
+			}
+			if shrinkIdx == -1 || width > widths[shrinkIdx] {
+				shrinkIdx = i
+			}
+		}
+		if shrinkIdx == -1 {
+			break
+		}
+		widths[shrinkIdx]--
+	}
+	return widths
+}
+
+func streamTableOverhead(cols int) int {
+	return cols*2 + cols + 1
+}
+
+func sumInts(values []int) int {
+	total := 0
+	for _, value := range values {
+		total += value
+	}
+	return total
+}
+
 // AddRow adds a row to the table.
 func (t *Table) AddRow(cells ...string) {
 	// Pad or truncate to match header count
@@ -78,7 +249,7 @@ func (t *Table) AddFooterRow(cells ...string) {
 	t.footerRows = append(t.footerRows, row)
 }
 
-// Render prints the table to stdout (centered) and returns the left margin used for centering.
+// Render prints the table to stdout and returns the left margin.
 func (t *Table) Render() int {
 	rendered, margin := t.renderString()
 	if rendered != "" {
@@ -87,24 +258,92 @@ func (t *Table) Render() int {
 	return margin
 }
 
-// RenderLeft prints the table to stdout with left alignment (no centering).
-func (t *Table) RenderLeft() {
-	rendered := t.renderRaw()
+// RenderTablesSideBySide prints two tables next to each other and returns the
+// left margin used for the combined output.
+func RenderTablesSideBySide(left, right *Table, gap int) int {
+	rendered, margin := renderTablesSideBySideString(left, right, gap)
 	if rendered != "" {
 		fmt.Println(rendered)
 	}
+	return margin
 }
 
-// LeftMargin returns the left margin that would be used for centering without printing.
+// RenderTitledTablesSideBySide prints two labeled tables next to each other and
+// returns the left margin used for the combined output.
+func RenderTitledTablesSideBySide(leftTitle string, left *Table, rightTitle string, right *Table, gap int) int {
+	rendered, margin := renderTitledTablesSideBySideString(leftTitle, left, rightTitle, right, gap)
+	if rendered != "" {
+		fmt.Println(rendered)
+	}
+	return margin
+}
+
+func renderTablesSideBySideString(left, right *Table, gap int) (string, int) {
+	if left == nil || len(left.headers) == 0 {
+		if right == nil {
+			return "", 0
+		}
+		return right.renderString()
+	}
+	if right == nil || len(right.headers) == 0 {
+		return left.renderString()
+	}
+	if gap < 1 {
+		gap = 1
+	}
+	rendered := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		left.renderRawString(),
+		strings.Repeat(" ", gap),
+		right.renderRawString(),
+	)
+	return rendered, 0
+}
+
+func renderTitledTablesSideBySideString(leftTitle string, left *Table, rightTitle string, right *Table, gap int) (string, int) {
+	if left == nil || len(left.headers) == 0 {
+		return renderTablesSideBySideString(left, right, gap)
+	}
+	if right == nil || len(right.headers) == 0 {
+		return renderTablesSideBySideString(left, right, gap)
+	}
+	leftRaw := withTableTitle(leftTitle, left.renderRawString())
+	rightRaw := withTableTitle(rightTitle, right.renderRawString())
+	if gap < 1 {
+		gap = 1
+	}
+	rendered := lipgloss.JoinHorizontal(lipgloss.Top, leftRaw, strings.Repeat(" ", gap), rightRaw)
+	return rendered, 0
+}
+
+func withTableTitle(title, rendered string) string {
+	title = strings.TrimSpace(title)
+	if title == "" || rendered == "" {
+		return rendered
+	}
+	width := lipgloss.Width(rendered)
+	label := lipgloss.NewStyle().Foreground(ColorCyan).Bold(true).Render(title)
+	return lipgloss.PlaceHorizontal(width, lipgloss.Center, label) + "\n" + rendered
+}
+
+// LeftMargin returns the left margin that would be used without printing.
 func (t *Table) LeftMargin() int {
 	_, margin := t.renderString()
 	return margin
 }
 
-// renderString renders the table and returns the centered string and left margin.
+// renderString renders the table and returns the string and left margin.
 func (t *Table) renderString() (string, int) {
-	if len(t.headers) == 0 {
+	rendered := t.renderRawString()
+	if rendered == "" {
 		return "", 0
+	}
+	return rendered, 0
+}
+
+func (t *Table) renderRawString() string {
+	if len(t.headers) == 0 {
+		return ""
 	}
 
 	termW := termWidth()
@@ -323,17 +562,7 @@ func (t *Table) renderString() (string, int) {
 		rendered = t.insertFooterRows(rendered, footerRows, borderStyle)
 	}
 
-	// Calculate centering
-	tableWidth := lipgloss.Width(rendered)
-	leftMargin := (termW - tableWidth) / 2
-	if leftMargin < 0 {
-		leftMargin = 0
-	}
-
-	// Center the table
-	centered := lipgloss.PlaceHorizontal(termW, lipgloss.Center, rendered)
-
-	return centered, leftMargin
+	return rendered
 }
 
 // insertFooterRows manipulates the rendered table string to add a separator and footer rows.
@@ -447,69 +676,10 @@ func parseColumnWidths(separator string) []int {
 	return widths
 }
 
-// renderRaw renders the table without centering.
-func (t *Table) renderRaw() string {
-	if len(t.headers) == 0 {
-		return ""
-	}
-
-	// Header style - cyan and bold
-	headerStyle := lipgloss.NewStyle().
-		Foreground(ColorCyan).
-		Bold(true).
-		Padding(0, 1)
-
-	// Cell style - white text
-	cellStyle := lipgloss.NewStyle().
-		Foreground(ColorWhite).
-		Padding(0, 1)
-
-	// Border style
-	borderStyle := lipgloss.NewStyle().Foreground(ColorDim)
-
-	// Create the main table (without footer rows)
-	tbl := table.New().
-		Border(lipgloss.RoundedBorder()).
-		BorderStyle(borderStyle).
-		Headers(t.headers...).
-		Rows(t.rows...).
-		StyleFunc(func(row, col int) lipgloss.Style {
-			if row == table.HeaderRow {
-				return headerStyle
-			}
-			return cellStyle
-		})
-
-	rendered := tbl.String()
-
-	// If we have footer rows, manipulate the output to add separator and footer
-	if len(t.footerRows) > 0 {
-		rendered = t.insertFooterRows(rendered, t.footerRows, borderStyle)
-	}
-
-	return rendered
-}
-
-// RowCount returns the number of data rows (excluding header).
-func (t *Table) RowCount() int {
-	return len(t.rows)
-}
-
-// IsEmpty returns true if the table has no data rows.
-func (t *Table) IsEmpty() bool {
-	return len(t.rows) == 0
-}
-
 // TableHeader represents a column header with optional styling.
 type TableHeader struct {
 	Title string
 	Color string // not used currently, kept for API compatibility
-}
-
-// PrintTable prints a table with styled headers and returns the left margin.
-func PrintTable(headers []TableHeader, rows [][]string) int {
-	tbl := BuildTable(headers, rows)
-	return tbl.Render()
 }
 
 // BuildTable creates a table without printing it.
@@ -525,13 +695,4 @@ func BuildTable(headers []TableHeader, rows [][]string) *Table {
 	}
 
 	return tbl
-}
-
-// SimpleTable prints a quick table from headers and rows.
-func SimpleTable(headers []string, rows [][]string) {
-	table := NewTable(headers...)
-	for _, row := range rows {
-		table.AddRow(row...)
-	}
-	table.Render()
 }

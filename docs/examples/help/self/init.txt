@@ -1,15 +1,15 @@
 $ nssh self init --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh self init [flags]            Initialize nssh                          │
+│   nssh self init [flags]            Initialize configuration                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────╮
+╭─ Flags ──────────────────────────────────────────────────────────────────────╮
+│   --cred STRINGARRAY                add credential provider (sops-age, ...   │
 │   --dry-run                         preview changes without applying         │
-│   --skip-shell                      skip shell integration                   │
-│   -y, --yes                         skip confirmation prompts                │
+│   --inv STRINGARRAY                 add inventory provider (local, netb...   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
-│   -v, --verbose                     Print debug messages                     │
+│   -v, --verbose COUNT               Increase debug verbosity                 │
 │   -V, --version                     Print command version                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯

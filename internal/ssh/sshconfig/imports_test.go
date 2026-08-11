@@ -9,7 +9,8 @@ import (
 // TestImportBoundaries verifies SSH subsystem import layering.
 //
 // Rules:
-// - compat/recording/sshconfig must NOT import ui/cobra/term
+// - compat/sshconfig must NOT import ui/cobra/term
+// - recording must NOT import ui/cobra/term/connector
 // - sshconfig must NOT import the connector package (it should depend on compat only)
 func TestImportBoundaries(t *testing.T) {
 	tests := []struct {
@@ -28,8 +29,8 @@ func TestImportBoundaries(t *testing.T) {
 			},
 		},
 		{
-			name: "ssh/recording must stay non-interactive",
-			pkg:  "github.com/ntwrknrd/nssh/internal/ssh/recording",
+			name: "recording must stay non-interactive",
+			pkg:  "github.com/ntwrknrd/nssh/internal/recording",
 			forbidden: []string{
 				"github.com/ntwrknrd/nssh/internal/ui",
 				"github.com/spf13/cobra",

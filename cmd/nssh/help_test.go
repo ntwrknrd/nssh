@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ntwrknrd/nssh/internal/app"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +28,7 @@ func snapshotDir() string {
 }
 
 // discoverCommands recursively discovers all commands and returns a map of
-// snapshot path -> command path (e.g., "host/add.txt" -> ["host", "add"])
+// snapshot path -> command path (e.g., "inv/list.txt" -> ["inv", "list"])
 func discoverCommands(cmd *cobra.Command, prefix []string) map[string][]string {
 	cases := make(map[string][]string)
 
@@ -64,7 +65,7 @@ func buildBinary(t *testing.T) string {
 	t.Helper()
 
 	binPath := filepath.Join(t.TempDir(), "nssh")
-	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/nssh")
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", binPath, "./cmd/nssh")
 	cmd.Dir = repoRoot()
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Failed to build binary: %v\n%s", err, output)
@@ -123,7 +124,7 @@ func TestHelpSnapshots(t *testing.T) {
 	binPath := buildBinary(t)
 
 	// Discover all commands from Cobra structure
-	rootCmd := newRootCmd()
+	rootCmd := app.NewRootCmd(app.Options{Version: "test"})
 	cases := discoverCommands(rootCmd, nil)
 
 	// Add root command

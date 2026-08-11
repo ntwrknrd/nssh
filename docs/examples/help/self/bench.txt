@@ -1,14 +1,14 @@
 $ nssh self bench --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh self bench [flags]           Run performance benchmarks               │
+│   nssh self bench [flags]           Performance benchmarking                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
 │   scp                               Benchmark SCP transfers                  │
 │   ssh                               Benchmark SSH connections                │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
-│   -v, --verbose                     Print debug messages                     │
+│   -v, --verbose COUNT               Increase debug verbosity                 │
 │   -V, --version                     Print command version                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯

@@ -2,13 +2,13 @@ $ nssh log upload --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
 │   nssh log upload [flags]           Upload to asciinema                      │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────╮
+╭─ Flags ──────────────────────────────────────────────────────────────────────╮
 │   --dry-run                         Preview actions without executing        │
 │   -y, --yes                         Skip confirmation                        │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
-│   -v, --verbose                     Print debug messages                     │
+│   -v, --verbose COUNT               Increase debug verbosity                 │
 │   -V, --version                     Print command version                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯

@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/exit"
-	"github.com/ntwrknrd/nssh/internal/ssh/recording"
+	"github.com/ntwrknrd/nssh/internal/recording"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -35,15 +35,13 @@ func runList(selectPattern string, lastN int) error {
 	settings := recording.LoadRecordingSettings()
 	localTZ := time.Now().Location()
 
-	ui.CommandStart("SESSION RECORDINGS")
-
 	// Use lazy loading optimization when --last is specified without filter
 	// This avoids loading all session metadata when only a few are needed
 	var sessions []recording.SessionRecord
 	if lastN > 0 && selectPattern == "" {
-		sessions = LoadSessionsLimit(settings, lastN)
+		sessions = recording.IterSessionRecordsLimit(settings, lastN)
 	} else {
-		sessions = LoadSessions(settings)
+		sessions = recording.IterSessionRecords(settings)
 	}
 
 	if selectPattern != "" {
@@ -51,14 +49,13 @@ func runList(selectPattern string, lastN int) error {
 		pattern, err := regexp.Compile("(?i)" + selectPattern)
 		if err != nil {
 			ui.Error("Invalid regex pattern: %s", err)
-			ui.CommandEnd(ui.StatusError)
 			return &exit.ExitError{Code: 1}
 		}
 
 		var filtered []recording.SessionRecord
 		for _, s := range sessions {
 			startDate := s.StartedAt.In(localTZ).Format("2006-01-02")
-			mtimeDate := sessionUpdatedTimestamp(s).In(localTZ).Format("2006-01-02")
+			mtimeDate := recording.SessionUpdatedTimestamp(s).In(localTZ).Format("2006-01-02")
 			if MatchesPattern(pattern, s.Host, s.SessionLabel, startDate, mtimeDate) {
 				filtered = append(filtered, s)
 			}
@@ -67,7 +64,6 @@ func runList(selectPattern string, lastN int) error {
 
 		if len(sessions) == 0 {
 			ui.WarningCentered("No sessions matching pattern: %s", selectPattern)
-			ui.CommandEnd(ui.StatusWarning)
 			return nil
 		}
 
@@ -79,6 +75,5 @@ func runList(selectPattern string, lastN int) error {
 
 	PrintSessions(sessions, selectPattern)
 
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }

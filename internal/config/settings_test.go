@@ -1,8 +1,8 @@
 package config
 
 import (
-	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -46,45 +46,102 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.SSH.Connection.PasswordTimeout.Duration() != 10*time.Second {
 		t.Errorf("default password_timeout = %v, want 10s", cfg.SSH.Connection.PasswordTimeout.Duration())
 	}
-	if cfg.Logging.Audit.MaxBackupFiles != 10 {
-		t.Errorf("default logging.audit.max_backup_files = %d, want 10", cfg.Logging.Audit.MaxBackupFiles)
+	if !cfg.Agent.AutoStart {
+		t.Error("default agent.auto_start = false, want true")
 	}
-	if cfg.Agent.Security.Software.PassphraseMinLength != 12 {
-		t.Errorf("default agent.security.software.passphrase_min_length = %d, want 12", cfg.Agent.Security.Software.PassphraseMinLength)
+	provider, ok := cfg.Credential.Provider["sops"]
+	if !ok {
+		t.Fatal("default credentials missing sops")
+	}
+	if provider.Type != CredentialProviderSOPSAge {
+		t.Fatalf("default sops type = %q, want %q", provider.Type, CredentialProviderSOPSAge)
+	}
+	if provider.File != "~/.local/share/nssh/credentials.sops.yaml" {
+		t.Fatalf("default sops file = %q", provider.File)
+	}
+	if _, ok := cfg.Credential.Provider["pass"]; ok {
+		t.Fatal("default credentials still include pass")
+	}
+	if _, ok := cfg.Inventory.Providers[ProviderLocal]; !ok {
+		t.Fatal("default inventory missing local provider")
+	}
+	group := cfg.Inventory.Providers[ProviderLocal].Groups["default"]
+	if group.Auth.IsSet() {
+		t.Fatalf("default local group auth = %+v, want unset", group.Auth)
+	}
+}
+
+func TestHighlightConfigValidate(t *testing.T) {
+	trueValue := true
+	tests := []struct {
+		name      string
+		highlight HighlightConfig
+		wantErr   string
+	}{
+		{name: "none disabled", highlight: HighlightConfig{Profile: HighlightProfileNone}},
+		{name: "junos enabled", highlight: HighlightConfig{Enabled: &trueValue, Profile: HighlightProfileJunos}},
+		{name: "unknown profile", highlight: HighlightConfig{Profile: "slow-regex"}, wantErr: `unsupported highlight profile "slow-regex"`},
+		{name: "enabled none rejected", highlight: HighlightConfig{Enabled: &trueValue, Profile: HighlightProfileNone}, wantErr: "highlight.profile must not be none when highlight.enabled is true"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.highlight.Validate("highlight")
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() unexpected error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestMergeHighlightAllowsHostDisableOverride(t *testing.T) {
+	trueValue := true
+	falseValue := false
+
+	got := MergeHighlight(
+		HighlightConfig{Profile: HighlightProfileNone},
+		HighlightConfig{Enabled: &trueValue, Profile: HighlightProfileJunos},
+	)
+	got = MergeHighlight(got, HighlightConfig{Enabled: &falseValue})
+
+	if got.Enabled == nil || *got.Enabled {
+		t.Fatalf("enabled = %v, want explicit false", got.Enabled)
+	}
+	if got.Profile != HighlightProfileJunos {
+		t.Fatalf("profile = %q, want %q", got.Profile, HighlightProfileJunos)
 	}
 }
 
 func TestLoad_NonexistentFile(t *testing.T) {
-	cfg, err := Load("/nonexistent/path/config.toml")
+	cfg, err := Load("/nonexistent/path/config.yaml")
 	if err != nil {
 		t.Fatalf("Load() error = %v, want nil for nonexistent file", err)
 	}
-	// Should return defaults
 	if cfg.SSH.Connection.Timeout.Duration() != 30*time.Second {
 		t.Errorf("got timeout = %v, want default 30s", cfg.SSH.Connection.Timeout.Duration())
 	}
 }
 
-func TestLoad_ValidConfig(t *testing.T) {
-	// Create temp config file
+func TestLoad_ValidYAMLConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.toml")
-
-	content := `
-[ssh.connection]
-timeout = "60s"
-password_timeout = "20s"
-
-[host.defaults]
-default_context = "work"
-default_user = "admin"
-
-[logging.audit]
-max_backup_files = 20
-`
-	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
-		t.Fatal(err)
-	}
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	writeConfigFile(t, configPath, `
+ssh:
+  connection:
+    timeout: 60s
+    password_timeout: 20s
+logging:
+  audit:
+    max_size: 20MB
+agent:
+  auto_start: false
+`)
 
 	cfg, err := Load(configPath)
 	if err != nil {
@@ -97,212 +154,95 @@ max_backup_files = 20
 	if cfg.SSH.Connection.PasswordTimeout.Duration() != 20*time.Second {
 		t.Errorf("password_timeout = %v, want 20s", cfg.SSH.Connection.PasswordTimeout.Duration())
 	}
-	if cfg.Host.Defaults.DefaultContext != "work" {
-		t.Errorf("host.defaults.default_context = %q, want %q", cfg.Host.Defaults.DefaultContext, "work")
+	if cfg.Logging.Audit.MaxSize != "20MB" {
+		t.Errorf("logging.audit.max_size = %q, want 20MB", cfg.Logging.Audit.MaxSize)
 	}
-	if cfg.Host.Defaults.DefaultUser != "admin" {
-		t.Errorf("host.defaults.default_user = %q, want %q", cfg.Host.Defaults.DefaultUser, "admin")
+	if cfg.Agent.AutoStart {
+		t.Error("agent.auto_start = true, want false")
 	}
-	if cfg.Logging.Audit.MaxBackupFiles != 20 {
-		t.Errorf("logging.audit.max_backup_files = %d, want 20", cfg.Logging.Audit.MaxBackupFiles)
+}
+
+func TestLoad_AcceptsArchiveTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	writeConfigFile(t, configPath, `
+logging:
+  session:
+    archive:
+      timeout: 45s
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.Logging.Session.Archive.Timeout.Duration(); got != 45*time.Second {
+		t.Fatalf("logging.session.archive.timeout = %v, want 45s", got)
+	}
+}
+
+func TestLoad_RejectsObsoleteArchiveSchedulerFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+	}{
+		{name: "enabled", field: "enabled: true"},
+		{name: "jitter", field: "jitter: 5m"},
+		{name: "min_interval", field: "min_interval: 24h"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.yaml")
+			writeConfigFile(t, configPath, `
+logging:
+  session:
+    archive:
+      `+tt.field+`
+`)
+
+			_, err := Load(configPath)
+			if err == nil {
+				t.Fatalf("Load() should reject obsolete archive field %q", tt.name)
+			}
+			if !strings.Contains(err.Error(), tt.name) {
+				t.Fatalf("Load() error = %v, want %q", err, tt.name)
+			}
+		})
+	}
+}
+
+func TestLoad_RejectsObsoleteMaxBackupFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	writeConfigFile(t, configPath, `
+logging:
+  audit:
+    max_backup_files: 20
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() should reject obsolete max_backup_files")
+	}
+	if !strings.Contains(err.Error(), "max_backup_files") {
+		t.Fatalf("Load() error = %v, want unknown max_backup_files", err)
 	}
 }
 
 func TestLoad_InvalidConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.toml")
-
-	content := `
-[ssh.connection]
-timeout = "not a duration"
-`
-	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
-		t.Fatal(err)
-	}
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	writeConfigFile(t, configPath, `
+ssh:
+  connection:
+    timeout: not a duration
+`)
 
 	_, err := Load(configPath)
 	if err == nil {
 		t.Error("Load() should return error for invalid duration")
-	}
-}
-
-func TestSoftwareSecurityConfig_Validate(t *testing.T) {
-	tests := []struct {
-		name    string
-		config  SoftwareSecurityConfig
-		wantErr string
-	}{
-		{
-			name: "valid defaults",
-			config: SoftwareSecurityConfig{
-				ScryptWorkFactor:    18,
-				PassphraseMinLength: 12,
-				LockoutThreshold:    10,
-				LockoutDuration:     Duration(5 * time.Minute),
-				MaxLockoutDuration:  Duration(time.Hour),
-			},
-			wantErr: "",
-		},
-		{
-			name: "scrypt_work_factor too low",
-			config: SoftwareSecurityConfig{
-				ScryptWorkFactor:    13,
-				PassphraseMinLength: 12,
-				LockoutThreshold:    10,
-				LockoutDuration:     Duration(5 * time.Minute),
-				MaxLockoutDuration:  Duration(time.Hour),
-			},
-			wantErr: "scrypt_work_factor must be >= 14",
-		},
-		{
-			name: "scrypt_work_factor too high",
-			config: SoftwareSecurityConfig{
-				ScryptWorkFactor:    23,
-				PassphraseMinLength: 12,
-				LockoutThreshold:    10,
-				LockoutDuration:     Duration(5 * time.Minute),
-				MaxLockoutDuration:  Duration(time.Hour),
-			},
-			wantErr: "scrypt_work_factor must be <= 22",
-		},
-		{
-			name: "lockout_threshold too low",
-			config: SoftwareSecurityConfig{
-				ScryptWorkFactor:    18,
-				PassphraseMinLength: 12,
-				LockoutThreshold:    2,
-				LockoutDuration:     Duration(5 * time.Minute),
-				MaxLockoutDuration:  Duration(time.Hour),
-			},
-			wantErr: "lockout_threshold must be >= 3",
-		},
-		{
-			name: "lockout_threshold too high",
-			config: SoftwareSecurityConfig{
-				ScryptWorkFactor:    18,
-				PassphraseMinLength: 12,
-				LockoutThreshold:    101,
-				LockoutDuration:     Duration(5 * time.Minute),
-				MaxLockoutDuration:  Duration(time.Hour),
-			},
-			wantErr: "lockout_threshold must be <= 100",
-		},
-		{
-			name: "lockout_duration too short",
-			config: SoftwareSecurityConfig{
-				ScryptWorkFactor:    18,
-				PassphraseMinLength: 12,
-				LockoutThreshold:    10,
-				LockoutDuration:     Duration(30 * time.Second),
-				MaxLockoutDuration:  Duration(time.Hour),
-			},
-			wantErr: "lockout_duration must be >= 1m",
-		},
-		{
-			name: "lockout_duration too long",
-			config: SoftwareSecurityConfig{
-				ScryptWorkFactor:    18,
-				PassphraseMinLength: 12,
-				LockoutThreshold:    10,
-				LockoutDuration:     Duration(2 * time.Hour),
-				MaxLockoutDuration:  Duration(24 * time.Hour),
-			},
-			wantErr: "lockout_duration must be <= 1h",
-		},
-		{
-			name: "max_lockout_duration too short",
-			config: SoftwareSecurityConfig{
-				ScryptWorkFactor:    18,
-				PassphraseMinLength: 12,
-				LockoutThreshold:    10,
-				LockoutDuration:     Duration(time.Minute),
-				MaxLockoutDuration:  Duration(4 * time.Minute),
-			},
-			wantErr: "max_lockout_duration must be >= 5m",
-		},
-		{
-			name: "max_lockout_duration too long",
-			config: SoftwareSecurityConfig{
-				ScryptWorkFactor:    18,
-				PassphraseMinLength: 12,
-				LockoutThreshold:    10,
-				LockoutDuration:     Duration(5 * time.Minute),
-				MaxLockoutDuration:  Duration(25 * time.Hour),
-			},
-			wantErr: "max_lockout_duration must be <= 24h",
-		},
-		{
-			name: "max_lockout_duration less than lockout_duration",
-			config: SoftwareSecurityConfig{
-				ScryptWorkFactor:    18,
-				PassphraseMinLength: 12,
-				LockoutThreshold:    10,
-				LockoutDuration:     Duration(30 * time.Minute),
-				MaxLockoutDuration:  Duration(10 * time.Minute),
-			},
-			wantErr: "max_lockout_duration (10m0s) must be >= lockout_duration (30m0s)",
-		},
-		{
-			name: "boundary values - minimum valid",
-			config: SoftwareSecurityConfig{
-				ScryptWorkFactor:    14,
-				PassphraseMinLength: 8,
-				LockoutThreshold:    3,
-				LockoutDuration:     Duration(time.Minute),
-				MaxLockoutDuration:  Duration(5 * time.Minute),
-			},
-			wantErr: "",
-		},
-		{
-			name: "boundary values - maximum valid",
-			config: SoftwareSecurityConfig{
-				ScryptWorkFactor:    22,
-				PassphraseMinLength: 128,
-				LockoutThreshold:    100,
-				LockoutDuration:     Duration(time.Hour),
-				MaxLockoutDuration:  Duration(24 * time.Hour),
-			},
-			wantErr: "",
-		},
-		{
-			name: "passphrase_min_length too low",
-			config: SoftwareSecurityConfig{
-				ScryptWorkFactor:    18,
-				PassphraseMinLength: 6,
-				LockoutThreshold:    10,
-				LockoutDuration:     Duration(5 * time.Minute),
-				MaxLockoutDuration:  Duration(time.Hour),
-			},
-			wantErr: "passphrase_min_length must be >= 8",
-		},
-		{
-			name: "passphrase_min_length too high",
-			config: SoftwareSecurityConfig{
-				ScryptWorkFactor:    18,
-				PassphraseMinLength: 200,
-				LockoutThreshold:    10,
-				LockoutDuration:     Duration(5 * time.Minute),
-				MaxLockoutDuration:  Duration(time.Hour),
-			},
-			wantErr: "passphrase_min_length must be <= 128",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
-			if tt.wantErr == "" {
-				if err != nil {
-					t.Errorf("Validate() unexpected error = %v", err)
-				}
-			} else {
-				if err == nil {
-					t.Errorf("Validate() expected error containing %q, got nil", tt.wantErr)
-				} else if !contains(err.Error(), tt.wantErr) {
-					t.Errorf("Validate() error = %v, want error containing %q", err, tt.wantErr)
-				}
-			}
-		})
 	}
 }
 
@@ -315,20 +255,39 @@ func TestAgentConfig_Validate(t *testing.T) {
 		{
 			name: "valid defaults",
 			config: AgentConfig{
+				IdleTimeout:            Duration(time.Hour),
+				ActivityIncrement:      Duration(15 * time.Minute),
+				MaxLifetime:            Duration(24 * time.Hour),
+				ProviderRequestTimeout: Duration(2 * time.Minute),
+			},
+		},
+		{
+			name: "provider_request_timeout zero uses default",
+			config: AgentConfig{
 				IdleTimeout:       Duration(time.Hour),
 				ActivityIncrement: Duration(15 * time.Minute),
 				MaxLifetime:       Duration(24 * time.Hour),
-				Security: AgentSecurityConfig{
-					Software: SoftwareSecurityConfig{
-						ScryptWorkFactor:    18,
-						PassphraseMinLength: 12,
-						LockoutThreshold:    10,
-						LockoutDuration:     Duration(5 * time.Minute),
-						MaxLockoutDuration:  Duration(time.Hour),
-					},
-				},
 			},
-			wantErr: "",
+		},
+		{
+			name: "provider_request_timeout too short",
+			config: AgentConfig{
+				IdleTimeout:            Duration(time.Hour),
+				ActivityIncrement:      Duration(15 * time.Minute),
+				MaxLifetime:            Duration(24 * time.Hour),
+				ProviderRequestTimeout: Duration(4 * time.Second),
+			},
+			wantErr: "provider_request_timeout must be >= 5s",
+		},
+		{
+			name: "provider_request_timeout too long",
+			config: AgentConfig{
+				IdleTimeout:            Duration(time.Hour),
+				ActivityIncrement:      Duration(15 * time.Minute),
+				MaxLifetime:            Duration(24 * time.Hour),
+				ProviderRequestTimeout: Duration(11 * time.Minute),
+			},
+			wantErr: "provider_request_timeout must be <= 10m",
 		},
 		{
 			name: "idle_timeout too short",
@@ -336,15 +295,6 @@ func TestAgentConfig_Validate(t *testing.T) {
 				IdleTimeout:       Duration(500 * time.Millisecond),
 				ActivityIncrement: Duration(15 * time.Minute),
 				MaxLifetime:       Duration(24 * time.Hour),
-				Security: AgentSecurityConfig{
-					Software: SoftwareSecurityConfig{
-						ScryptWorkFactor:    18,
-						PassphraseMinLength: 12,
-						LockoutThreshold:    10,
-						LockoutDuration:     Duration(5 * time.Minute),
-						MaxLockoutDuration:  Duration(time.Hour),
-					},
-				},
 			},
 			wantErr: "idle_timeout must be >= 1s",
 		},
@@ -354,15 +304,6 @@ func TestAgentConfig_Validate(t *testing.T) {
 				IdleTimeout:       Duration(25 * time.Hour),
 				ActivityIncrement: Duration(15 * time.Minute),
 				MaxLifetime:       Duration(168 * time.Hour),
-				Security: AgentSecurityConfig{
-					Software: SoftwareSecurityConfig{
-						ScryptWorkFactor:    18,
-						PassphraseMinLength: 12,
-						LockoutThreshold:    10,
-						LockoutDuration:     Duration(5 * time.Minute),
-						MaxLockoutDuration:  Duration(time.Hour),
-					},
-				},
 			},
 			wantErr: "idle_timeout must be <= 24h",
 		},
@@ -372,35 +313,8 @@ func TestAgentConfig_Validate(t *testing.T) {
 				IdleTimeout:       Duration(30 * time.Second),
 				ActivityIncrement: Duration(10 * time.Second),
 				MaxLifetime:       Duration(30 * time.Second),
-				Security: AgentSecurityConfig{
-					Software: SoftwareSecurityConfig{
-						ScryptWorkFactor:    18,
-						PassphraseMinLength: 12,
-						LockoutThreshold:    10,
-						LockoutDuration:     Duration(5 * time.Minute),
-						MaxLockoutDuration:  Duration(time.Hour),
-					},
-				},
 			},
 			wantErr: "max_lifetime must be >= 1m",
-		},
-		{
-			name: "max_lifetime too long",
-			config: AgentConfig{
-				IdleTimeout:       Duration(time.Hour),
-				ActivityIncrement: Duration(15 * time.Minute),
-				MaxLifetime:       Duration(169 * time.Hour),
-				Security: AgentSecurityConfig{
-					Software: SoftwareSecurityConfig{
-						ScryptWorkFactor:    18,
-						PassphraseMinLength: 12,
-						LockoutThreshold:    10,
-						LockoutDuration:     Duration(5 * time.Minute),
-						MaxLockoutDuration:  Duration(time.Hour),
-					},
-				},
-			},
-			wantErr: "max_lifetime must be <= 168h",
 		},
 		{
 			name: "idle_timeout exceeds max_lifetime",
@@ -408,53 +322,8 @@ func TestAgentConfig_Validate(t *testing.T) {
 				IdleTimeout:       Duration(2 * time.Hour),
 				ActivityIncrement: Duration(15 * time.Minute),
 				MaxLifetime:       Duration(1 * time.Hour),
-				Security: AgentSecurityConfig{
-					Software: SoftwareSecurityConfig{
-						ScryptWorkFactor:    18,
-						PassphraseMinLength: 12,
-						LockoutThreshold:    10,
-						LockoutDuration:     Duration(5 * time.Minute),
-						MaxLockoutDuration:  Duration(time.Hour),
-					},
-				},
 			},
 			wantErr: "agent.idle_timeout (2h0m0s) must be <= agent.max_lifetime (1h0m0s)",
-		},
-		{
-			name: "boundary values - minimum valid",
-			config: AgentConfig{
-				IdleTimeout:       Duration(time.Second),
-				ActivityIncrement: Duration(time.Second),
-				MaxLifetime:       Duration(time.Minute),
-				Security: AgentSecurityConfig{
-					Software: SoftwareSecurityConfig{
-						ScryptWorkFactor:    14,
-						PassphraseMinLength: 8,
-						LockoutThreshold:    3,
-						LockoutDuration:     Duration(time.Minute),
-						MaxLockoutDuration:  Duration(5 * time.Minute),
-					},
-				},
-			},
-			wantErr: "",
-		},
-		{
-			name: "boundary values - maximum valid",
-			config: AgentConfig{
-				IdleTimeout:       Duration(24 * time.Hour),
-				ActivityIncrement: Duration(24 * time.Hour),
-				MaxLifetime:       Duration(168 * time.Hour),
-				Security: AgentSecurityConfig{
-					Software: SoftwareSecurityConfig{
-						ScryptWorkFactor:    22,
-						PassphraseMinLength: 128,
-						LockoutThreshold:    100,
-						LockoutDuration:     Duration(time.Hour),
-						MaxLockoutDuration:  Duration(24 * time.Hour),
-					},
-				},
-			},
-			wantErr: "",
 		},
 	}
 
@@ -465,59 +334,59 @@ func TestAgentConfig_Validate(t *testing.T) {
 				if err != nil {
 					t.Errorf("Validate() unexpected error = %v", err)
 				}
-			} else {
-				if err == nil {
-					t.Errorf("Validate() expected error containing %q, got nil", tt.wantErr)
-				} else if !contains(err.Error(), tt.wantErr) {
-					t.Errorf("Validate() error = %v, want error containing %q", err, tt.wantErr)
-				}
+			} else if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Validate() error = %v, want containing %q", err, tt.wantErr)
 			}
 		})
 	}
 }
 
+func TestLoad_AcceptsProviderRequestTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	writeConfigFile(t, configPath, `
+agent:
+  provider_request_timeout: 90s
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.Agent.ProviderRequestTimeout.Duration(); got != 90*time.Second {
+		t.Fatalf("agent.provider_request_timeout = %v, want 90s", got)
+	}
+}
+
 func TestLoad_ValidationFailure(t *testing.T) {
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.toml")
-
-	content := `
-[agent.security.software]
-scrypt_work_factor = 10
-`
-	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
-		t.Fatal(err)
-	}
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	writeConfigFile(t, configPath, `
+agent:
+  idle_timeout: 500ms
+`)
 
 	_, err := Load(configPath)
 	if err == nil {
-		t.Error("Load() should return error for invalid scrypt_work_factor")
+		t.Error("Load() should return error for invalid idle_timeout")
 	}
-	if !contains(err.Error(), "scrypt_work_factor must be >= 14") {
-		t.Errorf("Load() error = %v, expected scrypt validation error", err)
+	if !strings.Contains(err.Error(), "idle_timeout must be >= 1s") {
+		t.Errorf("Load() error = %v, expected idle_timeout validation error", err)
 	}
 }
 
 func TestLoad_EnvOverrideValidation(t *testing.T) {
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.toml")
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	writeConfigFile(t, configPath, `{}`)
 
-	// Valid config file
-	content := `
-[agent.security.software]
-scrypt_work_factor = 18
-`
-	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	// Set invalid env override (below 1s minimum)
 	t.Setenv("NSSH_AGENT_IDLE_TIMEOUT", "500ms")
 
 	_, err := Load(configPath)
 	if err == nil {
 		t.Error("Load() should return error for invalid idle_timeout from env")
 	}
-	if !contains(err.Error(), "idle_timeout must be >= 1s") {
+	if !strings.Contains(err.Error(), "idle_timeout must be >= 1s") {
 		t.Errorf("Load() error = %v, expected idle_timeout validation error", err)
 	}
 }
@@ -528,46 +397,11 @@ func TestSSHSecurityConfig_Validate(t *testing.T) {
 		config  SSHSecurityConfig
 		wantErr string
 	}{
-		{
-			name: "valid defaults",
-			config: SSHSecurityConfig{
-				HostKeyPolicy:  "tofu",
-				AcceptOnceMode: "pin",
-			},
-			wantErr: "",
-		},
-		{
-			name: "valid host_key_policy - pin",
-			config: SSHSecurityConfig{
-				HostKeyPolicy:  "pin",
-				AcceptOnceMode: "pin",
-			},
-			wantErr: "",
-		},
-		{
-			name: "invalid host_key_policy",
-			config: SSHSecurityConfig{
-				HostKeyPolicy:  "invalid",
-				AcceptOnceMode: "pin",
-			},
-			wantErr: "host_key_policy must be 'pin' or 'tofu'",
-		},
-		{
-			name: "valid accept_once_mode - accept-new",
-			config: SSHSecurityConfig{
-				HostKeyPolicy:  "tofu",
-				AcceptOnceMode: "accept-new",
-			},
-			wantErr: "",
-		},
-		{
-			name: "invalid accept_once_mode",
-			config: SSHSecurityConfig{
-				HostKeyPolicy:  "pin",
-				AcceptOnceMode: "invalid",
-			},
-			wantErr: "accept_once_mode must be 'pin' or 'accept-new'",
-		},
+		{name: "valid defaults", config: SSHSecurityConfig{HostKeyPolicy: "tofu", AcceptOnceMode: "pin"}},
+		{name: "valid host_key_policy - pin", config: SSHSecurityConfig{HostKeyPolicy: "pin", AcceptOnceMode: "pin"}},
+		{name: "invalid host_key_policy", config: SSHSecurityConfig{HostKeyPolicy: "invalid", AcceptOnceMode: "pin"}, wantErr: "host_key_policy must be 'pin' or 'tofu'"},
+		{name: "valid accept_once_mode - accept-new", config: SSHSecurityConfig{HostKeyPolicy: "tofu", AcceptOnceMode: "accept-new"}},
+		{name: "invalid accept_once_mode", config: SSHSecurityConfig{HostKeyPolicy: "pin", AcceptOnceMode: "invalid"}, wantErr: "accept_once_mode must be 'pin' or 'accept-new'"},
 	}
 
 	for _, tt := range tests {
@@ -577,27 +411,9 @@ func TestSSHSecurityConfig_Validate(t *testing.T) {
 				if err != nil {
 					t.Errorf("Validate() unexpected error = %v", err)
 				}
-			} else {
-				if err == nil {
-					t.Errorf("Validate() expected error containing %q, got nil", tt.wantErr)
-				} else if !contains(err.Error(), tt.wantErr) {
-					t.Errorf("Validate() error = %v, want error containing %q", err, tt.wantErr)
-				}
+			} else if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Validate() error = %v, want containing %q", err, tt.wantErr)
 			}
 		})
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr)))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

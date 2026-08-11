@@ -5,46 +5,51 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/BurntSushi/toml"
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // NewCfgCmd creates the cfg subcommand.
 func NewCfgCmd() *cobra.Command {
 	var (
-		edit     bool
-		pathOnly bool
+		edit      bool
+		pathsOnly bool
+		source    bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "cfg",
-		Short: "View or edit nssh configuration",
+		Short: "Manage configuration",
 		Long: `View or edit the nssh configuration file.
 
 By default, prints the effective configuration (merged from file,
-environment variables, and defaults) in TOML format.
+environment variables, and defaults) in YAML format.
 
+Use --source to print the resolved source files with comments preserved.
 Use --edit to open the config file in your editor ($VISUAL or $EDITOR).
-Use --path to print just the config file path.`,
+Use --paths to print config file paths, including resolved includes.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCfg(edit, pathOnly)
+			return runCfg(edit, pathsOnly, source)
 		},
 	}
 
 	cmd.Flags().BoolVar(&edit, "edit", false, "open config in editor")
-	cmd.Flags().BoolVar(&pathOnly, "path", false, "print config file path only")
+	cmd.Flags().BoolVar(&pathsOnly, "paths", false, "print config file paths only")
+	cmd.Flags().BoolVar(&source, "source", false, "print source config files with comments")
 
 	return cmd
 }
 
-func runCfg(edit, pathOnly bool) error {
+func runCfg(edit, pathsOnly, source bool) error {
 	paths := config.DefaultPaths()
 
-	// --path: just print path and exit
-	if pathOnly {
-		fmt.Println(paths.ConfigFile)
-		return nil
+	if pathsOnly {
+		return printConfigPaths(paths)
+	}
+	if source {
+		return printSourceConfig(paths)
 	}
 
 	// --edit: open in editor
@@ -53,7 +58,60 @@ func runCfg(edit, pathOnly bool) error {
 	}
 
 	// Default: print effective config
-	return printEffectiveConfig(paths)
+	return printEffectiveConfig()
+}
+
+func printSourceConfig(paths *config.Paths) error {
+	files, err := configFiles(paths)
+	if err != nil {
+		return err
+	}
+	color := term.IsTerminal(int(os.Stdout.Fd()))
+	for i, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return fmt.Errorf("read config %s: %w", file, err)
+		}
+		if len(files) > 1 {
+			if i > 0 {
+				fmt.Println()
+			}
+			header := "# " + file + "\n"
+			fmt.Print(renderConfigText(header, color))
+		}
+		text := string(data)
+		fmt.Print(renderConfigText(text, color))
+		if text == "" || text[len(text)-1] != '\n' {
+			fmt.Println()
+		}
+	}
+	return nil
+}
+
+func printConfigPaths(paths *config.Paths) error {
+	files, err := configFiles(paths)
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		fmt.Println(file)
+	}
+	return nil
+}
+
+func configFiles(paths *config.Paths) ([]string, error) {
+	if paths == nil {
+		paths = config.DefaultPaths()
+	}
+	cfg, err := config.Load(paths.ConfigFile)
+	if err != nil {
+		return nil, err
+	}
+	files := cfg.ConfigFiles()
+	if len(files) == 0 {
+		files = []string{paths.ConfigFile}
+	}
+	return files, nil
 }
 
 func openInEditor(path string) error {
@@ -72,22 +130,24 @@ func openInEditor(path string) error {
 	return cmd.Run()
 }
 
-func printEffectiveConfig(paths *config.Paths) error {
-	// Print header with metadata
-	exists := "exists"
-	if _, err := os.Stat(paths.ConfigFile); os.IsNotExist(err) {
-		exists = "not found, using defaults"
-	}
-	fmt.Printf("# Config: %s (%s)\n", paths.ConfigFile, exists)
-	fmt.Printf("# Effective configuration\n\n")
+func printEffectiveConfig() error {
 
-	// Load and marshal config
 	cfg, err := config.LoadDefault()
 	if err != nil {
 		return err
 	}
 
-	// Encode as TOML to stdout
-	encoder := toml.NewEncoder(os.Stdout)
-	return encoder.Encode(cfg)
+	text, err := config.MarshalSparse(cfg)
+	if err != nil {
+		return err
+	}
+	fmt.Print(renderConfigText(text, term.IsTerminal(int(os.Stdout.Fd()))))
+	return nil
+}
+
+func renderConfigText(text string, color bool) string {
+	if !color {
+		return text
+	}
+	return ui.HighlightYAML(text)
 }

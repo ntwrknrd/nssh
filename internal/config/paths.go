@@ -21,16 +21,10 @@ type Paths struct {
 	// ConfigFile is the main config file path
 	ConfigFile string
 
-	// CredentialsFile is the encrypted credentials file
-	CredentialsFile string
-
-	// AgeKeyFile is the age identity file for encryption
-	AgeKeyFile string
-
 	// RecordingsDir is where session recordings are stored (state, not data)
 	RecordingsDir string
 
-	// BackupDir is where credential backups are stored
+	// BackupDir is where local config and inventory backups are stored
 	BackupDir string
 
 	// SSHConfigDir is the user's SSH config directory
@@ -78,30 +72,15 @@ func resolvePaths() *Paths {
 	stateDir := filepath.Join(stateHome, "nssh")
 	sshDir := filepath.Join(home, ".ssh")
 
-	// Age key: check env override, then standard age location, then nssh-specific
-	ageKeyFile := os.Getenv("NSSH_AGE_KEY")
-	if ageKeyFile == "" {
-		// Standard age key location: ~/.config/age/keys.txt
-		standardAgePath := filepath.Join(configHome, "age", "keys.txt")
-		if _, err := os.Stat(standardAgePath); err == nil {
-			ageKeyFile = standardAgePath
-		} else {
-			// Fallback to nssh-specific location
-			ageKeyFile = filepath.Join(configDir, "age.key")
-		}
-	}
-
 	return &Paths{
-		ConfigDir:       configDir,
-		DataDir:         dataDir,
-		StateDir:        stateDir,
-		ConfigFile:      filepath.Join(configDir, "config.toml"),
-		CredentialsFile: filepath.Join(dataDir, "credentials.age"),
-		AgeKeyFile:      ageKeyFile,
-		RecordingsDir:   filepath.Join(stateDir, "casts"), // State, matches Python
-		BackupDir:       filepath.Join(dataDir, "backups"),
-		SSHConfigDir:    sshDir,
-		SSHConfigFile:   filepath.Join(sshDir, "config"),
+		ConfigDir:     configDir,
+		DataDir:       dataDir,
+		StateDir:      stateDir,
+		ConfigFile:    filepath.Join(configDir, "config.yaml"),
+		RecordingsDir: filepath.Join(stateDir, "casts"), // State, matches Python
+		BackupDir:     filepath.Join(dataDir, "backups"),
+		SSHConfigDir:  sshDir,
+		SSHConfigFile: filepath.Join(sshDir, "config"),
 	}
 }
 

@@ -3,6 +3,7 @@ $ nssh log --help
 │   nssh log [flags]                  Manage session recordings                │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
+│   archive                           Archive old recordings                   │
 │   auth                              Authenticate with asciinema              │
 │   delete                            Delete recordings                        │
 │   export                            Export recording                         │
@@ -11,9 +12,9 @@ $ nssh log --help
 │   search                            Search recordings for text               │
 │   upload                            Upload to asciinema                      │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
-│   -v, --verbose                     Print debug messages                     │
+│   -v, --verbose COUNT               Increase debug verbosity                 │
 │   -V, --version                     Print command version                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯

@@ -33,17 +33,13 @@ var (
 	unknownHostLiteral    = []byte("are you sure you want to continue connecting")
 	hostKeyChangedLiteral = []byte("remote host identification has changed")
 
-	// Fingerprint extraction needs regex for capture groups
-	fingerprintRe = regexp.MustCompile(`(?i)(\w+) key fingerprint is (SHA256:[A-Za-z0-9+/=]+)`)
+	// Fingerprint extraction needs regex for capture groups. OpenSSH uses a
+	// different sentence for an unknown host than for a changed host.
+	fingerprintRes = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)(\w+) key fingerprint is (SHA256:[A-Za-z0-9+/=]+)`),
+		regexp.MustCompile(`(?is)fingerprint for the (\w+) key sent by the remote host is\s*(SHA256:[A-Za-z0-9+/=]+)`),
+	}
 )
-
-// Auth failure literals (lowercase, checked with bytes.Contains)
-var authFailureLiterals = [][]byte{
-	[]byte("permission denied"),
-	[]byte("authentication failed"),
-	[]byte("try again"),
-	[]byte("access denied"),
-}
 
 // matchPasswordPrompt checks if the buffer ends with a password prompt.
 // Uses fast bytes operations for simple patterns, falls back to regex for complex ones.
@@ -73,17 +69,6 @@ func matchPasswordPrompt(buf []byte) bool {
 	return false
 }
 
-// matchAuthFailure checks if the output indicates an authentication failure.
-func matchAuthFailure(buf []byte) bool {
-	lower := bytes.ToLower(buf)
-	for _, pattern := range authFailureLiterals {
-		if bytes.Contains(lower, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
 // matchUnknownHost checks if the output contains an unknown host key prompt.
 func matchUnknownHost(buf []byte) bool {
 	return bytes.Contains(bytes.ToLower(buf), unknownHostLiteral)
@@ -97,9 +82,11 @@ func matchHostKeyChanged(buf []byte) bool {
 // extractFingerprint extracts the key type and fingerprint from SSH output.
 // Returns empty strings if no fingerprint found.
 func extractFingerprint(output []byte) (keyType, fingerprint string) {
-	matches := fingerprintRe.FindSubmatch(output)
-	if len(matches) >= 3 {
-		return string(matches[1]), string(matches[2])
+	for _, re := range fingerprintRes {
+		matches := re.FindSubmatch(output)
+		if len(matches) >= 3 {
+			return string(matches[1]), string(matches[2])
+		}
 	}
 	return "", ""
 }

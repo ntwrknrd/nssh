@@ -66,11 +66,6 @@ func (r *RingBuffer) Write(p []byte) {
 	}
 }
 
-// Len returns the number of bytes currently in the buffer.
-func (r *RingBuffer) Len() int {
-	return r.count
-}
-
 // Reset clears the buffer.
 func (r *RingBuffer) Reset() {
 	r.count = 0

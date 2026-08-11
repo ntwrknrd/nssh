@@ -1,0 +1,10 @@
+$ nssh inv refresh --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh inv refresh [provider|local] [flags]                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose COUNT               Increase debug verbosity                 │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

@@ -33,9 +33,6 @@ func RunVersion() {
 		fmt.Printf("%s, ", date)
 	}
 	fmt.Printf("%s, %s/%s)", runtime.Version(), runtime.GOOS, runtime.GOARCH)
-	if features != "" {
-		fmt.Printf(" [%s]", features)
-	}
 	fmt.Println()
 }
 

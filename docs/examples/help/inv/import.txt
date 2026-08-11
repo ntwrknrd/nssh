@@ -1,0 +1,13 @@
+$ nssh inv import --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh inv import FILE.csv [flags]  Import inventory from CSV                │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Flags ──────────────────────────────────────────────────────────────────────╮
+│   --group STRING                    target provider-qualified group          │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose COUNT               Increase debug verbosity                 │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

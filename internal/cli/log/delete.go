@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/exit"
-	"github.com/ntwrknrd/nssh/internal/ssh/recording"
+	"github.com/ntwrknrd/nssh/internal/recording"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -46,8 +46,6 @@ Cannot combine modes - use only one mode flag at a time.`,
 func runDelete(selectPattern string, olderThan int, yes, dryRun bool) error {
 	settings := recording.LoadRecordingSettings()
 
-	ui.CommandStart("DELETE RECORDINGS")
-
 	// Validate mutual exclusion
 	modesSpecified := 0
 	if olderThan > 0 {
@@ -58,7 +56,6 @@ func runDelete(selectPattern string, olderThan int, yes, dryRun bool) error {
 	}
 	if modesSpecified > 1 {
 		ui.Error("Cannot combine modes. Use one of: --select, --older-than, or interactive (no flags)")
-		ui.CommandEnd(ui.StatusError)
 		return &exit.ExitError{Code: 1}
 	}
 
@@ -79,11 +76,11 @@ func runDelete(selectPattern string, olderThan int, yes, dryRun bool) error {
 func deleteOlderThan(settings recording.RecordingSettings, days int, dryRun bool) error {
 	cutoff := time.Now().AddDate(0, 0, -days)
 
-	sessions := LoadSessions(settings)
+	sessions := recording.IterSessionRecords(settings)
 	var toDelete []recording.SessionRecord
 
 	for _, session := range sessions {
-		mtime := sessionUpdatedTimestamp(session)
+		mtime := recording.SessionUpdatedTimestamp(session)
 		if mtime.Before(cutoff) {
 			toDelete = append(toDelete, session)
 		}
@@ -91,7 +88,6 @@ func deleteOlderThan(settings recording.RecordingSettings, days int, dryRun bool
 
 	if len(toDelete) == 0 {
 		ui.Success("No recordings to clean up")
-		ui.CommandEnd(ui.StatusSuccess)
 		return nil
 	}
 
@@ -107,28 +103,23 @@ func deleteOlderThan(settings recording.RecordingSettings, days int, dryRun bool
 
 	if dryRun {
 		ui.Warning("Run without --dry-run to actually delete files")
-		ui.CommandEnd(ui.StatusWarning)
-	} else {
-		ui.CommandEnd(ui.StatusSuccess)
 	}
 
 	return nil
 }
 
 func deleteByPattern(settings recording.RecordingSettings, pattern string, yes, dryRun bool) error {
-	sessions := LoadSessions(settings)
+	sessions := recording.IterSessionRecords(settings)
 
 	pattern = ExpandDateShortcut(pattern)
 	filtered, err := FilterSessionsByPattern(sessions, pattern)
 	if err != nil {
 		ui.Error("Invalid pattern: %s", err)
-		ui.CommandEnd(ui.StatusError)
 		return &exit.ExitError{Code: 1}
 	}
 
 	if len(filtered) == 0 {
 		ui.Warning("No recordings match '%s'", pattern)
-		ui.CommandEnd(ui.StatusWarning)
 		return nil
 	}
 
@@ -139,7 +130,6 @@ func deleteByPattern(settings recording.RecordingSettings, pattern string, yes, 
 		result, _ := ui.Confirm(fmt.Sprintf("Delete all %d?", len(filtered)), false)
 		if !result {
 			ui.Abort("Canceled")
-			ui.CommandEnd(ui.StatusAbort)
 			return nil
 		}
 	}
@@ -152,28 +142,24 @@ func deleteByPattern(settings recording.RecordingSettings, pattern string, yes, 
 
 	if dryRun {
 		ui.Warning("Run without --dry-run to actually delete files")
-		ui.CommandEnd(ui.StatusWarning)
 	} else {
 		ui.Success("Deleted %d recording(s)", len(filtered))
-		ui.CommandEnd(ui.StatusSuccess)
 	}
 
 	return nil
 }
 
 func deleteInteractive(settings recording.RecordingSettings, yes, dryRun bool) error {
-	sessions := LoadSessions(settings)
+	sessions := recording.IterSessionRecords(settings)
 
 	if len(sessions) == 0 {
 		ui.Warning("No recordings found in %s", settings.Directory)
-		ui.CommandEnd(ui.StatusWarning)
 		return nil
 	}
 
 	selected, err := SelectSessionsMulti(sessions, "Select recording(s) [Tab=multi-select]:")
 	if err != nil {
 		ui.Abort("%s", err)
-		ui.CommandEnd(ui.StatusAbort)
 		return nil
 	}
 
@@ -188,7 +174,6 @@ func deleteInteractive(settings recording.RecordingSettings, yes, dryRun bool) e
 		result, _ := ui.Confirm(prompt, len(selected) == 1)
 		if !result {
 			ui.Abort("Canceled")
-			ui.CommandEnd(ui.StatusAbort)
 			return nil
 		}
 	}
@@ -201,10 +186,8 @@ func deleteInteractive(settings recording.RecordingSettings, yes, dryRun bool) e
 
 	if dryRun {
 		ui.Warning("Run without --dry-run to actually delete files")
-		ui.CommandEnd(ui.StatusWarning)
 	} else {
 		ui.Success("Deleted %d recording(s)", len(selected))
-		ui.CommandEnd(ui.StatusSuccess)
 	}
 
 	return nil

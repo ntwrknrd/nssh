@@ -1,13 +1,13 @@
 // Package config provides configuration loading and path resolution for nssh.
 //
-// Configuration is loaded from a TOML file with environment variable overrides.
+// Configuration is loaded from a YAML file with environment variable overrides.
 // The package follows XDG Base Directory conventions for file placement.
 //
 // # Configuration File
 //
 // The configuration file is located at:
 //
-//	$XDG_CONFIG_HOME/nssh/config.toml  (default: ~/.config/nssh/config.toml)
+//	$XDG_CONFIG_HOME/nssh/config.yaml  (default: ~/.config/nssh/config.yaml)
 //
 // Use [LoadDefault] to load configuration with standard path resolution,
 // or [Load] to load from a specific path.
@@ -34,6 +34,6 @@
 //
 // # Duration Type
 //
-// The [Duration] type wraps [time.Duration] for TOML parsing, accepting
+// The [Duration] type wraps [time.Duration] for YAML parsing, accepting
 // standard Go duration strings like "30s", "5m", "1h".
 package config

@@ -1,15 +1,16 @@
 $ nssh self bench ssh --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh self bench ssh <host> [fl... Benchmark SSH connections                │
+│   nssh self bench ssh <host> [flags]                                         │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────╮
+╭─ Flags ──────────────────────────────────────────────────────────────────────╮
+│   --password-auth                   force SSH password authentication d...   │
 │   --samples INT                     number of measured runs                  │
 │   --simple                          wall-clock timing only (no stage br...   │
 │   --warmups INT                     number of warmup runs (not measured)     │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
-│   -v, --verbose                     Print debug messages                     │
+│   -v, --verbose COUNT               Increase debug verbosity                 │
 │   -V, --version                     Print command version                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯

@@ -3,6 +3,7 @@ package bench
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,6 +32,23 @@ type BenchmarkResult struct {
 	TotalRuns    int
 	WarmupRuns   int
 	MeasuredRuns int
+}
+
+type rawBenchmarkArtifact struct {
+	Type         string               `json:"type"`
+	Host         string               `json:"host"`
+	Timestamp    string               `json:"timestamp"`
+	WarmupRuns   int                  `json:"warmup_runs"`
+	MeasuredRuns int                  `json:"measured_runs"`
+	TotalRuns    int                  `json:"total_runs"`
+	Metadata     map[string]string    `json:"metadata,omitempty"`
+	Samples      []rawBenchmarkSample `json:"samples"`
+}
+
+type rawBenchmarkSample struct {
+	Index       int                `json:"index"`
+	WallClockMS float64            `json:"wall_clock_ms"`
+	Stages      map[string]float64 `json:"stages"`
 }
 
 // StageStats holds statistics for a single timing stage.
@@ -171,27 +189,13 @@ func parseTimingOutput(output string) map[string]time.Duration {
 			continue
 		}
 
-		timings[name] = time.Duration(ms * float64(time.Millisecond))
+		timings[name] += time.Duration(ms * float64(time.Millisecond))
 	}
 
 	return timings
 }
 
-// ComputeStats calculates statistics for a timing stage across all samples.
-func ComputeStats(samples []map[string]time.Duration, stageName string) StageStats {
-	var durations []time.Duration
-
-	for _, sample := range samples {
-		if d, ok := sample[stageName]; ok {
-			durations = append(durations, d)
-		}
-	}
-
-	return computeStatsFromDurations(stageName, durations)
-}
-
 // ComputeAllStats calculates statistics for all stages in a single pass.
-// This is more efficient than calling ComputeStats repeatedly.
 func ComputeAllStats(samples []map[string]time.Duration, stageNames []string) map[string]StageStats {
 	// Build duration slices for each stage in one pass
 	stageDurations := make(map[string][]time.Duration)
@@ -281,6 +285,32 @@ func ComputeWallClockStats(wallClocks []time.Duration) StageStats {
 	}
 }
 
+func computeDeltaStats(name string, samples []map[string]time.Duration, endStage, startStage string) StageStats {
+	durations := make([]time.Duration, 0, len(samples))
+	for _, sample := range samples {
+		end, okEnd := sample[endStage]
+		start, okStart := sample[startStage]
+		if okEnd && okStart && end >= start {
+			durations = append(durations, end-start)
+		}
+	}
+	return computeStatsFromDurations(name, durations)
+}
+
+func computeWallMinusStageStats(name string, wallClocks []time.Duration, samples []map[string]time.Duration, stage string) StageStats {
+	limit := len(samples)
+	if len(wallClocks) < limit {
+		limit = len(wallClocks)
+	}
+	durations := make([]time.Duration, 0, limit)
+	for i := 0; i < limit; i++ {
+		if d, ok := samples[i][stage]; ok && wallClocks[i] >= d {
+			durations = append(durations, wallClocks[i]-d)
+		}
+	}
+	return computeStatsFromDurations(name, durations)
+}
+
 // renderResults displays benchmark results in a formatted table.
 func renderResults(result *BenchmarkResult, simpleOnly bool) {
 	fmt.Println()
@@ -296,22 +326,19 @@ func renderResults(result *BenchmarkResult, simpleOnly bool) {
 
 		table := ui.NewTable("Stage", "Mean", "Median", "Min", "Max", "Description")
 
-		// Add startup overhead first (wall_clock - connector_total)
-		// This represents Go subprocess initialization before connector.Run()
-		connectorStats := allStats[connector.TimingTotal]
-		if connectorStats.Mean > 0 && wallStats.Mean > connectorStats.Mean {
+		// Add pre-connector overhead first (wall_clock - connector_total).
+		// This includes subprocess startup plus all work before Connector.Run().
+		preConnectorStats := computeWallMinusStageStats("pre_connector", result.WallClocks, result.Samples, connector.TimingTotal)
+		if preConnectorStats.Mean > 0 {
 			table.AddRow(
-				"startup",
-				formatDuration(wallStats.Mean-connectorStats.Mean),
-				formatDuration(wallStats.Median-connectorStats.Median),
-				formatDuration(wallStats.Min-connectorStats.Min),
-				formatDuration(wallStats.Max-connectorStats.Max),
-				ui.Gray("Go subprocess initialization"),
+				"pre_connector",
+				formatDuration(preConnectorStats.Mean),
+				formatDuration(preConnectorStats.Median),
+				formatDuration(preConnectorStats.Min),
+				formatDuration(preConnectorStats.Max),
+				ui.Gray("Process startup + pre-connector work"),
 			)
 		}
-
-		// Get first_read stats for computing session_io
-		firstReadStats := allStats[connector.TimingFirstRead]
 
 		for _, stageName := range sortedStages {
 			// Skip total - we show wall_clock as the total instead
@@ -327,18 +354,14 @@ func renderResults(result *BenchmarkResult, simpleOnly bool) {
 
 			// Convert session_end from cumulative to delta (session_io = session_end - first_read)
 			if stageName == connector.TimingSessionEnd {
-				if firstReadStats.Mean > 0 {
-					// Compute delta: time after first_read until session close
-					deltaMean := stats.Mean - firstReadStats.Mean
-					deltaMedian := stats.Median - firstReadStats.Median
-					deltaMin := stats.Min - firstReadStats.Min
-					deltaMax := stats.Max - firstReadStats.Max
+				sessionIOStats := computeDeltaStats("session_io", result.Samples, connector.TimingSessionEnd, connector.TimingFirstRead)
+				if sessionIOStats.Mean > 0 {
 					table.AddRow(
 						"session_io",
-						formatDuration(deltaMean),
-						formatDuration(deltaMedian),
-						formatDuration(deltaMin),
-						formatDuration(deltaMax),
+						formatDuration(sessionIOStats.Mean),
+						formatDuration(sessionIOStats.Median),
+						formatDuration(sessionIOStats.Min),
+						formatDuration(sessionIOStats.Max),
 						ui.Gray("I/O after first read until session close"),
 					)
 					continue
@@ -387,10 +410,27 @@ func formatDuration(d time.Duration) string {
 // TimingStageOrder defines the logical order of timing stages for display.
 var TimingStageOrder = []string{
 	connector.TimingConfigLoad,
+	connector.TimingCatalogTotal,
+	connector.TimingProviderStateList,
+	connector.TimingProviderStateLoad,
+	connector.TimingCatalogLocalHosts,
+	connector.TimingCatalogProviderHosts,
+	connector.TimingAuthResolve,
+	connector.TimingCredentialRegistry,
 	connector.TimingCredentialLookup,
+	connector.TimingMuxCheck,
+	connector.TimingMuxStart,
+	connector.TimingCredentialPrefetch,
+	connector.TimingAskpassSetup,
+	connector.TimingSSHArgsBuild,
+	connector.TimingSSHProcessStart,
+	connector.TimingSSHProcessWait,
+	connector.TimingSSHProcessTotal,
 	connector.TimingPTYStart,
 	connector.TimingFirstRead,
 	connector.TimingPasswordPrompt,
+	connector.TimingCredentialLookupLazy,
+	connector.TimingPasswordWrite,
 	connector.TimingPasswordSent,
 	connector.TimingSessionEnd,
 	connector.TimingTotal,
@@ -398,14 +438,31 @@ var TimingStageOrder = []string{
 
 // StageDescriptions provides human-readable descriptions for timing stages.
 var StageDescriptions = map[string]string{
-	connector.TimingConfigLoad:       "Load config.toml",
-	connector.TimingCredentialLookup: "Vault credential resolution",
-	connector.TimingPTYStart:         "Spawn PTY + SSH process",
-	connector.TimingFirstRead:        "Time to first SSH data (banner/prompt)",
-	connector.TimingPasswordPrompt:   "Time to password prompt (from session start)",
-	connector.TimingPasswordSent:     "Password injection duration",
-	connector.TimingSessionEnd:       "Total session duration (from session start)",
-	connector.TimingTotal:            "Connector.Run() total time",
+	connector.TimingConfigLoad:           "Load config.yaml",
+	connector.TimingCatalogTotal:         "Build host catalog",
+	connector.TimingProviderStateList:    "List provider state files",
+	connector.TimingProviderStateLoad:    "Load provider state JSON files",
+	connector.TimingCatalogLocalHosts:    "Add local inventory hosts to catalog",
+	connector.TimingCatalogProviderHosts: "Add provider-backed hosts to catalog",
+	connector.TimingAuthResolve:          "Resolve inventory auth inheritance",
+	connector.TimingCredentialRegistry:   "Build credential provider registry",
+	connector.TimingCredentialLookup:     "Provider credential resolution",
+	connector.TimingMuxCheck:             "Check existing OpenSSH ControlMaster session",
+	connector.TimingMuxStart:             "Start persistent OpenSSH ControlMaster session",
+	connector.TimingCredentialPrefetch:   "Provider credential prefetch",
+	connector.TimingAskpassSetup:         "Start askpass helper",
+	connector.TimingSSHArgsBuild:         "Build OpenSSH argv",
+	connector.TimingSSHProcessStart:      "Start ssh subprocess",
+	connector.TimingSSHProcessWait:       "Drain ssh output and wait for exit",
+	connector.TimingSSHProcessTotal:      "Total ssh subprocess lifetime",
+	connector.TimingPTYStart:             "Spawn PTY + SSH process",
+	connector.TimingFirstRead:            "Time to first SSH data (banner/prompt)",
+	connector.TimingPasswordPrompt:       "Time to password prompt (from session start)",
+	connector.TimingCredentialLookupLazy: "Provider credential resolution performed at password prompt",
+	connector.TimingPasswordWrite:        "PTY password write duration",
+	connector.TimingPasswordSent:         "Password injection duration (lookup + write)",
+	connector.TimingSessionEnd:           "Total session duration (from session start)",
+	connector.TimingTotal:                "Connector.Run() total time",
 }
 
 // stageOrderIndex maps stage names to their display order.
@@ -455,6 +512,10 @@ func PrintSavedPath(path string) {
 // SaveResults saves benchmark results to a timestamped file and updates symlinks.
 // Returns the path to the saved file, or empty string if saving failed.
 func SaveResults(benchType, host string, result *BenchmarkResult, simpleOnly bool) string {
+	return SaveResultsWithMetadata(benchType, host, result, simpleOnly, nil)
+}
+
+func SaveResultsWithMetadata(benchType, host string, result *BenchmarkResult, simpleOnly bool, metadata map[string]string) string {
 	dir := benchmarksDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return ""
@@ -463,29 +524,66 @@ func SaveResults(benchType, host string, result *BenchmarkResult, simpleOnly boo
 	// Generate timestamped filename
 	timestamp := time.Now().Format("2006-01-02-150405")
 	filename := fmt.Sprintf("%s-%s-%s.txt", benchType, host, timestamp)
-	filepath := filepath.Join(dir, filename)
+	path := filepath.Join(dir, filename)
 
 	// Render results to string
 	content := renderResultsToString(benchType, host, result, simpleOnly)
 
 	// Write file
-	if err := os.WriteFile(filepath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return ""
 	}
+	_ = saveRawResults(path, benchType, host, timestamp, result, metadata)
 
 	// Update symlinks
 	updateSymlinks(dir, benchType, filename)
 
-	return filepath
+	return path
+}
+
+func saveRawResults(textPath, benchType, host, timestamp string, result *BenchmarkResult, metadata map[string]string) error {
+	artifact := rawBenchmarkArtifact{
+		Type:         benchType,
+		Host:         host,
+		Timestamp:    timestamp,
+		WarmupRuns:   result.WarmupRuns,
+		MeasuredRuns: result.MeasuredRuns,
+		TotalRuns:    result.TotalRuns,
+		Metadata:     metadata,
+		Samples:      make([]rawBenchmarkSample, 0, len(result.Samples)),
+	}
+	for i, sample := range result.Samples {
+		rawSample := rawBenchmarkSample{
+			Index:  i + 1,
+			Stages: make(map[string]float64, len(sample)),
+		}
+		if i < len(result.WallClocks) {
+			rawSample.WallClockMS = durationMilliseconds(result.WallClocks[i])
+		}
+		for stage, duration := range sample {
+			rawSample.Stages[stage] = durationMilliseconds(duration)
+		}
+		artifact.Samples = append(artifact.Samples, rawSample)
+	}
+	data, err := json.MarshalIndent(artifact, "", "  ")
+	if err != nil {
+		return err
+	}
+	jsonPath := strings.TrimSuffix(textPath, filepath.Ext(textPath)) + ".json"
+	return os.WriteFile(jsonPath, append(data, '\n'), 0644)
+}
+
+func durationMilliseconds(duration time.Duration) float64 {
+	return float64(duration.Nanoseconds()) / 1e6
 }
 
 // renderResultsToString renders benchmark results to a string (for file output).
 func renderResultsToString(benchType, host string, result *BenchmarkResult, simpleOnly bool) string {
 	var buf strings.Builder
 
-	buf.WriteString(fmt.Sprintf("%s benchmark: %s\n", strings.ToUpper(benchType), host))
-	buf.WriteString(fmt.Sprintf("Date: %s\n", time.Now().Format("2006-01-02 15:04:05")))
-	buf.WriteString(fmt.Sprintf("Samples: %d (warmups: %d)\n\n", result.MeasuredRuns, result.WarmupRuns))
+	fmt.Fprintf(&buf, "%s benchmark: %s\n", strings.ToUpper(benchType), host)
+	fmt.Fprintf(&buf, "Date: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(&buf, "Samples: %d (warmups: %d)\n\n", result.MeasuredRuns, result.WarmupRuns)
 
 	if !simpleOnly && len(result.StageNames) > 0 {
 		sortedStages := sortStageNames(result.StageNames)
@@ -493,22 +591,20 @@ func renderResultsToString(benchType, host string, result *BenchmarkResult, simp
 		wallStats := ComputeWallClockStats(result.WallClocks)
 
 		// Header
-		buf.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %10s\n", "Stage", "Mean", "Median", "Min", "Max"))
+		fmt.Fprintf(&buf, "%-20s %10s %10s %10s %10s\n", "Stage", "Mean", "Median", "Min", "Max")
 		buf.WriteString(strings.Repeat("-", 62) + "\n")
 
-		// Startup overhead
-		connectorStats := allStats[connector.TimingTotal]
-		if connectorStats.Mean > 0 && wallStats.Mean > connectorStats.Mean {
-			buf.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %10s\n",
-				"startup",
-				formatDuration(wallStats.Mean-connectorStats.Mean),
-				formatDuration(wallStats.Median-connectorStats.Median),
-				formatDuration(wallStats.Min-connectorStats.Min),
-				formatDuration(wallStats.Max-connectorStats.Max),
-			))
+		// Pre-connector overhead.
+		preConnectorStats := computeWallMinusStageStats("pre_connector", result.WallClocks, result.Samples, connector.TimingTotal)
+		if preConnectorStats.Mean > 0 {
+			fmt.Fprintf(&buf, "%-20s %10s %10s %10s %10s\n",
+				"pre_connector",
+				formatDuration(preConnectorStats.Mean),
+				formatDuration(preConnectorStats.Median),
+				formatDuration(preConnectorStats.Min),
+				formatDuration(preConnectorStats.Max),
+			)
 		}
-
-		firstReadStats := allStats[connector.TimingFirstRead]
 
 		for _, stageName := range sortedStages {
 			if stageName == connector.TimingTotal {
@@ -517,37 +613,41 @@ func renderResultsToString(benchType, host string, result *BenchmarkResult, simp
 
 			stats := allStats[stageName]
 
-			if stageName == connector.TimingSessionEnd && firstReadStats.Mean > 0 {
-				buf.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %10s\n",
+			if stageName == connector.TimingSessionEnd {
+				sessionIOStats := computeDeltaStats("session_io", result.Samples, connector.TimingSessionEnd, connector.TimingFirstRead)
+				if sessionIOStats.Mean == 0 {
+					continue
+				}
+				fmt.Fprintf(&buf, "%-20s %10s %10s %10s %10s\n",
 					"session_io",
-					formatDuration(stats.Mean-firstReadStats.Mean),
-					formatDuration(stats.Median-firstReadStats.Median),
-					formatDuration(stats.Min-firstReadStats.Min),
-					formatDuration(stats.Max-firstReadStats.Max),
-				))
+					formatDuration(sessionIOStats.Mean),
+					formatDuration(sessionIOStats.Median),
+					formatDuration(sessionIOStats.Min),
+					formatDuration(sessionIOStats.Max),
+				)
 				continue
 			}
 
-			buf.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %10s\n",
+			fmt.Fprintf(&buf, "%-20s %10s %10s %10s %10s\n",
 				stageName,
 				formatDuration(stats.Mean),
 				formatDuration(stats.Median),
 				formatDuration(stats.Min),
 				formatDuration(stats.Max),
-			))
+			)
 		}
 
 		buf.WriteString(strings.Repeat("-", 62) + "\n")
-		buf.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %10s\n",
+		fmt.Fprintf(&buf, "%-20s %10s %10s %10s %10s\n",
 			"total",
 			formatDuration(wallStats.Mean),
 			formatDuration(wallStats.Median),
 			formatDuration(wallStats.Min),
 			formatDuration(wallStats.Max),
-		))
+		)
 	} else {
 		stats := ComputeWallClockStats(result.WallClocks)
-		buf.WriteString(fmt.Sprintf("Wall Clock: %s - %s\n", formatDuration(stats.Min), formatDuration(stats.Max)))
+		fmt.Fprintf(&buf, "Wall Clock: %s - %s\n", formatDuration(stats.Min), formatDuration(stats.Max))
 	}
 
 	return buf.String()

@@ -12,8 +12,7 @@
 //	ExitGeneralError     = 1    // General/unspecified error
 //	ExitConnectionFailed = 2    // SSH connection failed
 //	ExitAuthFailed       = 3    // Authentication failed
-//	ExitHostNotFound     = 4    // Host not in SSH config
-//	ExitVaultError       = 5    // Vault/credential error
+//	ExitHostNotFound     = 4    // Host not in nssh inventory
 //	ExitNotExecutable    = 126  // Command not executable
 //	ExitNotFound         = 127  // Command not found
 //

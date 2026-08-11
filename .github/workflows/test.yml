@@ -1,6 +1,11 @@
 name: Test
 
-on: [pull_request]
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "release/**"
 
 jobs:
   test:
@@ -26,10 +31,14 @@ jobs:
       - name: Format check
         run: test -z "$(gofmt -l .)"
 
-      - name: Run tests
-        run: go test ./... -race -v
+      - name: Run tests (pure Go)
+        env:
+          CGO_ENABLED: "0"
+        run: go test ./... -v
 
-      - name: Build
+      - name: Build (pure Go)
+        env:
+          CGO_ENABLED: "0"
         run: go build -o nssh ./cmd/nssh
 
   lint:

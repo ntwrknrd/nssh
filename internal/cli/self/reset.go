@@ -8,11 +8,9 @@ import (
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/agent"
-	clisession "github.com/ntwrknrd/nssh/internal/cli/session"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/ui"
-	"github.com/ntwrknrd/nssh/internal/vault"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +27,6 @@ type ResetSummary struct {
 	DataDir        string
 	StateDir       string
 	HostCount      int
-	ContextCount   int
 	RecordingCount int
 	TotalBytes     int64
 }
@@ -43,17 +40,13 @@ func NewResetCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "reset",
-		Short: "Delete all nssh data and start fresh",
-		Long: `Reset nssh by deleting all configuration and credentials.
+		Short: "Reset configuration",
+		Long: `Reset nssh by deleting all configuration and local state.
 
 This command permanently deletes:
-- Your nssh identity (age keypair)
-- All stored credentials
+- nssh provider configuration and local state
 - Session recordings
 - nssh configuration
-
-Shell integration in your rc file will remain but become a harmless no-op.
-SSH config (~/.ssh/) will not be modified.
 
 Use --dry-run to preview what would be deleted.
 Use --force to skip the confirmation prompt (for scripts).`,
@@ -71,8 +64,6 @@ Use --force to skip the confirmation prompt (for scripts).`,
 func runReset(dryRun, force bool) error {
 	paths := config.DefaultPaths()
 
-	ui.CommandStart("RESET NSSH")
-
 	if dryRun {
 		ui.Info("Dry run mode - no changes will be made")
 		fmt.Println()
@@ -83,24 +74,13 @@ func runReset(dryRun, force bool) error {
 
 	// Show deletion summary
 	ui.SubSection("The following will be permanently deleted")
-	ui.Deletion("Your nssh identity (age keypair)")
-	if summary.HostCount > 0 || summary.ContextCount > 0 {
-		ui.Deletion("All stored credentials (%d hosts across %d contexts)", summary.HostCount, summary.ContextCount)
-	} else {
-		ui.Deletion("All stored credentials")
-	}
+	ui.Deletion("nssh provider configuration and local state")
 	if summary.RecordingCount > 0 {
 		ui.Deletion("Session recordings (%d files)", summary.RecordingCount)
 	} else {
 		ui.Deletion("Session recordings")
 	}
 	ui.Deletion("nssh configuration")
-	fmt.Println()
-
-	// Show what's preserved
-	shellInfo := DetectShell()
-	ui.Info("Shell integration in %s will remain (harmless no-op)", AbbreviatePath(shellInfo.RCFile))
-	ui.Info("SSH config (~/.ssh/) will not be modified")
 	fmt.Println()
 
 	// Show directories
@@ -116,13 +96,11 @@ func runReset(dryRun, force bool) error {
 		if err != nil {
 			// User canceled (Ctrl+C)
 			ui.Info("Reset canceled")
-			ui.CommandEnd(ui.StatusAbort)
 			return &exit.ExitError{Code: exitResetCancelled}
 		}
 
 		if strings.TrimSpace(response) != "DESTROY" {
 			ui.Info("Reset canceled (you must type DESTROY exactly)")
-			ui.CommandEnd(ui.StatusAbort)
 			return &exit.ExitError{Code: exitResetCancelled}
 		}
 		fmt.Println()
@@ -131,7 +109,6 @@ func runReset(dryRun, force bool) error {
 	// Dry run stops here
 	if dryRun {
 		ui.Info("Dry run complete - no changes were made")
-		ui.CommandEnd(ui.StatusNoop)
 		return nil
 	}
 
@@ -166,7 +143,7 @@ func runReset(dryRun, force bool) error {
 	// 2. Delete directories in order: state, data, config
 	hasErrors := false
 
-	// State directory (socket, recordings, lockout)
+	// State directory (socket, recordings)
 	if DirExists(summary.StateDir) {
 		if err := os.RemoveAll(summary.StateDir); err != nil {
 			ui.Warning("Failed to remove %s: %v", AbbreviatePath(summary.StateDir), err)
@@ -176,7 +153,7 @@ func runReset(dryRun, force bool) error {
 		}
 	}
 
-	// Data directory (vault, backups)
+	// Data directory
 	if DirExists(summary.DataDir) {
 		if err := os.RemoveAll(summary.DataDir); err != nil {
 			ui.Warning("Failed to remove %s: %v", AbbreviatePath(summary.DataDir), err)
@@ -186,7 +163,7 @@ func runReset(dryRun, force bool) error {
 		}
 	}
 
-	// Config directory (identity, config)
+	// Config directory
 	if DirExists(summary.ConfigDir) {
 		if err := os.RemoveAll(summary.ConfigDir); err != nil {
 			ui.Warning("Failed to remove %s: %v", AbbreviatePath(summary.ConfigDir), err)
@@ -200,13 +177,11 @@ func runReset(dryRun, force bool) error {
 	fmt.Println()
 	if hasErrors {
 		ui.Warning("Reset completed with warnings")
-		ui.CommandEnd(ui.StatusWarning)
 		return &exit.ExitError{Code: exitResetError, Message: "reset completed with errors"}
 	}
 
 	ui.Success("nssh reset to initial state")
 	ui.Info("Run 'nssh self init' to set up again")
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 
@@ -216,18 +191,6 @@ func enumerateDeletions(paths *config.Paths) ResetSummary {
 		ConfigDir: paths.ConfigDir,
 		DataDir:   paths.DataDir,
 		StateDir:  paths.StateDir,
-	}
-
-	// Try to count hosts and contexts from vault (best effort)
-	// This may fail if vault is locked or doesn't exist
-	mgr, err := clisession.NewManager(vault.Auto(), vault.WithPaths(paths))
-	if err == nil {
-		if contexts, err := mgr.ListContexts(); err == nil {
-			summary.ContextCount = len(contexts)
-		}
-		if hosts, err := mgr.ListHostsWithCredentials(); err == nil {
-			summary.HostCount = len(hosts)
-		}
 	}
 
 	// Count recordings

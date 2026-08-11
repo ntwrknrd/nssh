@@ -1,14 +1,14 @@
 $ nssh self reinstall --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh self reinstall [flags]       Reinstall nssh from latest GitHub r...   │
+│   nssh self reinstall [flags]       Install latest from GitHub               │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ────────────────────────────────────────────────────────────────────╮
-│   --dev                             build from source instead of downlo...   │
-│   --hardware                        build with hardware security suppor...   │
+╭─ Flags ──────────────────────────────────────────────────────────────────────╮
+│   --dev                             build from source                        │
+│   --release STRING                  GitHub release tag                       │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
-│   -v, --verbose                     Print debug messages                     │
+│   -v, --verbose COUNT               Increase debug verbosity                 │
 │   -V, --version                     Print command version                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯

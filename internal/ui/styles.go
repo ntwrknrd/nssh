@@ -37,9 +37,6 @@ var (
 // Cyan renders text in cyan color.
 func Cyan(s string) string { return StyleCyan.Render(s) }
 
-// Green renders text in green color.
-func Green(s string) string { return StyleGreen.Render(s) }
-
 // Yellow renders text in yellow color.
 func Yellow(s string) string { return StyleYellow.Render(s) }
 
@@ -48,12 +45,6 @@ func Red(s string) string { return StyleRed.Render(s) }
 
 // Gray renders text in gray color.
 func Gray(s string) string { return StyleDim.Render(s) }
-
-// Bold renders text in bold.
-func Bold(s string) string { return StyleBold.Render(s) }
-
-// Magenta renders text in magenta color.
-func Magenta(s string) string { return StyleMagenta.Render(s) }
 
 // DimCyan renders text in dimmed cyan color.
 func DimCyan(s string) string { return StyleCyan.Faint(true).Render(s) }

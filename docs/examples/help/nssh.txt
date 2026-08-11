@@ -1,20 +1,21 @@
 $ nssh --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh [host] [flags]               Smart connect to host                    │
+│   nssh [flags] [ssh-options] HOST [command]                                  │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
-│   connect                           Connect to host                          │
+│   agent                             Manage nssh agent                        │
 │   cp                                Copy files via SCP                       │
-│   ctx                               Manage credential contexts               │
-│   host                              Manage SSH host files                    │
-│   lock                              Lock credential vault                    │
+│   inv                               Manage inventory                         │
 │   log                               Manage session recordings                │
-│   self                              Manage nssh installation                 │
-│   unlock                            Unlock credential vault                  │
+│   self                              Manage nssh                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Flags ──────────────────────────────────────────────────────────────────────╮
+│   --select                          Open smart target picker                 │
+│   --target STRING                   Use literal target                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
-│   -v, --verbose                     Print debug messages                     │
+│   -v, --verbose COUNT               Increase debug verbosity                 │
 │   -V, --version                     Print command version                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯

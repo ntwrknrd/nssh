@@ -1,7 +1,7 @@
 //go:build unix
 
 // Package connector provides PTY-based SSH connection management with
-// credential injection and session recording support.
+// credential injection support.
 //
 // The connector spawns SSH as a child process in a pseudo-terminal, enabling
 // interactive sessions with automatic password injection and host key handling.
@@ -27,12 +27,6 @@
 // The connector supports an "accept-once" mode where unknown host keys are
 // automatically accepted for the current session only, without persisting
 // to known_hosts. This is useful for temporary or ephemeral connections.
-//
-// # Recording Integration
-//
-// Sessions can be recorded via asciinema. Use [MaybeWrapWithRecording] to
-// check recording configuration and spawn a recording wrapper if enabled.
-// The recording wrapper re-executes nssh under asciinema.
 //
 // # Connection Testing
 //

@@ -1,0 +1,7 @@
+interface:
+  display_name: "nssh"
+  short_description: "SSH-compatible inventory and automatic authentication"
+  default_prompt: "Use $nssh to develop, operate, or troubleshoot nssh and its SSH-compatible inventory and automatic authentication workflows."
+
+policy:
+  allow_implicit_invocation: true

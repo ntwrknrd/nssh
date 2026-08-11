@@ -28,34 +28,6 @@ func FzfAvailable() bool {
 	return err == nil
 }
 
-// huhFilteredSelect provides a fallback selection UI when fzf is unavailable.
-func huhFilteredSelect(title string, options []huh.Option[int]) (int, error) {
-	var selected = -1
-
-	sel := huh.NewSelect[int]().
-		Title(title).
-		Options(options...).
-		Height(10).
-		Value(&selected)
-
-	form := huh.NewForm(huh.NewGroup(sel)).
-		WithTheme(huhTheme())
-
-	if err := form.Run(); err != nil {
-		return -1, err
-	}
-
-	// Print persisted result (find label for selected index)
-	for _, opt := range options {
-		if opt.Value == selected {
-			fmt.Printf("  %s %s : %s\n", DimCyan("[?]"), title, opt.Key)
-			break
-		}
-	}
-
-	return selected, nil
-}
-
 // huhFilteredSelectString provides a fallback selection UI for string options.
 func huhFilteredSelectString(title string, options []string) (string, error) {
 	var selected string
@@ -149,55 +121,6 @@ func fzfSelect(prompt string, options []string, multi bool, initialQuery string)
 	}
 
 	return selected, nil
-}
-
-// FuzzySelect presents a fuzzy finder interface and returns the selected option.
-// Returns the index of the selected option, or -1 if canceled.
-// Optional initialQuery pre-fills the search input.
-// Falls back to huh's filtered select if fzf is unavailable.
-func FuzzySelect(prompt string, options []FuzzySelectOption, initialQuery ...string) (int, error) {
-	if len(options) == 0 {
-		return -1, fmt.Errorf("no options provided")
-	}
-
-	// Extract labels for fzf
-	labels := make([]string, len(options))
-	for i, opt := range options {
-		labels[i] = opt.Label
-	}
-
-	// Try fzf first
-	if FzfAvailable() {
-		query := ""
-		if len(initialQuery) > 0 {
-			query = initialQuery[0]
-		}
-
-		selected, err := fzfSelect(prompt, labels, false, query)
-		if err != nil {
-			return -1, err
-		}
-		if len(selected) == 0 {
-			return -1, nil // Canceled
-		}
-
-		// Find index of selected label
-		for i, opt := range options {
-			if opt.Label == selected[0] {
-				return i, nil
-			}
-		}
-
-		return -1, fmt.Errorf("selected option not found")
-	}
-
-	// Fallback to huh's filtered select
-	huhOpts := make([]huh.Option[int], len(options))
-	for i, opt := range options {
-		huhOpts[i] = huh.NewOption(opt.Label, i)
-	}
-
-	return huhFilteredSelect(prompt, huhOpts)
 }
 
 // FuzzySelectString presents a fuzzy finder for a simple string list.
@@ -301,14 +224,4 @@ func FuzzySelectMulti(prompt string, options []FuzzySelectOption) ([]int, error)
 	}
 
 	return selected, nil
-}
-
-// HostSelectOption creates a FuzzySelectOption for a host entry.
-func HostSelectOption(alias, hostname, user, configFile string) FuzzySelectOption {
-	desc := fmt.Sprintf("Hostname: %s\nUser: %s\nConfig: %s", hostname, user, configFile)
-	return FuzzySelectOption{
-		Label:       alias,
-		Description: desc,
-		Value:       alias,
-	}
 }

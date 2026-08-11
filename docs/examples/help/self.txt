@@ -1,21 +1,20 @@
 $ nssh self --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh self [flags]                 Manage nssh installation                 │
+│   nssh self [flags]                 Manage nssh                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
-│   bench                             Run performance benchmarks               │
-│   cfg                               View or edit nssh configuration          │
-│   init                              Initialize nssh                          │
-│   piv                               Manage enrolled YubiKeys                 │
-│   reinstall                         Reinstall nssh from latest GitHub r...   │
-│   rekey                             Rotate or switch security mode           │
-│   reset                             Delete all nssh data and start fresh     │
-│   status                            Show installation status                 │
+│   bench                             Performance benchmarking                 │
+│   cfg                               Manage configuration                     │
+│   import                            Import external configuration            │
+│   init                              Initialize configuration                 │
+│   reinstall                         Install latest from GitHub               │
+│   reset                             Reset configuration                      │
+│   status                            Show status                              │
 │   uninstall                         Uninstall nssh                           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Global Options ─────────────────────────────────────────────────────────────╮
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
-│   -v, --verbose                     Print debug messages                     │
+│   -v, --verbose COUNT               Increase debug verbosity                 │
 │   -V, --version                     Print command version                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯

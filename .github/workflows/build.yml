@@ -22,50 +22,20 @@ jobs:
         with:
           go-version: "1.25"
       - name: Build (pure Go)
+        env:
+          CGO_ENABLED: "0"
         run: |
           go build -trimpath -ldflags "-s -w" -o nssh ./cmd/nssh
-      - name: Verify no hardware features
+      - name: Verify no optional features
         run: |
           ./nssh -V
-          ! ./nssh -V | grep -q "piv"
-
-  build-hardware-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.25"
-      - name: Install PC/SC dependencies
-        run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
-      - name: Build with hardware
-        env:
-          CGO_ENABLED: 1
-        run: |
-          go build -trimpath -tags hardware -ldflags "-s -w" -o nssh-hardware ./cmd/nssh
-      - name: Verify PIV available
-        run: ./nssh-hardware -V | grep -q "piv"
-
-  build-hardware-darwin:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.25"
-      - name: Build with hardware
-        env:
-          CGO_ENABLED: 1
-        run: |
-          go build -trimpath -tags hardware -ldflags "-s -w" -o nssh-hardware ./cmd/nssh
-      - name: Verify PIV available
-        run: ./nssh-hardware -V | grep -q "piv"
+          ! ./nssh -V | grep -q "\["
 
   # ==========================
   # Release Jobs (tags only)
   # ==========================
 
-  release-pure:
+  release:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     strategy:
@@ -105,97 +75,10 @@ jobs:
           name: nssh-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*.tar.gz
 
-  release-hardware-linux:
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.25"
-      - name: Install PC/SC dependencies
-        run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
-      - name: Build
-        env:
-          CGO_ENABLED: "1"
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          COMMIT=$(git rev-parse --short HEAD)
-          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          mkdir -p dist
-          go build -trimpath -tags hardware \
-            -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
-            -o dist/nssh-hardware ./cmd/nssh
-          cd dist
-          tar -czf nssh-hardware_${VERSION}_linux_amd64.tar.gz nssh-hardware
-          rm nssh-hardware
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nssh-hardware-linux-amd64
-          path: dist/*.tar.gz
-
-  release-hardware-darwin-amd64:
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: macos-15-intel
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.25"
-          cache: false  # Workaround for macos-15-intel tar cache issue
-      - name: Build
-        env:
-          CGO_ENABLED: "1"
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          COMMIT=$(git rev-parse --short HEAD)
-          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          mkdir -p dist
-          go build -trimpath -tags hardware \
-            -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
-            -o dist/nssh-hardware ./cmd/nssh
-          cd dist
-          tar -czf nssh-hardware_${VERSION}_darwin_amd64.tar.gz nssh-hardware
-          rm nssh-hardware
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nssh-hardware-darwin-amd64
-          path: dist/*.tar.gz
-
-  release-hardware-darwin-arm64:
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.25"
-      - name: Build
-        env:
-          CGO_ENABLED: "1"
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          COMMIT=$(git rev-parse --short HEAD)
-          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          mkdir -p dist
-          go build -trimpath -tags hardware \
-            -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
-            -o dist/nssh-hardware ./cmd/nssh
-          cd dist
-          tar -czf nssh-hardware_${VERSION}_darwin_arm64.tar.gz nssh-hardware
-          rm nssh-hardware
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nssh-hardware-darwin-arm64
-          path: dist/*.tar.gz
-
   release-create:
     if: startsWith(github.ref, 'refs/tags/v')
     needs:
-      - release-pure
-      - release-hardware-linux
-      - release-hardware-darwin-amd64
-      - release-hardware-darwin-arm64
+      - release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -215,11 +98,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # A hyphen in the tag marks a prerelease, e.g. v0.3.0-rc.1.
+          PRERELEASE=""
+          case "${{ github.ref_name }}" in
+            *-*) PRERELEASE="--prerelease" ;;
+          esac
           # Create release if it doesn't exist
           if ! gh release view ${{ github.ref_name }} &>/dev/null; then
             gh release create ${{ github.ref_name }} \
               --title "${{ github.ref_name }}" \
-              --generate-notes
+              --generate-notes ${PRERELEASE}
           fi
           # Upload assets (overwrites existing)
           gh release upload ${{ github.ref_name }} \
@@ -228,7 +116,8 @@ jobs:
             --clobber
 
   homebrew-nssh:
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Skip prerelease tags so the tap formula keeps tracking the stable release.
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     needs: release-create
     runs-on: ubuntu-latest
     steps:

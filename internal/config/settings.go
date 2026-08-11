@@ -6,16 +6,21 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/BurntSushi/toml"
 )
 
-// Config is the root configuration structure loaded from config.toml.
+// Config is the root configuration structure loaded from config.yaml.
 type Config struct {
-	Agent   AgentConfig   `toml:"agent"`
-	Host    HostConfig    `toml:"host"`
-	Logging LoggingConfig `toml:"logging"`
-	SSH     SSHConfig     `toml:"ssh"`
+	Include   []string        `yaml:"include,omitempty"`
+	Agent     AgentConfig     `yaml:"agent,omitempty"`
+	Inventory InventoryConfig `yaml:"inventory,omitempty"`
+	Logging   LoggingConfig   `yaml:"logging,omitempty"`
+	SSH       SSHConfig       `yaml:"ssh,omitempty"`
+	Highlight HighlightConfig `yaml:"highlight,omitempty"`
+
+	Credential CredentialConfig `yaml:"credential,omitempty"`
+	Host       HostConfig       `yaml:"host,omitempty"`
+
+	document *configDocument
 }
 
 // ============================================================================
@@ -24,36 +29,16 @@ type Config struct {
 
 // AgentConfig holds agent daemon lifecycle settings.
 type AgentConfig struct {
+	// AutoStart starts the runtime agent on first provider-session request (default true)
+	AutoStart bool `yaml:"auto_start,omitempty"`
 	// IdleTimeout is how long the agent waits without activity before terminating (default 1h)
-	IdleTimeout Duration `toml:"idle_timeout"`
+	IdleTimeout Duration `yaml:"idle_timeout,omitempty"`
 	// ActivityIncrement is how much to extend the idle deadline on activity (default 15m)
-	ActivityIncrement Duration `toml:"activity_increment"`
+	ActivityIncrement Duration `yaml:"activity_increment,omitempty"`
 	// MaxLifetime is the maximum lifetime of the agent regardless of activity (default 24h)
-	MaxLifetime Duration `toml:"max_lifetime"`
-	// Security holds credential protection settings
-	Security AgentSecurityConfig `toml:"security"`
-}
-
-// AgentSecurityConfig holds agent security mode-specific settings.
-// Note: Security mode is detected from filesystem state (age.key.enc vs piv.json),
-// not from config. See vault.DetectSecurityMode().
-type AgentSecurityConfig struct {
-	// Software holds settings specific to software mode
-	Software SoftwareSecurityConfig `toml:"software"`
-}
-
-// SoftwareSecurityConfig holds settings for software-based credential protection.
-type SoftwareSecurityConfig struct {
-	// LockoutDuration is the initial lockout duration (default: 5m)
-	LockoutDuration Duration `toml:"lockout_duration"`
-	// LockoutThreshold is the number of failed attempts before lockout (default: 10)
-	LockoutThreshold int `toml:"lockout_threshold"`
-	// MaxLockoutDuration is the maximum lockout duration with exponential backoff (default: 1h)
-	MaxLockoutDuration Duration `toml:"max_lockout_duration"`
-	// PassphraseMinLength enforces minimum length for credential passphrases (default: 12)
-	PassphraseMinLength int `toml:"passphrase_min_length"`
-	// ScryptWorkFactor is the scrypt work factor (2^N iterations, default 18)
-	ScryptWorkFactor int `toml:"scrypt_work_factor"`
+	MaxLifetime Duration `yaml:"max_lifetime,omitempty"`
+	// ProviderRequestTimeout bounds each brokered credential-provider request (default 2m)
+	ProviderRequestTimeout Duration `yaml:"provider_request_timeout,omitempty"`
 }
 
 // ============================================================================
@@ -62,15 +47,13 @@ type SoftwareSecurityConfig struct {
 
 // HostConfig holds host-related settings.
 type HostConfig struct {
-	Defaults HostDefaultsConfig `toml:"defaults"`
+	Defaults HostDefaultsConfig `yaml:"defaults,omitempty"`
 }
 
 // HostDefaultsConfig holds default values for new hosts.
 type HostDefaultsConfig struct {
-	// DefaultContext is the default context for new hosts (used by `nssh host add`)
-	DefaultContext string `toml:"default_context"`
-	// DefaultUser is the default SSH username for new hosts
-	DefaultUser string `toml:"default_user"`
+	// DefaultContext is deprecated; group placement is configured under inventory.
+	DefaultContext string `yaml:"default_context,omitempty"`
 }
 
 // ============================================================================
@@ -79,62 +62,127 @@ type HostDefaultsConfig struct {
 
 // LoggingConfig holds audit and session logging settings.
 type LoggingConfig struct {
-	Audit   AuditConfig   `toml:"audit"`
-	Session SessionConfig `toml:"session"`
+	Audit   AuditConfig         `yaml:"audit,omitempty"`
+	Export  LoggingExportConfig `yaml:"export,omitempty"`
+	Session SessionConfig       `yaml:"session,omitempty"`
 }
 
 // AuditConfig holds security event logging settings.
 type AuditConfig struct {
 	// Enabled enables security event logging to file (default: true)
-	Enabled bool `toml:"enabled"`
-	// MaxBackupFiles is the maximum number of backup files to retain (default: 10)
-	MaxBackupFiles int `toml:"max_backup_files"`
+	Enabled bool `yaml:"enabled,omitempty"`
 	// MaxSize is the max audit log size before rotation (default: "10MB")
-	MaxSize string `toml:"max_size"`
+	MaxSize string `yaml:"max_size,omitempty"`
 }
 
 // SessionConfig holds session recording settings.
 type SessionConfig struct {
 	// AppendMode appends to daily session file vs creating separate files
-	AppendMode *bool `toml:"append_mode"`
+	AppendMode *bool `yaml:"append_mode,omitempty"`
 	// AsciinemaServer is a custom asciinema server URL for self-hosted instances
-	AsciinemaServer string `toml:"asciinema_server_url"`
+	AsciinemaServer string `yaml:"asciinema_server_url,omitempty"`
 	// Dir is the recording storage directory
-	Dir string `toml:"dir"`
+	Dir string `yaml:"dir,omitempty"`
 	// Enabled enables automatic session recording
-	Enabled *bool `toml:"enabled"`
+	Enabled *bool `yaml:"enabled,omitempty"`
 	// ExcludeHosts are patterns for hosts to never record
-	ExcludeHosts []string `toml:"exclude_hosts"`
+	ExcludeHosts []string `yaml:"exclude_hosts,omitempty"`
 	// IdleTimeLimit caps long pauses in recordings (seconds, 0 = disabled)
-	IdleTimeLimit float64 `toml:"idle_time_limit"`
+	IdleTimeLimit float64 `yaml:"idle_time_limit,omitempty"`
 	// IdleTimeLimitMode is when to apply idle time limit: "play", "record", or "both"
-	IdleTimeLimitMode string `toml:"idle_time_limit_mode"`
+	IdleTimeLimitMode string `yaml:"idle_time_limit_mode,omitempty"`
 	// IncludeHosts are patterns for hosts to record (takes precedence over exclude)
-	IncludeHosts []string `toml:"include_hosts"`
+	IncludeHosts []string `yaml:"include_hosts,omitempty"`
 	// TitleFormat is a template for recording titles with {host}, {user}, {date}, {time}
-	TitleFormat string `toml:"title_format"`
-	// WindowSize is fixed terminal dimensions for recordings (cols x rows)
-	WindowSize string `toml:"window_size"`
+	TitleFormat string `yaml:"title_format,omitempty"`
 	// AutoExportTxt automatically exports recordings to plain text (.txt) when session ends
-	AutoExportTxt bool `toml:"auto_export_txt"`
-	// Archive holds automatic archival settings
-	Archive SessionArchiveConfig `toml:"archive"`
+	AutoExportTxt bool `yaml:"auto_export_txt,omitempty"`
+	// Archive holds recording archival settings
+	Archive SessionArchiveConfig `yaml:"archive,omitempty"`
 }
 
-// SessionArchiveConfig holds automatic session archival settings.
+// LoggingExportConfig holds export-time recording conversion settings.
+type LoggingExportConfig struct {
+	GIF GIFExportConfig `yaml:"gif,omitempty"`
+}
+
+// GIFExportConfig holds export-time GIF rendering settings.
+type GIFExportConfig struct {
+	// WindowSize is export render dimensions as COLSxROWS.
+	WindowSize string `yaml:"window_size,omitempty"`
+	// FontSize is the GIF renderer font size in pixels.
+	FontSize int `yaml:"font_size,omitempty"`
+}
+
+// SessionArchiveConfig holds session archival settings.
 type SessionArchiveConfig struct {
 	// Dir is where monthly archives are stored (default: ~/.local/state/nssh/archives)
-	Dir string `toml:"dir"`
-	// Enabled enables automatic recording archiving (default: false)
-	Enabled bool `toml:"enabled"`
-	// Jitter introduces +/- jitter to the daily schedule (default: 30m)
-	Jitter Duration `toml:"jitter"`
+	Dir string `yaml:"dir,omitempty"`
 	// MaxBundles is how many monthly bundles to retain (default: 12)
-	MaxBundles int `toml:"max_bundles"`
+	MaxBundles int `yaml:"max_bundles,omitempty"`
 	// MaxRunBytes caps bytes processed per maintenance run (default: 0 = unlimited)
-	MaxRunBytes int64 `toml:"max_run_bytes"`
+	MaxRunBytes int64 `yaml:"max_run_bytes,omitempty"`
 	// MinAge is how old a .cast file must be before archiving (default: 30d)
-	MinAge Duration `toml:"min_age"`
+	MinAge Duration `yaml:"min_age,omitempty"`
+	// Timeout caps a manual archive maintenance pass (default: 30s)
+	Timeout Duration `yaml:"timeout,omitempty"`
+}
+
+// ============================================================================
+// Highlight Configuration
+// ============================================================================
+
+const (
+	HighlightProfileNone  = "none"
+	HighlightProfileJunos = "junos"
+)
+
+// HighlightConfig controls optional highlighting for renderer-owned output.
+type HighlightConfig struct {
+	Enabled *bool  `yaml:"enabled,omitempty"`
+	Profile string `yaml:"profile,omitempty"`
+}
+
+// MergeHighlight applies nssh highlight inheritance. Values in override
+// replace base only when explicitly configured.
+func MergeHighlight(base, override HighlightConfig) HighlightConfig {
+	out := base
+	if override.Enabled != nil {
+		enabled := *override.Enabled
+		out.Enabled = &enabled
+	}
+	if strings.TrimSpace(override.Profile) != "" {
+		out.Profile = strings.ToLower(strings.TrimSpace(override.Profile))
+	}
+	return out
+}
+
+// EffectiveProfile returns the normalized configured profile.
+func (c HighlightConfig) EffectiveProfile() string {
+	profile := strings.ToLower(strings.TrimSpace(c.Profile))
+	if profile == "" {
+		return HighlightProfileNone
+	}
+	return profile
+}
+
+// EnabledValue returns true only when highlighting was explicitly enabled.
+func (c HighlightConfig) EnabledValue() bool {
+	return c.Enabled != nil && *c.Enabled
+}
+
+// Validate checks one highlight config scope.
+func (c HighlightConfig) Validate(scope string) error {
+	profile := c.EffectiveProfile()
+	switch profile {
+	case HighlightProfileNone, HighlightProfileJunos:
+	default:
+		return fmt.Errorf("%s.profile has unsupported highlight profile %q", scope, profile)
+	}
+	if c.EnabledValue() && profile == HighlightProfileNone {
+		return fmt.Errorf("%s.profile must not be none when %s.enabled is true", scope, scope)
+	}
+	return nil
 }
 
 // ============================================================================
@@ -143,35 +191,36 @@ type SessionArchiveConfig struct {
 
 // SSHConfig holds SSH connection and security settings.
 type SSHConfig struct {
-	Connection SSHConnectionConfig `toml:"connection"`
-	Security   SSHSecurityConfig   `toml:"security"`
+	Connection SSHConnectionConfig `yaml:"connection,omitempty"`
+	Security   SSHSecurityConfig   `yaml:"security,omitempty"`
+	Defaults   SSHHostConfig       `yaml:"defaults,omitempty"`
 }
 
 // SSHConnectionConfig holds timeout settings for SSH connections.
 type SSHConnectionConfig struct {
 	// IdleTimeout disconnects after inactivity (0 = disabled)
-	IdleTimeout Duration `toml:"idle_timeout"`
+	IdleTimeout Duration `yaml:"idle_timeout,omitempty"`
 	// PasswordTimeout is the password prompt timeout (default: 10s)
-	PasswordTimeout Duration `toml:"password_timeout"`
+	PasswordTimeout Duration `yaml:"password_timeout,omitempty"`
 	// Timeout is the SSH connection timeout (default: 30s)
-	Timeout Duration `toml:"timeout"`
+	Timeout Duration `yaml:"timeout,omitempty"`
 }
 
 // SSHSecurityConfig holds SSH host key policy settings.
 type SSHSecurityConfig struct {
 	// AcceptOnceMode controls how host-key "Accept once" behaves: "pin" (default) or "accept-new"
-	AcceptOnceMode string `toml:"accept_once_mode"`
+	AcceptOnceMode string `yaml:"accept_once_mode,omitempty"`
 	// CompatPersistProbes controls whether SSH compatibility probes write to known_hosts
-	CompatPersistProbes bool `toml:"compat_persist_probes"`
+	CompatPersistProbes bool `yaml:"compat_persist_probes,omitempty"`
 	// HostKeyPolicy is a higher-level preset: "pin" (default) or "tofu"
-	HostKeyPolicy string `toml:"host_key_policy"`
+	HostKeyPolicy string `yaml:"host_key_policy,omitempty"`
 }
 
 // ============================================================================
 // Duration Type
 // ============================================================================
 
-// Duration wraps time.Duration for TOML string parsing.
+// Duration wraps time.Duration for config string parsing.
 // Supports formats like "30s", "5m", "1h".
 type Duration time.Duration
 
@@ -205,39 +254,56 @@ func DefaultConfig() *Config {
 	paths := DefaultPaths()
 	return &Config{
 		Agent: AgentConfig{
-			IdleTimeout:       Duration(1 * time.Hour),
-			ActivityIncrement: Duration(15 * time.Minute),
-			MaxLifetime:       Duration(24 * time.Hour),
-			Security: AgentSecurityConfig{
-				Software: SoftwareSecurityConfig{
-					LockoutDuration:     Duration(5 * time.Minute),
-					LockoutThreshold:    10,
-					MaxLockoutDuration:  Duration(1 * time.Hour),
-					PassphraseMinLength: 12,
-					ScryptWorkFactor:    18,
-				},
-			},
+			AutoStart:              true,
+			IdleTimeout:            Duration(1 * time.Hour),
+			ActivityIncrement:      Duration(15 * time.Minute),
+			MaxLifetime:            Duration(24 * time.Hour),
+			ProviderRequestTimeout: Duration(2 * time.Minute),
 		},
 		Host: HostConfig{
 			Defaults: HostDefaultsConfig{
 				DefaultContext: "",
-				DefaultUser:    "",
+			},
+		},
+		Credential: CredentialConfig{
+			Provider: map[string]CredentialProviderConfig{
+				"sops": {
+					Type: CredentialProviderSOPSAge,
+					File: "~/.local/share/nssh/credentials.sops.yaml",
+				},
+			},
+		},
+		Inventory: InventoryConfig{
+			Auth: InventoryAuthConfig{},
+			Provider: map[string]InventoryProviderConfig{
+				ProviderLocal: {
+					Type: ProviderLocal,
+					Group: map[string]GroupConfig{
+						"default": {},
+					},
+				},
+			},
+			Providers: map[string]InventoryProviderConfig{
+				ProviderLocal: {
+					Type: ProviderLocal,
+					Groups: map[string]GroupConfig{
+						"default": {},
+					},
+				},
 			},
 		},
 		Logging: LoggingConfig{
 			Audit: AuditConfig{
-				Enabled:        true,
-				MaxBackupFiles: 10,
-				MaxSize:        "10MB",
+				Enabled: true,
+				MaxSize: "10MB",
 			},
 			Session: SessionConfig{
 				Archive: SessionArchiveConfig{
 					Dir:         filepath.Join(paths.StateDir, "archives"),
-					Enabled:     false,
-					Jitter:      Duration(30 * time.Minute),
 					MaxBundles:  12,
 					MaxRunBytes: 0,
 					MinAge:      Duration(30 * 24 * time.Hour),
+					Timeout:     Duration(30 * time.Second),
 				},
 			},
 		},
@@ -271,29 +337,78 @@ func DefaultConfig() *Config {
 func Load(path string) (*Config, error) {
 	cfg := DefaultConfig()
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			applyEnvOverrides(cfg)
-			if err := cfg.Validate(); err != nil {
-				return nil, fmt.Errorf("validate config: %w", err)
-			}
-			return cfg, nil
+	if _, err := os.Stat(path); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("read config %s: %w", path, err)
 		}
-		return nil, fmt.Errorf("read config %s: %w", path, err)
+		applyEnvOverrides(cfg)
+		if err := cfg.Validate(); err != nil {
+			return nil, fmt.Errorf("validate config: %w", err)
+		}
+		return cfg, nil
 	}
 
-	if err := toml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("parse config %s: %w", path, err)
+	doc, err := loadConfigDocument(path)
+	if err != nil {
+		return nil, err
 	}
+	if err := decodeConfigDocument(path, doc, cfg); err != nil {
+		return nil, err
+	}
+	if tablePathDefined(doc.effective, "inventory", "providers") {
+		cfg.Inventory.Provider = nil
+	}
+	if tablePathDefined(doc.effective, "inventory", "hosts") {
+		cfg.Inventory.Host = nil
+	}
+	cfg.syncSchemaAliases()
+	migrateLegacyIdentityConfig(cfg)
+	pruneImplicitCredentialDefaults(doc.effective, cfg)
+	pruneImplicitInventoryDefaults(doc.effective, cfg)
 
 	applyEnvOverrides(cfg)
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate config %s: %w", path, err)
 	}
+	cfg.document = doc
 
 	return cfg, nil
+}
+
+func pruneImplicitCredentialDefaults(table map[string]any, cfg *Config) {
+	if cfg == nil || cfg.Credential.Provider == nil {
+		return
+	}
+	configDefinesProviders := tablePathDefined(table, "credential", "provider")
+	sopsExplicit := tablePathDefined(table, "credential", "provider", "sops")
+	if configDefinesProviders && !sopsExplicit {
+		delete(cfg.Credential.Provider, "sops")
+		if defaultGroup, ok := cfg.Inventory.Provider[ProviderLocal].Group["default"]; ok &&
+			!tablePathDefined(table, "inventory", "provider", ProviderLocal, "group", "default", "auth") &&
+			defaultGroup.Auth.CredentialProvider == "sops" {
+			defaultGroup.Auth = InventoryAuthConfig{}
+			localProvider := cfg.Inventory.Provider[ProviderLocal]
+			localProvider.Group["default"] = defaultGroup
+			cfg.Inventory.Provider[ProviderLocal] = localProvider
+		}
+	}
+}
+
+func migrateLegacyIdentityConfig(cfg *Config) {}
+
+func pruneImplicitInventoryDefaults(table map[string]any, cfg *Config) {
+	if cfg == nil || cfg.Inventory.Provider == nil {
+		return
+	}
+	defaultGroupExplicit := tablePathDefined(table, "inventory", "provider", ProviderLocal, "group", "default")
+	configDefinesGroups := tablePathDefined(table, "inventory", "provider")
+	if !defaultGroupExplicit && configDefinesGroups {
+		if localProvider, ok := cfg.Inventory.Provider[ProviderLocal]; ok {
+			delete(localProvider.Group, "default")
+			cfg.Inventory.Provider[ProviderLocal] = localProvider
+		}
+	}
 }
 
 // applyEnvOverrides applies environment variable overrides to the config.
@@ -328,12 +443,7 @@ func LoadDefault() (*Config, error) {
 
 // Save writes the config to the specified path.
 func Save(path string, cfg *Config) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return fmt.Errorf("create config: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-	return toml.NewEncoder(f).Encode(cfg)
+	return SaveSparse(path, cfg)
 }
 
 // ============================================================================
@@ -342,7 +452,23 @@ func Save(path string, cfg *Config) error {
 
 // Validate checks Config values are within acceptable bounds.
 func (c *Config) Validate() error {
+	c.syncSchemaAliases()
 	if err := c.Agent.Validate(); err != nil {
+		return err
+	}
+	if err := c.Credential.Validate(); err != nil {
+		return err
+	}
+	if err := c.Inventory.Validate(); err != nil {
+		return err
+	}
+	if err := c.validateSSHHostConfigs(); err != nil {
+		return err
+	}
+	if err := c.validateHighlightConfigs(); err != nil {
+		return err
+	}
+	if err := c.validateInventoryAuthProviders(); err != nil {
 		return err
 	}
 	if err := c.Logging.Audit.Validate(); err != nil {
@@ -357,11 +483,111 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+func (c *Config) validateHighlightConfigs() error {
+	if err := c.Highlight.Validate("highlight"); err != nil {
+		return err
+	}
+	for hostName, host := range c.Inventory.Host {
+		if err := host.Highlight.Validate("inventory.host." + hostName + ".highlight"); err != nil {
+			return err
+		}
+	}
+	for providerName, provider := range c.Inventory.Provider {
+		for groupName, group := range provider.Group {
+			if err := group.Highlight.Validate("inventory.provider." + providerName + ".group." + groupName + ".highlight"); err != nil {
+				return err
+			}
+		}
+		for hostName, host := range provider.Hosts {
+			if err := host.Highlight.Validate("inventory.provider." + providerName + ".hosts." + hostName + ".highlight"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (c *Config) validateSSHHostConfigs() error {
+	if err := validateSSHHostConfig("ssh.defaults", c.SSH.Defaults); err != nil {
+		return err
+	}
+	for hostName, host := range c.Inventory.Host {
+		if err := validateSSHHostConfig("inventory.host."+hostName+".ssh", host.SSH); err != nil {
+			return err
+		}
+	}
+	for providerName, provider := range c.Inventory.Provider {
+		for groupName, group := range provider.Group {
+			if err := validateSSHHostConfig("inventory.provider."+providerName+".group."+groupName+".ssh", group.SSH); err != nil {
+				return err
+			}
+		}
+		for hostName, host := range provider.Hosts {
+			if err := validateSSHHostConfig("inventory.provider."+providerName+".hosts."+hostName+".ssh", host.SSH); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (c *Config) syncSchemaAliases() {
+	if c == nil {
+		return
+	}
+	for name, provider := range c.Credential.Provider {
+		provider.syncDetailFields()
+		c.Credential.Provider[name] = provider
+	}
+	c.Inventory.syncAliasFields()
+}
+
+func (c *Config) validateInventoryAuthProviders() error {
+	if err := validateInventoryAuthProvider("inventory.auth", c.Inventory.Auth, c.Credential); err != nil {
+		return err
+	}
+	for host, cfg := range c.Inventory.Host {
+		if err := validateInventoryAuthProvider("inventory.host."+host+".auth", cfg.Auth, c.Credential); err != nil {
+			return err
+		}
+	}
+	for providerName, provider := range c.Inventory.Provider {
+		if err := validateInventoryAuthProvider("inventory.provider."+providerName+".auth", provider.Auth, c.Credential); err != nil {
+			return err
+		}
+		for groupName, group := range provider.Group {
+			if err := validateInventoryAuthProvider("inventory.provider."+providerName+".group."+groupName+".auth", group.Auth, c.Credential); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateInventoryAuthProvider(scope string, auth InventoryAuthConfig, credential CredentialConfig) error {
+	if !auth.IsSet() {
+		return nil
+	}
+	auth.Normalize()
+	if auth.CredentialProvider == "" && auth.PasswordRef == "" {
+		return nil
+	}
+	provider := strings.TrimSpace(auth.CredentialProvider)
+	if provider == "" {
+		return fmt.Errorf("%s.credential_provider is required", scope)
+	}
+	if _, ok := credential.Provider[provider]; !ok {
+		return fmt.Errorf("%s.credential_provider references unknown provider %q", scope, provider)
+	}
+	return nil
+}
+
 // Validate checks AgentConfig values are within acceptable bounds.
 func (c *AgentConfig) Validate() error {
 	idleTimeout := c.IdleTimeout.Duration()
 	activityIncrement := c.ActivityIncrement.Duration()
 	maxLifetime := c.MaxLifetime.Duration()
+	providerRequestTimeout := c.ProviderRequestTimeout.Duration()
 
 	// Validate idle timeout (min 1s, max 24h)
 	if idleTimeout < time.Second {
@@ -392,66 +618,15 @@ func (c *AgentConfig) Validate() error {
 		return fmt.Errorf("agent.idle_timeout (%v) must be <= agent.max_lifetime (%v)", idleTimeout, maxLifetime)
 	}
 
-	return c.Security.Validate()
-}
-
-// Validate checks AgentSecurityConfig values are within acceptable bounds.
-func (c *AgentSecurityConfig) Validate() error {
-	return c.Software.Validate()
-}
-
-// Validate checks SoftwareSecurityConfig values are within acceptable bounds.
-func (c *SoftwareSecurityConfig) Validate() error {
-	// Default passphrase min length if unset
-	if c.PassphraseMinLength == 0 {
-		c.PassphraseMinLength = 12
+	if providerRequestTimeout == 0 {
+		c.ProviderRequestTimeout = Duration(2 * time.Minute)
+		providerRequestTimeout = c.ProviderRequestTimeout.Duration()
 	}
-
-	// Validate scrypt work factor (min 14, max 22)
-	if c.ScryptWorkFactor < 14 {
-		return fmt.Errorf("agent.security.software.scrypt_work_factor must be >= 14 (got %d)", c.ScryptWorkFactor)
+	if providerRequestTimeout < 5*time.Second {
+		return fmt.Errorf("agent.provider_request_timeout must be >= 5s (got %v)", providerRequestTimeout)
 	}
-	if c.ScryptWorkFactor > 22 {
-		return fmt.Errorf("agent.security.software.scrypt_work_factor must be <= 22 (got %d)", c.ScryptWorkFactor)
-	}
-
-	// Validate passphrase minimum length
-	if c.PassphraseMinLength < 8 {
-		return fmt.Errorf("agent.security.software.passphrase_min_length must be >= 8 (got %d)", c.PassphraseMinLength)
-	}
-	if c.PassphraseMinLength > 128 {
-		return fmt.Errorf("agent.security.software.passphrase_min_length must be <= 128 (got %d)", c.PassphraseMinLength)
-	}
-
-	// Validate lockout threshold (min 3, max 100)
-	if c.LockoutThreshold < 3 {
-		return fmt.Errorf("agent.security.software.lockout_threshold must be >= 3 (got %d)", c.LockoutThreshold)
-	}
-	if c.LockoutThreshold > 100 {
-		return fmt.Errorf("agent.security.software.lockout_threshold must be <= 100 (got %d)", c.LockoutThreshold)
-	}
-
-	// Validate lockout duration (min 1m, max 1h)
-	lockoutDuration := c.LockoutDuration.Duration()
-	if lockoutDuration < time.Minute {
-		return fmt.Errorf("agent.security.software.lockout_duration must be >= 1m (got %v)", lockoutDuration)
-	}
-	if lockoutDuration > time.Hour {
-		return fmt.Errorf("agent.security.software.lockout_duration must be <= 1h (got %v)", lockoutDuration)
-	}
-
-	// Validate max lockout duration (min 5m, max 24h)
-	maxLockoutDuration := c.MaxLockoutDuration.Duration()
-	if maxLockoutDuration < 5*time.Minute {
-		return fmt.Errorf("agent.security.software.max_lockout_duration must be >= 5m (got %v)", maxLockoutDuration)
-	}
-	if maxLockoutDuration > 24*time.Hour {
-		return fmt.Errorf("agent.security.software.max_lockout_duration must be <= 24h (got %v)", maxLockoutDuration)
-	}
-
-	// Logical constraint: max_lockout_duration >= lockout_duration
-	if maxLockoutDuration < lockoutDuration {
-		return fmt.Errorf("agent.security.software.max_lockout_duration (%v) must be >= lockout_duration (%v)", maxLockoutDuration, lockoutDuration)
+	if providerRequestTimeout > 10*time.Minute {
+		return fmt.Errorf("agent.provider_request_timeout must be <= 10m (got %v)", providerRequestTimeout)
 	}
 
 	return nil
@@ -459,13 +634,6 @@ func (c *SoftwareSecurityConfig) Validate() error {
 
 // Validate checks AuditConfig values are within acceptable bounds.
 func (c *AuditConfig) Validate() error {
-	// Validate max backup files (reasonable bounds)
-	if c.MaxBackupFiles < 1 {
-		return fmt.Errorf("logging.audit.max_backup_files must be >= 1 (got %d)", c.MaxBackupFiles)
-	}
-	if c.MaxBackupFiles > 100 {
-		return fmt.Errorf("logging.audit.max_backup_files must be <= 100 (got %d)", c.MaxBackupFiles)
-	}
 	return nil
 }
 
@@ -491,9 +659,12 @@ func (c *SessionArchiveConfig) Validate() error {
 		return fmt.Errorf("logging.session.archive.max_run_bytes must be >= 0 (got %d)", c.MaxRunBytes)
 	}
 
-	// Validate jitter
-	if c.Jitter.Duration() < 0 {
-		return fmt.Errorf("logging.session.archive.jitter must be >= 0 (got %v)", c.Jitter.Duration())
+	if c.Timeout.Duration() < 0 {
+		return fmt.Errorf("logging.session.archive.timeout must be >= 0 (got %v)", c.Timeout.Duration())
+	}
+	// Default timeout if unset
+	if c.Timeout.Duration() == 0 {
+		c.Timeout = Duration(30 * time.Second)
 	}
 
 	return nil

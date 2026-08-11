@@ -5,7 +5,7 @@ import (
 	"os/exec"
 
 	"github.com/ntwrknrd/nssh/internal/exit"
-	"github.com/ntwrknrd/nssh/internal/ssh/recording"
+	"github.com/ntwrknrd/nssh/internal/recording"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -35,10 +35,6 @@ func NewAuthCmd() *cobra.Command {
 func runAuth(serverURL string, quiet bool) error {
 	settings := recording.LoadRecordingSettings()
 
-	if !quiet {
-		ui.CommandStart("AUTHENTICATE WITH ASCIINEMA")
-	}
-
 	// Determine server URL (flag > env > config > default)
 	if serverURL == "" {
 		serverURL = os.Getenv("NSSH_ASCIINEMA_SERVER_URL")
@@ -54,7 +50,6 @@ func runAuth(serverURL string, quiet bool) error {
 	if err != nil {
 		if !quiet {
 			ui.Error("%s", err)
-			ui.CommandEnd(ui.StatusError)
 		}
 		return &exit.ExitError{Code: 1}
 	}
@@ -78,13 +73,9 @@ func runAuth(serverURL string, quiet bool) error {
 	if err := cmd.Run(); err != nil {
 		if !quiet {
 			ui.Error("Authentication failed: %s", err)
-			ui.CommandEnd(ui.StatusError)
 		}
 		return &exit.ExitError{Code: 1}
 	}
 
-	if !quiet {
-		ui.CommandEnd(ui.StatusSuccess)
-	}
 	return nil
 }

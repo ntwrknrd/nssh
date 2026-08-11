@@ -1,0 +1,46 @@
+[
+  {
+    "query": "Why does nssh select the wrong credential for this inventory host?",
+    "should_trigger": true
+  },
+  {
+    "query": "Migrate my nssh 0.2 config, credentials, recordings, and SSH config to 0.3.",
+    "should_trigger": true
+  },
+  {
+    "query": "Troubleshoot nssh host-key verification through a managed proxy.",
+    "should_trigger": true
+  },
+  {
+    "query": "How do I play or export an nssh session recording?",
+    "should_trigger": true
+  },
+  {
+    "query": "Use nssh as an SSH-compatible way to log in to these switches without manually typing each password.",
+    "should_trigger": true
+  },
+  {
+    "query": "Change the nssh connection resolver without breaking automatic authentication for SCP or managed jump hosts.",
+    "should_trigger": true
+  },
+  {
+    "query": "Which nssh package should own host-key verification and askpass orchestration?",
+    "should_trigger": true
+  },
+  {
+    "query": "Show me the OpenSSH syntax for ProxyJump.",
+    "should_trigger": false
+  },
+  {
+    "query": "Write a generic SCP wrapper in Bash.",
+    "should_trigger": false
+  },
+  {
+    "query": "Configure OpenSSH keys so I can log in to a switch without a password.",
+    "should_trigger": false
+  },
+  {
+    "query": "Why is the 1Password CLI signed out?",
+    "should_trigger": false
+  }
+]

@@ -2,20 +2,15 @@
 package cp
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"regexp"
 
-	"github.com/creack/pty"
-	clisession "github.com/ntwrknrd/nssh/internal/cli/session"
-	"github.com/ntwrknrd/nssh/internal/secret"
-	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
+	"github.com/ntwrknrd/nssh/internal/connect"
+	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 	"github.com/ntwrknrd/nssh/internal/ui"
-	"github.com/ntwrknrd/nssh/internal/vault"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 // NewCmd creates the 'cp' command.
@@ -38,9 +33,17 @@ Examples:
   nssh cp myhost:~/file.txt ./           # pull from remote
   nssh cp ./file.txt myhost:~/           # push to remote
   nssh cp -r myhost:~/dir ./local/       # recursive pull`,
-		Args: cobra.ExactArgs(2),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return nil
+			}
+			return cobra.ExactArgs(2)(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCp(args[0], args[1], recursive, preserve, quiet, verbose)
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			return runCp(cmd.Context(), args[0], args[1], recursive, preserve, quiet, verbose)
 		},
 	}
 
@@ -159,7 +162,7 @@ func detectDirection(source, dest string) (user, host, remotePath, localPath, di
 	return user, host, remotePath, localPath, direction, nil
 }
 
-func runCp(source, dest string, recursive, preserve, quiet, verbose bool) error {
+func runCp(ctx context.Context, source, dest string, recursive, preserve, quiet, verbose bool) error {
 	// Parse direction and paths
 	user, hostSearch, remotePath, localPath, direction, err := detectDirection(source, dest)
 	if err != nil {
@@ -167,59 +170,36 @@ func runCp(source, dest string, recursive, preserve, quiet, verbose bool) error 
 		return err
 	}
 
-	// Resolve host from SSH config
-	parser := sshconfig.NewParser()
-	hostEntry, err := parser.FindHost(hostSearch)
+	resolved, err := resolveHostForConnect(hostSearch, user)
 	if err != nil {
-		ui.Error("Failed to get host details: %s", err)
-		return err
-	}
-	if hostEntry == nil {
-		ui.Error("Host not found: %s", hostSearch)
-		return fmt.Errorf("host not found: %s", hostSearch)
-	}
-
-	includeFile := filepath.Base(hostEntry.SourceFile)
-
-	// Resolve credentials
-	mgr, err := clisession.NewManager(vault.Auto())
-	if err != nil {
-		ui.Error("Failed to load credentials: %s", err)
+		ui.Error("Failed to resolve host: %s", err)
 		return err
 	}
 
-	_ = clisession.TryUnlockIfTTY(mgr)
-
-	var password *secret.Secret
-	var scpUser string
-
-	if user != "" {
-		scpUser = user
-	} else if hostEntry != nil && hostEntry.User() != "" {
-		scpUser = hostEntry.User()
+	defer destroyResolvedPasswords(resolved)
+	scpUser := resolved.Username
+	askpassEnv, err := startResolvedAskpass(ctx, resolved)
+	if err != nil {
+		return err
+	}
+	if askpassEnv != nil {
+		defer askpassEnv.Cleanup()
 	}
 
-	// Resolve credential using the Host identifier (how credentials are indexed in the vault)
-	// host add stores credentials keyed by Host, not by HostName
-	cred, _ := mgr.ResolveCredential(hostSearch, filepath.Base(includeFile), scpUser)
-	if cred != nil {
-		if scpUser == "" {
-			scpUser = cred.Username
-		}
-		password = cred.Password
-	}
-
-	// Build remote spec using the Host identifier (hostSearch) so SSH config applies
-	// SSH config directives (ProxyJump, Port, IdentityFile, etc.) match on Host
+	// Build remote spec using the resolved endpoint; nssh renders SSH options
+	// directly because OpenSSH config is disabled.
 	var remoteSpec string
 	if scpUser != "" {
-		remoteSpec = fmt.Sprintf("%s@%s:%s", scpUser, hostSearch, remotePath)
+		remoteSpec = fmt.Sprintf("%s@%s:%s", scpUser, resolved.Hostname, remotePath)
 	} else {
-		remoteSpec = fmt.Sprintf("%s:%s", hostSearch, remotePath)
+		remoteSpec = fmt.Sprintf("%s:%s", resolved.Hostname, remotePath)
 	}
 
 	// Build SCP command
-	args := []string{}
+	args := connector.RenderSSHOptions(resolved.SSH, 0)
+	if resolved.Port != 0 && resolved.Port != 22 {
+		args = append(args, "-P", fmt.Sprintf("%d", resolved.Port))
+	}
 	if recursive {
 		args = append(args, "-r")
 	}
@@ -232,6 +212,18 @@ func runCp(source, dest string, recursive, preserve, quiet, verbose bool) error 
 	if verbose {
 		args = append(args, "-v")
 	}
+	var proxyEnv []string
+	if askpassEnv != nil {
+		proxyEnv = askpassEnv.ProxyEnv
+	}
+	hostKeyPrep, err := prepareResolvedHostKey(ctx, resolved, nil, proxyEnv)
+	if err != nil {
+		return err
+	}
+	if hostKeyPrep != nil {
+		defer hostKeyPrep.Cleanup()
+		args = append(args, hostKeyPrep.SSHArgs()...)
+	}
 
 	if direction == "pull" {
 		args = append(args, remoteSpec, localPath)
@@ -239,83 +231,40 @@ func runCp(source, dest string, recursive, preserve, quiet, verbose bool) error 
 		args = append(args, localPath, remoteSpec)
 	}
 
-	// Run SCP with PTY for password injection
-	return runScpWithPty(args, password)
-}
-
-var passwordPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)password:\s*$`),
-	regexp.MustCompile(`(?i)passcode:\s*$`),
-}
-
-func matchPasswordPrompt(data []byte) bool {
-	for _, re := range passwordPatterns {
-		if re.Match(data) {
-			return true
-		}
+	var env []string
+	if askpassEnv != nil {
+		env = askpassEnv.Env
 	}
-	return false
+	return runScp(args, env)
 }
 
-func runScpWithPty(args []string, password *secret.Secret) error {
+var resolveHostForConnect = connect.ResolveHostForConnect
+var startResolvedAskpass = connect.StartResolvedAskpassEnvironment
+var prepareResolvedHostKey = connect.PrepareResolvedHostKey
+
+var runScp = runScpCommand
+
+func runScpCommand(args, env []string) error {
 	cmd := exec.Command("scp", args...)
-
-	// Start with PTY
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		return fmt.Errorf("failed to start scp: %w", err)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
 	}
-	defer func() { _ = ptmx.Close() }()
+	return cmd.Run()
+}
 
-	// Save and restore terminal state
-	if term.IsTerminal(int(os.Stdin.Fd())) {
-		oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
-		if err == nil {
-			defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
-		}
+func destroyResolvedPasswords(resolved *connect.ResolvedHost) {
+	if resolved == nil {
+		return
 	}
-
-	// Copy stdin to PTY in goroutine
-	go func() {
-		buf := make([]byte, 1024)
-		for {
-			n, err := os.Stdin.Read(buf)
-			if err != nil {
-				return
-			}
-			_, _ = ptmx.Write(buf[:n])
-		}
-	}()
-
-	// Read from PTY, handle password prompts, write to stdout
-	buf := make([]byte, 4096)
-	ringBuf := make([]byte, 0, 2048)
-	passwordSent := false
-
-	for {
-		n, err := ptmx.Read(buf)
-		if err != nil {
-			break
-		}
-
-		// Append to ring buffer for prompt detection
-		ringBuf = append(ringBuf, buf[:n]...)
-		if len(ringBuf) > 2048 {
-			ringBuf = ringBuf[len(ringBuf)-2048:]
-		}
-
-		// Check for password prompt
-		if password != nil && !passwordSent && matchPasswordPrompt(ringBuf) {
-			_ = password.Use(func(pw []byte) error {
-				_, _ = ptmx.Write(pw)
-				_, _ = ptmx.Write([]byte{'\n'})
-				return nil
-			})
-			passwordSent = true
-		}
-
-		_, _ = os.Stdout.Write(buf[:n])
+	if resolved.Credential != nil && resolved.Credential.Password != nil {
+		resolved.Credential.Password.Destroy()
+		resolved.Credential.Password = nil
 	}
-
-	return cmd.Wait()
+	if resolved.Proxy != nil && resolved.Proxy.Credential != nil && resolved.Proxy.Credential.Password != nil {
+		resolved.Proxy.Credential.Password.Destroy()
+		resolved.Proxy.Credential.Password = nil
+	}
 }

@@ -1,0 +1,19 @@
+$ nssh inv --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh inv [flags]                  Manage inventory                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────╮
+│   get                               Show inventory details                   │
+│   import                            Import inventory from CSV                │
+│   list                              List inventory                           │
+│   refresh                           Refresh inventory                        │
+│   rm                                Remove inventory entries                 │
+│   set                               Create or update inventory               │
+│   status                            Show inventory provider status           │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose COUNT               Increase debug verbosity                 │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

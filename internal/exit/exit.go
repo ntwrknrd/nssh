@@ -16,7 +16,6 @@ const (
 	ExitConnectionFailed = 2
 	ExitAuthFailed       = 3
 	ExitHostNotFound     = 4
-	ExitVaultError       = 5
 	ExitNotExecutable    = 126
 	ExitNotFound         = 127
 )
@@ -26,5 +25,4 @@ var (
 	ErrConnectionFailed = &ExitError{Code: ExitConnectionFailed, Message: "connection failed"}
 	ErrAuthFailed       = &ExitError{Code: ExitAuthFailed, Message: "authentication failed"}
 	ErrHostNotFound     = &ExitError{Code: ExitHostNotFound, Message: "host not found"}
-	ErrVault            = &ExitError{Code: ExitVaultError, Message: "vault error"}
 )

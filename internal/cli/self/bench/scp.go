@@ -6,9 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	clisession "github.com/ntwrknrd/nssh/internal/cli/session"
 	"github.com/ntwrknrd/nssh/internal/ui"
-	"github.com/ntwrknrd/nssh/internal/vault"
 	"github.com/spf13/cobra"
 )
 
@@ -63,12 +61,11 @@ func runSCPBenchmark(host string, warmups, samples int, simpleOnly bool, fileSiz
 		return fmt.Errorf("--warmups must be >= 0")
 	}
 
-	// Unlock vault before running benchmark (subprocess won't have TTY)
-	if mgr, err := clisession.NewManager(vault.Auto()); err == nil {
-		_ = clisession.TryUnlockIfTTY(mgr)
+	resolvedHost, err := resolveBenchmarkHost(host)
+	if err != nil {
+		return err
 	}
-
-	ui.CommandStart("SCP BENCHMARK")
+	host = resolvedHost
 
 	fmt.Printf("  %s: %s\n", ui.Gray("Host"), ui.Cyan(host))
 	fmt.Printf("  %s: %d samples, %d warmup, %s file\n", ui.Gray("Config"), samples, warmups, fileSize)
@@ -77,14 +74,12 @@ func runSCPBenchmark(host string, warmups, samples int, simpleOnly bool, fileSiz
 	// Create temporary test file
 	tempDir, err := os.MkdirTemp("", "nssh-benchmark-*")
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return fmt.Errorf("create temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	testFile := filepath.Join(tempDir, "nssh-benchmark-test")
 	if err := createTestFile(testFile, fileSize); err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return fmt.Errorf("create test file: %w", err)
 	}
 
@@ -95,7 +90,6 @@ func runSCPBenchmark(host string, warmups, samples int, simpleOnly bool, fileSiz
 	fmt.Printf("  %s\n", ui.Gray("── Upload ──"))
 	result, err := run(uploadArgs, warmups, samples, simpleOnly)
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return fmt.Errorf("upload benchmark failed: %w", err)
 	}
 	renderResults(result, simpleOnly)
@@ -109,7 +103,6 @@ func runSCPBenchmark(host string, warmups, samples int, simpleOnly bool, fileSiz
 	fmt.Printf("  %s\n", ui.Gray("── Download ──"))
 	downloadResult, err := run(downloadArgs, warmups, samples, simpleOnly)
 	if err != nil {
-		ui.CommandEnd(ui.StatusError)
 		return fmt.Errorf("download benchmark failed: %w", err)
 	}
 	renderResults(downloadResult, simpleOnly)
@@ -122,7 +115,6 @@ func runSCPBenchmark(host string, warmups, samples int, simpleOnly bool, fileSiz
 		_ = exec.Command(binary, cleanupArgs...).Run()
 	}
 
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 

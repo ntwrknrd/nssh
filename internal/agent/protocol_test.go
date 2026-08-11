@@ -20,20 +20,8 @@ func TestRequest_JSON(t *testing.T) {
 		req  Request
 	}{
 		{
-			name: "hello",
-			req:  Request{Version: 1, Op: OpHello},
-		},
-		{
 			name: "status",
 			req:  Request{Version: 1, Op: OpStatus, ID: "req-123"},
-		},
-		{
-			name: "decrypt with data",
-			req:  Request{Version: 1, Op: OpDecrypt, Data: []byte("ciphertext")},
-		},
-		{
-			name: "recipient",
-			req:  Request{Version: 1, Op: OpRecipient},
 		},
 		{
 			name: "lock",
@@ -124,7 +112,6 @@ func TestResponse_JSON(t *testing.T) {
 
 func TestStatusInfo_JSON(t *testing.T) {
 	info := StatusInfo{
-		Mode:          ModeSoftware,
 		IdleTimeout:   3600,
 		MaxLifetime:   86400,
 		RemainingLife: 43200,
@@ -144,9 +131,6 @@ func TestStatusInfo_JSON(t *testing.T) {
 	}
 
 	// Verify fields
-	if got.Mode != info.Mode {
-		t.Errorf("Mode = %q, want %q", got.Mode, info.Mode)
-	}
 	if got.IdleTimeout != info.IdleTimeout {
 		t.Errorf("IdleTimeout = %d, want %d", got.IdleTimeout, info.IdleTimeout)
 	}
@@ -167,11 +151,9 @@ func TestOpConstants(t *testing.T) {
 		constant string
 		want     string
 	}{
-		{"OpHello", OpHello, "hello"},
 		{"OpStatus", OpStatus, "status"},
-		{"OpDecrypt", OpDecrypt, "decrypt"},
-		{"OpRecipient", OpRecipient, "recipient"},
 		{"OpLock", OpLock, "lock"},
+		{"OpProviderRequest", OpProviderRequest, "provider_request"},
 	}
 
 	for _, tt := range tests {

@@ -1,0 +1,35 @@
+{
+  "skill_name": "nssh",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Explain the exact nssh 0.3 authentication precedence for an inventory host.",
+      "expected_output": "Describes fieldwise precedence from inventory defaults through provider, provider group, root host, and provider-scoped host; explains auth_disabled and mode:key; and cites current source or the focused configuration reference."
+    },
+    {
+      "id": 2,
+      "prompt": "Give me a safe migration checklist from nssh 0.2 to 0.3 with XDG_CONFIG_HOME set.",
+      "expected_output": "Uses the migration reference; backs up resolved XDG config, data, and state paths; covers config, state, share, auth, completion, and recordings; and warns about context-domain apex matching and imported User-only password mode."
+    },
+    {
+      "id": 3,
+      "prompt": "Copy a file through nssh using a password-authenticated target behind a password-authenticated managed proxy.",
+      "expected_output": "Uses nssh cp and accurately explains shared host resolution, separate target and proxy askpass channels, host-key preparation, and the absence of plaintext passwords in argv or environment variables."
+    },
+    {
+      "id": 4,
+      "prompt": "Play recording abc123, export it as text, and then delete it.",
+      "expected_output": "Does not invent positional recording IDs; explains the interactive selectors and supported flags for play, export, and delete, including delete selection modes."
+    },
+    {
+      "id": 5,
+      "prompt": "Change nssh so automatic password authentication still works when SSH and SCP use a managed password-backed jump host.",
+      "expected_output": "Resolves the owning checkout; reads SPEC.md and current source in one revision; traces inventory, merged auth, credential providers, distinct target and proxy askpass channels, host-key verification, and shared SSH/SCP resolution; makes the smallest owning-layer change; runs focused tests; and reports the affected contract and anything not verified."
+    },
+    {
+      "id": 6,
+      "prompt": "Why did nssh automatically log in to one switch but prompt for a password on another?",
+      "expected_output": "Treats nssh as the SSH-compatible automatic-authentication layer and traces resolved inventory identity, merged auth mapping, provider reference and username agreement, askpass helper/channel availability, proxy eligibility, multiplexing, and the final OpenSSH path without requesting or exposing password values."
+    }
+  ]
+}

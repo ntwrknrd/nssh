@@ -1,0 +1,21 @@
+$ nssh inv set --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh inv set HOST                 Create or update inventory               │
+│   nssh inv set local/GROUP                                                   │
+│   nssh inv set HOST -g local/GROUP                                           │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Flags ──────────────────────────────────────────────────────────────────────╮
+│   --alias STRINGARRAY               add host alias                           │
+│   --auth STRING                     auth mode: password or key               │
+│   --cred STRING                     credential provider or provider:ref...   │
+│   -g, --group STRING                target provider-qualified group          │
+│   --hostname STRING                 SSH connection target override           │
+│   --port INT                        SSH Port                                 │
+│   --user STRING                     SSH User                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
+│   -h, --help                        Print command help                       │
+│   -v, --verbose COUNT               Increase debug verbosity                 │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

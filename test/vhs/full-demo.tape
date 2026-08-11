@@ -1,5 +1,5 @@
 # Demo: nssh full workflow
-# Shows initialization, context/host management, and SSH connection with password injection
+# Shows initialization, inventory/credential management, and SSH connection with password injection
 
 Set Width 1200
 Set Height 900
@@ -59,14 +59,24 @@ Sleep 500ms
 Enter
 Sleep 500ms
 
-# Unlock the vault for subsequent commands
-Sleep 200ms
-Type "nssh unlock"
+# Provider authentication is owned by the configured credential provider.
+
+# Pause for user to review
+Sleep 10s
+Ctrl+L
+
+# ============================================================================
+# Section 2: Group Add & Status
+# ============================================================================
+
+# Create an inventory group
+Type "nssh inv set --group local/test"
+Sleep 300ms
 Enter
 
-# Enter passphrase
-Sleep 200ms
-Type "thisisatestpass"
+# Show group details in provider status
+Type "nssh inv status"
+Sleep 500ms
 Enter
 
 # Pause for user to review
@@ -74,109 +84,22 @@ Sleep 10s
 Ctrl+L
 
 # ============================================================================
-# Section 2: Context Add & List
+# Section 4: Inventory Host Add
 # ============================================================================
 
-# Start the interactive ctx add
-Type "nssh ctx add"
+# Create a local inventory host
+Type "nssh inv set ssh-pwd.demo.local --group local/test --user testuser"
 Sleep 300ms
 Enter
 
-# Wait for the form to appear
+# Map host auth to an existing provider item
+Type "nssh inv set ssh-pwd.demo.local --credential-provider pass-local --password-ref nssh/hosts/ssh-pwd.demo.local --credential-username testuser"
+Sleep 300ms
+Enter
 Sleep 1s
 
-# Fill in context name
-Type "test"
-Sleep 500ms
-Enter
-Sleep 300ms
-
-# Confirm SSH include filename (default)
-Sleep 2s
-Enter
-Sleep 300ms
-
-# Skip domain
-Sleep 2s
-Enter
-Sleep 300ms
-
-# Skip credential
-Sleep 2s
-Enter
-Sleep 100ms
-Enter
-Sleep 100ms
-Enter
-
-# Show the created ctx
-Type "nssh ctx list"
-Sleep 500ms
-Enter
-
-# Pause for user to review
-Sleep 10s
-Ctrl+L
-
-# ============================================================================
-# Section 4: Host Add
-# ============================================================================
-
-# Start the interactive host add with hostname argument
-Type "nssh host add ssh-pwd.demo.local"
-Sleep 300ms
-Enter
-
-# Wait for the form to appear
-Sleep 500ms
-
-# Confirm ctx (default)
-Sleep 2s
-Enter
-
-# Confirm host (default)
-Sleep 2s
-Enter
-
-# Confirm hostname (default)
-Sleep 2s
-Enter
-
-# Confirm port (default 22)
-Sleep 2s
-Enter
-Sleep 300ms
-
-# Fill in User
-Type "testuser"
-Sleep 2s
-Enter
-Sleep 300ms
-
-# Select password auth (Key is default, so arrow down to Password)
-Sleep 500ms
-Down
-Sleep 2s
-Enter
-Sleep 300ms
-
-# Fill in Password
-Type "testpass"
-Sleep 500ms
-Enter
-
-# Wait for processing
-Sleep 2s
-
-# Confirm host add
-Enter
-Sleep 100ms
-Enter
-Sleep 100ms
-Enter
-
 # Show the created host
-Type "nssh host list"
+Type "nssh inv list"
 Sleep 500ms
 Enter
 

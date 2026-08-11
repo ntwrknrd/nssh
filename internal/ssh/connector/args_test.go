@@ -1,0 +1,179 @@
+//go:build unix
+
+package connector
+
+import (
+	"os"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/ntwrknrd/nssh/internal/config"
+)
+
+func TestBuildSSHArgsPinsAcceptedRSAKeyBeforeConfiguredPreferences(t *testing.T) {
+	tempKnownHosts, err := os.CreateTemp(t.TempDir(), "known-hosts-*")
+	if err != nil {
+		t.Fatalf("create temp known_hosts: %v", err)
+	}
+	if err := tempKnownHosts.Close(); err != nil {
+		t.Fatalf("close temp known_hosts: %v", err)
+	}
+
+	conn := NewConnector("edge01", "", nil, []string{"-o", "HostKeyAlgorithms=ecdsa-sha2-nistp256,ssh-rsa"})
+	conn.useTemporaryKnownHosts = true
+	conn.tempKnownHosts = tempKnownHosts.Name()
+	conn.pinnedHostKey = &pinnedKey{
+		fingerprint:       "SHA256:accepted-rsa-key",
+		hostKeyAlgorithms: "rsa-sha2-512,rsa-sha2-256,ssh-rsa",
+	}
+
+	args, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatalf("buildSSHArgs: %v", err)
+	}
+	wantPrefix := []string{
+		"-tt",
+		"-o", "HostKeyAlgorithms=rsa-sha2-512,rsa-sha2-256,ssh-rsa",
+		"-o", "UserKnownHostsFile=" + tempKnownHosts.Name(),
+		"-o", "StrictHostKeyChecking=yes",
+	}
+	if len(args) < len(wantPrefix) || !slices.Equal(args[:len(wantPrefix)], wantPrefix) {
+		t.Fatalf("buildSSHArgs() = %#v, want prefix %#v", args, wantPrefix)
+	}
+}
+
+func TestBuildSSHArgsPrioritizesPreparedHostKeyOptions(t *testing.T) {
+	conn := NewConnector("edge01", "", nil, []string{
+		"-o", "HostKeyAlgorithms=ssh-rsa",
+		"-o", "UserKnownHostsFile=/tmp/pinned",
+		"-o", "StrictHostKeyChecking=yes",
+		"-o", "LogLevel=ERROR",
+	})
+	conn.SetSSHOptions(config.SSHHostConfig{Options: config.SSHOptions{
+		"HostKeyAlgorithms": config.NewSSHOptionItems("ecdsa-sha2-nistp256", "ssh-rsa"),
+	}})
+
+	args, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatalf("buildSSHArgs: %v", err)
+	}
+	wantPrefix := []string{
+		"-tt",
+		"-o", "HostKeyAlgorithms=ssh-rsa",
+		"-o", "UserKnownHostsFile=/tmp/pinned",
+		"-o", "StrictHostKeyChecking=yes",
+	}
+	if len(args) < len(wantPrefix) || !slices.Equal(args[:len(wantPrefix)], wantPrefix) {
+		t.Fatalf("buildSSHArgs() = %#v, want prefix %#v", args, wantPrefix)
+	}
+}
+
+func TestBuildSSHArgsPreservesOptionsTargetAndCommand(t *testing.T) {
+	conn := NewConnector("edge01", "netops", nil, []string{"-p", "2222", "-o", "LogLevel=ERROR", "--", "show version"})
+	conn.SetResolvedEndpoint("edge01", "2200")
+	conn.SetTimeouts(&config.SSHConnectionConfig{Timeout: config.Duration(7 * time.Second)})
+
+	got, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatalf("buildSSHArgs() error = %v", err)
+	}
+
+	want := []string{"-F", "none", "-o", "ConnectTimeout=7", "-p", "2222", "-o", "LogLevel=ERROR", "netops@edge01", "show version"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildSSHArgsAddsDefaultTTYForInteractiveSession(t *testing.T) {
+	conn := NewConnector("edge01", "netops", nil, []string{"-o", "LogLevel=ERROR"})
+	conn.SetResolvedEndpoint("edge01", "2200")
+
+	got, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatalf("buildSSHArgs() error = %v", err)
+	}
+
+	want := []string{"-tt", "-F", "none", "-p", "2200", "-o", "LogLevel=ERROR", "netops@edge01"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildSSHArgsLimitsAskpassToOnePrompt(t *testing.T) {
+	conn := NewConnector("edge01", "netops", nil, nil)
+	conn.SetEnv([]string{"SSH_ASKPASS=/tmp/nssh-askpass"})
+
+	got, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatalf("buildSSHArgs() error = %v", err)
+	}
+
+	want := []string{"-tt", "-F", "none", "-o", "NumberOfPasswordPrompts=1", "netops@edge01"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildSSHArgsKeepsExplicitAskpassPromptLimit(t *testing.T) {
+	conn := NewConnector("edge01", "netops", nil, []string{"-o", "NumberOfPasswordPrompts=2"})
+	conn.SetEnv([]string{"SSH_ASKPASS=/tmp/nssh-askpass"})
+
+	got, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatalf("buildSSHArgs() error = %v", err)
+	}
+
+	want := []string{"-tt", "-F", "none", "-o", "NumberOfPasswordPrompts=2", "netops@edge01"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildSSHArgsDoesNotAddDefaultTTYForRemoteCommand(t *testing.T) {
+	conn := NewConnector("edge01", "netops", nil, []string{"--", "show", "version"})
+	conn.SetResolvedEndpoint("edge01", "2200")
+
+	got, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatalf("buildSSHArgs() error = %v", err)
+	}
+
+	want := []string{"-F", "none", "-p", "2200", "netops@edge01", "show", "version"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildSSHArgsPreservesExplicitTTYFlagsForRemoteCommand(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{name: "single force tty", args: []string{"-t", "--", "show"}, want: []string{"-F", "none", "-t", "edge01", "show"}},
+		{name: "double force tty", args: []string{"-tt", "--", "show"}, want: []string{"-F", "none", "-tt", "edge01", "show"}},
+		{name: "disable tty", args: []string{"-T", "--", "show"}, want: []string{"-F", "none", "-T", "edge01", "show"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := NewConnector("edge01", "", nil, tt.args)
+
+			got, err := conn.buildSSHArgs()
+			if err != nil {
+				t.Fatalf("buildSSHArgs() error = %v", err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("buildSSHArgs() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParsePortFromSSHArgsStopsAtRemoteCommand(t *testing.T) {
+	conn := NewConnector("edge01", "", nil, []string{"-o", "Port=2200", "--", "-p", "9999"})
+	if got := conn.parsePortFromSSHArgs(); got != "2200" {
+		t.Fatalf("parsePortFromSSHArgs() = %q, want %q", got, "2200")
+	}
+}

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/exit"
-	"github.com/ntwrknrd/nssh/internal/ssh/recording"
+	"github.com/ntwrknrd/nssh/internal/recording"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -39,20 +39,16 @@ func NewUploadCmd() *cobra.Command {
 
 func runUpload(yes, dryRun bool) error {
 	settings := recording.LoadRecordingSettings()
-	sessions := LoadSessions(settings)
-
-	ui.CommandStart("UPLOAD RECORDING")
+	sessions := recording.IterSessionRecords(settings)
 
 	if len(sessions) == 0 {
 		ui.Warning("No recordings found in %s", settings.Directory)
-		ui.CommandEnd(ui.StatusWarning)
 		return nil
 	}
 
 	session, err := SelectSession(sessions, "Select recording:")
 	if err != nil {
 		ui.Abort("%s", err)
-		ui.CommandEnd(ui.StatusAbort)
 		return nil
 	}
 
@@ -69,7 +65,6 @@ func runUpload(yes, dryRun bool) error {
 		result, err := ui.InputWithDefault("Server URL", serverURL)
 		if err != nil {
 			ui.Abort("%s", err)
-			ui.CommandEnd(ui.StatusAbort)
 			return err
 		}
 		serverURL = result
@@ -80,14 +75,12 @@ func runUpload(yes, dryRun bool) error {
 	asciinemaPath, err := RequireBinary("asciinema")
 	if err != nil {
 		ui.Error("%s", err)
-		ui.CommandEnd(ui.StatusError)
 		return &exit.ExitError{Code: 1}
 	}
 
 	if dryRun {
 		ui.Info("[dry-run] %s upload --server-url %s %s", asciinemaPath, serverURL, session.CastPath)
 		ui.Warning("Run without --dry-run to actually upload")
-		ui.CommandEnd(ui.StatusWarning)
 		return nil
 	}
 
@@ -104,7 +97,6 @@ func runUpload(yes, dryRun bool) error {
 		} else {
 			ui.Error("%s", err)
 		}
-		ui.CommandEnd(ui.StatusError)
 		return &exit.ExitError{Code: 1}
 	}
 
@@ -118,7 +110,6 @@ func runUpload(yes, dryRun bool) error {
 		ui.Info("%s", strings.TrimSpace(output))
 	}
 
-	ui.CommandEnd(ui.StatusSuccess)
 	return nil
 }
 

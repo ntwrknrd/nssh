@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestExampleConfigInSync(t *testing.T) {
+func TestExampleConfigUsesInternalSource(t *testing.T) {
 	// Find project root from test file location
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -15,14 +15,20 @@ func TestExampleConfigInSync(t *testing.T) {
 	}
 	projectRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 
-	docsPath := filepath.Join(projectRoot, "docs", "examples", "config", "config.example.toml")
-	docsContent, err := os.ReadFile(docsPath)
+	templatePath := filepath.Join(projectRoot, "internal", "config", "example_config.yaml")
+	templateContent, err := os.ReadFile(templatePath)
 	if err != nil {
-		t.Fatalf("read docs config: %v", err)
+		t.Fatalf("read internal config template: %v", err)
 	}
 
-	if ExampleConfig != string(docsContent) {
-		t.Errorf("embedded config out of sync with docs/examples/config/config.example.toml\n" +
-			"Run: cp docs/examples/config/config.example.toml internal/config/example_config.toml")
+	docsCopy := filepath.Join(projectRoot, "docs", "examples", "config", "config.example.yaml")
+	if _, err := os.Stat(docsCopy); err == nil {
+		t.Fatalf("docs config copy exists: %s", docsCopy)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat docs config copy: %v", err)
+	}
+
+	if ExampleConfig != string(templateContent) {
+		t.Errorf("embedded config does not match internal/config/example_config.yaml")
 	}
 }

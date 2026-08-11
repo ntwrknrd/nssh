@@ -5,6 +5,11 @@
 *.so
 *.dylib
 nssh
+!.agents/
+!.agents/skills/
+!.agents/skills/nssh/
+!.agents/skills/nssh/**
+bin/
 
 # Test binary, built with `go test -c`
 *.test
@@ -21,6 +26,11 @@ profile.cov
 go.work
 go.work.sum
 
+# Agent scratch context
+.agent-worklog.md
+
 # Sensitive dirs
 benchmarks/
 import/
+!docs/examples/help/self/import/
+!docs/examples/help/self/import/ssh-config.txt

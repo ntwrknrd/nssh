@@ -76,13 +76,3 @@ func RemoveSocket(path string) error {
 	}
 	return nil
 }
-
-// IsSocketAlive checks if an agent is listening on the socket.
-func IsSocketAlive(path string) bool {
-	conn, err := net.Dial("unix", path)
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
-}

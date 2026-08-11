@@ -1,0 +1,213 @@
+# nssh Configuration File
+# Location: ~/.config/nssh/config.yaml
+#
+# This file is intentionally verbose: active lines are safe defaults, while
+# commented lines show common options you can enable or tune later.
+
+# Provider definitions live in include files created by `nssh self init`.
+# These globs are activated only after matching files exist.
+# include:
+#   - credential/*.yaml
+#   - inventory/*.yaml
+
+agent:
+  # The agent starts only when a selected credential transport needs retained
+  # provider access, such as 1Password keepalive or Bitwarden warm_session.
+  auto_start: true
+  idle_timeout: 1h
+  activity_increment: 15m
+  max_lifetime: 24h
+  provider_request_timeout: 2m
+
+# Provider examples are intentionally commented. Run one of these commands to
+# create an active provider file under ~/.config/nssh/credential/:
+#
+#   nssh self init --cred sops-age
+#   nssh self init --cred 1password
+#   nssh self init --cred bitwarden
+#
+# credential:
+#   provider:
+#     sops:
+#       type: sops-age
+#       file: ~/.local/share/nssh/credentials.sops.yaml
+#       age_key_file: ~/.config/sops/age/keys.txt
+#     op-work:
+#       type: 1password
+#       account: account-user-id
+#       vault: Work
+#       keepalive: true
+#       keepalive_interval: 5m
+#       keepalive_timeout: 10s
+#     op-personal:
+#       type: 1password
+#       vault: Personal
+#     bw-work:
+#       type: bitwarden
+#       warm_session: true
+
+# Inventory provider examples are intentionally commented. Run one of these
+# commands to create an active provider file under ~/.config/nssh/inventory/:
+#
+#   nssh self init --inv local
+#   nssh self init --inv netbox
+#   nssh self init --inv containerlab
+#
+# inventory:
+#   providers:
+#     local:
+#       type: local
+#       groups:
+#         corp:
+#           auth:
+#             mode: password
+#             credential_provider: op-work
+#             password_ref: op://Work/network-admin/password
+#             username: netops
+#           match:
+#             domain_suffix:
+#               - .example.net
+#           ssh:
+#             options:
+#               WarnWeakCrypto: no-pq-kex
+#               IdentityFile:
+#                 - ~/.ssh/work-ssh-key.pub
+#         lab:
+#           match:
+#             domain_suffix:
+#               - .lab.example.net
+#           ssh:
+#             options:
+#               IdentityFile:
+#                 - ~/.ssh/lab-ssh-key.pub
+#       hosts:
+#         edge01.example.net:
+#           group: corp
+#           aliases:
+#             - edge01
+#           port: 22
+#           auth:
+#             mode: key
+#             username: netops
+#         jump01.lab.example.net:
+#           group: lab
+#           aliases:
+#             - lab-jump
+#           auth:
+#             mode: key
+#             username: admin
+#     netbox-prod:
+#       type: netbox
+#       config:
+#         url_env: NETBOX_URL
+#         token_env: NETBOX_TOKEN
+#       groups:
+#         corp:
+#           auth:
+#             mode: password
+#             credential_provider: op-work
+#             password_ref: op://Work/network-admin/password
+#             username: netops
+#           match:
+#             domain_suffix:
+#               - .example.net
+#             manufacturer:
+#               - Juniper
+#               - Arista
+#             status:
+#               - active
+#             tenant:
+#               - ExampleCorp
+#           ssh:
+#             options:
+#               WarnWeakCrypto: no-pq-kex
+#               IdentityFile:
+#                 - ~/.ssh/work-ssh-key.pub
+#       hosts:
+#         legacy-switch.example.net:
+#           aliases:
+#             - legacy-switch
+#           group: corp
+#           ssh:
+#             compatibility:
+#               kex: diffie-hellman-group14-sha1
+#               mac: hmac-sha1
+#     containerlab:
+#       type: containerlab
+#       config:
+#         jump_host: lab-jump
+#         sudo: false
+#         strict_host_key_checking: false
+#       groups:
+#         ceos:
+#           auth:
+#             mode: password
+#             credential_provider: op-work
+#             username_ref: op://Work/containerlab-ceos/username
+#             password_ref: op://Work/containerlab-ceos/password
+#           match:
+#             kind:
+#               - ceos
+#               - arista_ceos
+#             state:
+#               - running
+#         vjunos:
+#           auth:
+#             mode: password
+#             credential_provider: op-work
+#             username_ref: op://Work/containerlab-vjunos/username
+#             password_ref: op://Work/containerlab-vjunos/password
+#           match:
+#             kind:
+#               - vjunos
+#               - juniper_vjunosrouter
+#             state:
+#               - running
+#         linux:
+#           auth:
+#             mode: password
+#             credential_provider: op-work
+#             username_ref: op://Work/containerlab-linux/username
+#             password_ref: op://Work/containerlab-linux/password
+#           match:
+#             kind:
+#               - linux
+#             state:
+#               - running
+
+ssh:
+  connection:
+    timeout: 30s
+    password_timeout: 10s
+    # 0s disables idle disconnects.
+    idle_timeout: 0s
+  security:
+    host_key_policy: pin
+    accept_once_mode: pin
+    compat_persist_probes: false
+  # defaults:
+  #   options:
+  #     ServerAliveInterval: 30
+  #     ServerAliveCountMax: 3
+
+logging:
+  audit:
+    enabled: true
+    max_size: 10MB
+  export:
+    gif:
+      window_size: 145x30
+      font_size: 18
+  session:
+    enabled: false
+    append_mode: true
+    dir: ~/.local/state/nssh/casts
+    auto_export_txt: true
+    # exclude_hosts: []
+    # include_hosts: []
+    archive:
+      dir: ~/.local/state/nssh/archives
+      min_age: 720h
+      max_bundles: 12
+      max_run_bytes: 0
+      timeout: 30s

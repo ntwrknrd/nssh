@@ -35,33 +35,15 @@ func Connect() (*Client, error) {
 	}, nil
 }
 
-// Hello sends a hello request to verify the agent is responsive.
-// Returns the agent's security mode (e.g., "software").
-func (c *Client) Hello() (string, error) {
-	resp, err := c.request(Request{Version: ProtocolVersion, Op: OpHello})
-	if err != nil {
-		return "", err
-	}
-	return string(resp.Data), nil
-}
-
-// Decrypt sends ciphertext to the agent for decryption.
-// Returns the plaintext on success.
-func (c *Client) Decrypt(ciphertext []byte) ([]byte, error) {
-	resp, err := c.request(Request{Version: ProtocolVersion, Op: OpDecrypt, Data: ciphertext})
+func (c *Client) ProviderRequest(req ProviderRequest) (*ProviderResponse, error) {
+	resp, err := c.request(Request{Version: ProtocolVersion, Op: OpProviderRequest, Provider: &req})
 	if err != nil {
 		return nil, err
 	}
-	return resp.Data, nil
-}
-
-// Recipient returns the agent's age public key for encryption.
-func (c *Client) Recipient() (string, error) {
-	resp, err := c.request(Request{Version: ProtocolVersion, Op: OpRecipient})
-	if err != nil {
-		return "", err
+	if resp.Provider == nil {
+		return &ProviderResponse{}, nil
 	}
-	return string(resp.Data), nil
+	return resp.Provider, nil
 }
 
 // Status returns session status including timing information.

@@ -1,0 +1,206 @@
+package inventory
+
+import (
+	"slices"
+	"testing"
+
+	"github.com/ntwrknrd/nssh/internal/config"
+)
+
+func TestReconcileSelectorsObjectsToGroups(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{{
+		Group:    "netbox-prod/customer",
+		Provider: "netbox-prod",
+		Match: config.InventoryMatch{
+			"manufacturer": {"Juniper"},
+			"status":       {"active"},
+		},
+	}}
+	objects := []Object{{
+		ObjectID: "device:1",
+		Name:     "edge01",
+		HostName: "edge01.customer.local",
+		Attributes: map[string][]string{
+			"manufacturer": {"Juniper"},
+			"status":       {"active"},
+		},
+	}}
+
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, nil)
+	if len(plan.Adds) != 1 {
+		t.Fatalf("adds = %d, want 1", len(plan.Adds))
+	}
+	if plan.Adds[0].Group != "netbox-prod/customer" {
+		t.Fatalf("group = %q", plan.Adds[0].Group)
+	}
+}
+
+func TestReconcileAddsShortHostPatternForFQDNProviderHost(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{{
+		Group:    "netbox-prod/customer",
+		Provider: "netbox-prod",
+		Match:    config.InventoryMatch{"status": {"active"}},
+	}}
+	objects := []Object{{
+		ObjectID: "device:1",
+		Name:     "acm-lab-agg-sw1.custcbb.local",
+		HostName: "acm-lab-agg-sw1.custcbb.local",
+		Attributes: map[string][]string{
+			"status": {"active"},
+		},
+	}}
+
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, nil)
+	if len(plan.Adds) != 1 {
+		t.Fatalf("adds = %d, want 1", len(plan.Adds))
+	}
+	want := []string{"acm-lab-agg-sw1.custcbb.local", "acm-lab-agg-sw1"}
+	if !slices.Equal(plan.Adds[0].Patterns, want) {
+		t.Fatalf("patterns = %#v, want %#v", plan.Adds[0].Patterns, want)
+	}
+}
+
+func TestReconcileDoesNotDuplicateShortHostPattern(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{{
+		Group:    "netbox-prod/customer",
+		Provider: "netbox-prod",
+		Match:    config.InventoryMatch{"status": {"active"}},
+	}}
+	objects := []Object{{
+		ObjectID: "device:1",
+		Name:     "acm-lab-agg-sw1",
+		HostName: "acm-lab-agg-sw1.custcbb.local",
+		Attributes: map[string][]string{
+			"status": {"active"},
+		},
+	}}
+
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, nil)
+	if len(plan.Adds) != 1 {
+		t.Fatalf("adds = %d, want 1", len(plan.Adds))
+	}
+	want := []string{"acm-lab-agg-sw1"}
+	if !slices.Equal(plan.Adds[0].Patterns, want) {
+		t.Fatalf("patterns = %#v, want %#v", plan.Adds[0].Patterns, want)
+	}
+}
+
+func TestReconcileDoesNotShortenIPAddressProviderHost(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{{
+		Group:    "netbox-prod/customer",
+		Provider: "netbox-prod",
+		Match:    config.InventoryMatch{"status": {"active"}},
+	}}
+	objects := []Object{{
+		ObjectID: "device:1",
+		Name:     "192.0.2.10",
+		HostName: "192.0.2.10",
+		Attributes: map[string][]string{
+			"status": {"active"},
+		},
+	}}
+
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, nil)
+	if len(plan.Adds) != 1 {
+		t.Fatalf("adds = %d, want 1", len(plan.Adds))
+	}
+	want := []string{"192.0.2.10"}
+	if !slices.Equal(plan.Adds[0].Patterns, want) {
+		t.Fatalf("patterns = %#v, want %#v", plan.Adds[0].Patterns, want)
+	}
+}
+
+func TestReconcileDefaultsAuthModeFromGroupAuth(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{{
+		Group:    "netbox-prod/network",
+		Provider: "netbox-prod",
+		Match:    config.InventoryMatch{"role": {"switch"}},
+	}}
+	objects := []Object{{
+		ObjectID:   "device:1",
+		Name:       "edge01",
+		HostName:   "edge01.example.com",
+		Attributes: map[string][]string{"role": {"switch"}},
+	}}
+	groups := map[string]config.GroupConfig{
+		"network": {Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "groups.network.password"}},
+	}
+
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, groups)
+	if len(plan.Adds) != 1 {
+		t.Fatalf("adds = %d, want 1", len(plan.Adds))
+	}
+	if plan.Adds[0].AuthMode != config.AuthModePassword {
+		t.Fatalf("auth mode = %q, want %q", plan.Adds[0].AuthMode, config.AuthModePassword)
+	}
+}
+
+func TestReconcileDefaultsAuthModeToKeyWithoutGroupAuth(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{{
+		Group:    "netbox-prod/servers",
+		Provider: "netbox-prod",
+		Match:    config.InventoryMatch{"role": {"server"}},
+	}}
+	objects := []Object{{
+		ObjectID:   "node:1",
+		Name:       "app01",
+		HostName:   "app01.example.com",
+		Attributes: map[string][]string{"role": {"server"}},
+	}}
+	groups := map[string]config.GroupConfig{"servers": {}}
+
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, groups)
+	if len(plan.Adds) != 1 {
+		t.Fatalf("adds = %d, want 1", len(plan.Adds))
+	}
+	if plan.Adds[0].AuthMode != config.AuthModeKey {
+		t.Fatalf("auth mode = %q, want %q", plan.Adds[0].AuthMode, config.AuthModeKey)
+	}
+}
+
+func TestReconcileReportsConflictingGroupSelectors(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{
+		{Group: "netbox-prod/customer", Provider: "netbox-prod", Match: config.InventoryMatch{"role": {"router"}}},
+		{Group: "netbox-prod/network", Provider: "netbox-prod", Match: config.InventoryMatch{"role": {"router"}}},
+	}
+	objects := []Object{{
+		ObjectID:   "device:1",
+		Name:       "edge01",
+		HostName:   "edge01.example.com",
+		Attributes: map[string][]string{"role": {"router"}},
+	}}
+
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, nil)
+	if len(plan.Conflicts) != 1 {
+		t.Fatalf("conflicts = %+v, want one conflict", plan.Conflicts)
+	}
+	if len(plan.Adds) != 0 {
+		t.Fatalf("adds = %+v, want no additions on conflict", plan.Adds)
+	}
+}
+
+func TestReconcileChoosesMostSpecificWildcardDomainSuffixSelector(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{
+		{Group: "netbox-prod/customer", Provider: "netbox-prod", Match: config.InventoryMatch{"domain_suffix": {"*custcbb.local"}}},
+		{Group: "netbox-prod/ldap", Provider: "netbox-prod", Match: config.InventoryMatch{"domain_suffix": {"*ldap.custcbb.local"}}},
+	}
+	objects := []Object{{
+		ObjectID: "device:1",
+		Name:     "810-teps03.ldap.custcbb.local",
+		HostName: "810-teps03.ldap.custcbb.local",
+		Attributes: map[string][]string{
+			"domain_suffix": {".ldap.custcbb.local"},
+		},
+	}}
+
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, nil)
+	if len(plan.Conflicts) != 0 {
+		t.Fatalf("conflicts = %+v, want none", plan.Conflicts)
+	}
+	if len(plan.Adds) != 1 {
+		t.Fatalf("adds = %d, want 1", len(plan.Adds))
+	}
+	if plan.Adds[0].Group != "netbox-prod/ldap" {
+		t.Fatalf("group = %q, want netbox-prod/ldap", plan.Adds[0].Group)
+	}
+}

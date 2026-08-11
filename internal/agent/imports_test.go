@@ -10,8 +10,7 @@ import (
 
 // TestImportBoundaries verifies that agent packages do not import forbidden packages.
 // Rules:
-// - internal/agent/... must NOT import internal/cli, internal/ui, or internal/ssh packages
-// - internal/agent/... must NOT import internal/vault (manager package) directly
+// - internal/agent/... must NOT import internal/cli, internal/ui, internal/ssh, or internal/recording packages
 func TestImportBoundaries(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -25,13 +24,7 @@ func TestImportBoundaries(t *testing.T) {
 				"github.com/ntwrknrd/nssh/internal/cli/...",
 				"github.com/ntwrknrd/nssh/internal/ui/...",
 				"github.com/ntwrknrd/nssh/internal/ssh/...",
-			},
-		},
-		{
-			name: "agent must not import vault manager",
-			pkg:  "github.com/ntwrknrd/nssh/internal/agent/...",
-			forbidden: []string{
-				"github.com/ntwrknrd/nssh/internal/vault",
+				"github.com/ntwrknrd/nssh/internal/recording/...",
 			},
 		},
 	}

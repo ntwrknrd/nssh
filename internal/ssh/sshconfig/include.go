@@ -248,32 +248,6 @@ func (p *Parser) FindHostWithLocation(pattern string) (*HostEntry, *ParsedConfig
 	return nil, nil, nil
 }
 
-// GetIncludeFileForContext finds the SSH config file associated with a context.
-// Returns the path if found, or suggests a default path.
-func (p *Parser) GetIncludeFileForContext(includeFile string) (string, error) {
-	if includeFile == "" {
-		return "", nil
-	}
-
-	includes, err := p.FindIncludeFiles()
-	if err != nil {
-		return "", err
-	}
-
-	// Normalize to basename for comparison
-	targetBase := filepath.Base(includeFile)
-
-	for _, inc := range includes {
-		if filepath.Base(inc) == targetBase {
-			return inc, nil
-		}
-	}
-
-	// Not found - return suggested path
-	sshDir := filepath.Dir(p.configFile)
-	return filepath.Join(sshDir, includeFile), nil
-}
-
 // DeriveHostID generates a short Host identifier from an FQDN.
 // For "server.example.com" returns "server".
 // For names without dots, returns as-is (already a short identifier).

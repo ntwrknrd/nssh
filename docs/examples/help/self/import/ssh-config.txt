@@ -1,0 +1,9 @@
+$ nssh self import ssh-config --help
+╭─ Usage ──────────────────────────────────────────────────────────────────────╮
+│   nssh self import ssh-config [flags]                                        │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Global Flags ───────────────────────────────────────────────────────────────╮
+│   -h, --help                        Print command help                       │
+│   -v, --verbose COUNT               Increase debug verbosity                 │
+│   -V, --version                     Print command version                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

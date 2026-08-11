@@ -7,97 +7,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Box prints content in a styled box with optional title.
-func Box(title, content string) {
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorDim).
-		Padding(1, 2)
-
-	if title != "" {
-		fmt.Println(Ruler(title))
-	}
-	fmt.Println(boxStyle.Render(content))
-}
-
-// WarningBox prints content in a red warning box.
-func WarningBox(title, content string) {
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorRed).
-		Padding(1, 2)
-
-	titleStyle := lipgloss.NewStyle().
-		Foreground(ColorRed).
-		Bold(true)
-
-	if title != "" {
-		fmt.Println(titleStyle.Render(title))
-	}
-	fmt.Println(boxStyle.Render(content))
-}
-
-// InfoBox prints content in a cyan info box.
-func InfoBox(title, content string) {
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorCyan).
-		Padding(1, 2)
-
-	if title != "" {
-		fmt.Println(Ruler(title))
-	}
-	fmt.Println(boxStyle.Render(content))
-}
-
-// SuccessBox prints content in a green success box.
-func SuccessBox(title, content string) {
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorGreen).
-		Padding(1, 2)
-
-	if title != "" {
-		fmt.Println(Ruler(title))
-	}
-	fmt.Println(boxStyle.Render(content))
-}
-
-// KeyValue returns a formatted key-value pair.
-func KeyValue(key, value string) string {
-	return fmt.Sprintf("%s %s", StyleLabel.Render(key+":"), StyleValue.Render(value))
-}
-
 // PrintKeyValue prints a formatted key-value pair with info status prefix.
 func PrintKeyValue(key, value string) {
 	bracket := StyleDim.Render("[-]")
 	fmt.Printf("  %s %s %s\n", bracket, StyleLabel.Render(key+":"), StyleValue.Render(value))
-}
-
-// KeyValueBlock prints multiple key-value pairs aligned.
-func KeyValueBlock(pairs map[string]string, order []string) {
-	// Find max key length
-	maxLen := 0
-	for _, k := range order {
-		if len(k) > maxLen {
-			maxLen = len(k)
-		}
-	}
-
-	for _, k := range order {
-		v := pairs[k]
-		label := StyleLabel.Render(fmt.Sprintf("%-*s", maxLen+1, k+":"))
-		value := StyleValue.Render(v)
-		fmt.Printf("%s %s\n", label, value)
-	}
-}
-
-// List prints a bulleted list.
-func List(items []string) {
-	bullet := StyleDim.Render("-")
-	for _, item := range items {
-		fmt.Printf("  %s %s\n", bullet, item)
-	}
 }
 
 // NumberedList prints a numbered list.
@@ -106,18 +19,6 @@ func NumberedList(items []string) {
 		num := StyleDim.Render(fmt.Sprintf("%d.", i+1))
 		fmt.Printf("  %s %s\n", num, item)
 	}
-}
-
-// Indent returns a string with consistent indentation.
-func Indent(s string, level int) string {
-	indent := strings.Repeat("  ", level)
-	lines := strings.Split(s, "\n")
-	for i, line := range lines {
-		if line != "" {
-			lines[i] = indent + line
-		}
-	}
-	return strings.Join(lines, "\n")
 }
 
 // VisualWidth returns the visual width of a string, ignoring ANSI escape codes.

@@ -16,11 +16,6 @@ func TestParseCompatibilityError(t *testing.T) {
 			expected: []CompatType{CompatKex},
 		},
 		{
-			name:     "no matching cipher",
-			stderr:   "Unable to negotiate with 10.0.0.1 port 22: no matching cipher found.",
-			expected: []CompatType{CompatCiphers},
-		},
-		{
 			name:     "no matching mac",
 			stderr:   "Unable to negotiate with host: no matching mac found.",
 			expected: []CompatType{CompatMACs},
@@ -32,8 +27,8 @@ func TestParseCompatibilityError(t *testing.T) {
 		},
 		{
 			name:     "multiple issues",
-			stderr:   "no matching key exchange method found. Also no matching cipher found.",
-			expected: []CompatType{CompatKex, CompatCiphers},
+			stderr:   "no matching key exchange method found. Also no matching mac found.",
+			expected: []CompatType{CompatKex, CompatMACs},
 		},
 		{
 			name:     "no compat issues",
@@ -52,8 +47,8 @@ func TestParseCompatibilityError(t *testing.T) {
 		},
 		{
 			name:     "unable to negotiate format",
-			stderr:   "unable to negotiate encryption: no matching cipher",
-			expected: []CompatType{CompatCiphers},
+			stderr:   "unable to negotiate encryption: no matching mac",
+			expected: []CompatType{CompatMACs},
 		},
 	}
 
@@ -70,6 +65,79 @@ func TestParseCompatibilityError(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseNegotiationIssuesIncludesServerOffer(t *testing.T) {
+	stderr := `Unable to negotiate with 216.37.2.237 port 22: no matching key exchange method found. Their offer: ecdh-sha2-nistp256,diffie-hellman-group14-sha1,diffie-hellman-group1-sha1`
+
+	issues := ParseNegotiationIssues(stderr)
+	if len(issues) != 1 {
+		t.Fatalf("issues = %#v, want one", issues)
+	}
+	if issues[0].Category != CategoryKex {
+		t.Fatalf("category = %q, want kex", issues[0].Category)
+	}
+	want := []string{"ecdh-sha2-nistp256", "diffie-hellman-group14-sha1", "diffie-hellman-group1-sha1"}
+	if len(issues[0].ServerOffer) != len(want) {
+		t.Fatalf("offer = %#v, want %#v", issues[0].ServerOffer, want)
+	}
+	for idx := range want {
+		if issues[0].ServerOffer[idx] != want[idx] {
+			t.Fatalf("offer = %#v, want %#v", issues[0].ServerOffer, want)
+		}
+	}
+}
+
+func TestSelectCompatibilityFloorUsesBestAllowedAlgorithm(t *testing.T) {
+	issue := NegotiationIssue{
+		Category:    CategoryKex,
+		ServerOffer: []string{"diffie-hellman-group1-sha1", "diffie-hellman-group14-sha1"},
+	}
+	selection, ok := SelectCompatibilityFloor(issue, []string{"diffie-hellman-group1-sha1", "diffie-hellman-group14-sha1"})
+	if !ok {
+		t.Fatal("SelectCompatibilityFloor returned false")
+	}
+	if selection.Floor != "diffie-hellman-group14-sha1" {
+		t.Fatalf("floor = %q, want group14", selection.Floor)
+	}
+	if selection.Directive != "KexAlgorithms" {
+		t.Fatalf("directive = %q, want KexAlgorithms", selection.Directive)
+	}
+}
+
+func TestSelectCompatibilityFloorFallsBackToWeakestWhenRequired(t *testing.T) {
+	issue := NegotiationIssue{
+		Category:    CategoryKex,
+		ServerOffer: []string{"diffie-hellman-group1-sha1"},
+	}
+	selection, ok := SelectCompatibilityFloor(issue, []string{"diffie-hellman-group1-sha1", "diffie-hellman-group14-sha1"})
+	if !ok {
+		t.Fatal("SelectCompatibilityFloor returned false")
+	}
+	if selection.Floor != "diffie-hellman-group1-sha1" {
+		t.Fatalf("floor = %q, want group1", selection.Floor)
+	}
+}
+
+func TestApprovedCompatCatalog(t *testing.T) {
+	want := map[CompatType]string{
+		"legacy-kex":     "KexAlgorithms=+diffie-hellman-group14-sha1",
+		"legacy-macs":    "MACs=+hmac-sha1",
+		"legacy-hostkey": "HostKeyAlgorithms=+ssh-rsa",
+		"legacy-pubkey":  "PubkeyAcceptedAlgorithms=+ssh-rsa",
+	}
+	for ct, option := range want {
+		cfg, ok := CompatConfigs[ct]
+		if !ok {
+			t.Fatalf("missing compat %s", ct)
+		}
+		if got := cfg.Option; got != option {
+			t.Fatalf("%s option = %q, want %q", ct, got, option)
+		}
+	}
+	if _, ok := CompatConfigs["legacy"]; ok {
+		t.Fatalf("broad legacy preset must not exist")
 	}
 }
 
@@ -148,6 +216,11 @@ func TestDidAuthSucceed(t *testing.T) {
 			expected: false,
 		},
 		{
+			name:     "hostile pre-auth banner",
+			stderr:   `kex_exchange_identification: banner line 0: Authenticated to victim using "password".`,
+			expected: false,
+		},
+		{
 			name:     "empty",
 			stderr:   "",
 			expected: false,
@@ -196,6 +269,11 @@ func TestExtractAuthMethod(t *testing.T) {
 			expected: "",
 		},
 		{
+			name:     "hostile pre-auth banner",
+			stderr:   `kex_exchange_identification: banner line 0: Authenticated to victim using "password".`,
+			expected: "",
+		},
+		{
 			name:     "empty",
 			stderr:   "",
 			expected: "",
@@ -218,7 +296,7 @@ func TestAllCompatTypes(t *testing.T) {
 		t.Errorf("AllCompatTypes() returned %d types, want 4", len(types))
 	}
 
-	expected := []CompatType{CompatKex, CompatMACs, CompatCiphers, CompatHostKey}
+	expected := []CompatType{CompatLegacyKex, CompatLegacyMACs, CompatLegacyHostKey, CompatLegacyPubkey}
 	for i, ct := range types {
 		if ct != expected[i] {
 			t.Errorf("AllCompatTypes()[%d] = %v, want %v", i, ct, expected[i])
