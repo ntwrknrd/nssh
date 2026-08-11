@@ -54,22 +54,22 @@ func CheckMuxSession(ctx context.Context, req MuxCheckRequest, execFn MuxCheckEx
 func BuildMuxCheckArgs(req MuxCheckRequest) ([]string, bool) {
 	options, _ := splitSSHArgs(req.SSHArgs)
 	pinnedOptions, options := SplitPinnedHostKeyOptions(options)
-	rendered := RenderSSHOptions(req.SSHOptions, req.SSHVerbosity)
-	allOptions := append([]string{}, rendered...)
-	allOptions = append(allOptions, options...)
-	if controlPath := effectiveSSHOption(allOptions, "ControlPath"); controlPath == "" || strings.EqualFold(controlPath, "none") {
+	args := ComposeSSHOptions(SSHOptionPlan{
+		Enforced:     pinnedOptions,
+		Runtime:      options,
+		Resolved:     req.SSHOptions,
+		SSHVerbosity: req.SSHVerbosity,
+	})
+	if controlPath := effectiveSSHOption(args, "ControlPath"); controlPath == "" || strings.EqualFold(controlPath, "none") {
 		return nil, false
 	}
 
-	args := append([]string{}, pinnedOptions...)
-	args = append(args, rendered...)
-	if req.Timeout > 0 && effectiveSSHOption(allOptions, "ConnectTimeout") == "" {
+	if req.Timeout > 0 && effectiveSSHOption(args, "ConnectTimeout") == "" {
 		args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", req.Timeout))
 	}
-	if req.Port != 0 && req.Port != 22 && explicitSSHPort(options) == "" && effectiveSSHOption(rendered, "Port") == "" {
+	if req.Port != 0 && req.Port != 22 && effectiveSSHOption(args, "Port") == "" {
 		args = append(args, "-p", fmt.Sprintf("%d", req.Port))
 	}
-	args = append(args, options...)
 	args = append(args, "-O", "check", muxTarget(req.Username, req.Hostname))
 	return args, true
 }
@@ -95,29 +95,29 @@ func StartMuxSession(ctx context.Context, req MuxStartRequest, execFn MuxStartEx
 func BuildMuxStartArgs(req MuxStartRequest) ([]string, bool) {
 	options, _ := splitSSHArgs(req.SSHArgs)
 	pinnedOptions, options := SplitPinnedHostKeyOptions(options)
-	rendered := RenderSSHOptions(req.SSHOptions, req.SSHVerbosity)
-	allOptions := append([]string{}, rendered...)
-	allOptions = append(allOptions, options...)
-	if !persistentMuxEnabled(allOptions) {
+	args := ComposeSSHOptions(SSHOptionPlan{
+		Enforced:     pinnedOptions,
+		Runtime:      options,
+		Resolved:     req.SSHOptions,
+		SSHVerbosity: req.SSHVerbosity,
+	})
+	if !persistentMuxEnabled(args) {
 		return nil, false
 	}
 
-	args := append([]string{}, pinnedOptions...)
-	args = append(args, rendered...)
 	if len(req.Env) > 0 {
-		if effectiveSSHOption(allOptions, "NumberOfPasswordPrompts") == "" {
+		if effectiveSSHOption(args, "NumberOfPasswordPrompts") == "" {
 			args = append(args, "-o", "NumberOfPasswordPrompts=1")
 		}
-	} else if effectiveSSHOption(allOptions, "BatchMode") == "" {
+	} else if effectiveSSHOption(args, "BatchMode") == "" {
 		args = append(args, "-o", "BatchMode=yes")
 	}
-	if req.Timeout > 0 && effectiveSSHOption(allOptions, "ConnectTimeout") == "" {
+	if req.Timeout > 0 && effectiveSSHOption(args, "ConnectTimeout") == "" {
 		args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", req.Timeout))
 	}
-	if req.Port != 0 && req.Port != 22 && explicitSSHPort(options) == "" && effectiveSSHOption(rendered, "Port") == "" {
+	if req.Port != 0 && req.Port != 22 && effectiveSSHOption(args, "Port") == "" {
 		args = append(args, "-p", fmt.Sprintf("%d", req.Port))
 	}
-	args = append(args, options...)
 	args = append(args, "-M", "-N", "-f", muxTarget(req.Username, req.Hostname))
 	return args, true
 }
@@ -154,74 +154,4 @@ func muxTarget(username, hostname string) string {
 		return hostname
 	}
 	return username + "@" + hostname
-}
-
-func explicitSSHPort(args []string) string {
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			return ""
-		}
-		if arg == "-p" && i+1 < len(args) {
-			return args[i+1]
-		}
-		if strings.HasPrefix(arg, "-p") && len(arg) > 2 {
-			return arg[2:]
-		}
-		if arg == "-o" && i+1 < len(args) {
-			key, value, ok := splitOpenSSHOption(args[i+1])
-			if ok && strings.EqualFold(key, "Port") {
-				return value
-			}
-			i++
-			continue
-		}
-		if strings.HasPrefix(arg, "-o") && len(arg) > 2 {
-			key, value, ok := splitOpenSSHOption(arg[2:])
-			if ok && strings.EqualFold(key, "Port") {
-				return value
-			}
-		}
-	}
-	return ""
-}
-
-func effectiveSSHOption(args []string, want string) string {
-	var found string
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			return found
-		}
-		if arg == "-o" && i+1 < len(args) {
-			key, value, ok := splitOpenSSHOption(args[i+1])
-			if ok && strings.EqualFold(key, want) {
-				found = value
-			}
-			i++
-			continue
-		}
-		if strings.HasPrefix(arg, "-o") && len(arg) > 2 {
-			key, value, ok := splitOpenSSHOption(arg[2:])
-			if ok && strings.EqualFold(key, want) {
-				found = value
-			}
-		}
-	}
-	return found
-}
-
-func splitOpenSSHOption(raw string) (string, string, bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", "", false
-	}
-	if key, value, ok := strings.Cut(raw, "="); ok {
-		return strings.TrimSpace(key), strings.TrimSpace(value), true
-	}
-	fields := strings.Fields(raw)
-	if len(fields) < 2 {
-		return "", "", false
-	}
-	return fields[0], strings.Join(fields[1:], " "), true
 }

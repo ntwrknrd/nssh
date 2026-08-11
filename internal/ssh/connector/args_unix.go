@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"slices"
 	"strings"
 )
 
@@ -20,7 +19,6 @@ func (c *Connector) buildSSHArgs() ([]string, error) {
 	if len(command) == 0 && !hasExplicitTTYOption(options) {
 		args = append(args, "-tt")
 	}
-	renderedOptions := RenderSSHOptions(c.sshOptions, c.sshVerbosity)
 
 	// Build target (user@host or just host). OpenSSH config is disabled with
 	// -F none; host-specific settings are already rendered into argv.
@@ -45,38 +43,38 @@ func (c *Connector) buildSSHArgs() ([]string, error) {
 		}
 	}
 
+	var enforcedOptions []string
 	if c.tempKnownHosts != "" && c.pinnedHostKey != nil && c.pinnedHostKey.hostKeyAlgorithms != "" {
-		args = append(args, "-o", "HostKeyAlgorithms="+c.pinnedHostKey.hostKeyAlgorithms)
+		enforcedOptions = append(enforcedOptions, "-o", "HostKeyAlgorithms="+c.pinnedHostKey.hostKeyAlgorithms)
 	}
 	if c.tempKnownHosts != "" {
-		args = append(args,
+		enforcedOptions = append(enforcedOptions,
 			"-o", "UserKnownHostsFile="+c.tempKnownHosts,
 			"-o", "StrictHostKeyChecking=yes",
 		)
 	}
-	args = append(args, pinnedOptions...)
-	args = append(args, renderedOptions...)
+	enforcedOptions = append(enforcedOptions, pinnedOptions...)
+	args = append(args, ComposeSSHOptions(SSHOptionPlan{
+		Enforced:     enforcedOptions,
+		Runtime:      options,
+		Resolved:     c.sshOptions,
+		SSHVerbosity: c.sshVerbosity,
+	})...)
 
 	// Add connection timeout if configured
-	if c.timeouts != nil && c.timeouts.Timeout.Duration() > 0 {
+	if c.timeouts != nil && c.timeouts.Timeout.Duration() > 0 && EffectiveSSHOption(args, "ConnectTimeout") == "" {
 		args = append(args,
 			"-o", fmt.Sprintf("ConnectTimeout=%d", int(c.timeouts.Timeout.Duration().Seconds())),
 		)
 	}
 
-	if c.resolvedPort != "" && c.resolvedPort != "22" && c.parsePortFromSSHArgs() == "" {
+	if c.resolvedPort != "" && c.resolvedPort != "22" && EffectiveSSHOption(args, "Port") == "" {
 		args = append(args, "-p", c.resolvedPort)
 	}
 
-	if hasAskpassEnv(c.env) {
-		allOptions := append(slices.Clone(renderedOptions), options...)
-		if effectiveSSHOption(allOptions, "NumberOfPasswordPrompts") == "" {
-			args = append(args, "-o", "NumberOfPasswordPrompts=1")
-		}
+	if hasAskpassEnv(c.env) && EffectiveSSHOption(args, "NumberOfPasswordPrompts") == "" {
+		args = append(args, "-o", "NumberOfPasswordPrompts=1")
 	}
-
-	// Add SSH options
-	args = append(args, options...)
 
 	// Add target hostname
 	args = append(args, target)

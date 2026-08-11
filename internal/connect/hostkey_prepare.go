@@ -139,7 +139,7 @@ func knownHostsRemovalTargets(resolved *ResolvedHost, sshArgs []string) []string
 	}
 	host := strings.TrimSpace(resolved.Hostname)
 	port := fmt.Sprintf("%d", resolved.Port)
-	if explicit := explicitConnectSSHPort(sshArgs); explicit != "" {
+	if explicit := connector.EffectiveSSHOption(sshArgs, "Port"); explicit != "" {
 		port = explicit
 	}
 	if port == "" || port == "0" || port == "22" {
@@ -172,7 +172,7 @@ func scanHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string, 
 
 	host := resolved.Hostname
 	port := fmt.Sprintf("%d", resolved.Port)
-	if explicit := explicitConnectSSHPort(sshArgs); explicit != "" {
+	if explicit := connector.EffectiveSSHOption(sshArgs, "Port"); explicit != "" {
 		port = explicit
 	}
 	if port == "" || port == "0" {

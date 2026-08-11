@@ -29,10 +29,10 @@ func TestBuildMuxCheckArgsUsesRenderedOptionsAndTarget(t *testing.T) {
 	}
 	want := []string{
 		"-F", "none",
+		"-o", "LogLevel=ERROR",
 		"-o", "ControlMaster=auto",
 		"-o", "ControlPath=~/.ssh/sockets/%r@%h:%p",
 		"-p", "2200",
-		"-o", "LogLevel=ERROR",
 		"-O", "check",
 		"netops@edge01.example.com",
 	}
@@ -132,12 +132,12 @@ func TestBuildMuxStartArgsUsesRenderedOptionsTargetAndEnvironment(t *testing.T) 
 	}
 	want := []string{
 		"-F", "none",
+		"-o", "LogLevel=ERROR",
 		"-o", "ControlMaster=auto",
 		"-o", "ControlPath=~/.ssh/sockets/%r@%h:%p",
 		"-o", "ControlPersist=43200",
 		"-o", "BatchMode=yes",
 		"-p", "2200",
-		"-o", "LogLevel=ERROR",
 		"-M", "-N", "-f",
 		"netops@edge01.example.com",
 	}

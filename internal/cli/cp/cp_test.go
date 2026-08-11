@@ -57,7 +57,10 @@ func TestRunCpUsesSharedResolvePath(t *testing.T) {
 			Hostname: "edge01.example.com",
 			Port:     2200,
 			Username: "resolved-user",
-			SSH:      config.SSHHostConfig{Options: config.SSHOptions{"Compression": config.NewSSHOptionBool(true)}},
+			SSH: config.SSHHostConfig{Options: config.SSHOptions{
+				"Compression": config.NewSSHOptionBool(true),
+				"LogLevel":    config.NewSSHOptionString("ERROR"),
+			}},
 			Credential: &clireconnect.ResolvedCredential{
 				Username: "resolved-user",
 				Password: resolvedPassword,
@@ -86,13 +89,13 @@ func TestRunCpUsesSharedResolvePath(t *testing.T) {
 		return nil
 	}
 
-	if err := runCp(context.Background(), "edge01:/tmp/file", "./file", false, false, false, false); err != nil {
+	if err := runCp(context.Background(), "edge01:/tmp/file", "./file", false, false, false, true); err != nil {
 		t.Fatalf("runCp: %v", err)
 	}
 	if gotQuery != "edge01" || gotUser != "" {
 		t.Fatalf("resolve query=%q user=%q", gotQuery, gotUser)
 	}
-	if strings.Join(scpArgs, " ") != "-F none -o Compression=yes -P 2200 -o UserKnownHostsFile=/tmp/nssh-test-known-hosts -o StrictHostKeyChecking=yes resolved-user@edge01.example.com:/tmp/file ./file" {
+	if strings.Join(scpArgs, " ") != "-o UserKnownHostsFile=/tmp/nssh-test-known-hosts -o StrictHostKeyChecking=yes -F none -v -o Compression=yes -o LogLevel=ERROR -P 2200 resolved-user@edge01.example.com:/tmp/file ./file" {
 		t.Fatalf("scp args = %#v", scpArgs)
 	}
 	if strings.Join(gotEnv, " ") != "SSH_ASKPASS=/tmp/nssh-askpass" {

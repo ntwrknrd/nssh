@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 )
 
 func TestClassifyHostKeyProbeOutput(t *testing.T) {
@@ -74,6 +75,49 @@ func TestBuildHostKeyProbeArgsDisablesPromptsAndUsesRenderedTarget(t *testing.T)
 	}
 	if slices.Contains(got, "show version") {
 		t.Fatalf("probe args should ignore remote command: %#v", got)
+	}
+}
+
+func TestBuildHostKeyProbeArgsRuntimeOverridesConfigButNotProbeSafety(t *testing.T) {
+	resolved := &ResolvedHost{
+		Hostname: "edge01.example.net",
+		SSH: config.SSHHostConfig{Options: config.SSHOptions{
+			"ConnectTimeout":               config.NewSSHOptionString("30"),
+			"BatchMode":                    config.NewSSHOptionBool(false),
+			"KbdInteractiveAuthentication": config.NewSSHOptionBool(true),
+		}},
+	}
+	cfg := &config.Config{}
+	cfg.SSH.Connection.Timeout = config.Duration(15 * time.Second)
+
+	args := buildHostKeyProbeArgs(resolved, []string{
+		"-oConnectTimeout=60",
+		"-o", "BatchMode=no",
+		"-o", "KbdInteractiveAuthentication=yes",
+	}, cfg, Options{})
+
+	for key, want := range map[string]string{
+		"ConnectTimeout":               "60",
+		"BatchMode":                    "yes",
+		"NumberOfPasswordPrompts":      "0",
+		"KbdInteractiveAuthentication": "no",
+	} {
+		if got := connector.EffectiveSSHOption(args, key); got != want {
+			t.Fatalf("effective %s = %q, want %q; args=%#v", key, got, want, args)
+		}
+	}
+}
+
+func TestEffectiveHostKeyProbeTimeoutUsesRuntimeValue(t *testing.T) {
+	if got := effectiveHostKeyProbeTimeout([]string{
+		"-F", "none",
+		"-o", "ConnectTimeout=60",
+		"-o", "ConnectTimeout=30",
+	}); got != 60*time.Second {
+		t.Fatalf("effectiveHostKeyProbeTimeout() = %v, want 60s", got)
+	}
+	if got := effectiveHostKeyProbeTimeout([]string{"-o", "ConnectTimeout=0"}); got != 0 {
+		t.Fatalf("disabled effectiveHostKeyProbeTimeout() = %v, want 0", got)
 	}
 }
 
