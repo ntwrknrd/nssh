@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
@@ -166,21 +167,23 @@ func defaultExec(ctx context.Context, command Command) Result {
 
 	waitTimer := connector.StartTiming(connector.TimingSSHProcessWait)
 	err = cmd.Wait()
-	// Background children may inherit the write ends and never close them.
-	// Give the readers a moment to drain buffered output, then time out
-	// rather than waiting for those processes to exit.
-	deadline := time.Now().Add(200 * time.Millisecond)
-	_ = stdoutRead.SetReadDeadline(deadline)
-	_ = stderrRead.SetReadDeadline(deadline)
+	// The child has exited, so everything it wrote is either consumed or
+	// sitting in the kernel pipe buffers. Interrupt the readers so they
+	// don't block on write ends inherited by background children, then
+	// salvage the buffered remainder synchronously.
+	past := time.Unix(0, 1)
+	_ = stdoutRead.SetReadDeadline(past)
+	_ = stderrRead.SetReadDeadline(past)
 	wg.Wait()
+	drainBuffered(stdoutRead, &stdout, StreamStdout, events)
+	drainBuffered(stderrRead, &stderr, StreamStderr, events)
 	_ = stdoutRead.Close()
 	_ = stderrRead.Close()
 	close(events)
 	output := <-outputDone
 	for range 2 {
 		readErr := <-readErrs
-		if readErr != nil && err == nil &&
-			!errors.Is(readErr, os.ErrDeadlineExceeded) && !errors.Is(readErr, os.ErrClosed) {
+		if readErr != nil && err == nil && !errors.Is(readErr, os.ErrDeadlineExceeded) {
 			err = readErr
 		}
 	}
@@ -196,6 +199,41 @@ func defaultExec(ctx context.Context, command Command) Result {
 		result.ExitCode = exitErr.ExitCode()
 	}
 	return result
+}
+
+// drainLimit bounds how much buffered pipe output drainBuffered salvages
+// after the child exits. The child's unread output can never exceed the
+// kernel pipe buffer, which is far smaller; the limit only cuts off
+// background children that keep writing after the child exited.
+const drainLimit = 1 << 20
+
+// drainBuffered reads whatever is already buffered in the pipe without
+// blocking, appending it to the sink and event stream in order after the
+// interrupted reader goroutine's output.
+func drainBuffered(f *os.File, sink *bytes.Buffer, stream Stream, events chan<- OutputEvent) {
+	conn, err := f.SyscallConn()
+	if err != nil {
+		return
+	}
+	total := 0
+	_ = conn.Control(func(fd uintptr) {
+		buf := make([]byte, 32*1024)
+		for total < drainLimit {
+			n, readErr := syscall.Read(int(fd), buf)
+			if n > 0 {
+				total += n
+				chunk := append([]byte(nil), buf[:n]...)
+				sink.Write(chunk)
+				events <- OutputEvent{Stream: stream, Data: chunk}
+			}
+			if readErr == syscall.EINTR {
+				continue
+			}
+			if readErr != nil || n <= 0 {
+				return
+			}
+		}
+	})
 }
 
 func readOutputEvents(stream Stream, r io.Reader, sink *bytes.Buffer, events chan<- OutputEvent) error {
