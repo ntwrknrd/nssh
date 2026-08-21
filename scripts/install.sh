@@ -5,6 +5,7 @@ set -e
 REPO="ntwrknrd/nssh"
 INSTALL_DIR="${HOME}/.local/bin"
 BINARY="nssh"
+HELPER="nssh-askpass"
 RELEASE=""
 EVENTS=0
 
@@ -198,12 +199,18 @@ main() {
     status "Installing"
     mkdir -p "${INSTALL_DIR}"
     tar -xzf "${ARCHIVE}"
+    for EXECUTABLE in "${ARCHIVE_BINARY}" "${HELPER}"; do
+        if [ ! -f "${EXECUTABLE}" ]; then
+            error "Release archive missing ${EXECUTABLE}"
+        fi
+    done
     mv "${ARCHIVE_BINARY}" "${INSTALL_DIR}/${BINARY}"
-    chmod +x "${INSTALL_DIR}/${BINARY}"
+    mv "${HELPER}" "${INSTALL_DIR}/${HELPER}"
+    chmod +x "${INSTALL_DIR}/${BINARY}" "${INSTALL_DIR}/${HELPER}"
 
     event "PATH" "${INSTALL_DIR}/${BINARY}"
     if [ "${EVENTS}" -eq 0 ]; then
-        success "Installed ${BINARY} to ${INSTALL_DIR}/${BINARY}"
+        success "Installed ${BINARY} and ${HELPER} to ${INSTALL_DIR}"
     fi
 
     # Check PATH
