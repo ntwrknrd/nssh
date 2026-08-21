@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,11 +26,11 @@ const (
 
 func probeInteractiveHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options, proxyEnv []string) hostKeyProbeStatus {
 	args := buildHostKeyProbeArgs(resolved, sshArgs, cfg, opts)
-	timeout := 10 * time.Second
-	if cfg != nil && cfg.SSH.Connection.Timeout.Duration() > 0 {
-		timeout = cfg.SSH.Connection.Timeout.Duration()
+	probeCtx := ctx
+	cancel := func() {}
+	if timeout := effectiveHostKeyProbeTimeout(args); timeout > 0 {
+		probeCtx, cancel = context.WithTimeout(ctx, timeout)
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	slog.Debug("probing host key", "host", resolved.Hostname, "argv", append([]string{"ssh"}, args...))
@@ -39,6 +40,18 @@ func probeInteractiveHostKey(ctx context.Context, resolved *ResolvedHost, sshArg
 	status := classifyHostKeyProbeOutput(output)
 	slog.Debug("host key probe completed", "host", resolved.Hostname, "status", status.String())
 	return status
+}
+
+func effectiveHostKeyProbeTimeout(args []string) time.Duration {
+	value := connector.EffectiveSSHOption(args, "ConnectTimeout")
+	if value == "" {
+		return 10 * time.Second
+	}
+	seconds, err := strconv.Atoi(value)
+	if err != nil || seconds < 0 {
+		return 10 * time.Second
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func (s hostKeyProbeStatus) String() string {
@@ -56,20 +69,23 @@ func (s hostKeyProbeStatus) String() string {
 
 func buildHostKeyProbeArgs(resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options) []string {
 	options, _ := splitConnectSSHArgs(sshArgs)
-	args := append([]string{}, connector.RenderSSHOptions(resolved.SSH, opts.SSHVerbosity)...)
-	if cfg != nil && cfg.SSH.Connection.Timeout.Duration() > 0 && effectiveConnectSSHOption(append(args, options...), "ConnectTimeout") == "" {
+	args := connector.ComposeSSHOptions(connector.SSHOptionPlan{
+		Enforced: []string{
+			"-o", "BatchMode=yes",
+			"-o", "NumberOfPasswordPrompts=0",
+			"-o", "KbdInteractiveAuthentication=no",
+		},
+		Runtime:      options,
+		Resolved:     resolved.SSH,
+		SSHVerbosity: opts.SSHVerbosity,
+	})
+	if cfg != nil && cfg.SSH.Connection.Timeout.Duration() > 0 && connector.EffectiveSSHOption(args, "ConnectTimeout") == "" {
 		args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", int(cfg.SSH.Connection.Timeout.Duration().Seconds())))
 	}
-	if resolved.Port != 0 && resolved.Port != 22 && explicitConnectSSHPort(options) == "" && effectiveConnectSSHOption(args, "Port") == "" {
+	if resolved.Port != 0 && resolved.Port != 22 && connector.EffectiveSSHOption(args, "Port") == "" {
 		args = append(args, "-p", fmt.Sprintf("%d", resolved.Port))
 	}
-	args = append(args, options...)
-	args = append(args,
-		"-o", "BatchMode=yes",
-		"-o", "NumberOfPasswordPrompts=0",
-		"-o", "KbdInteractiveAuthentication=no",
-		connectTarget(resolved.Username, resolved.Hostname),
-	)
+	args = append(args, connectTarget(resolved.Username, resolved.Hostname))
 	return args
 }
 
@@ -124,74 +140,4 @@ func connectTarget(username, hostname string) string {
 		return hostname
 	}
 	return username + "@" + hostname
-}
-
-func explicitConnectSSHPort(args []string) string {
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			return ""
-		}
-		if arg == "-p" && i+1 < len(args) {
-			return args[i+1]
-		}
-		if strings.HasPrefix(arg, "-p") && len(arg) > 2 {
-			return arg[2:]
-		}
-		if arg == "-o" && i+1 < len(args) {
-			key, value, ok := splitConnectOpenSSHOption(args[i+1])
-			if ok && strings.EqualFold(key, "Port") {
-				return value
-			}
-			i++
-			continue
-		}
-		if strings.HasPrefix(arg, "-o") && len(arg) > 2 {
-			key, value, ok := splitConnectOpenSSHOption(arg[2:])
-			if ok && strings.EqualFold(key, "Port") {
-				return value
-			}
-		}
-	}
-	return ""
-}
-
-func effectiveConnectSSHOption(args []string, want string) string {
-	var found string
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			return found
-		}
-		if arg == "-o" && i+1 < len(args) {
-			key, value, ok := splitConnectOpenSSHOption(args[i+1])
-			if ok && strings.EqualFold(key, want) {
-				found = value
-			}
-			i++
-			continue
-		}
-		if strings.HasPrefix(arg, "-o") && len(arg) > 2 {
-			key, value, ok := splitConnectOpenSSHOption(arg[2:])
-			if ok && strings.EqualFold(key, want) {
-				found = value
-			}
-		}
-	}
-	return found
-}
-
-func splitConnectOpenSSHOption(raw string) (string, string, bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", "", false
-	}
-	if key, value, ok := strings.Cut(raw, "="); ok {
-		return strings.TrimSpace(key), strings.TrimSpace(value), true
-	}
-	fields := strings.Fields(raw)
-	if len(fields) < 2 {
-		return "", "", false
-	}
-	return fields[0], strings.Join(fields[1:], " "), true
 }

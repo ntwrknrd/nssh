@@ -79,7 +79,7 @@ func TestBuildSSHArgsPreservesOptionsTargetAndCommand(t *testing.T) {
 		t.Fatalf("buildSSHArgs() error = %v", err)
 	}
 
-	want := []string{"-F", "none", "-o", "ConnectTimeout=7", "-p", "2222", "-o", "LogLevel=ERROR", "netops@edge01", "show version"}
+	want := []string{"-F", "none", "-p", "2222", "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=7", "netops@edge01", "show version"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
 	}
@@ -94,7 +94,7 @@ func TestBuildSSHArgsAddsDefaultTTYForInteractiveSession(t *testing.T) {
 		t.Fatalf("buildSSHArgs() error = %v", err)
 	}
 
-	want := []string{"-tt", "-F", "none", "-p", "2200", "-o", "LogLevel=ERROR", "netops@edge01"}
+	want := []string{"-tt", "-F", "none", "-o", "LogLevel=ERROR", "-p", "2200", "netops@edge01"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
 	}
@@ -127,6 +127,35 @@ func TestBuildSSHArgsKeepsExplicitAskpassPromptLimit(t *testing.T) {
 	want := []string{"-tt", "-F", "none", "-o", "NumberOfPasswordPrompts=2", "netops@edge01"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildSSHArgsRuntimeOptionsOverrideResolvedConfiguration(t *testing.T) {
+	conn := NewConnector("edge01", "netops", nil, []string{
+		"-o", "ConnectTimeout=60",
+		"-oLogLevel=DEBUG",
+		"-p", "2222",
+	})
+	conn.SetSSHOptions(config.SSHHostConfig{Options: config.SSHOptions{
+		"ConnectTimeout": config.NewSSHOptionString("30"),
+		"LogLevel":       config.NewSSHOptionString("ERROR"),
+		"Port":           config.NewSSHOptionString("2200"),
+	}})
+	conn.SetResolvedEndpoint("edge01", "2022")
+	conn.SetTimeouts(&config.SSHConnectionConfig{Timeout: config.Duration(15 * time.Second)})
+
+	args, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatalf("buildSSHArgs: %v", err)
+	}
+	for key, want := range map[string]string{
+		"ConnectTimeout": "60",
+		"LogLevel":       "DEBUG",
+		"Port":           "2222",
+	} {
+		if got := EffectiveSSHOption(args, key); got != want {
+			t.Fatalf("effective %s = %q, want %q; args=%#v", key, got, want, args)
+		}
 	}
 }
 

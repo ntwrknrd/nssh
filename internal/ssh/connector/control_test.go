@@ -40,15 +40,35 @@ func TestBuildControlCommandArgsUsesRenderedOptionsAndTarget(t *testing.T) {
 
 	want := []string{
 		"-F", "none",
+		"-o", "LogLevel=ERROR",
 		"-o", "ControlMaster=auto",
 		"-o", "ControlPath=~/.ssh/sockets/%r@%h:%p",
 		"-p", "2200",
-		"-o", "LogLevel=ERROR",
 		"-O", "exit",
 		"netops@edge01.example.com",
 	}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("args = %#v, want %#v", args, want)
+	}
+}
+
+func TestBuildControlCommandArgsRuntimeOverridesResolvedOptions(t *testing.T) {
+	args := BuildControlCommandArgs(ControlCommandRequest{
+		Hostname: "edge01.example.com",
+		Command:  "check",
+		SSHOptions: config.SSHHostConfig{Options: config.SSHOptions{
+			"ConnectTimeout": config.NewSSHOptionString("30"),
+			"ControlPath":    config.NewSSHOptionString("/tmp/config.sock"),
+		}},
+		SSHArgs: []string{"-oConnectTimeout=60", "-S", "/tmp/runtime.sock"},
+		Timeout: 15,
+	})
+
+	if got := EffectiveSSHOption(args, "ConnectTimeout"); got != "60" {
+		t.Fatalf("effective ConnectTimeout = %q, want 60; args=%#v", got, args)
+	}
+	if got := EffectiveSSHOption(args, "ControlPath"); got != "/tmp/runtime.sock" {
+		t.Fatalf("effective ControlPath = %q, want runtime path; args=%#v", got, args)
 	}
 }
 

@@ -20,16 +20,16 @@ import (
 )
 
 type Request struct {
-	Hostname      string
-	Username      string
-	Port          int
-	SSHOptions    config.SSHHostConfig
-	SSHVerbosity  int
-	SSHArgs       []string
-	RemoteCommand []string
-	Timeout       time.Duration
-	Env           []string
-	Stdin         io.Reader
+	Hostname       string
+	Username       string
+	Port           int
+	SSHOptions     config.SSHHostConfig
+	SSHVerbosity   int
+	SSHArgs        []string
+	RemoteCommand  []string
+	ConnectTimeout time.Duration
+	Env            []string
+	Stdin          io.Reader
 }
 
 type Command struct {
@@ -64,11 +64,6 @@ type Runner struct {
 }
 
 func (r Runner) Run(ctx context.Context, req Request) (Result, error) {
-	if req.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
-		defer cancel()
-	}
 	execFn := r.Exec
 	if execFn == nil {
 		execFn = defaultExec
@@ -258,20 +253,25 @@ func readOutputEvents(stream Stream, r io.Reader, sink *bytes.Buffer, events cha
 
 func buildOpenSSHArgs(req Request) []string {
 	pinnedOptions, sshArgs := connector.SplitPinnedHostKeyOptions(req.SSHArgs)
-	args := append([]string{}, pinnedOptions...)
-	args = append(args, connector.RenderSSHOptions(req.SSHOptions, req.SSHVerbosity)...)
+	args := connector.ComposeSSHOptions(connector.SSHOptionPlan{
+		Enforced:     pinnedOptions,
+		Runtime:      sshArgs,
+		Resolved:     req.SSHOptions,
+		SSHVerbosity: req.SSHVerbosity,
+	})
 	if hasAskpassEnv(req.Env) {
-		args = append(args, "-o", "NumberOfPasswordPrompts=1")
-	} else {
+		if connector.EffectiveSSHOption(args, "NumberOfPasswordPrompts") == "" {
+			args = append(args, "-o", "NumberOfPasswordPrompts=1")
+		}
+	} else if connector.EffectiveSSHOption(args, "BatchMode") == "" {
 		args = append(args, "-o", "BatchMode=yes")
 	}
-	if req.Timeout > 0 {
-		args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", int(req.Timeout.Seconds())))
+	if req.ConnectTimeout > 0 && connector.EffectiveSSHOption(args, "ConnectTimeout") == "" {
+		args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", int(req.ConnectTimeout.Seconds())))
 	}
-	if req.Port != 0 && req.Port != 22 && explicitPort(sshArgs) == "" {
+	if req.Port != 0 && req.Port != 22 && connector.EffectiveSSHOption(args, "Port") == "" {
 		args = append(args, "-p", fmt.Sprintf("%d", req.Port))
 	}
-	args = append(args, sshArgs...)
 
 	target := req.Hostname
 	if req.Username != "" {
@@ -280,29 +280,6 @@ func buildOpenSSHArgs(req Request) []string {
 	args = append(args, target)
 	args = append(args, req.RemoteCommand...)
 	return args
-}
-
-func explicitPort(args []string) string {
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			return ""
-		}
-		if arg == "-p" && i+1 < len(args) {
-			return args[i+1]
-		}
-		if strings.HasPrefix(arg, "-p") && len(arg) > 2 {
-			return arg[2:]
-		}
-		if arg == "-o" && i+1 < len(args) {
-			next := strings.ToLower(args[i+1])
-			if strings.HasPrefix(next, "port=") {
-				return args[i+1][5:]
-			}
-			i++
-		}
-	}
-	return ""
 }
 
 func hasAskpassEnv(env []string) bool {

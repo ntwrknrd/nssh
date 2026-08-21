@@ -71,18 +71,19 @@ func RunControlCommand(ctx context.Context, req ControlCommandRequest, execFn Co
 
 func BuildControlCommandArgs(req ControlCommandRequest) []string {
 	options, _ := splitSSHArgs(req.SSHArgs)
-	rendered := RenderSSHOptions(req.SSHOptions, req.SSHVerbosity)
-	allOptions := append([]string{}, rendered...)
-	allOptions = append(allOptions, options...)
-
-	args := append([]string{}, rendered...)
-	if req.Timeout > 0 && effectiveSSHOption(allOptions, "ConnectTimeout") == "" {
+	pinnedOptions, options := SplitPinnedHostKeyOptions(options)
+	args := ComposeSSHOptions(SSHOptionPlan{
+		Enforced:     pinnedOptions,
+		Runtime:      options,
+		Resolved:     req.SSHOptions,
+		SSHVerbosity: req.SSHVerbosity,
+	})
+	if req.Timeout > 0 && effectiveSSHOption(args, "ConnectTimeout") == "" {
 		args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", req.Timeout))
 	}
-	if req.Port != 0 && req.Port != 22 && explicitSSHPort(options) == "" && effectiveSSHOption(rendered, "Port") == "" {
+	if req.Port != 0 && req.Port != 22 && effectiveSSHOption(args, "Port") == "" {
 		args = append(args, "-p", fmt.Sprintf("%d", req.Port))
 	}
-	args = append(args, options...)
 	args = append(args, "-O", req.Command, muxTarget(req.Username, req.Hostname))
 	return args
 }

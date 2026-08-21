@@ -195,22 +195,20 @@ func runCp(ctx context.Context, source, dest string, recursive, preserve, quiet,
 		remoteSpec = fmt.Sprintf("%s:%s", resolved.Hostname, remotePath)
 	}
 
-	// Build SCP command
-	args := connector.RenderSSHOptions(resolved.SSH, 0)
-	if resolved.Port != 0 && resolved.Port != 22 {
-		args = append(args, "-P", fmt.Sprintf("%d", resolved.Port))
-	}
+	// Build runtime SCP options before resolved configuration so explicit
+	// invocation flags retain OpenSSH precedence.
+	var runtimeOptions []string
 	if recursive {
-		args = append(args, "-r")
+		runtimeOptions = append(runtimeOptions, "-r")
 	}
 	if preserve {
-		args = append(args, "-p")
+		runtimeOptions = append(runtimeOptions, "-p")
 	}
 	if quiet {
-		args = append(args, "-q")
+		runtimeOptions = append(runtimeOptions, "-q")
 	}
 	if verbose {
-		args = append(args, "-v")
+		runtimeOptions = append(runtimeOptions, "-v")
 	}
 	var proxyEnv []string
 	if askpassEnv != nil {
@@ -222,7 +220,18 @@ func runCp(ctx context.Context, source, dest string, recursive, preserve, quiet,
 	}
 	if hostKeyPrep != nil {
 		defer hostKeyPrep.Cleanup()
-		args = append(args, hostKeyPrep.SSHArgs()...)
+	}
+	var enforcedOptions []string
+	if hostKeyPrep != nil {
+		enforcedOptions = hostKeyPrep.SSHArgs()
+	}
+	args := connector.ComposeSSHOptions(connector.SSHOptionPlan{
+		Enforced: enforcedOptions,
+		Runtime:  runtimeOptions,
+		Resolved: resolved.SSH,
+	})
+	if resolved.Port != 0 && resolved.Port != 22 {
+		args = append(args, "-P", fmt.Sprintf("%d", resolved.Port))
 	}
 
 	if direction == "pull" {

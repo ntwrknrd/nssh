@@ -240,7 +240,7 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 		RemoteCommand: command,
 	}
 	if cfg != nil && cfg.SSH.Connection.Timeout.Duration() > 0 {
-		req.Timeout = cfg.SSH.Connection.Timeout.Duration()
+		req.ConnectTimeout = cfg.SSH.Connection.Timeout.Duration()
 	}
 	passwordFuture, muxHot := preparePasswordPrefetch(ctx, resolved, sshArgs, cfg, opts)
 	if passwordFuture != nil {

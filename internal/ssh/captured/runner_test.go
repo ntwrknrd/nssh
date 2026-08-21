@@ -19,17 +19,17 @@ import (
 
 func TestBuildOpenSSHArgsPreservesOptionsTargetAndCommand(t *testing.T) {
 	req := Request{
-		Hostname:      "edge01",
-		Username:      "netops",
-		Port:          2200,
-		SSHArgs:       []string{"-o", "LogLevel=ERROR"},
-		RemoteCommand: []string{"show", "version"},
-		Timeout:       7 * time.Second,
+		Hostname:       "edge01",
+		Username:       "netops",
+		Port:           2200,
+		SSHArgs:        []string{"-o", "LogLevel=ERROR"},
+		RemoteCommand:  []string{"show", "version"},
+		ConnectTimeout: 7 * time.Second,
 	}
 
 	got := buildOpenSSHArgs(req)
 
-	want := []string{"-F", "none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=7", "-p", "2200", "-o", "LogLevel=ERROR", "netops@edge01", "show", "version"}
+	want := []string{"-F", "none", "-o", "LogLevel=ERROR", "-o", "BatchMode=yes", "-o", "ConnectTimeout=7", "-p", "2200", "netops@edge01", "show", "version"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildOpenSSHArgs() = %#v, want %#v", got, want)
 	}
@@ -45,7 +45,7 @@ func TestBuildOpenSSHArgsRespectsExplicitPort(t *testing.T) {
 
 	got := buildOpenSSHArgs(req)
 
-	want := []string{"-F", "none", "-o", "BatchMode=yes", "-p", "2222", "edge01", "show"}
+	want := []string{"-F", "none", "-p", "2222", "-o", "BatchMode=yes", "edge01", "show"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildOpenSSHArgs() = %#v, want %#v", got, want)
 	}
@@ -97,6 +97,56 @@ func TestBuildOpenSSHArgsAllowsAskpassPasswordPrompt(t *testing.T) {
 	want := []string{"-F", "none", "-o", "NumberOfPasswordPrompts=1", "edge01", "show"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildOpenSSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildOpenSSHArgsRuntimeConnectTimeoutOverridesResolvedAndFallback(t *testing.T) {
+	req := Request{
+		Hostname:       "edge01",
+		SSHArgs:        []string{"-o", "ConnectTimeout=60"},
+		ConnectTimeout: 30 * time.Second,
+		SSHOptions: config.SSHHostConfig{Options: config.SSHOptions{
+			"ConnectTimeout": config.NewSSHOptionString("45"),
+		}},
+		RemoteCommand: []string{"show"},
+	}
+
+	args := buildOpenSSHArgs(req)
+	if got := connector.EffectiveSSHOption(args, "ConnectTimeout"); got != "60" {
+		t.Fatalf("effective ConnectTimeout = %q, want 60; args=%#v", got, args)
+	}
+}
+
+func TestRunnerConnectTimeoutDoesNotCreateCommandDeadline(t *testing.T) {
+	runner := Runner{Exec: func(ctx context.Context, _ Command) Result {
+		if _, ok := ctx.Deadline(); ok {
+			t.Fatal("ConnectTimeout created a command execution deadline")
+		}
+		return Result{}
+	}}
+
+	if _, err := runner.Run(context.Background(), Request{
+		Hostname:       "edge01",
+		ConnectTimeout: 30 * time.Second,
+	}); err != nil {
+		t.Fatalf("Runner.Run: %v", err)
+	}
+}
+
+func TestRunnerPreservesParentDeadline(t *testing.T) {
+	parent, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	want, _ := parent.Deadline()
+	runner := Runner{Exec: func(ctx context.Context, _ Command) Result {
+		got, ok := ctx.Deadline()
+		if !ok || !got.Equal(want) {
+			t.Fatalf("executor deadline = %v, %t; want %v", got, ok, want)
+		}
+		return Result{}
+	}}
+
+	if _, err := runner.Run(parent, Request{Hostname: "edge01"}); err != nil {
+		t.Fatalf("Runner.Run: %v", err)
 	}
 }
 
