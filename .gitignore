@@ -5,6 +5,7 @@
 *.so
 *.dylib
 nssh
+nssh-askpass
 !.agents/
 !.agents/skills/
 !.agents/skills/nssh/
