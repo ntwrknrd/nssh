@@ -70,7 +70,7 @@ password-manager records are not removed.
   beta-tester guide with backup, conversion, verification, and rollback steps.
 - [CONTRIBUTING.md](CONTRIBUTING.md) - development workflow, tests, releases,
   and doc rules.
-- [.agents/skills/nssh/SKILL.md](.agents/skills/nssh/SKILL.md) - nssh skill
+- [skills/nssh/SKILL.md](skills/nssh/SKILL.md) - portable nssh skill
   entrypoint for usage, configuration, inventory, credentials, operations,
   troubleshooting, and architecture references.
 

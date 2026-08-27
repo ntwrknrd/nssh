@@ -6,7 +6,7 @@ Read source before reasoning about behavior. For durable product contracts,
 package boundaries, and non-goals, start with [SPEC.md](SPEC.md), then inspect
 the current source for implementation details.
 For nssh usage and operations questions, use
-[.agents/skills/nssh/SKILL.md](.agents/skills/nssh/SKILL.md).
+[`skills/nssh/SKILL.md`](skills/nssh/SKILL.md).
 
 ## Commands
 
