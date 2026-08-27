@@ -86,7 +86,7 @@ When creating or editing Markdown, validate it:
 
 Keep narrative docs limited to [README.md](README.md),
 [CONTRIBUTING.md](CONTRIBUTING.md), [SPEC.md](SPEC.md), and the nssh skill under
-[.agents/skills/nssh/](.agents/skills/nssh/). Prefer current source, generated
+[skills/nssh/](skills/nssh/). Prefer current source, generated
 help, or the config template over duplicating volatile implementation details.
 
 ## Opening a PR
