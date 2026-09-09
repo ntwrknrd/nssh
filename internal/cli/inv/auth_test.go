@@ -23,7 +23,7 @@ func TestApplyInventoryAuthPatchWritesInventoryHostAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply auth: %v", err)
 	}
-	got := cfg.Inventory.Host["edge01"].Auth
+	got := cfg.Inventory.Providers["local"].Hosts["edge01.lab.local"].Auth
 	if got.CredentialProvider != "sops" || got.PasswordRef != "hosts.edge01.password" || got.Username != "admin" {
 		t.Fatalf("auth = %+v", got)
 	}
@@ -32,17 +32,23 @@ func TestApplyInventoryAuthPatchWritesInventoryHostAuth(t *testing.T) {
 func TestApplyInventoryAuthPatchClearsOnlyHostAuth(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := testAuthPatchConfig("local", config.ProviderLocal, "lab", "edge01", "edge01.lab.local")
-	cfg.Inventory.Host = map[string]config.InventoryHostConfig{
-		"edge01": {Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "hosts.edge01.password"}},
-	}
+	provider := cfg.Inventory.Providers["local"]
+	host := provider.Hosts["edge01.lab.local"]
+	host.Auth = config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "hosts.edge01.password"}
+	provider.Hosts["edge01.lab.local"] = host
+	cfg.Inventory.Providers["local"] = provider
+	cfg.Inventory.Host = map[string]config.InventoryHostConfig{"edge01": {Auth: config.InventoryAuthConfig{Username: "override"}}}
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
 	err := applyInventoryAuthPatch(cfg, paths, "edge01", inventoryAuthPatch{Clear: true})
 	if err != nil {
 		t.Fatalf("clear auth: %v", err)
 	}
-	if _, ok := cfg.Inventory.Host["edge01"]; ok {
-		t.Fatalf("host auth still present: %+v", cfg.Inventory.Host["edge01"])
+	if cfg.Inventory.Providers["local"].Hosts["edge01.lab.local"].Auth.IsSet() {
+		t.Fatal("provider auth not cleared")
+	}
+	if cfg.Inventory.Host["edge01"].Auth.Username != "override" {
+		t.Fatal("deliberate root override changed")
 	}
 }
 
@@ -65,13 +71,12 @@ func TestApplyInventoryAuthPatchAllowsProviderOwnedHost(t *testing.T) {
 func TestApplyInventoryAuthPatchPreservesExistingUsername(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := testAuthPatchConfig("local", config.ProviderLocal, "lab", "edge01", "edge01.lab.local")
-	cfg.Inventory.Host = map[string]config.InventoryHostConfig{
-		"edge01": {Auth: config.InventoryAuthConfig{
-			CredentialProvider: "op-expedient",
-			PasswordRef:        "op://Expedient/item/password",
-			Username:           "chris.jones",
-		}},
-	}
+	provider := cfg.Inventory.Providers["local"]
+	host := provider.Hosts["edge01.lab.local"]
+	host.Auth = config.InventoryAuthConfig{Username: "chris.jones"}
+	provider.Hosts["edge01.lab.local"] = host
+	cfg.Inventory.Providers["local"] = provider
+
 	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
 
 	err := applyInventoryAuthPatch(cfg, paths, "edge01", inventoryAuthPatch{
@@ -80,7 +85,7 @@ func TestApplyInventoryAuthPatchPreservesExistingUsername(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply auth: %v", err)
 	}
-	got := cfg.Inventory.Host["edge01"].Auth
+	got := cfg.Inventory.Providers["local"].Hosts["edge01.lab.local"].Auth
 	if got.CredentialProvider != "sops" || got.PasswordRef != "expedient.password" {
 		t.Fatalf("credential = %+v", got)
 	}

@@ -49,7 +49,7 @@ func (p inventoryAuthPatch) Validate(cfg *config.Config) error {
 	if err := p.Auth.Validate("inventory.host.auth"); err != nil {
 		return err
 	}
-	if p.Clear {
+	if p.Clear || p.Auth.Mode == config.AuthModeKey {
 		return nil
 	}
 	if cfg == nil {
@@ -90,6 +90,20 @@ func applyInventoryAuthPatch(cfg *config.Config, paths *config.Paths, host strin
 	if err := patch.Validate(cfg); err != nil {
 		return err
 	}
+	if metadataForHost(existing, cfg, paths, nil).Owner == "local" {
+		provider := cfg.Inventory.Providers[config.ProviderLocal]
+		hostCfg := provider.Hosts[existing.Host]
+		if patch.Clear {
+			hostCfg.Auth = config.InventoryAuthConfig{}
+		} else {
+			hostCfg.Auth = mergeInventoryAuthPatch(hostCfg.Auth, patch.Auth)
+		}
+		provider.Hosts[existing.Host] = hostCfg
+		cfg.Inventory.Providers[config.ProviderLocal] = provider
+		cfg.Inventory.Provider = cfg.Inventory.Providers
+		return cfg.Validate()
+	}
+
 	if patch.Clear {
 		if cfg.Inventory.Host != nil {
 			delete(cfg.Inventory.Host, host)

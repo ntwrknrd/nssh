@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -43,6 +44,7 @@ type hostPatch struct {
 	Auth         config.InventoryAuthConfig
 	AuthDisabled bool
 
+	Identity    config.SSHOptions
 	CompatFixes []compat.FloorSelection
 }
 
@@ -178,6 +180,7 @@ func upsertLocalHostYAML(cfg *config.Config, paths *config.Paths, patch hostPatc
 		}
 		host.SSH.Options["ProxyJump"] = config.NewSSHOptionString(strings.TrimSpace(patch.ProxyJump))
 	}
+	host.SSH = config.MergeSSH(host.SSH, config.SSHHostConfig{Options: patch.Identity})
 	host.Aliases = mergeHostAliases(hostName, host.Aliases, autoLocalHostAliases(hostName), patch.Aliases)
 	if patch.PortSet {
 		host.Port = patch.Port
@@ -633,6 +636,26 @@ func localHostEntryFromPatch(paths *config.Paths, patch hostPatch) *sshconfig.Ho
 		patch.AuthMode == config.AuthModePassword,
 		localFilePath(paths, inventory.LocalProviderIncludeFile()),
 	)
+	for _, key := range []string{"IdentityFile", "IdentityAgent", "IdentitiesOnly"} {
+		value, ok := patch.Identity[key]
+		if !ok {
+			continue
+		}
+		values := []string{value.StringValue()}
+		if key == "IdentityFile" {
+			values = value.Items
+		}
+		for _, item := range values {
+			if strings.ContainsAny(item, " \t") {
+				item = strconv.Quote(item)
+			}
+			host.Lines = append(host.Lines, fmt.Sprintf("    %s %s\n", key, item))
+		}
+	}
+	if patch.AuthMode == config.AuthModeKey {
+		upsertDirective(host, "PreferredAuthentications", "publickey")
+		upsertDirective(host, "PubkeyAuthentication", "yes")
+	}
 	if strings.TrimSpace(patch.ProxyJump) != "" {
 		upsertDirective(host, "ProxyJump", strings.TrimSpace(patch.ProxyJump))
 		host.Properties["proxyjump"] = strings.TrimSpace(patch.ProxyJump)
@@ -801,12 +824,6 @@ func resolveLocalHostCredentialRecord(cfg *config.Config, patch hostPatch) (*cre
 	if patch.AuthDisabled {
 		return nil, nil
 	}
-	if patch.Auth.IsSet() {
-		if cfg.Inventory.Host == nil {
-			cfg.Inventory.Host = make(map[string]config.InventoryHostConfig)
-		}
-		cfg.Inventory.Host[patch.Host] = config.InventoryHostConfig{Auth: patch.Auth}
-	}
 	registry, err := newCredentialRegistry(cfg)
 	if err != nil {
 		return nil, err
@@ -858,27 +875,6 @@ func localHostProbeCredentialSecret(patch hostPatch, record *credential.Record) 
 		return nil, nil
 	}
 	return secret.NewFromString(password), nil
-}
-
-func applyInteractiveHostAuthSelection(cfg *config.Config, patch hostPatch) bool {
-	if cfg == nil {
-		return false
-	}
-	if patch.Auth.IsSet() || patch.AuthDisabled {
-		if cfg.Inventory.Host == nil {
-			cfg.Inventory.Host = make(map[string]config.InventoryHostConfig)
-		}
-		cfg.Inventory.Host[patch.Host] = config.InventoryHostConfig{Auth: patch.Auth, AuthDisabled: patch.AuthDisabled}
-		return true
-	}
-	if cfg.Inventory.Host == nil {
-		return false
-	}
-	if _, ok := cfg.Inventory.Host[patch.Host]; !ok {
-		return false
-	}
-	delete(cfg.Inventory.Host, patch.Host)
-	return true
 }
 
 func promptInventoryGroup(groups []string) (string, error) {
@@ -1062,10 +1058,6 @@ func localFilePath(paths *config.Paths, localFile string) string {
 		return filepath.Join(paths.SSHConfigDir, localFile)
 	}
 	return filepath.Join(paths.SSHConfigDir, "nssh.d", localFile)
-}
-
-func localProviderOwnerLabel(paths *config.Paths) string {
-	return "Inventory Filepath: " + localProviderYAMLPath(config.DefaultConfig(), paths)
 }
 
 func localWrittenHostConfig(cfg *config.Config, paths *config.Paths, host string) (string, error) {
@@ -1512,7 +1504,7 @@ func saveLocalProviderHostInventory(cfg *config.Config, paths *config.Paths, hos
 	if !ok {
 		return fmt.Errorf("local host %q is not configured", hostName)
 	}
-	patched, err := patchLocalProviderHostYAML(target, hostName, hostCfg)
+	patched, err := patchLocalProviderHostYAML(target, hostName, hostCfg, provider.Groups)
 	if err != nil {
 		return err
 	}
@@ -1522,7 +1514,7 @@ func saveLocalProviderHostInventory(cfg *config.Config, paths *config.Paths, hos
 	return saveLocalProviderInventory(cfg, paths)
 }
 
-func patchLocalProviderHostYAML(path, hostName string, hostCfg config.InventoryHostConfig) (bool, error) {
+func patchLocalProviderHostYAML(path, hostName string, hostCfg config.InventoryHostConfig, groups map[string]config.GroupConfig) (bool, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1546,6 +1538,16 @@ func patchLocalProviderHostYAML(path, hostName string, hostCfg config.InventoryH
 	localNode := ensureYAMLMapping(providersNode, config.ProviderLocal)
 	if yamlMappingValue(localNode, "type") == nil {
 		setYAMLMappingValue(localNode, "type", yamlScalarNode(config.ProviderLocal))
+	}
+	if group, ok := groups[hostCfg.Group]; ok {
+		groupsNode := ensureYAMLMapping(localNode, "groups")
+		if yamlMappingValue(groupsNode, hostCfg.Group) == nil {
+			var groupNode yaml.Node
+			if err := groupNode.Encode(group); err != nil {
+				return false, err
+			}
+			setYAMLMappingValue(groupsNode, hostCfg.Group, &groupNode)
+		}
 	}
 	hostsNode := ensureYAMLMapping(localNode, "hosts")
 	var hostNode yaml.Node
@@ -1976,4 +1978,65 @@ func localBackupFromEntry(backupDir, sourceBase string, entry os.DirEntry, loc *
 func startOfLocalDay(t time.Time) time.Time {
 	local := t.In(t.Location())
 	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, local.Location())
+}
+
+// Identity discovery is opt-in because evaluating SSH config can run Match exec.
+func promptLocalHostIdentity(patch hostPatch) (hostPatch, error) {
+	ui.Info("nssh bypasses SSH config; key and agent settings must be stored in inventory.")
+	inspect, err := ui.Confirm("Read this host's SSH identity settings for an import preview?", false)
+	if err != nil || !inspect {
+		return patch, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	target := patch.HostName
+	if target == "" {
+		target = patch.Host
+	}
+	args := []string{"-G"}
+	if patch.User != "" {
+		args = append(args, "-l", patch.User)
+	}
+	args = append(args, "--", target)
+	output, err := exec.CommandContext(ctx, "ssh", args...).Output()
+	if err != nil {
+		return patch, fmt.Errorf("read SSH identity settings: %w", err)
+	}
+	identity := parseSSHIdentitySettings(string(output))
+	if len(identity) == 0 {
+		ui.Info("No SSH identity settings found")
+		return patch, nil
+	}
+	for _, key := range []string{"IdentityFile", "IdentityAgent", "IdentitiesOnly"} {
+		if value, ok := identity[key]; ok {
+			ui.Info("%s: %s", key, value.StringValue())
+		}
+	}
+	accept, err := ui.Confirm("Import these identity settings into this inventory host?", false)
+	if err == nil && accept {
+		patch.Identity = identity
+	}
+	return patch, err
+}
+
+func parseSSHIdentitySettings(output string) config.SSHOptions {
+	options := make(config.SSHOptions)
+	for _, line := range strings.Split(output, "\n") {
+		key, value, ok := strings.Cut(line, " ")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.ToLower(key) {
+		case "identityfile":
+			current := options["IdentityFile"]
+			current.Items = append(current.Items, value)
+			options["IdentityFile"] = current
+		case "identityagent":
+			options["IdentityAgent"] = config.NewSSHOptionString(value)
+		case "identitiesonly":
+			options["IdentitiesOnly"] = config.NewSSHOptionBool(value == "yes")
+		}
+	}
+	return options
 }

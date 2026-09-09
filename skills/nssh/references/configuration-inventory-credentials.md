@@ -15,7 +15,8 @@ Default paths:
 - Benchmarks: `~/.local/share/nssh/benchmarks/`
 
 Config is YAML. `include: [...]` can appear at the root or under sections.
-Included files are merged first; the importing file wins.
+Included files are merged first; the importing file wins. Unmatched include
+globs are allowed; missing explicitly named files remain errors.
 
 Use `nssh self cfg` or the first-run config template for field-level details
 instead of repeating the whole schema. Bare `nssh self init` is first-run only;
@@ -72,7 +73,21 @@ When resolved inventory auth mode is `password`, nssh renders OpenSSH options
 that force password-style authentication:
 `PreferredAuthentications=keyboard-interactive,password` and
 `PubkeyAuthentication=no`. This is applied during connection after SSH defaults,
-group options, and host options are merged. Key auth does not add these options.
+group options, and host options are merged. Key auth sets
+`PreferredAuthentications=publickey` and `PubkeyAuthentication=yes`, so it does
+not fall back to login passwords. Explicit command-line SSH options retain
+precedence over inventory policy.
+
+nssh bypasses SSH config files with `-F none`. Configure `IdentityFile`,
+`IdentityAgent`, and `IdentitiesOnly` in the host's `ssh.options`. Interactive
+key setup offers to read the target's effective SSH identity settings and
+preview them before importing. Reading those settings evaluates SSH config,
+including any `Match exec` directives.
+
+Local host creation stores auth in the owning provider inventory file, ensures
+that file is included, and verifies discovery after reloading. It does not
+create a root host auth override. Saving after a failed connection test requires
+an explicit choice and reports the host as unverified.
 For containerlab, use `state: [running]` to select any running node; add
 `kind: [ceos, vjunos]` only when a group should be limited to specific
 node kinds.

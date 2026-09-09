@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"syscall"
 
 	"github.com/creack/pty"
 	"github.com/ntwrknrd/nssh/internal/exit"
@@ -162,6 +163,10 @@ func (c *Connector) waitChild() error {
 	}
 
 	if exitErr, ok := err.(*exec.ExitError); ok {
+		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			signal := status.Signal()
+			return &exit.ExitError{Code: 128 + int(signal), Message: fmt.Sprintf("SSH terminated by signal %s", signal), Cause: err}
+		}
 		code := exitErr.ExitCode()
 		switch code {
 		case 255:
