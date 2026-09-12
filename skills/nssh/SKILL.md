@@ -5,6 +5,20 @@ description: Develop, operate, and troubleshoot nssh, an OpenSSH-compatible wrap
 
 # nssh
 
+## Settings
+
+| Setting | Default |
+| --- | --- |
+| `source_repository` | `ntwrknrd/nssh` on GitHub |
+| `canonical_checkout` | Git's registered primary checkout for the repository owning this symlink-resolved `SKILL.md` |
+
+Use an explicitly selected nssh checkout or worktree; otherwise use
+`canonical_checkout`. Verify its remote and revision. When selecting another
+checkout, load its `skills/nssh/SKILL.md` before following references. Resolve
+skill references relative to that file and repository documents and source
+within the selected checkout. Native XDG configuration and credential providers
+retain runtime ownership.
+
 Use this skill for nssh support and repository work. nssh preserves OpenSSH
 command behavior while adding inventory resolution and credential-backed
 automatic authentication for servers, switches, and other SSH targets.
@@ -13,8 +27,8 @@ automatic authentication for servers, switches, and other SSH targets.
 
 1. Identify whether the user is asking about usage, automatic authentication,
    configuration, troubleshooting, operations, migration, or development.
-2. When repository material is needed, resolve the nssh checkout that owns this
-   skill and keep all source-based conclusions within that revision.
+2. When repository material is needed, resolve the owning nssh checkout using
+   Settings and keep all source-based conclusions within that revision.
 3. Select the authority that matches the question:
    - `SPEC.md` for durable product contracts and package boundaries
    - `nssh --help`
