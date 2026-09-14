@@ -33,10 +33,32 @@ prompts, and can record sessions.
   and typed SSH option rendering.
 - Recordings: optional asciinema session capture is managed with `nssh log`.
 - SCP: `nssh cp` uses the same host and credential resolution path as connect.
+- Multi-host commands: `nssh repl` provides an interactive terminal prompt or
+  plain piped input, with bounded concurrency and attributed command output.
 
 Run `nssh --help` or read the generated help snapshots under
 [docs/examples/help](docs/examples/help). The first-run config template is
 [internal/config/example_config.yaml](internal/config/example_config.yaml).
+
+## Multi-host commands
+
+Start `nssh repl`, then submit targets and commands:
+
+```text
+[ 'irn-border-sw(1,2)', 'irn-agg-sw(1,2)' ] ( 'show env power' )
+```
+
+Or pipe a submission from fish:
+
+```fish
+printf '%s\n' "[ 'irn-border-sw(1,2)', 'irn-agg-sw(1,2)' ] ( 'show env power' )" | nssh repl
+```
+
+REPL is a normal command in the 0.3 development series. Root SSH syntax remains
+unchanged; a literal host named `repl` uses `nssh --target repl`. Authenticate
+credential providers before entering the REPL. Output appears when each command
+finishes; commands cannot read interactive input. See the
+[REPL guide](skills/nssh/references/repl.md) for grammar, keys, limits, and errors.
 
 ## Installation
 

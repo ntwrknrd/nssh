@@ -36,7 +36,7 @@ func probeInteractiveHostKey(ctx context.Context, resolved *ResolvedHost, sshArg
 	slog.Debug("probing host key", "host", resolved.Hostname, "argv", append([]string{"ssh"}, args...))
 	cmd := exec.CommandContext(probeCtx, "ssh", args...)
 	cmd.Env = append(withoutAskpassEnv(os.Environ()), proxyEnv...)
-	output, _ := cmd.CombinedOutput()
+	output, _ := collectPreparationOutput(cmd, opts)
 	status := classifyHostKeyProbeOutput(output)
 	slog.Debug("host key probe completed", "host", resolved.Hostname, "status", status.String())
 	return status
@@ -69,6 +69,9 @@ func (s hostKeyProbeStatus) String() string {
 
 func buildHostKeyProbeArgs(resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options) []string {
 	options, _ := splitConnectSSHArgs(sshArgs)
+	if opts.capture != nil {
+		options = append([]string{"-o", "PubkeyAuthentication=no", "-o", "PreferredAuthentications=none"}, options...)
+	}
 	args := connector.ComposeSSHOptions(connector.SSHOptionPlan{
 		Enforced: []string{
 			"-o", "BatchMode=yes",

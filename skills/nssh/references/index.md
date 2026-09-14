@@ -8,6 +8,10 @@ Select the smallest reference set that covers the request:
 - For config files, includes, inventory groups, local inventory, NetBox,
   containerlab, credential providers, or auth mappings, read
   [configuration-inventory-credentials.md](configuration-inventory-credentials.md).
+- For `nssh repl` grammar, multi-host execution, history, or terminal behavior,
+  read [repl.md](repl.md).
+- For the deferred Rust frontend evaluation and rebuilding it against current Go
+  code, read [frontend-alternatives.md](frontend-alternatives.md).
 - For connect or SCP behavior, fuzzy matching, provider refresh, agent
   operations, host keys, legacy SSH fixes, managed proxies, recordings, logs,
   benchmarks, or diagnostics, read

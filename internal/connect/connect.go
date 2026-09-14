@@ -45,6 +45,7 @@ type connectionResult struct {
 type Options struct {
 	Verbosity    int
 	SSHVerbosity int
+	capture      *CaptureOptions
 }
 
 var (
@@ -227,8 +228,16 @@ func RunControlCommand(ctx context.Context, hostname string, literal bool, sshAr
 }
 
 func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshArgs, command []string, cfg *config.Config, opts Options) error {
+	result, err := captureResolvedRemoteCommand(ctx, resolved, sshArgs, command, cfg, opts)
+	if resolved != nil {
+		writeCapturedCommandOutput(result, resolved.Highlight)
+	}
+	return err
+}
+
+func captureResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshArgs, command []string, cfg *config.Config, opts Options) (captured.Result, error) {
 	if resolved == nil {
-		return fmt.Errorf("resolved host is required")
+		return captured.Result{}, fmt.Errorf("resolved host is required")
 	}
 	req := captured.Request{
 		Hostname:      resolved.Hostname,
@@ -242,7 +251,16 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 	if cfg != nil && cfg.SSH.Connection.Timeout.Duration() > 0 {
 		req.ConnectTimeout = cfg.SSH.Connection.Timeout.Duration()
 	}
+	var diagnostics captureDiagnostics
+	if opts.capture != nil {
+		req.Stdin = strings.NewReader("")
+		req.MaxOutputBytes = opts.capture.MaxOutputBytes
+		diagnostics.limit = min(req.MaxOutputBytes/4, 16*1024)
+	}
 	passwordFuture, muxHot := preparePasswordPrefetch(ctx, resolved, sshArgs, cfg, opts)
+	if opts.capture != nil && !muxHot {
+		muxHot, _ = checkMuxSessionFunc(ctx, muxCheckRequest(resolved, sshArgs, cfg, opts))
+	}
 	if passwordFuture != nil {
 		defer passwordFuture.Close()
 	}
@@ -259,17 +277,17 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 		askpassHandle, err = startConnectionAskpass(ctx, passwordResolvers)
 		askpassTimer.Emit()
 		if err != nil {
-			return err
+			return diagnostics.result(), err
 		}
 		defer askpassHandle.cleanup()
 	}
 	var hostKeyPrep *connector.HostKeyPreparation
-	if passwordResolvers.any() {
+	if passwordResolvers.any() || opts.capture != nil {
 		if !muxHot {
 			var err error
 			hostKeyPrep, err = prepareInteractiveHostKey(ctx, resolved, sshArgs, cfg, opts, proxyAskpassEnv(askpassHandle))
 			if err != nil {
-				return err
+				return diagnostics.result(), err
 			}
 			if hostKeyPrep != nil {
 				defer hostKeyPrep.Cleanup()
@@ -280,6 +298,11 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 
 	if !muxHot {
 		muxStartReq := muxStartRequest(resolved, req.SSHArgs, cfg, opts, nil)
+		if opts.capture != nil {
+			muxStartReq.Stdin = strings.NewReader("")
+			muxStartReq.Stdout = &diagnostics
+			muxStartReq.Stderr = &diagnostics
+		}
 		if _, ok := connector.BuildMuxStartArgs(muxStartReq); ok {
 			if askpassHandle != nil {
 				muxStartReq.Env = askpassHandle.env
@@ -288,8 +311,8 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 			// Captured remote commands drain stdout/stderr and reap the foreground ssh process.
 			// Starting the persistent master as its own step keeps ControlPersist behavior
 			// independent of captured output pipe lifetime.
-			if err := startMuxSessionFunc(ctx, muxStartReq); err != nil {
-				return err
+			if err := startCommandMux(ctx, muxStartReq, opts.capture != nil); err != nil {
+				return diagnostics.result(), err
 			}
 			muxHot = true
 		}
@@ -300,10 +323,16 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 	}
 
 	slog.Debug("starting captured ssh command", "host", req.Hostname, "has_askpass", len(req.Env) > 0)
+	if opts.capture != nil {
+		req.MaxOutputBytes -= len(diagnostics.data)
+	}
 	result, err := runCapturedCommandFunc(ctx, req)
-	writeCapturedCommandOutput(result, resolved.Highlight)
+	if opts.capture != nil {
+		result.Stderr = append(diagnostics.data, result.Stderr...)
+		result.Truncated = result.Truncated || diagnostics.truncated
+	}
 	slog.Debug("captured ssh command completed", "host", req.Hostname, "err", err)
-	return err
+	return result, err
 }
 
 func startAskpassServerEnv(ctx context.Context, resolve func(context.Context) (*secret.Secret, error)) (*askpass.Server, context.CancelFunc, chan error, []string, error) {

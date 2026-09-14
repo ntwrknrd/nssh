@@ -5,6 +5,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -33,6 +34,9 @@ type MuxStartRequest struct {
 	SSHArgs      []string
 	Timeout      int
 	Env          []string
+	Stdin        io.Reader
+	Stdout       io.Writer
+	Stderr       io.Writer
 }
 
 type MuxStartExec func(context.Context, []string, []string) error
@@ -84,7 +88,9 @@ func StartMuxSession(ctx context.Context, req MuxStartRequest, execFn MuxStartEx
 		return nil
 	}
 	if execFn == nil {
-		execFn = defaultMuxStartExec
+		execFn = func(ctx context.Context, args, env []string) error {
+			return runMuxStartExec(ctx, args, env, req.Stdin, req.Stdout, req.Stderr)
+		}
 	}
 	timer := StartTiming(TimingMuxStart)
 	err := execFn(ctx, args, req.Env)
@@ -138,14 +144,23 @@ func persistentMuxEnabled(args []string) bool {
 	return true
 }
 
-func defaultMuxStartExec(ctx context.Context, args []string, env []string) error {
+func runMuxStartExec(ctx context.Context, args []string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
 	}
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+	cmd.Stdin = stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	return cmd.Run()
 }
 

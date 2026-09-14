@@ -26,6 +26,15 @@ func TestPreprocessArgs(t *testing.T) {
 			out:  []string{"smart-connect", "router1"},
 		},
 		{
+			name: "repl subcommand passes through",
+			in:   []string{"repl", "--plain"},
+			out:  []string{"repl", "--plain"},
+		},
+
+		{name: "literal repl target with command", in: []string{"--target", "repl", "show env power"}, out: []string{"smart-connect", "--literal-target", "repl", "--", "show env power"}},
+		{name: "user at repl stays SSH", in: []string{"ops@repl", "show version"}, out: []string{"smart-connect", "ops@repl", "--", "show version"}},
+		{name: "root comma remains literal hostname", in: []string{"a,b", "show version"}, out: []string{"smart-connect", "a,b", "--", "show version"}},
+		{
 			name: "known subcommand passes through",
 			in:   []string{"inv", "list"},
 			out:  []string{"inv", "list"},
@@ -164,7 +173,7 @@ func TestRootCommandRegistersPublicCommands(t *testing.T) {
 			got = append(got, cmd.Name())
 		}
 	}
-	want := []string{"agent", "cp", "inv", "log", "self"}
+	want := []string{"agent", "cp", "inv", "log", "repl", "self"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("public commands = %v, want %v", got, want)
 	}

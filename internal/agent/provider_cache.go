@@ -183,6 +183,10 @@ func (p *RuntimeProvider) RegisterBitwarden(name string, cfg BitwardenProviderCo
 }
 
 func (p *RuntimeProvider) HandleProviderRequest(ctx context.Context, req ProviderRequest) (ProviderResponse, error) {
+	if req.Action == "get_noninteractive" {
+		req.Action = "get"
+		req.NonInteractive = true
+	}
 	if req.Provider == "" {
 		return ProviderResponse{}, errors.New("provider is required")
 	}
