@@ -42,7 +42,7 @@ func TestFormsSwitchAndAddRowsWithoutChangingSyntax(t *testing.T) {
 	}
 }
 
-func TestFormsResponsiveLayoutAndVisibleRows(t *testing.T) {
+func TestFormsStackedLayoutAndVisibleRows(t *testing.T) {
 	m := testTUI(120)
 	m.input.SetValue("[ 'edge1', 'edge2' ] ( 'one', 'two', 'three', 'four', 'five' )")
 	m.focusForm(true)
@@ -59,8 +59,8 @@ func TestFormsResponsiveLayoutAndVisibleRows(t *testing.T) {
 			t.Fatalf("overflow at %d", width)
 		}
 	}
-	if lipgloss.Height(m.formsView(120)) >= lipgloss.Height(m.formsView(45)) {
-		t.Fatal("narrow forms should stack")
+	if lipgloss.Height(m.formsView(120)) != lipgloss.Height(m.formsView(45)) {
+		t.Fatal("forms should stack at every width")
 	}
 	before := m.input.Value()
 	m.formsView(120)

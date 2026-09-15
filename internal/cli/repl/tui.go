@@ -464,16 +464,7 @@ func (m *model) openPicker() {
 	if !ok {
 		return
 	}
-	for _, candidate := range m.candidates {
-		if m.advanceCompletedTarget(candidate) {
-			return
-		}
-	}
-	_, _, matches := completeTargetToken(m.input.Value(), m.input.Position(), m.candidates)
-	if len(matches) == 1 {
-		m.insertHosts(matches)
-		return
-	}
+	m.resetCompletedTarget()
 	m.input.Focus()
 	m.picked = map[string]bool{}
 	m.pickerOpen = true
@@ -525,8 +516,17 @@ func (m *model) updatePicker(key tea.KeyMsg) {
 		m.matches = nil
 	case tea.KeyUp:
 		m.pickAt = max(0, m.pickAt-1)
-	case tea.KeyDown, tea.KeyTab:
+	case tea.KeyDown:
 		m.pickAt = min(max(0, len(m.matches)-1), m.pickAt+1)
+	case tea.KeyTab:
+		m.picked = map[string]bool{}
+		m.pickAt = 0
+	case tea.KeyShiftTab:
+		m.input.SetValue(m.pickerDraft)
+		m.input.SetCursor(m.pickerCursor)
+		m.pickerOpen = false
+		m.matches = nil
+		m.focusForm(!m.commandFocused())
 	case tea.KeySpace:
 		if len(m.matches) > 0 {
 			name := m.matches[m.pickAt]

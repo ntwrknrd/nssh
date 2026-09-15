@@ -82,11 +82,11 @@ requested host order, with separate stdout/stderr. A failure skips later
 commands only on that host. Remote stdin is EOF; authenticate credential providers first.
 Interactive host-key approval is serialized. Plain mode cannot prompt for trust.
 
-Interactive: Devices and Commands have separate boxes. Tab/Shift-Tab switch
-boxes after host selection. Enter in Devices advances; Enter in Commands runs.
+Interactive: Devices and Commands use stacked boxes. Shift-Tab switches boxes.
+Enter in Devices advances; Enter in Commands runs.
 Alt-Enter adds a row; Up/Down moves within lists. Ctrl-P/N recalls history.
-Tab completes a unique
-host or opens a searchable multi-select picker. Tab on an empty prompt starts
+Tab opens a fresh searchable device picker, including for a single match.
+Tab on an empty prompt starts
 a target list. In the picker, type to filter, Space selects, Up/Down moves,
 Enter inserts selected hosts, and Esc closes without changing the command.
 Selections persist across filters. Up/Down outside the picker
@@ -614,9 +614,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.Type == tea.KeyTab && !m.active {
 			if m.commandFocused() {
 				m.focusForm(false)
-			} else {
-				m.openPicker()
 			}
+			m.openPicker()
 			return m, nil
 		}
 		if v.Type == tea.KeyPgUp || v.Type == tea.KeyPgDown || v.String() == "up" && m.active || v.String() == "down" && m.active {

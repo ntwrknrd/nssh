@@ -160,8 +160,8 @@ func TestREPLProcess(t *testing.T) {
 		if f.log() != "" {
 			t.Fatal("picker Enter executed a command")
 		}
-		// Tab moves from the accepted device into the command quotes.
-		s.write(t, "\tone', 'two\r")
+		// Enter finishes Devices and moves into the command quotes.
+		s.write(t, "\rone', 'two\r")
 		s.await(t, "stdout-good-two")
 		s.await(t, "done 2")
 		s.settle()
@@ -174,7 +174,7 @@ func TestREPLProcess(t *testing.T) {
 	t.Run("PTY completion history resize and quit", func(t *testing.T) {
 		f := newREPLFixture(t, binary)
 		s := f.terminal(t)
-		s.write(t, "[ 'go\t' ] ( 'one' )\r")
+		s.write(t, "go\t\r\rone\r")
 		s.await(t, "stdout-good-one")
 		s.await(t, "done 1")
 		s.settle()

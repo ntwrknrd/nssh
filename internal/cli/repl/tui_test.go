@@ -260,7 +260,7 @@ func TestPromptPickerFiltersAndPreservesSelections(t *testing.T) {
 	if _, target := activeTargetStart([]rune(m.input.Value()), m.input.Position()); !target {
 		t.Fatal("Enter should keep focus in devices")
 	}
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
 	if m.input.Position() != len([]rune(m.input.Value()))-3 {
 		t.Fatal("cursor not in command field")
@@ -302,6 +302,10 @@ func TestUniqueCompletionReplacesWholeHostAtCursor(t *testing.T) {
 	m.input.SetValue("[ 'ops@edZZ' ] ( 'show version' )")
 	m.input.SetCursor(len([]rune("[ 'ops@ed")))
 	m.openPicker()
+	if !m.pickerOpen {
+		t.Fatal("single match must still open picker")
+	}
+	m.updatePicker(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.pickerOpen || m.input.Value() != "[ 'ops@edge1' ] ( 'show version' )" {
 		t.Fatal(m.input.Value())
 	}

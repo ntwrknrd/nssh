@@ -197,6 +197,11 @@ func TestTypingStartsInsideFirstDevice(t *testing.T) {
 	m.candidates = []string{"acm-spine1.example"}
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = next.(model)
+	if !m.pickerOpen {
+		t.Fatal("Tab must open picker for one match")
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
 	if m.input.Value() != "[ 'acm-spine1.example' ] ( '' )" {
 		t.Fatal("completion failed", m.input.Value())
 	}

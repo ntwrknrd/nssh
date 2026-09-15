@@ -73,11 +73,7 @@ func (m model) formsView(width int) string {
 	if strings.HasPrefix(strings.TrimSpace(m.input.Value()), ":") || len(devices) == 0 || len(commands) == 0 {
 		return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("8")).Width(max(1, width-2)).Render(m.editorView(max(1, width-4)))
 	}
-	sideBySide := width >= 80
 	boxWidth := width
-	if sideBySide {
-		boxWidth = (width - 1) / 2
-	}
 	render := func(title string, fields []editorField, focused bool) string {
 		inner := max(1, boxWidth-4)
 		rows := []string{title}
@@ -121,9 +117,6 @@ func (m model) formsView(width int) string {
 	}
 	left := render("Devices", devices, !m.commandFocused())
 	right := render("Commands", commands, m.commandFocused())
-	if sideBySide {
-		return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
-	}
 	return left + "\n" + right
 }
 

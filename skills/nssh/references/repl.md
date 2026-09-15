@@ -50,8 +50,8 @@ to a host literally named `repl`.
 ## Interactive command prompt
 
 Run `nssh repl` to edit Devices and Commands in separate boxes. Each value has
-its own row. The boxes sit side by side on wide terminals and stack on narrow
-terminals. History retains the existing submission syntax. Typing a hostname
+its own row. The boxes are always stacked, Devices above Commands.
+History retains the existing submission syntax. Typing a hostname
 into an empty prompt inserts the submission template and places the text inside the first
 device's quotes. Input beginning with `:` remains an internal command; `[`
 starts explicit submission syntax. Press Enter in Commands to run the completed
@@ -60,11 +60,13 @@ submission.
 - Deletion stays inside the quoted host or command at the cursor. Backspace,
   word deletion, and delete-to-start preserve brackets, parentheses, quotes,
   and separators. Type `:` into an empty template to enter an internal command.
-- Tab and Shift-Tab switch between boxes after device selection. Enter in
+- Shift-Tab switches between boxes. Enter in
   Devices advances to Commands. Alt-Enter adds a row to the current box; Up/Down
   moves between rows. Ctrl-P/N recalls history even when editing a list.
-- Tab completes a unique host at the cursor or opens a searchable host picker.
-  Tab on an empty prompt starts a submission and opens the picker.
+- Tab always opens a fresh device picker, including for a single match. A
+  partially typed name filters the list; a completed device starts a blank
+  filter while preserving its username. Tab from Commands returns to Devices
+  and opens the picker. Tab within the picker resets selection and highlight.
 - In the picker, typing edits the device in its box and filters the list
   above it. No separate filter box or inline completion preview is shown.
   Use Up/Down to move and Space to select hosts.
@@ -72,8 +74,8 @@ submission.
   command; it does not execute it. Esc closes the picker and restores the draft.
 - Selected hosts are quoted and separated automatically. Existing command text
   and an explicit username remain intact. Enter keeps the cursor in the device
-  field after inserting hosts. Tab on a completed device moves directly into the
-  first command field.
+  field after inserting hosts. Press Enter again to finish Devices and enter
+  the first command field.
 - Up/Down outside the picker recalls history when the current box has one row.
   The submitted syntax is stored
   exactly as entered after trimming outer whitespace. Repeating an identical
@@ -131,7 +133,7 @@ and truncation remain visible.
 
 Use `:help` or `nssh repl --explain` for keys and syntax:
 
-- Tab and Shift-Tab switch between boxes after device selection. Enter in
+- Shift-Tab switches between boxes. Enter in
   Devices advances to Commands. Alt-Enter adds a row to the current box; Up/Down
   moves between rows. Ctrl-P/N recalls history even when editing a list.
 - Tab completes a unique hostname or opens the picker. Type to filter, Space selects
