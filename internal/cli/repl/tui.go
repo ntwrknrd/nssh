@@ -44,7 +44,7 @@ type tuiState struct {
 }
 
 var (
-	tuiDim     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	tuiDim     = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "240", Dark: "248"})
 	tuiTarget  = lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
 	tuiCommand = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 )
@@ -406,7 +406,7 @@ func (m model) tuiView() string {
 	hint := ansi.Truncate(":help", width, "")
 	leftWidth := max(0, width-ansi.StringWidth(hint)-1)
 	status = ansi.Truncate(status, leftWidth, "")
-	parts = append(parts, tuiDim.Render(padCells(status, width-ansi.StringWidth(hint))+hint))
+	parts = append(parts, padCells(status, width-ansi.StringWidth(hint))+hint)
 	view := strings.Join(parts, "\n")
 	if m.helpOpen {
 		return m.helpOverlay(view)
@@ -464,7 +464,7 @@ func (m model) editorView(width int) string {
 			style = tuiTarget
 		}
 		if strings.ContainsRune("[]()'", r) {
-			style = tuiDim
+			style = lipgloss.NewStyle()
 		}
 		if i == pos {
 			style = style.Reverse(true)
