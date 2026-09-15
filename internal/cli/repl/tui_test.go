@@ -1,6 +1,10 @@
 package repl
 
 import (
+	"encoding/base64"
+	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -301,5 +305,108 @@ func TestTUIResultLabelIncludesStatusDeviceAndCommand(t *testing.T) {
 	e.Result.ExitCode = 7
 	if got := resultLabel(e); got != "FAILED exit 7:  [user@device] ('show env power')" {
 		t.Fatal(got)
+	}
+}
+
+func TestStickyCommandFollowsScrolledOutput(t *testing.T) {
+	m := testTUI(80)
+	m.acceptResult(tuiEvent("a", "first", strings.Repeat("one\n", 40), 0))
+	m.acceptResult(tuiEvent("a", "second", strings.Repeat("two\n", 40), 1))
+	m.viewport.SetYOffset(15)
+	if got := m.stickyCommand(); got != "first" {
+		t.Fatal(got)
+	}
+	for i, row := range m.renderRows() {
+		if row.command == "second" {
+			m.viewport.SetYOffset(i + 2)
+			break
+		}
+	}
+	if got := m.stickyCommand(); got != "second" {
+		t.Fatal(got)
+	}
+	if strings.Contains(ansi.Strip(m.View()), "nssh repl") {
+		t.Fatal("old title retained")
+	}
+}
+
+func TestStickyCommandCopiesFullOriginalText(t *testing.T) {
+	m := testTUI(40)
+	command := "show " + strings.Repeat("long-command ", 10) + "\nnext"
+	m.acceptResult(tuiEvent("a", command, "output", 0))
+	if strings.Contains(m.commandHeader(), "\n") {
+		t.Fatal("header spans multiple terminal rows")
+	}
+	next, _ := m.handleMouse(tea.MouseMsg{X: 10, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m = next.(model)
+	if got := m.selectedText(); got != command {
+		t.Fatalf("copy=%q", got)
+	}
+	if !strings.Contains(ansi.Strip(m.commandHeader()), "...") {
+		t.Fatal("long header not truncated")
+	}
+}
+
+func TestRightClickCopiesSelectionAndClearsAfterSuccess(t *testing.T) {
+	m := testTUI(120)
+	m.acceptResult(tuiEvent("a", "show", "left one\nleft two", 0))
+	m.acceptResult(tuiEvent("b", "show", "right one\nright two", 0))
+	m.viewport.GotoTop()
+	row := 0
+	for i, r := range m.renderRows() {
+		if len(r.spans) == 2 {
+			row = i
+			break
+		}
+	}
+	next, _ := m.handleMouse(tea.MouseMsg{X: 8, Y: row + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m = next.(model)
+	next, _ = m.handleMouse(tea.MouseMsg{X: 8, Y: row + 2, Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion})
+	m = next.(model)
+	next, cmd := m.handleMouse(tea.MouseMsg{X: 100, Y: 0, Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
+	m = next.(model)
+	if cmd == nil || !m.selected {
+		t.Fatal("selection cleared before copy")
+	}
+	// Capture the clipboard request without touching the user's clipboard.
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	original := os.Stdout
+	os.Stdout = writer
+	defer func() { os.Stdout = original; writer.Close() }()
+	msg := cmd()
+	writer.Close()
+	os.Stdout = original
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte("left one\nleft two")) + "\x07"
+	if string(data) != want {
+		t.Fatalf("clipboard request=%q", data)
+	}
+	next, _ = m.Update(msg)
+	m = next.(model)
+	if m.selected || m.selecting || m.selectedText() != "" {
+		t.Fatal("selection not cleared")
+	}
+	_, cmd = m.handleMouse(tea.MouseMsg{Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
+	if cmd != nil {
+		t.Fatal("empty selection copied")
+	}
+}
+
+func TestCopyFailurePreservesSelection(t *testing.T) {
+	m := testTUI(80)
+	m.acceptResult(tuiEvent("a", "show", "output", 0))
+	next, _ := m.handleMouse(tea.MouseMsg{X: 10, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m = next.(model)
+	next, _ = m.Update(tuiCopyMsg{err: errors.New("write failed"), clearAfter: true, text: "show"})
+	m = next.(model)
+	if !m.selected || m.selectedText() != "show" {
+		t.Fatal("failed copy lost selection")
 	}
 }

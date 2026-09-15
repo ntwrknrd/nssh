@@ -391,7 +391,7 @@ func (f *replFixture) terminal(t *testing.T) *replTerminal {
 	s.file = file
 	go func() { _, _ = io.Copy(&s.output, file); close(s.readDone) }()
 	t.Cleanup(func() { _ = file.Close(); <-s.readDone })
-	s.await(t, "nssh repl")
+	s.await(t, "Enter run")
 	return s
 }
 func (s *replTerminal) write(t *testing.T, text string) {

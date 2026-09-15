@@ -36,6 +36,8 @@ type tuiState struct {
 	message                                         string
 	selectionStart, selectionEnd                    int
 	selectionBlock                                  int
+	selectedCommand                                 string
+	latestCommand                                   string
 	selecting, selected                             bool
 }
 
@@ -46,6 +48,9 @@ var (
 )
 
 func (m *model) acceptResult(e core.Event) {
+	if e.State != core.Queued {
+		m.latestCommand = e.Command
+	}
 	switch e.State {
 	case core.Queued:
 		return
@@ -69,7 +74,6 @@ func (m *model) acceptResult(e core.Event) {
 	}
 
 	e.Target = core.ResolvedTarget{Identity: hostListName(e.Target)}
-	e.Command = displayLabel(e.Command)
 	e.Result.Stdout = []byte(safeTerminalText(string(e.Result.Stdout)))
 	e.Result.Stderr = []byte(safeTerminalText(string(e.Result.Stderr)))
 	// Keep only bounded display data, never resolver state or raw terminal escapes.
@@ -142,7 +146,7 @@ func resultLabel(e core.Event) string {
 	if e.State == core.Failed {
 		status += fmt.Sprintf(" exit %d", e.Result.ExitCode)
 	}
-	command := strings.ReplaceAll(e.Command, "'", "\\'")
+	command := strings.ReplaceAll(displayLabel(e.Command), "'", "\\'")
 	return status + ":  [" + e.Target.Identity + "] ('" + command + "')"
 }
 
@@ -179,8 +183,9 @@ type tuiSpan struct {
 	text                 string
 }
 type tuiRow struct {
-	styled string
-	spans  []tuiSpan
+	command string
+	styled  string
+	spans   []tuiSpan
 }
 
 func (m model) renderRows() []tuiRow {
@@ -208,9 +213,9 @@ func (m model) renderRows() []tuiRow {
 				continue
 			}
 		}
-		rows = append(rows, tuiRow{styled: resultHeading(*b.event, width)})
+		rows = append(rows, tuiRow{command: b.event.Command, styled: resultHeading(*b.event, width)})
 		for _, line := range resultLines(*b.event, width) {
-			rows = append(rows, tuiRow{styled: line, spans: []tuiSpan{{block: i, width: width, text: line}}})
+			rows = append(rows, tuiRow{command: b.event.Command, styled: line, spans: []tuiSpan{{block: i, width: width, text: line}}})
 		}
 	}
 	return rows
@@ -252,7 +257,7 @@ func resultsFitPair(left, right core.Event, width int) bool {
 func (m model) renderPair(left, right core.Event, width, block int) []tuiRow {
 	column := (width - 4) / 2
 	a, b := sourceLines(left), sourceLines(right)
-	rows := []tuiRow{{styled: padCells(resultHeading(left, column), column) + "    " + resultHeading(right, column)}}
+	rows := []tuiRow{{command: left.Command, styled: padCells(resultHeading(left, column), column) + "    " + resultHeading(right, column)}}
 	// Pair original rows first. Wrapping either side adds continuation cells to
 	// that pair, never shifts the next source row or consumes another line number.
 	for i := 0; i < max(len(a), len(b)); i++ {
@@ -268,7 +273,7 @@ func (m model) renderPair(left, right core.Event, width, block int) []tuiRow {
 			differs = a[i] != b[i]
 		}
 		for j := 0; j < max(len(l), len(r)); j++ {
-			row := tuiRow{}
+			row := tuiRow{command: left.Command}
 			cells := [2]string{}
 			for side, lines := range [][]string{l, r} {
 				if j >= len(lines) {
@@ -321,9 +326,39 @@ func (m *model) refreshLayout() {
 	m.pickFilter.Width = max(1, width-10)
 	m.viewport.SetContent(m.transcriptContent())
 }
+
+// Follow the first result at or below the viewport top, including when its
+// device heading has scrolled away. Fall back to the preceding/latest command.
+func (m model) stickyCommand() string {
+	rows := m.renderRows()
+	top := min(m.viewport.YOffset, len(rows))
+	for _, row := range rows[top:] {
+		if row.command != "" {
+			return row.command
+		}
+	}
+	for i := top - 1; i >= 0; i-- {
+		if rows[i].command != "" {
+			return rows[i].command
+		}
+	}
+	return m.latestCommand
+}
+func (m model) commandHeader() string {
+	command := m.stickyCommand()
+	if command == "" {
+		return ""
+	}
+	text := ansi.Truncate("Command: "+displayLabel(command), max(1, m.viewport.Width), "...")
+	if m.selected && m.selectionBlock == -1 && m.selectedCommand == command {
+		return lipgloss.NewStyle().Reverse(true).Render(text)
+	}
+	return tuiCommand.Render(text)
+}
+
 func (m model) tuiView() string {
 	width := max(1, m.viewport.Width)
-	parts := []string{tuiDim.Render("nssh repl"), m.viewport.View()}
+	parts := []string{m.commandHeader(), m.viewport.View()}
 	switch {
 	case m.trust != nil:
 		p := m.trust.prompt
@@ -356,7 +391,7 @@ func (m model) tuiView() string {
 		hints = "Ctrl-C cancel  PgUp/PgDn scroll"
 	}
 	if m.selected {
-		hints += "  Ctrl-Y copy"
+		hints += "  Ctrl-Y / right-click copy"
 	}
 	if m.trust != nil {
 		hints = ""
@@ -555,9 +590,25 @@ func (m *model) insertHosts(hosts []string) {
 }
 
 // Mouse selection copies only the chosen pane's displayed lines. Clipboard
-// access is explicit (Ctrl-Y), never triggered by remote terminal sequences.
+// access is explicit (Ctrl-Y or right-click), never triggered by remote terminal sequences.
 func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.trust != nil {
+		return m, nil
+	}
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonRight {
+		return m, m.copySelection(true)
+	}
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && msg.Y == 0 {
+		m.selected = false
+		m.selecting = false
+		command := m.stickyCommand()
+		if command != "" && msg.X >= 0 && msg.X < min(m.viewport.Width, ansi.StringWidth("Command: "+displayLabel(command))) {
+			m.selectionBlock = -1
+			m.selectedCommand = command
+			m.selected = true
+			m.message = "command selected"
+		}
+		m.viewport.SetContent(m.renderBlocks())
 		return m, nil
 	}
 	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
@@ -594,7 +645,7 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.selectionEnd = row
 	}
 	if m.selected {
-		m.message = "lines selected; Ctrl-Y copies"
+		m.message = "lines selected"
 	}
 	m.viewport.SetContent(m.renderBlocks())
 	return m, nil
@@ -602,6 +653,12 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 func (m model) selectedText() string {
 	if !m.selected {
 		return ""
+	}
+	if m.selectionBlock == -1 {
+		if m.selectedCommand != m.stickyCommand() {
+			return ""
+		}
+		return m.selectedCommand
 	}
 	rows := m.renderRows()
 	start, end := min(m.selectionStart, m.selectionEnd), max(m.selectionStart, m.selectionEnd)
@@ -619,15 +676,19 @@ func (m model) selectedText() string {
 	}
 	return strings.Join(selected, "\n")
 }
-func (m model) copySelection() tea.Cmd {
+func (m model) copySelection(clearAfter bool) tea.Cmd {
 	text := m.selectedText()
 	if text == "" || len(text) > 64<<10 {
 		return nil
 	}
 	return func() tea.Msg {
 		_, err := fmt.Fprintf(os.Stdout, "\x1b]52;c;%s\x07", base64.StdEncoding.EncodeToString([]byte(text)))
-		return tuiCopyMsg{err: err}
+		return tuiCopyMsg{err: err, clearAfter: clearAfter, text: text}
 	}
 }
 
-type tuiCopyMsg struct{ err error }
+type tuiCopyMsg struct {
+	err        error
+	clearAfter bool
+	text       string
+}

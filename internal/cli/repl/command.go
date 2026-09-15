@@ -83,7 +83,9 @@ Enter inserts selected hosts, and Esc closes without changing the command.
 Selections persist across filters. Up/Down outside the picker
 recall history. PgUp/PgDn or the mouse wheel scroll. Ctrl-L toggles stacked
 results; Ctrl-G toggles line comparison in split panes. Drag selects lines in
-one device pane; Ctrl-Y sends up to 64 KiB to the terminal clipboard.
+one device pane or click the sticky command header to select its command.
+Ctrl-Y copies; right-click copies and clears the selection after a successful
+write. Copy sends up to 64 KiB to the terminal clipboard.
 Ctrl-C cancels active work and waits for local cleanup, or
 exits when idle. :help shows help; :quit, :exit, or EOF exits.
 Cancellation cannot undo remote effects. Normal interactive quit returns zero.
@@ -465,6 +467,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch v := msg.(type) {
 	case tuiCopyMsg:
 		m.message = "selection sent to terminal clipboard"
+		if v.err == nil && v.clearAfter && m.selectedText() == v.text {
+			m.selected = false
+			m.selecting = false
+			m.viewport.SetContent(m.renderBlocks())
+		}
 		if v.err != nil {
 			m.message = "clipboard write failed"
 		}
@@ -538,7 +545,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if v.Type == tea.KeyCtrlY {
-			return m, m.copySelection()
+			return m, m.copySelection(false)
 		}
 		if m.pickerOpen {
 			m.updatePicker(v)

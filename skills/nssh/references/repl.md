@@ -95,6 +95,8 @@ ordinary interactive connection before retrying.
 The Go TUI has a command prompt with host completion and
 persistent running/done/failed/pending/canceled/skipped counts. Each result
 starts with its status, device, and command: `OK:  [user@device] ('show env power')`.
+The sticky header follows the command at the top of the visible output. Click
+it to select the full command for copying, even if the header is truncated.
 At 100 columns or wider, adjacent devices for the same command appear side by
 side only when both headings and every output line fit, including line-number
 space. Otherwise, devices stack at full width. Lines wrap only when they exceed
@@ -113,7 +115,8 @@ Use `:help` or `nssh repl --explain` for keys and syntax:
   comparison; it does not infer semantic differences in device output.
 - Drag selects displayed output lines within one device. Ctrl-Y sends up to
   64 KiB to the terminal clipboard using OSC 52, if the terminal supports it.
-  Selection excludes line numbers and adjacent devices. Resize or new output
+  Right-click also copies and clears the selection after a successful clipboard
+  write. Selection excludes line numbers and adjacent devices. Resize or new output
   clears selection. Native terminal selection depends on the terminal's mouse
   override shortcut.
 
