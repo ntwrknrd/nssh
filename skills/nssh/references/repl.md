@@ -49,7 +49,10 @@ to a host literally named `repl`.
 
 ## Interactive command prompt
 
-Run `nssh repl` to edit a submission directly. Press Enter to run it.
+Run `nssh repl` to edit a submission directly. Typing a hostname into an empty
+prompt inserts the submission template and places the text inside the first
+device's quotes. Input beginning with `:` remains an internal command; `[`
+starts explicit submission syntax. Press Enter to run the completed submission.
 
 - Tab completes a unique host at the cursor or opens a searchable host picker.
   Tab on an empty prompt starts a submission and opens the picker.

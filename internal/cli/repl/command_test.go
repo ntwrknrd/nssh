@@ -180,3 +180,45 @@ func TestHistoryConcurrentInstancesPreserveEntries(t *testing.T) {
 		t.Fatalf("history lost entries: %v", got)
 	}
 }
+
+func TestTypingStartsInsideFirstDevice(t *testing.T) {
+	m := testTUI(120)
+	m.input.Focus()
+	for _, r := range "acm-spine1" {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = next.(model)
+	}
+	if got := m.input.Value(); got != "[ 'acm-spine1' ] ( '' )" {
+		t.Fatal(got)
+	}
+	if m.input.Position() != len([]rune("[ 'acm-spine1")) {
+		t.Fatal("cursor not inside target quotes")
+	}
+	m.candidates = []string{"acm-spine1.example"}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = next.(model)
+	if m.input.Value() != "[ 'acm-spine1.example' ] ( '' )" {
+		t.Fatal("completion failed", m.input.Value())
+	}
+}
+
+func TestTypingPreservesInternalCommandsAndExplicitSyntax(t *testing.T) {
+	for _, input := range []string{":help", ":clear", ":wipe", "[ 'a' ] ( 'show' )"} {
+		m := testTUI(120)
+		m.input.Focus()
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(input)})
+		m = next.(model)
+		if m.input.Value() != input {
+			t.Fatalf("input %q became %q", input, m.input.Value())
+		}
+	}
+	m := testTUI(120)
+	m.input.Focus()
+	m.input.SetValue("[ 'a' ] ( '' )")
+	m.input.SetCursor(len([]rune("[ 'a' ] ( '")))
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("show")})
+	m = next.(model)
+	if m.input.Value() != "[ 'a' ] ( 'show' )" {
+		t.Fatal("existing command changed", m.input.Value())
+	}
+}

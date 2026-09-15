@@ -662,6 +662,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.active {
 		return m, nil
 	}
+	// Ordinary typing starts in the first quoted device. Explicit REPL syntax
+	// and internal commands keep their original input path, including paste.
+	if key, ok := msg.(tea.KeyMsg); ok && key.Type == tea.KeyRunes && len(key.Runes) > 0 && m.input.Value() == "" {
+		first := key.Runes[0]
+		if first != ':' && first != '[' && !unicode.IsSpace(first) {
+			m.input.SetValue("[ '' ] ( '' )")
+			m.input.SetCursor(3)
+		}
+	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
