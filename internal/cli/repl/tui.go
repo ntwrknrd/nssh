@@ -143,13 +143,29 @@ func resultHeading(e core.Event, width int) string {
 	}
 	return tuiTarget.Bold(true).Render(ansi.Truncate("["+e.Target.Identity+"] "+status, width, "..."))
 }
-func resultLines(e core.Event, width int) []string {
-	// Wrapping preserves full output in narrow panes; Ctrl-L provides full width.
+
+// Device tables often pad rows to a fixed width. Trim only trailing display
+// padding before wrapping; indentation, column spacing, and real blank rows stay.
+func sourceLines(e core.Event) []string {
 	body := blockBody(e)
 	if body == "" {
 		return nil
 	}
-	return strings.Split(ansi.Hardwrap(body, max(1, width), true), "\n")
+	lines := strings.Split(body, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " \t")
+	}
+	return lines
+}
+func wrapResultLine(line string, width int) []string {
+	return strings.Split(ansi.Hardwrap(line, max(1, width), true), "\n")
+}
+func resultLines(e core.Event, width int) []string {
+	var lines []string
+	for _, line := range sourceLines(e) {
+		lines = append(lines, wrapResultLine(line, width)...)
+	}
+	return lines
 }
 
 type tuiSpan struct {
@@ -181,21 +197,7 @@ func (m model) renderRows() []tuiRow {
 		if !m.stacked && width >= 100 && i+1 < len(m.blocks) {
 			next := m.blocks[i+1]
 			if next.event != nil && next.batch == b.batch && next.event.CommandIndex == b.event.CommandIndex {
-				col := (width - 4) / 2
-				pair := strings.Split(m.renderPair(*b.event, *next.event, width), "\n")
-				a, c := resultLines(*b.event, col-7), resultLines(*next.event, col-7)
-				for j, line := range pair {
-					row := tuiRow{styled: line}
-					if j > 0 {
-						if j <= len(a) {
-							row.spans = append(row.spans, tuiSpan{block: i, offset: 7, width: col - 7, text: a[j-1]})
-						}
-						if j <= len(c) {
-							row.spans = append(row.spans, tuiSpan{block: i + 1, offset: col + 11, width: col - 7, text: c[j-1]})
-						}
-					}
-					rows = append(rows, row)
-				}
+				rows = append(rows, m.renderPair(*b.event, *next.event, width, i)...)
 				i++
 				continue
 			}
@@ -223,33 +225,52 @@ func (m model) renderBlocks() string {
 	}
 	return strings.Join(lines, "\n")
 }
-func (m model) renderPair(left, right core.Event, width int) string {
+func (m model) renderPair(left, right core.Event, width, block int) []tuiRow {
 	column := (width - 4) / 2
-	// Reserve a fixed gutter only after knowing the number of wrapped lines.
-	a, b := resultLines(left, column-7), resultLines(right, column-7)
-	lines := []string{padCells(resultHeading(left, column), column) + "    " + resultHeading(right, column)}
+	a, b := sourceLines(left), sourceLines(right)
+	rows := []tuiRow{{styled: padCells(resultHeading(left, column), column) + "    " + resultHeading(right, column)}}
+	// Pair original rows first. Wrapping either side adds continuation cells to
+	// that pair, never shifts the next source row or consumes another line number.
 	for i := 0; i < max(len(a), len(b)); i++ {
-		l, r := "", ""
+		var l, r []string
 		if i < len(a) {
-			l = a[i]
+			l = wrapResultLine(a[i], column-7)
 		}
 		if i < len(b) {
-			r = b[i]
+			r = wrapResultLine(b[i], column-7)
 		}
-		lp, rp := l, r
-		if m.diff && l != r {
-			lp = lipgloss.NewStyle().Background(lipgloss.Color("52")).Render(l)
-			rp = lipgloss.NewStyle().Background(lipgloss.Color("22")).Render(r)
+		differs := i >= len(a) || i >= len(b)
+		if !differs {
+			differs = a[i] != b[i]
 		}
-		if i < len(a) {
-			lp = tuiDim.Render(fmt.Sprintf("%6d ", i+1)) + lp
+		for j := 0; j < max(len(l), len(r)); j++ {
+			row := tuiRow{}
+			cells := [2]string{}
+			for side, lines := range [][]string{l, r} {
+				if j >= len(lines) {
+					continue
+				}
+				text := lines[j]
+				painted := text
+				if m.diff && differs {
+					color := lipgloss.Color("52")
+					if side == 1 {
+						color = lipgloss.Color("22")
+					}
+					painted = lipgloss.NewStyle().Background(color).Render(text)
+				}
+				gutter := "       "
+				if j == 0 {
+					gutter = tuiDim.Render(fmt.Sprintf("%6d ", i+1))
+				}
+				cells[side] = gutter + painted
+				row.spans = append(row.spans, tuiSpan{block: block + side, offset: side*(column+4) + 7, width: column - 7, text: text})
+			}
+			row.styled = padCells(cells[0], column) + "    " + cells[1]
+			rows = append(rows, row)
 		}
-		if i < len(b) {
-			rp = tuiDim.Render(fmt.Sprintf("%6d ", i+1)) + rp
-		}
-		lines = append(lines, padCells(lp, column)+"    "+rp)
 	}
-	return strings.Join(lines, "\n")
+	return rows
 }
 func padCells(s string, width int) string {
 	return s + strings.Repeat(" ", max(0, width-ansi.StringWidth(s)))

@@ -177,3 +177,35 @@ func TestTUIAccountsForInvisiblePayloadBytes(t *testing.T) {
 		t.Fatalf("retained=%d accounted=%d", retained, m.bytes)
 	}
 }
+
+func TestTUITablePaddingDoesNotCreateBlankRows(t *testing.T) {
+	e := tuiEvent("host", "show", "  Et1    connected"+strings.Repeat(" ", 70)+"\n  Et2    connected"+strings.Repeat(" ", 70)+"\n", 0)
+	lines := resultLines(e, 40)
+	if len(lines) != 2 || lines[0] != "  Et1    connected" || lines[1] != "  Et2    connected" {
+		t.Fatalf("padding created rows: %#v", lines)
+	}
+	e.Result.Stdout = []byte("first\n\n  indented\n")
+	lines = resultLines(e, 40)
+	if len(lines) != 3 || lines[1] != "" || lines[2] != "  indented" {
+		t.Fatalf("lost real blank line or indentation: %#v", lines)
+	}
+}
+
+func TestTUIPairsSourceRowsBeforeWrapping(t *testing.T) {
+	m := testTUI(100)
+	m.acceptResult(tuiEvent("a", "show", strings.Repeat("x", 50)+"\nEt2 left", 0))
+	m.acceptResult(tuiEvent("b", "show", "short\nEt2 right", 0))
+	for _, row := range m.renderRows() {
+		line := ansi.Strip(row.styled)
+		if strings.Contains(line, "Et2 left") {
+			if !strings.Contains(line, "Et2 right") {
+				t.Fatalf("second source rows drifted: %q", line)
+			}
+			if strings.Count(line, "     2 ") != 2 {
+				t.Fatalf("line numbers count wrapped display rows: %q", line)
+			}
+			return
+		}
+	}
+	t.Fatal("missing second source row")
+}

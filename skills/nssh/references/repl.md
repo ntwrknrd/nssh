@@ -75,7 +75,10 @@ The Go TUI has a boxed command editor, hostname suggestions, a host picker, and
 persistent running/done/failed/pending/canceled/skipped counts. Results stay
 under their command heading. At 100 columns or wider, adjacent devices for the
 same command appear side by side; narrow terminals stack them. Long output lines
-wrap within each pane. Stderr, failures, and truncation remain visible.
+wrap within each pane. Trailing table padding is removed for display; real blank
+lines and indentation remain. Paired source rows stay aligned when either side
+wraps, and continuation rows do not receive new line numbers. Stderr, failures,
+and truncation remain visible.
 
 Use `:help` or `nssh repl --explain` for keys and syntax:
 
