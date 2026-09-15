@@ -22,6 +22,12 @@ prompts, and can record sessions.
   through nssh inventory lookup, partial host matching, and optional `fzf`
   selection. Use `nssh --target HOST` for literal destinations that collide
   with nssh command names.
+- SSH command line: root invocations keep SSH-style option and command
+  boundaries. In 0.3, recognized SSH options can appear before or after the
+  destination until the remote command starts. Use `--` when a remote command
+  begins with `-`; `nssh -- HOST -p 2222` and
+  `nssh HOST -- -p 2222` both run `-p 2222` on `HOST` rather than treating it
+  as an SSH port option.
 - Inventory: `nssh inv` manages local hosts and external providers; current
   providers are NetBox and containerlab.
 - Credentials: SOPS+age, 1Password, and Bitwarden providers are selected by
@@ -33,10 +39,34 @@ prompts, and can record sessions.
   and typed SSH option rendering.
 - Recordings: optional asciinema session capture is managed with `nssh log`.
 - SCP: `nssh cp` uses the same host and credential resolution path as connect.
+- Multi-host commands: `nssh repl` provides an interactive terminal prompt or
+  plain piped input. A root command may also target a bare comma list such as
+  `nssh 'edge1, edge2' 'show version'`; it runs one command per host with four
+  workers by default. Lists require a remote command and keep its argv unchanged.
 
 Run `nssh --help` or read the generated help snapshots under
 [docs/examples/help](docs/examples/help). The first-run config template is
 [internal/config/example_config.yaml](internal/config/example_config.yaml).
+
+## Multi-host commands
+
+Start `nssh repl`, then submit targets and commands:
+
+```text
+[ 'irn-border-sw(1,2)', 'irn-agg-sw(1,2)' ] ( 'show env power' )
+```
+
+Or pipe a submission from fish:
+
+```fish
+printf '%s\n' "[ 'irn-border-sw(1,2)', 'irn-agg-sw(1,2)' ] ( 'show env power' )" | nssh repl
+```
+
+REPL is a normal command in the 0.3 development series. A literal host named
+`repl` uses `nssh --target repl`. Authenticate credential providers before
+entering the REPL. Output appears when each command
+finishes; commands cannot read interactive input. See the
+[REPL guide](skills/nssh/references/repl.md) for grammar, keys, limits, and errors.
 
 ## Installation
 

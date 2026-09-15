@@ -101,7 +101,7 @@ func buildTestSSHArgs(hostname, username string, cfg TestConfig) ([]string, stri
 	if username != "" {
 		target = fmt.Sprintf("%s@%s", username, hostname)
 	}
-	args = append(args, target, "--", "exit")
+	args = append(args, "--", target, "exit")
 
 	return args, clientLogPath, cleanup, nil
 }

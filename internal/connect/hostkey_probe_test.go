@@ -138,3 +138,14 @@ func TestWithoutAskpassEnvRemovesAskpassVariables(t *testing.T) {
 		t.Fatalf("withoutAskpassEnv() = %#v, want %#v", got, want)
 	}
 }
+
+func TestHostKeyProbePreservesOptionValuesAndTargetBoundary(t *testing.T) {
+	host := &ResolvedHost{Hostname: "-not-an-option", Port: 22}
+	args := buildHostKeyProbeArgs(host, []string{"-i", "--", "-qp2222"}, nil, Options{})
+	if connector.EffectiveSSHOption(args, "Port") != "2222" {
+		t.Fatalf("port lost: %q", args)
+	}
+	if !slices.Equal(args[len(args)-2:], []string{"--", "-not-an-option"}) {
+		t.Fatalf("target boundary: %q", args)
+	}
+}

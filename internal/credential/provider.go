@@ -4,6 +4,7 @@ package credential
 
 import (
 	"fmt"
+	"maps"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/secret"
@@ -33,16 +34,20 @@ func NewRegistry(cfg *config.Config) (*Registry, error) {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	credCfg := cfg.Credential
-	if err := credCfg.Validate(); err != nil {
+	// Validation normalizes provider entries. Each registry owns that map,
+	// including the normalized configuration retained by its executor.
+	local := *cfg
+	local.Credential.Provider = maps.Clone(cfg.Credential.Provider)
+	cfg = &local
+	if err := cfg.Credential.Validate(); err != nil {
 		return nil, err
 	}
 
 	registry := &Registry{
-		providers: make(map[string]Provider, len(credCfg.Provider)),
+		providers: make(map[string]Provider, len(cfg.Credential.Provider)),
 	}
 	executor := newConfiguredProviderExecutor(cfg)
-	for name, providerCfg := range credCfg.Provider {
+	for name, providerCfg := range cfg.Credential.Provider {
 		provider, err := buildNamedProvider(name, providerCfg, cfg, executor)
 		if err != nil {
 			return nil, err

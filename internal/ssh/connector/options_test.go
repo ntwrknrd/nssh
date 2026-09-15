@@ -52,6 +52,8 @@ func TestEffectiveSSHOptionUsesFirstValueAndShortAliases(t *testing.T) {
 		{name: "joined", args: []string{"-oConnectTimeout=60"}, want: "ConnectTimeout", value: "60"},
 		{name: "short port", args: []string{"-p", "2222", "-o", "Port=2200"}, want: "Port", value: "2222"},
 		{name: "joined short port", args: []string{"-p2222"}, want: "Port", value: "2222"},
+		{name: "quoted user", args: []string{"-o", `User="admin"`}, want: "User", value: "admin"},
+		{name: "quoted port", args: []string{"-o", `Port "2222"`}, want: "Port", value: "2222"},
 	}
 
 	for _, tt := range tests {
@@ -60,6 +62,26 @@ func TestEffectiveSSHOptionUsesFirstValueAndShortAliases(t *testing.T) {
 				t.Fatalf("EffectiveSSHOption() = %q, want %q", got, tt.value)
 			}
 		})
+	}
+}
+
+func TestComposeSSHOptionsStripsConfigFileOptionsWithoutScanningOpaqueValues(t *testing.T) {
+	args := ComposeSSHOptions(SSHOptionPlan{
+		Runtime: []string{"-vF/tmp/ignored", "-J", "-F", "-o", "LogLevel=DEBUG"},
+	})
+	want := []string{"-F", "none", "-v", "-J", "-F", "-o", "LogLevel=DEBUG"}
+	if !slices.Equal(args, want) {
+		t.Fatalf("ComposeSSHOptions() = %#v, want %#v", args, want)
+	}
+}
+
+func TestEffectiveSSHOptionSkipsOpaqueOptionValuesAndRecognizesClusters(t *testing.T) {
+	args := []string{"-vT", "-J", "-p", "-p2222", "-oUser=netops"}
+	if got := EffectiveSSHOption(args, "Port"); got != "2222" {
+		t.Fatalf("effective Port = %q, want 2222", got)
+	}
+	if got := EffectiveSSHOption(args, "User"); got != "netops" {
+		t.Fatalf("effective User = %q, want netops", got)
 	}
 }
 
@@ -242,6 +264,24 @@ func TestRenderSSHOptionsCompatibilityFloorExtendsExplicitAlgorithmBaseline(t *t
 		if arg == "KexAlgorithms=sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org" ||
 			arg == "KexAlgorithms=+diffie-hellman-group-exchange-sha256,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1,diffie-hellman-group1-sha1" {
 			t.Fatalf("args should render one merged KexAlgorithms directive: %#v", args)
+		}
+	}
+}
+
+func TestControlPathAssignmentOrder(t *testing.T) {
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-o", "ControlPath=/first", "-S", "/last"}, "/last"},
+		{[]string{"-S/first", "-o", "ControlPath=/ignored"}, "/first"},
+		{[]string{"-S/first", "-qS/last"}, "/last"},
+		{[]string{"-o", "ControlPath=/first", "-o", "ControlPath=/ignored"}, "/first"},
+		{[]string{"-o", "ControlPath=/first", "-S", "none"}, "none"},
+		{[]string{"-i", "-S/ignored", "-S/actual"}, "/actual"},
+	} {
+		if got := EffectiveSSHOption(tt.args, "ControlPath"); got != tt.want {
+			t.Errorf("%q: %q want %q", tt.args, got, tt.want)
 		}
 	}
 }

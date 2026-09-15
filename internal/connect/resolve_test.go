@@ -685,3 +685,32 @@ func TestSelectConnectionUsernameKeepsSSHUserForUnmanagedHosts(t *testing.T) {
 		t.Fatalf("username = %q, want ssh config user", got)
 	}
 }
+
+func TestRuntimePortUpdatesManagedProxyWithoutChangingInventory(t *testing.T) {
+	original := config.SSHHostConfig{Options: config.SSHOptions{
+		"ProxyCommand": config.NewSSHOptionString("original"),
+	}}
+	host := &ResolvedHost{
+		Hostname: "2001:db8::1", Port: 22,
+		SSH:   config.MergeSSH(config.SSHHostConfig{}, original),
+		Proxy: &ResolvedProxy{Hostname: "jump.example", Username: "proxyuser", Port: 2200},
+	}
+	if err := applyRuntimePort(host, []string{"-i", "-pwrong", "-qp", "2222", "-p", "2200"}); err != nil {
+		t.Fatal(err)
+	}
+	if host.Port != 2222 {
+		t.Fatalf("port=%d", host.Port)
+	}
+	command := host.SSH.Options["ProxyCommand"].StringValue()
+	if !strings.Contains(command, "[2001:db8::1]:2222") || !strings.Contains(command, "proxyuser@jump.example:2200") {
+		t.Fatalf("proxy=%s", command)
+	}
+	if original.Options["ProxyCommand"].StringValue() != "original" {
+		t.Fatal("mutated inventory policy")
+	}
+	for _, value := range []string{"wrong", "0", "65536"} {
+		if err := applyRuntimePort(host, []string{"-p", value}); err == nil {
+			t.Errorf("accepted port %s", value)
+		}
+	}
+}

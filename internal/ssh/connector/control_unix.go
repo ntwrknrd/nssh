@@ -11,6 +11,7 @@ import (
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
+	"github.com/ntwrknrd/nssh/internal/ssh/sshargs"
 )
 
 type ControlCommandRequest struct {
@@ -29,24 +30,27 @@ type ControlCommandExec func(context.Context, []string) error
 func ExtractControlCommand(args []string) (command string, rest []string, ok bool) {
 	rest = make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
+		if args[i] == "--" {
 			rest = append(rest, args[i:]...)
 			return "", rest, false
 		}
-		if arg == "-O" {
-			if i+1 >= len(args) {
-				rest = append(rest, arg)
-				return "", rest, false
+		options, consumed, err := sshargs.Next(args[i:])
+		if err != nil {
+			rest = append(rest, args[i:]...)
+			return "", rest, false
+		}
+		for _, option := range options {
+			if option.Name != 'O' {
+				continue
 			}
-			rest = append(rest, args[i+2:]...)
-			return args[i+1], rest, true
+			if before := strings.IndexByte(args[i], 'O'); before > 1 {
+				rest = append(rest, args[i][:before])
+			}
+			rest = append(rest, args[i+consumed:]...)
+			return option.Value, rest, true
 		}
-		if strings.HasPrefix(arg, "-O") && len(arg) > 2 {
-			rest = append(rest, args[i+1:]...)
-			return arg[2:], rest, true
-		}
-		rest = append(rest, arg)
+		rest = append(rest, args[i:i+consumed]...)
+		i += consumed - 1
 	}
 	return "", rest, false
 }
@@ -84,7 +88,7 @@ func BuildControlCommandArgs(req ControlCommandRequest) []string {
 	if req.Port != 0 && req.Port != 22 && effectiveSSHOption(args, "Port") == "" {
 		args = append(args, "-p", fmt.Sprintf("%d", req.Port))
 	}
-	args = append(args, "-O", req.Command, muxTarget(req.Username, req.Hostname))
+	args = append(args, "-O", req.Command, "--", muxTarget(req.Username, req.Hostname))
 	return args
 }
 

@@ -98,24 +98,5 @@ func hostKeyAlgorithmsForPublicKey(keyType string) string {
 // parsePortFromSSHArgs extracts an explicit port from sshArgs (-p or -o Port=...)
 // before the -- separator. Returns empty string if none found.
 func (c *Connector) parsePortFromSSHArgs() string {
-	for i := 0; i < len(c.sshArgs); i++ {
-		arg := c.sshArgs[i]
-		if arg == "--" {
-			break
-		}
-		if arg == "-p" && i+1 < len(c.sshArgs) {
-			return c.sshArgs[i+1]
-		}
-		if strings.HasPrefix(arg, "-p") && len(arg) > 2 {
-			return arg[2:]
-		}
-		if arg == "-o" && i+1 < len(c.sshArgs) {
-			next := strings.ToLower(c.sshArgs[i+1])
-			if strings.HasPrefix(next, "port=") {
-				return c.sshArgs[i+1][5:]
-			}
-			i++
-		}
-	}
-	return ""
+	return EffectiveSSHOption(c.sshArgs, "Port")
 }

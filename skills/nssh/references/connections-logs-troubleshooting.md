@@ -9,6 +9,66 @@ Use `nssh --select` for the smart picker and `nssh --target HOST` for literal
 destinations that collide with nssh command names or should bypass fuzzy
 resolution.
 
+### Root SSH syntax
+
+Root invocation is `nssh [ssh-options] HOST [command]`. In 0.3, recognized SSH
+options may appear before or after the destination until the remote command
+starts. This corrects the earlier behavior that treated every post-destination
+option as remote-command text. After the command starts, nssh passes all command
+arguments unchanged.
+
+Use `--` when the remote command itself starts with an option. Either placement
+preserves that literal command argv:
+
+```fish
+nssh -- HOST -p 2222
+nssh HOST -- -p 2222
+```
+
+Both commands run the remote argv `-p 2222`; they do not set an SSH port. `--` is
+not required when the remote command begins with normal text. `-B INTERFACE`,
+`-e ESCAPE`, and `-P TAG` accept either attached or separate values. Use the same
+forms for supported SSH options, including short clusters where SSH accepts them.
+
+Destinations may be `user@host`, a bracketed IPv6 address, or
+`ssh://user@host:port`. URI usernames decode percent escapes and `+` as a space;
+use `%2B` for a literal plus sign. Username and port use native first-value precedence
+across `-l`, `-o User=`, destination user, and `-p`, `-o Port=`, URI port. For
+example, `nssh -p 2222 ssh://user@host:2200` uses port 2222, while
+`nssh ssh://user@host:2200 -p 2222` uses port 2200. nssh still owns inventory,
+credentials, and rendered SSH policy. It does not load an OpenSSH configuration
+file from a supplied `-F`;
+configure those settings in nssh YAML instead. `nssh --target HOST` changes only resolution to literal; it shares
+this same 0.3 pre- and post-destination option parsing.
+
+### Root host lists
+
+A bare comma-separated destination with a remote command runs that one argv for
+each member. Quote a destination containing spaces so the shell passes it as one
+argument:
+
+```fish
+nssh 'irn-border-sw1,irn-border-sw2,irn-agg-sw1,irn-agg-sw2' 'show env power'
+nssh 'irn-border-sw1, irn-border-sw2, irn-agg-sw1, irn-agg-sw2' 'show env power'
+```
+
+An exact inventory alias containing the whole comma token remains one host.
+`--target`, `user@host`, and `ssh://` forms are always single targets. An explicit
+`-l` applies to all members; otherwise each member uses its inventory username.
+The SSH-option tokens are shared unchanged. Lists use four workers by default,
+require a remote command, send EOF on remote stdin, and print attributed output
+plus a final summary. A failed member exits 1; SIGINT exits 130 after cleanup.
+
+Lists reject interactive, forwarding, tunnel, background, and control modes,
+including incompatible resolved YAML policy, before connecting. A host-key
+approval that cannot be completed fails closed. Multiplexing remains available
+when `ControlPath` contains `%C` or all of `%h`, `%p`, and `%r`; shared static
+sockets are rejected. Use `-S none` or `-o ControlPath=none` to disable reuse.
+
+Put nssh-specific flags such as `--help` and `--explain` before the destination.
+The standalone `nssh -e` explanation shortcut remains available; `-e VALUE`
+selects SSH's escape character.
+
 Smart lookup behavior:
 
 1. Check the nssh host catalog for an exact host.

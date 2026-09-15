@@ -79,7 +79,7 @@ func TestBuildSSHArgsPreservesOptionsTargetAndCommand(t *testing.T) {
 		t.Fatalf("buildSSHArgs() error = %v", err)
 	}
 
-	want := []string{"-F", "none", "-p", "2222", "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=7", "netops@edge01", "show version"}
+	want := []string{"-F", "none", "-p", "2222", "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=7", "--", "netops@edge01", "show version"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
 	}
@@ -94,7 +94,7 @@ func TestBuildSSHArgsAddsDefaultTTYForInteractiveSession(t *testing.T) {
 		t.Fatalf("buildSSHArgs() error = %v", err)
 	}
 
-	want := []string{"-tt", "-F", "none", "-o", "LogLevel=ERROR", "-p", "2200", "netops@edge01"}
+	want := []string{"-tt", "-F", "none", "-o", "LogLevel=ERROR", "-p", "2200", "--", "netops@edge01"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
 	}
@@ -109,7 +109,7 @@ func TestBuildSSHArgsLimitsAskpassToOnePrompt(t *testing.T) {
 		t.Fatalf("buildSSHArgs() error = %v", err)
 	}
 
-	want := []string{"-tt", "-F", "none", "-o", "NumberOfPasswordPrompts=1", "netops@edge01"}
+	want := []string{"-tt", "-F", "none", "-o", "NumberOfPasswordPrompts=1", "--", "netops@edge01"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
 	}
@@ -124,7 +124,7 @@ func TestBuildSSHArgsKeepsExplicitAskpassPromptLimit(t *testing.T) {
 		t.Fatalf("buildSSHArgs() error = %v", err)
 	}
 
-	want := []string{"-tt", "-F", "none", "-o", "NumberOfPasswordPrompts=2", "netops@edge01"}
+	want := []string{"-tt", "-F", "none", "-o", "NumberOfPasswordPrompts=2", "--", "netops@edge01"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
 	}
@@ -168,7 +168,7 @@ func TestBuildSSHArgsDoesNotAddDefaultTTYForRemoteCommand(t *testing.T) {
 		t.Fatalf("buildSSHArgs() error = %v", err)
 	}
 
-	want := []string{"-F", "none", "-p", "2200", "netops@edge01", "show", "version"}
+	want := []string{"-F", "none", "-p", "2200", "--", "netops@edge01", "show", "version"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
 	}
@@ -180,9 +180,9 @@ func TestBuildSSHArgsPreservesExplicitTTYFlagsForRemoteCommand(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{name: "single force tty", args: []string{"-t", "--", "show"}, want: []string{"-F", "none", "-t", "edge01", "show"}},
-		{name: "double force tty", args: []string{"-tt", "--", "show"}, want: []string{"-F", "none", "-tt", "edge01", "show"}},
-		{name: "disable tty", args: []string{"-T", "--", "show"}, want: []string{"-F", "none", "-T", "edge01", "show"}},
+		{name: "single force tty", args: []string{"-t", "--", "show"}, want: []string{"-F", "none", "-t", "--", "edge01", "show"}},
+		{name: "double force tty", args: []string{"-tt", "--", "show"}, want: []string{"-F", "none", "-tt", "--", "edge01", "show"}},
+		{name: "disable tty", args: []string{"-T", "--", "show"}, want: []string{"-F", "none", "-T", "--", "edge01", "show"}},
 	}
 
 	for _, tt := range tests {
@@ -200,9 +200,40 @@ func TestBuildSSHArgsPreservesExplicitTTYFlagsForRemoteCommand(t *testing.T) {
 	}
 }
 
+func TestBuildSSHArgsRecognizesTTYInAClusterAndKeepsValuesOpaque(t *testing.T) {
+	conn := NewConnector("edge01", "", nil, []string{"-vT", "-J", "-t"})
+
+	got, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatalf("buildSSHArgs() error = %v", err)
+	}
+	want := []string{"-F", "none", "-vT", "-J", "-t", "--", "edge01"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
 func TestParsePortFromSSHArgsStopsAtRemoteCommand(t *testing.T) {
 	conn := NewConnector("edge01", "", nil, []string{"-o", "Port=2200", "--", "-p", "9999"})
 	if got := conn.parsePortFromSSHArgs(); got != "2200" {
 		t.Fatalf("parsePortFromSSHArgs() = %q, want %q", got, "2200")
+	}
+}
+
+func TestPortAndCommandBoundariesIgnoreOptionValues(t *testing.T) {
+	conn := NewConnector("edge01", "", nil, []string{"-i", "--", "-i", "-pwrong", "-qp2222", "--", "-p", "9999"})
+	if got := conn.parsePortFromSSHArgs(); got != "2222" {
+		t.Fatalf("port = %q", got)
+	}
+	args, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--", "edge01", "-p", "9999"}
+	if !slices.Equal(args[len(args)-len(want):], want) {
+		t.Fatalf("command boundary: %q", args)
+	}
+	if EffectiveSSHOption(args, "IdentityFile") != "--" {
+		t.Fatalf("identity value lost: %q", args)
 	}
 }

@@ -18,6 +18,7 @@ type bitwardenProvider struct {
 	hostRefs    map[string]config.CredentialRefConfig
 	groupRefs   map[string]config.CredentialRefConfig
 	warmSession bool
+	noUnlock    bool
 	transport   providerTransport
 }
 
@@ -64,6 +65,9 @@ func (p *bitwardenProvider) transportGet(scope credentialScope, name string, ref
 		UsernameRef: ref.UsernameRef,
 	})
 	if isBitwardenAuthRequired(err) {
+		if p.noUnlock {
+			return nil, fmt.Errorf("bitwarden requires authentication before starting nssh repl")
+		}
 		session, unlockErr := unlockBitwardenProvider()
 		if unlockErr != nil {
 			return nil, unlockErr

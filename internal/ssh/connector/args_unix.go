@@ -7,11 +7,13 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+
+	"github.com/ntwrknrd/nssh/internal/ssh/sshargs"
 )
 
 // buildSSHArgs constructs SSH arguments, adding temp known_hosts if needed.
-// SSH syntax: ssh [options] hostname [command]
-// The -- separator marks the start of the remote command, which must come AFTER hostname.
+// SSH syntax: ssh [options] -- hostname [command]. The terminator keeps the
+// generated target positional even when it begins with a dash.
 func (c *Connector) buildSSHArgs() ([]string, error) {
 	options, command := splitSSHArgs(c.sshArgs)
 	pinnedOptions, options := SplitPinnedHostKeyOptions(options)
@@ -76,10 +78,8 @@ func (c *Connector) buildSSHArgs() ([]string, error) {
 		args = append(args, "-o", "NumberOfPasswordPrompts=1")
 	}
 
-	// Add target hostname
-	args = append(args, target)
-
-	// Add remote command (if any)
+	// Terminate OpenSSH option parsing before the generated target.
+	args = append(args, "--", target)
 	if len(command) > 0 {
 		args = append(args, command...)
 	}
@@ -133,20 +133,17 @@ func hasAskpassEnv(env []string) bool {
 }
 
 func splitSSHArgs(args []string) (options, command []string) {
-	for i, arg := range args {
-		if arg == "--" {
-			return args[:i], args[i+1:]
-		}
-	}
-	return args, nil
+	return sshargs.Split(args)
 }
 
 func hasExplicitTTYOption(args []string) bool {
-	for _, arg := range args {
-		switch arg {
-		case "-t", "-tt", "-T":
-			return true
+	requested := false
+	sshargs.Walk(args, func(option sshargs.Option) bool {
+		if option.Name == 't' || option.Name == 'T' {
+			requested = true
+			return false
 		}
-	}
-	return false
+		return true
+	})
+	return requested
 }

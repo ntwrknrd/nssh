@@ -30,13 +30,15 @@ type Request struct {
 	ConnectTimeout time.Duration
 	Env            []string
 	Stdin          io.Reader
+	MaxOutputBytes int // Zero preserves unbounded root-command capture.
 }
 
 type Command struct {
-	Name  string
-	Args  []string
-	Env   []string
-	Stdin io.Reader
+	Name           string
+	Args           []string
+	Env            []string
+	Stdin          io.Reader
+	MaxOutputBytes int
 }
 
 type Stream string
@@ -52,11 +54,12 @@ type OutputEvent struct {
 }
 
 type Result struct {
-	Stdout   []byte
-	Stderr   []byte
-	Output   []OutputEvent
-	ExitCode int
-	Err      error
+	Stdout    []byte
+	Stderr    []byte
+	Output    []OutputEvent
+	ExitCode  int
+	Err       error
+	Truncated bool
 }
 
 type Runner struct {
@@ -78,10 +81,11 @@ func (r Runner) Run(ctx context.Context, req Request) (Result, error) {
 	}
 
 	result := execFn(ctx, Command{
-		Name:  "ssh",
-		Args:  args,
-		Env:   req.Env,
-		Stdin: stdin,
+		Name:           "ssh",
+		Args:           args,
+		Env:            req.Env,
+		Stdin:          stdin,
+		MaxOutputBytes: req.MaxOutputBytes,
 	})
 	if result.Err == nil {
 		return result, nil
@@ -120,7 +124,7 @@ func defaultExec(ctx context.Context, command Command) Result {
 	cmd.Stdout = stdoutWrite
 	cmd.Stderr = stderrWrite
 
-	var stdout, stderr bytes.Buffer
+	output := &outputBuffer{limit: command.MaxOutputBytes}
 	totalTimer := connector.StartTiming(connector.TimingSSHProcessTotal)
 	startTimer := connector.StartTiming(connector.TimingSSHProcessStart)
 	if err := cmd.Start(); err != nil {
@@ -138,26 +142,16 @@ func defaultExec(ctx context.Context, command Command) Result {
 	_ = stdoutWrite.Close()
 	_ = stderrWrite.Close()
 
-	events := make(chan OutputEvent, 16)
 	readErrs := make(chan error, 2)
-	outputDone := make(chan []OutputEvent, 1)
-	go func() {
-		var output []OutputEvent
-		for event := range events {
-			output = append(output, event)
-		}
-		outputDone <- output
-	}()
-
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		readErrs <- readOutputEvents(StreamStdout, stdoutRead, &stdout, events)
+		readErrs <- readOutputEvents(StreamStdout, stdoutRead, output)
 	}()
 	go func() {
 		defer wg.Done()
-		readErrs <- readOutputEvents(StreamStderr, stderrRead, &stderr, events)
+		readErrs <- readOutputEvents(StreamStderr, stderrRead, output)
 	}()
 
 	waitTimer := connector.StartTiming(connector.TimingSSHProcessWait)
@@ -170,12 +164,10 @@ func defaultExec(ctx context.Context, command Command) Result {
 	_ = stdoutRead.SetReadDeadline(past)
 	_ = stderrRead.SetReadDeadline(past)
 	wg.Wait()
-	drainBuffered(stdoutRead, &stdout, StreamStdout, events)
-	drainBuffered(stderrRead, &stderr, StreamStderr, events)
+	drainBuffered(stdoutRead, StreamStdout, output)
+	drainBuffered(stderrRead, StreamStderr, output)
 	_ = stdoutRead.Close()
 	_ = stderrRead.Close()
-	close(events)
-	output := <-outputDone
 	for range 2 {
 		readErr := <-readErrs
 		if readErr != nil && err == nil && !errors.Is(readErr, os.ErrDeadlineExceeded) {
@@ -185,10 +177,11 @@ func defaultExec(ctx context.Context, command Command) Result {
 	waitTimer.Emit()
 	totalTimer.Emit()
 	result := Result{
-		Stdout: stdout.Bytes(),
-		Stderr: stderr.Bytes(),
-		Output: output,
-		Err:    err,
+		Stdout:    output.stdout.Bytes(),
+		Stderr:    output.stderr.Bytes(),
+		Output:    output.events,
+		Truncated: output.truncated,
+		Err:       err,
 	}
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		result.ExitCode = exitErr.ExitCode()
@@ -205,7 +198,7 @@ const drainLimit = 1 << 20
 // drainBuffered reads whatever is already buffered in the pipe without
 // blocking, appending it to the sink and event stream in order after the
 // interrupted reader goroutine's output.
-func drainBuffered(f *os.File, sink *bytes.Buffer, stream Stream, events chan<- OutputEvent) {
+func drainBuffered(f *os.File, stream Stream, output *outputBuffer) {
 	conn, err := f.SyscallConn()
 	if err != nil {
 		return
@@ -217,9 +210,7 @@ func drainBuffered(f *os.File, sink *bytes.Buffer, stream Stream, events chan<- 
 			n, readErr := syscall.Read(int(fd), buf)
 			if n > 0 {
 				total += n
-				chunk := append([]byte(nil), buf[:n]...)
-				sink.Write(chunk)
-				events <- OutputEvent{Stream: stream, Data: chunk}
+				output.append(stream, buf[:n])
 			}
 			if readErr == syscall.EINTR {
 				continue
@@ -231,21 +222,49 @@ func drainBuffered(f *os.File, sink *bytes.Buffer, stream Stream, events chan<- 
 	})
 }
 
-func readOutputEvents(stream Stream, r io.Reader, sink *bytes.Buffer, events chan<- OutputEvent) error {
+// outputBuffer serializes reader observations. Bounded consumers retain each byte
+// only once; root commands also retain event order for existing presentation.
+type outputBuffer struct {
+	mu             sync.Mutex
+	stdout, stderr bytes.Buffer
+	events         []OutputEvent
+	limit          int
+	truncated      bool
+}
+
+func (b *outputBuffer) append(stream Stream, data []byte) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.limit > 0 {
+		left := max(0, b.limit-b.stdout.Len()-b.stderr.Len())
+		if len(data) > left {
+			b.truncated = true
+			data = data[:left]
+		}
+	}
+	if len(data) == 0 {
+		return
+	}
+	if stream == StreamStdout {
+		b.stdout.Write(data)
+	} else {
+		b.stderr.Write(data)
+	}
+	if b.limit <= 0 {
+		b.events = append(b.events, OutputEvent{Stream: stream, Data: append([]byte(nil), data...)})
+	}
+}
+
+func readOutputEvents(stream Stream, r io.Reader, output *outputBuffer) error {
 	reader := bufio.NewReader(r)
 	for {
-		data, err := reader.ReadBytes('\n')
-		if len(data) > 0 {
-			if _, writeErr := sink.Write(data); writeErr != nil {
-				return writeErr
-			}
-			chunk := append([]byte(nil), data...)
-			events <- OutputEvent{Stream: stream, Data: chunk}
-		}
+		// ReadSlice keeps even an unterminated multi-gigabyte line bounded.
+		data, err := reader.ReadSlice('\n')
+		output.append(stream, data)
 		if err == io.EOF {
 			return nil
 		}
-		if err != nil {
+		if err != nil && err != bufio.ErrBufferFull {
 			return err
 		}
 	}
@@ -277,8 +296,10 @@ func buildOpenSSHArgs(req Request) []string {
 	if req.Username != "" {
 		target = req.Username + "@" + target
 	}
-	args = append(args, target)
-	args = append(args, req.RemoteCommand...)
+	args = append(args, "--", target)
+	if len(req.RemoteCommand) > 0 {
+		args = append(args, req.RemoteCommand...)
+	}
 	return args
 }
 

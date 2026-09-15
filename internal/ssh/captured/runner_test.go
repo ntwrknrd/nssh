@@ -29,7 +29,23 @@ func TestBuildOpenSSHArgsPreservesOptionsTargetAndCommand(t *testing.T) {
 
 	got := buildOpenSSHArgs(req)
 
-	want := []string{"-F", "none", "-o", "LogLevel=ERROR", "-o", "BatchMode=yes", "-o", "ConnectTimeout=7", "-p", "2200", "netops@edge01", "show", "version"}
+	want := []string{"-F", "none", "-o", "LogLevel=ERROR", "-o", "BatchMode=yes", "-o", "ConnectTimeout=7", "-p", "2200", "--", "netops@edge01", "show", "version"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildOpenSSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildOpenSSHArgsDelimitsLeadingDashCommand(t *testing.T) {
+	got := buildOpenSSHArgs(Request{Hostname: "edge01", RemoteCommand: []string{"-dash-command"}})
+	want := []string{"-F", "none", "-o", "BatchMode=yes", "--", "edge01", "-dash-command"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildOpenSSHArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildOpenSSHArgsTerminatesOptionsBeforeDashTarget(t *testing.T) {
+	got := buildOpenSSHArgs(Request{Hostname: "-oProxyCommand=unexpected", RemoteCommand: []string{"show"}})
+	want := []string{"-F", "none", "-o", "BatchMode=yes", "--", "-oProxyCommand=unexpected", "show"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildOpenSSHArgs() = %#v, want %#v", got, want)
 	}
@@ -45,7 +61,7 @@ func TestBuildOpenSSHArgsRespectsExplicitPort(t *testing.T) {
 
 	got := buildOpenSSHArgs(req)
 
-	want := []string{"-F", "none", "-p", "2222", "-o", "BatchMode=yes", "edge01", "show"}
+	want := []string{"-F", "none", "-p", "2222", "-o", "BatchMode=yes", "--", "edge01", "show"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildOpenSSHArgs() = %#v, want %#v", got, want)
 	}
@@ -64,7 +80,7 @@ func TestBuildOpenSSHArgsRendersResolvedSSHOptions(t *testing.T) {
 
 	got := buildOpenSSHArgs(req)
 
-	want := []string{"-F", "none", "-o", "ProxyCommand=ssh -F none -W %h:%p jump", "-o", "BatchMode=yes", "edge01", "show"}
+	want := []string{"-F", "none", "-o", "ProxyCommand=ssh -F none -W %h:%p jump", "-o", "BatchMode=yes", "--", "edge01", "show"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildOpenSSHArgs() = %#v, want %#v", got, want)
 	}
@@ -79,7 +95,7 @@ func TestBuildOpenSSHArgsPreservesSSHVerbosity(t *testing.T) {
 
 	got := buildOpenSSHArgs(req)
 
-	want := []string{"-F", "none", "-vv", "-o", "BatchMode=yes", "edge01", "show"}
+	want := []string{"-F", "none", "-vv", "-o", "BatchMode=yes", "--", "edge01", "show"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildOpenSSHArgs() = %#v, want %#v", got, want)
 	}
@@ -94,7 +110,7 @@ func TestBuildOpenSSHArgsAllowsAskpassPasswordPrompt(t *testing.T) {
 
 	got := buildOpenSSHArgs(req)
 
-	want := []string{"-F", "none", "-o", "NumberOfPasswordPrompts=1", "edge01", "show"}
+	want := []string{"-F", "none", "-o", "NumberOfPasswordPrompts=1", "--", "edge01", "show"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildOpenSSHArgs() = %#v, want %#v", got, want)
 	}
@@ -156,7 +172,7 @@ func TestRunnerCapturesStdoutStderrAndExitCode(t *testing.T) {
 			if command.Name != "ssh" {
 				t.Fatalf("command name = %q, want ssh", command.Name)
 			}
-			if !slices.Equal(command.Args, []string{"-F", "none", "-o", "BatchMode=yes", "edge01", "show"}) {
+			if !slices.Equal(command.Args, []string{"-F", "none", "-o", "BatchMode=yes", "--", "edge01", "show"}) {
 				t.Fatalf("command args = %#v", command.Args)
 			}
 			return Result{

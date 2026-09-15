@@ -1,6 +1,6 @@
 ---
 name: nssh
-description: Develop, operate, and troubleshoot nssh, an OpenSSH-compatible wrapper used to resolve inventory and automatically authenticate or log in to servers, switches, and other SSH targets through external credential providers. Use for nssh CLI and SCP usage, automatic SSH authentication, configuration, inventory, credentials, connection behavior, proxies, host keys, recordings, logs, migration, architecture, or repository changes. Do not use for generic OpenSSH, SCP, device-access, or credential-provider questions unrelated to nssh.
+description: Develop, operate, and troubleshoot nssh, an OpenSSH-compatible wrapper used to resolve inventory and automatically authenticate or log in to servers, switches, and other SSH targets through external credential providers. Use for nssh CLI, REPL, and SCP usage, automatic SSH authentication, configuration, inventory, credentials, connection behavior, proxies, host keys, recordings, logs, migration, architecture, or repository changes. Do not use for generic OpenSSH, SCP, device-access, or credential-provider questions unrelated to nssh.
 ---
 
 # nssh
@@ -36,7 +36,7 @@ automatic authentication for servers, switches, and other SSH targets.
    - `docs/examples/help/`
    - `internal/config/example_config.yaml`
    - current source and tests for implementation details
-4. Treat the checked-out `release/0.3` behavior as the target command surface.
+4. Treat the selected checkout and revision as the target command surface.
    Verify installed versions, tags, or releases before calling any version
    current or latest.
 5. For upgrades from 0.2.x, read the migration reference before suggesting

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/credential/sopsdoc"
@@ -21,14 +22,15 @@ const ErrBitwardenNotAuthenticated = "bitwarden credential provider is not authe
 
 // ProviderRequest describes a provider-scoped credential operation.
 type ProviderRequest struct {
-	Provider    string `json:"provider"`
-	Action      string `json:"action"`
-	Scope       string `json:"scope,omitempty"`
-	Name        string `json:"name,omitempty"`
-	Ref         string `json:"ref,omitempty"`
-	Username    string `json:"username,omitempty"`
-	UsernameRef string `json:"username_ref,omitempty"`
-	Session     string `json:"session,omitempty"`
+	NonInteractive bool   `json:"non_interactive,omitempty"`
+	Provider       string `json:"provider"`
+	Action         string `json:"action"`
+	Scope          string `json:"scope,omitempty"`
+	Name           string `json:"name,omitempty"`
+	Ref            string `json:"ref,omitempty"`
+	Username       string `json:"username,omitempty"`
+	UsernameRef    string `json:"username_ref,omitempty"`
+	Session        string `json:"session,omitempty"`
 }
 
 // ProviderResponse returns a request-scoped credential record.
@@ -132,6 +134,9 @@ func NewConfiguredExecutor(cfg *config.Config) *Executor {
 
 func (OPCLIRunner) Run(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "op", args...)
+	if isNonInteractive(ctx) {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	}
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
@@ -215,6 +220,13 @@ func (e *Executor) ProviderNames() []string {
 }
 
 func (e *Executor) HandleProviderRequest(ctx context.Context, req ProviderRequest) (ProviderResponse, error) {
+	if req.Action == "get_noninteractive" {
+		req.Action = "get"
+		req.NonInteractive = true
+	}
+	if req.NonInteractive {
+		ctx = context.WithValue(ctx, nonInteractiveKey{}, true)
+	}
 	if req.Provider == "" {
 		return ProviderResponse{}, errors.New("provider is required")
 	}
@@ -284,7 +296,14 @@ func (e *Executor) handleSOPSAgeGet(ctx context.Context, cfg *SOPSAgeProviderCon
 	if cfg == nil {
 		return ProviderResponse{}, errors.New("credential provider is nil")
 	}
-	doc, err := sopsdoc.Decrypt(ctx, cfg.Runner, cfg.File, cfg.AgeKeyFile)
+	runner := cfg.Runner
+	if isNonInteractive(ctx) {
+		if cli, ok := runner.(sopsdoc.CLIRunner); ok {
+			cli.NonInteractive = true
+			runner = cli
+		}
+	}
+	doc, err := sopsdoc.Decrypt(ctx, runner, cfg.File, cfg.AgeKeyFile)
 	if err != nil {
 		return ProviderResponse{}, err
 	}
@@ -395,6 +414,9 @@ func runOnePasswordWithSignin(ctx context.Context, cfg *OnePasswordProviderConfi
 	if err == nil || !isOnePasswordNotSignedIn(out, err) {
 		return out, err
 	}
+	if isNonInteractive(ctx) {
+		return nil, fmt.Errorf("1Password requires authentication before starting nssh repl")
+	}
 	signinArgs := []string{"signin"}
 	if cfg.Account != "" {
 		signinArgs = append(signinArgs, "--account", cfg.Account)
@@ -479,4 +501,11 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+type nonInteractiveKey struct{}
+
+func isNonInteractive(ctx context.Context) bool {
+	v, _ := ctx.Value(nonInteractiveKey{}).(bool)
+	return v
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
@@ -51,6 +52,7 @@ type ResolvedHost struct {
 }
 
 type ResolvedProxy struct {
+	ssh        config.SSHHostConfig
 	Canonical  string
 	Hostname   string
 	Port       int
@@ -139,7 +141,14 @@ func resolveCatalogHostForConnect(query, explicitUser string, c *config.Config, 
 		registry = nil
 	}
 
-	auth, cred, username := resolveCatalogAuthCredential(c, registry, hostData, explicitUser)
+	return resolveCatalogHostWithRegistry(query, explicitUser, c, hostData, registry, false)
+}
+
+func resolveCatalogHostWithRegistry(query, explicitUser string, c *config.Config, hostData *ResolvedHostData, registry providerRegistry, strict bool) (*ResolvedHost, error) {
+	auth, cred, username, err := resolveCatalogAuthCredential(c, registry, hostData, explicitUser, strict)
+	if strict && err != nil {
+		return nil, fmt.Errorf("resolve credential: %w", err)
+	}
 
 	resolved := &ResolvedHost{
 		Query:      query,
@@ -157,8 +166,13 @@ func resolveCatalogHostForConnect(query, explicitUser string, c *config.Config, 
 		Config:     c,
 	}
 	if hostData.ManagedProxy != nil {
-		proxyAuth, proxyCredential, proxyUsername := resolveCatalogAuthCredential(c, registry, hostData.ManagedProxy, hostData.ManagedProxy.Username)
+		proxyAuth, proxyCredential, proxyUsername, err := resolveCatalogAuthCredential(c, registry, hostData.ManagedProxy, hostData.ManagedProxy.Username, strict)
+		if strict && err != nil {
+			destroyImmediateResolvedPasswords(resolved)
+			return nil, fmt.Errorf("resolve proxy credential: %w", err)
+		}
 		resolved.Proxy = &ResolvedProxy{
+			ssh:        hostData.ManagedProxy.SSH,
 			Canonical:  hostData.ManagedProxy.Canonical,
 			Hostname:   hostData.ManagedProxy.Hostname,
 			Port:       hostData.ManagedProxy.Port,
@@ -187,9 +201,9 @@ func deleteSSHOption(options config.SSHOptions, name string) {
 	}
 }
 
-func resolveCatalogAuthCredential(c *config.Config, registry providerRegistry, host *ResolvedHostData, explicitUser string) (config.InventoryAuthResolution, *ResolvedCredential, string) {
+func resolveCatalogAuthCredential(c *config.Config, registry providerRegistry, host *ResolvedHostData, explicitUser string, strict bool) (config.InventoryAuthResolution, *ResolvedCredential, string, error) {
 	if c == nil || host == nil {
-		return config.InventoryAuthResolution{}, nil, strings.TrimSpace(explicitUser)
+		return config.InventoryAuthResolution{}, nil, strings.TrimSpace(explicitUser), nil
 	}
 	authTimer := connector.StartTiming(connector.TimingAuthResolve)
 	auth := c.ResolveInventoryAuth(config.InventoryAuthContext{
@@ -201,19 +215,23 @@ func resolveCatalogAuthCredential(c *config.Config, registry providerRegistry, h
 
 	credentialUser := auth.Username
 	var cred *ResolvedCredential
+	var lookupErr error
 	if registry != nil {
 		lookupTimer := connector.StartTiming(connector.TimingCredentialLookup)
 		var err error
 		cred, err = resolveInventoryCredential(registry, auth, explicitUser)
+		lookupErr = err
 		lookupTimer.Emit()
 		if err != nil {
-			slog.Warn("credential resolution failed", "host", host.Hostname, "err", err)
+			if !strict {
+				slog.Warn("credential resolution failed", "host", host.Hostname, "err", err)
+			}
 		} else if cred != nil && credentialUser == "" {
 			credentialUser = cred.Username
 		}
 	}
 	username := selectConnectionUsername(true, explicitUser, "", "", credentialUser, "")
-	return auth, cred, username
+	return auth, cred, username, lookupErr
 }
 
 // ResolveLiteralHostForConnect resolves a literal destination without fuzzy
@@ -447,4 +465,55 @@ func canDeferCredentialLookup(ref config.CredentialRefConfig, explicitUser strin
 func isDirectSecretRef(ref string) bool {
 	ref = strings.TrimSpace(ref)
 	return strings.HasPrefix(ref, "op://") && !strings.HasSuffix(ref, "/")
+}
+
+// ResolveLiteralHostFromCatalog uses a submission's catalog snapshot without
+// fuzzy selection or inventory creation. Providers cannot bootstrap terminal
+// sessions, and each call owns its own resolved secrets.
+func ResolveLiteralHostFromCatalog(ctx context.Context, query, explicitUser string, cfg *config.Config, cat *HostCatalog) (*ResolvedHost, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if cfg == nil || cat == nil {
+		return nil, fmt.Errorf("config and catalog are required")
+	}
+	host, user := splitConnectQuery(strings.TrimSpace(query), explicitUser)
+	if host == "" {
+		return nil, fmt.Errorf("literal target is required")
+	}
+	if data, ok := cat.Find(host); ok {
+		registry, err := credential.NewCommandRegistry(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+		return resolveCatalogHostWithRegistry(query, user, cfg, data, registry, true)
+	}
+	return &ResolvedHost{Query: query, Canonical: host, Hostname: host, Port: 22, Username: user,
+		SSH: config.MergeSSH(config.SSHHostConfig{}, cfg.SSH.Defaults), Highlight: cfg.Highlight, Config: cfg}, nil
+}
+
+// applyRuntimePort keeps managed proxy forwarding and endpoint consumers in
+// agreement with OpenSSH's first explicit Port. Inventory data stays unchanged.
+func applyRuntimePort(resolved *ResolvedHost, sshArgs []string) error {
+	value := connector.EffectiveSSHOption(sshArgs, "Port")
+	if value == "" {
+		return nil
+	}
+	port, err := strconv.Atoi(value)
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("invalid SSH port %q", value)
+	}
+	resolved.Port = port
+	if proxy := resolved.Proxy; proxy != nil {
+		command := formatManagedProxyCommand(&ResolvedHostData{
+			Hostname: proxy.Hostname, Port: proxy.Port, Username: proxy.Username, SSH: proxy.ssh,
+		}, resolved.Hostname, port)
+		if command != "" {
+			if resolved.SSH.Options == nil {
+				resolved.SSH.Options = config.SSHOptions{}
+			}
+			resolved.SSH.Options["ProxyCommand"] = config.NewSSHOptionString(command)
+		}
+	}
+	return nil
 }

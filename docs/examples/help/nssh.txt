@@ -1,12 +1,14 @@
 $ nssh --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
 │   nssh [flags] [ssh-options] HOST [command]                                  │
+│   nssh [flags] [ssh-options] 'HOST1,HOST2' command                           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────╮
 │   agent                             Manage nssh agent                        │
 │   cp                                Copy files via SCP                       │
 │   inv                               Manage inventory                         │
 │   log                               Manage session recordings                │
+│   repl                              Run commands across inventory targets    │
 │   self                              Manage nssh                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Flags ──────────────────────────────────────────────────────────────────────╮

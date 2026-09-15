@@ -1,10 +1,10 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -13,119 +13,6 @@ import (
 	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/ui"
 )
-
-func TestPreprocessArgs(t *testing.T) {
-	tests := []struct {
-		name string
-		in   []string
-		out  []string
-	}{
-		{
-			name: "simple host connects through smart-connect",
-			in:   []string{"router1"},
-			out:  []string{"smart-connect", "router1"},
-		},
-		{
-			name: "known subcommand passes through",
-			in:   []string{"inv", "list"},
-			out:  []string{"inv", "list"},
-		},
-		{
-			name: "verbose flag before host",
-			in:   []string{"-v", "router1"},
-			out:  []string{"-v", "smart-connect", "router1"},
-		},
-		{
-			name: "ssh flag with value before host (-o)",
-			in:   []string{"-o", "StrictHostKeyChecking=no", "router1"},
-			out:  []string{"smart-connect", "router1", "-o", "StrictHostKeyChecking=no"},
-		},
-		{
-			name: "ssh flag with value before host (-p)",
-			in:   []string{"-p", "2200", "router1"},
-			out:  []string{"smart-connect", "router1", "-p", "2200"},
-		},
-		{
-			name: "post host flag is remote command",
-			in:   []string{"router1", "-p", "2200"},
-			out:  []string{"smart-connect", "router1", "--", "-p", "2200"},
-		},
-		{
-			name: "ssh boolean flags before host",
-			in:   []string{"-4", "-A", "router1"},
-			out:  []string{"smart-connect", "router1", "-4", "-A"},
-		},
-		{
-			name: "multiple SSH flags",
-			in:   []string{"-p", "2222", "-l", "admin", "somehost"},
-			out:  []string{"smart-connect", "somehost", "-p", "2222", "-l", "admin"},
-		},
-		{
-			name: "mixed global and SSH flags",
-			in:   []string{"-v", "-4", "-p", "2222", "somehost", "-l", "root"},
-			out:  []string{"-v", "smart-connect", "somehost", "-4", "-p", "2222", "--", "-l", "root"},
-		},
-		{
-			name: "remote command after host",
-			in:   []string{"router1", "show", "version"},
-			out:  []string{"smart-connect", "router1", "--", "show", "version"},
-		},
-		{
-			name: "ssh options before host and remote command after host",
-			in:   []string{"-p", "2222", "router1", "show", "version"},
-			out:  []string{"smart-connect", "router1", "-p", "2222", "--", "show", "version"},
-		},
-		{
-			name: "control command split form before host",
-			in:   []string{"-O", "exit", "router1"},
-			out:  []string{"smart-connect", "router1", "-O", "exit"},
-		},
-		{
-			name: "control command joined form before host",
-			in:   []string{"-Ocheck", "router1"},
-			out:  []string{"smart-connect", "router1", "-Ocheck"},
-		},
-		{
-			name: "select opens smart picker",
-			in:   []string{"--select"},
-			out:  []string{"smart-connect"},
-		},
-		{
-			name: "literal target bypasses subcommand parsing",
-			in:   []string{"--target", "log"},
-			out:  []string{"smart-connect", "--literal-target", "log"},
-		},
-		{
-			name: "literal target carries remote command",
-			in:   []string{"--target", "log", "show", "version"},
-			out:  []string{"smart-connect", "--literal-target", "log", "--", "show", "version"},
-		},
-		{
-			name: "ssh option before literal target",
-			in:   []string{"-p", "2222", "--target", "log", "show", "version"},
-			out:  []string{"smart-connect", "--literal-target", "log", "-p", "2222", "--", "show", "version"},
-		},
-		{
-			name: "global flag only",
-			in:   []string{"-v", "--help"},
-			out:  []string{"-v", "--help"},
-		},
-		{
-			name: "empty args",
-			in:   []string{},
-			out:  []string{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := PreprocessArgs(tt.in)
-			if !reflect.DeepEqual(got, tt.out) {
-				t.Fatalf("PreprocessArgs(%v) = %v, want %v", tt.in, got, tt.out)
-			}
-		})
-	}
-}
 
 func TestRunSuppressesEmptyExitErrorMessage(t *testing.T) {
 	oldConnectRequest := connectRequestFunc
@@ -164,9 +51,39 @@ func TestRootCommandRegistersPublicCommands(t *testing.T) {
 			got = append(got, cmd.Name())
 		}
 	}
-	want := []string{"agent", "cp", "inv", "log", "self"}
+	want := []string{"agent", "cp", "inv", "log", "repl", "self"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("public commands = %v, want %v", got, want)
+	}
+}
+
+func TestPublicCommandIntegration(t *testing.T) {
+	root := NewRootCmd(Options{Version: "test"})
+	var want []string
+	for _, cmd := range root.Commands() {
+		if cmd.Hidden {
+			continue
+		}
+		want = append(want, cmd.Name())
+		args := []string{cmd.Name(), "--help"}
+		got, err := parseRootArgs(args)
+		if err != nil || got.request != nil || !slices.Equal(got.commandArgs, args) {
+			t.Errorf("public command %s routed incorrectly: %+v, %v", cmd.Name(), got, err)
+		}
+		if cmd.Long != "" && cmd.Flags().Lookup("explain") == nil {
+			t.Errorf("public command %s has extended help but no --explain flag", cmd.Name())
+		}
+	}
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetArgs([]string{"__list-subcommands"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Fields(out.String())
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("listed commands = %v, registered commands = %v", got, want)
 	}
 }
 

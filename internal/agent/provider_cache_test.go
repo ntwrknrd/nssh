@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -79,6 +80,7 @@ type deadlineCheckingBroker struct {
 }
 
 type fakeOnePasswordRunner struct {
+	mu    sync.Mutex
 	calls [][]string
 	outs  [][]byte
 	errs  []error
@@ -100,6 +102,8 @@ type fakeBitwardenCall struct {
 }
 
 func (f *fakeOnePasswordRunner) Run(_ context.Context, _ []byte, args ...string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, append([]string(nil), args...))
 	var out []byte
 	if len(f.outs) > 0 {
@@ -114,6 +118,12 @@ func (f *fakeOnePasswordRunner) Run(_ context.Context, _ []byte, args ...string)
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeOnePasswordRunner) callSnapshot() [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][]string(nil), f.calls...)
 }
 
 func (f *fakeSOPSAgeRunner) Run(_ context.Context, _ []string, _ ...string) ([]byte, error) {
@@ -330,15 +340,15 @@ func TestRuntimeProviderOnePasswordKeepaliveArmsAfterSuccessfulGet(t *testing.T)
 	}
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		if len(runner.calls) >= 3 {
+		if len(runner.callSnapshot()) >= 3 {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if len(runner.calls) < 3 {
-		t.Fatalf("op calls = %v, want keepalive tick", runner.calls)
+	if len(runner.callSnapshot()) < 3 {
+		t.Fatalf("op calls = %v, want keepalive tick", runner.callSnapshot())
 	}
-	if got := strings.Join(runner.calls[2], " "); got != "whoami --account ntwrknrd" {
+	if got := strings.Join(runner.callSnapshot()[2], " "); got != "whoami --account ntwrknrd" {
 		t.Fatalf("keepalive args = %q", got)
 	}
 	entries := provider.AccessStatus()

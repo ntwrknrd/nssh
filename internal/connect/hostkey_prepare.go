@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -30,38 +31,60 @@ type scannedHostKey struct {
 var negotiatedHostKeyRE = regexp.MustCompile(`(?m)Server host key: ([^\s]+) (SHA256:[A-Za-z0-9+/=]+)`)
 
 func runHostKeyPreparation(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options, changed bool, proxyEnv []string) (*connector.HostKeyPreparation, error) {
+	if opts.capture != nil && opts.capture.HostKeyPrompt == nil {
+		return nil, fmt.Errorf("host %s requires interactive host-key verification", resolved.Hostname)
+	}
 	slog.Debug("preparing host key", "host", resolved.Hostname)
 	key, err := scanHostKeyFunc(ctx, resolved, sshArgs, cfg, opts, proxyEnv)
 	if err != nil {
 		return nil, err
 	}
 	slog.Debug("host key scanned", "host", resolved.Hostname, "key_type", key.KeyType, "fingerprint", key.Fingerprint)
-	action := hostKeyPromptFunc()(connector.HostKeyPrompt{
-		Host:        resolved.Hostname,
-		KeyType:     key.KeyType,
-		Fingerprint: key.Fingerprint,
-		Changed:     changed,
-		Stdin:       os.Stdin,
-	})
-	switch action {
-	case connector.HostKeyReject:
-		return nil, exit.ErrAuthFailed
-	case connector.HostKeyAcceptOnce:
-		return writeTemporaryKnownHosts(key.Line, key.Algorithm)
-	case connector.HostKeyAcceptAlways:
-		var err error
-		if changed {
-			err = replaceKnownHosts(resolved, sshArgs, key.Line)
-		} else {
-			err = appendKnownHosts(key.Line)
+	decision := func() (*connector.HostKeyPreparation, error) {
+		promptFn := hostKeyPromptFunc()
+		if opts.capture != nil {
+			promptFn = opts.capture.HostKeyPrompt
 		}
-		if err != nil {
-			return nil, err
+		if promptFn == nil {
+			return nil, fmt.Errorf("host %s requires interactive host-key verification", resolved.Hostname)
 		}
-		return nil, nil
-	default:
-		return nil, exit.ErrAuthFailed
+		action := promptFn(connector.HostKeyPrompt{
+			Host:        resolved.Hostname,
+			KeyType:     key.KeyType,
+			Fingerprint: key.Fingerprint,
+			Changed:     changed,
+			Stdin:       promptInput(opts),
+		})
+		switch action {
+		case connector.HostKeyReject:
+			return nil, exit.ErrAuthFailed
+		case connector.HostKeyAcceptOnce:
+			return writeTemporaryKnownHosts(key.Line, key.Algorithm)
+		case connector.HostKeyAcceptAlways:
+			var err error
+			if changed {
+				err = replaceKnownHosts(resolved, sshArgs, key.Line)
+			} else {
+				err = appendKnownHosts(key.Line)
+			}
+			if err != nil {
+				return nil, err
+			}
+			return nil, nil
+		default:
+			return nil, exit.ErrAuthFailed
+		}
 	}
+	if opts.capture == nil {
+		return decision()
+	}
+	select {
+	case commandTrustGate <- struct{}{}:
+		defer func() { <-commandTrustGate }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return decision()
 }
 
 func writeTemporaryKnownHosts(line, algorithm string) (*connector.HostKeyPreparation, error) {
@@ -164,7 +187,7 @@ func scanHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string, 
 	probeArgs := append([]string{"-vv"}, buildHostKeyProbeArgs(resolved, sshArgs, cfg, opts)...)
 	probe := exec.CommandContext(ctx, "ssh", probeArgs...)
 	probe.Env = append(withoutAskpassEnv(os.Environ()), proxyEnv...)
-	probeOutput, _ := probe.CombinedOutput()
+	probeOutput, _ := collectPreparationOutput(probe, opts)
 	algorithm, fingerprint, err := parseNegotiatedHostKey(probeOutput)
 	if err != nil {
 		return scannedHostKey{}, err
@@ -185,7 +208,7 @@ func scanHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string, 
 	}
 	args = append(args, host)
 	slog.Debug("executing ssh-keyscan", "argv", append([]string{"ssh-keyscan"}, args...))
-	output, err := exec.CommandContext(ctx, "ssh-keyscan", args...).CombinedOutput()
+	output, err := collectPreparationOutput(exec.CommandContext(ctx, "ssh-keyscan", args...), opts)
 	if err != nil {
 		return scannedHostKey{}, fmt.Errorf("ssh-keyscan failed: %w (%s)", err, strings.TrimSpace(string(output)))
 	}
@@ -248,4 +271,13 @@ func scannedHostKeyByFingerprint(output []byte, fingerprint string) (scannedHost
 		return scannedHostKey{}, fmt.Errorf("read ssh-keyscan output: %w", err)
 	}
 	return scannedHostKey{}, fmt.Errorf("ssh-keyscan did not return the host key negotiated by OpenSSH")
+}
+
+var commandTrustGate = make(chan struct{}, 1)
+
+func promptInput(opts Options) io.Reader {
+	if opts.capture != nil {
+		return strings.NewReader("")
+	}
+	return os.Stdin
 }
