@@ -23,6 +23,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/connect"
 	"github.com/ntwrknrd/nssh/internal/exit"
 	core "github.com/ntwrknrd/nssh/internal/repl"
+	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/spf13/cobra"
@@ -33,6 +34,8 @@ func NewCmd() *cobra.Command {
 	var plain bool
 	var concurrency int
 	cmd := &cobra.Command{Use: "repl", Short: "Run commands across inventory targets", Long: replHelp, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		restoreInterrupts := secret.ManageInterrupts()
+		defer restoreInterrupts()
 		if concurrency < 1 {
 			return fmt.Errorf("concurrency must be at least one")
 		}
@@ -425,6 +428,7 @@ func runTUI(concurrency int) error {
 	defer cancel()
 	owner := &terminalOwner{ctx: ctx}
 	input := textinput.New()
+	input.Prompt = ""
 	input.Placeholder = "[ 'host' ] ( 'command' )"
 	input.CharLimit = core.MaxSubmissionBytes
 	input.Focus()

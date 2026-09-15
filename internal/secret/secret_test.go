@@ -108,3 +108,13 @@ func TestNewFromString(t *testing.T) {
 		t.Errorf("Use() error: %v", err)
 	}
 }
+
+func TestManagedInterruptRestorePurgesSecureMemory(t *testing.T) {
+	restore := ManageInterrupts()
+	s := NewFromString("test-only")
+	defer s.Destroy()
+	restore()
+	if s.buf.IsAlive() {
+		t.Fatal("secure memory survived interrupt-owner cleanup")
+	}
+}

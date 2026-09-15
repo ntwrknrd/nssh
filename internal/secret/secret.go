@@ -2,6 +2,8 @@ package secret
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
 
 	"github.com/awnumar/memguard"
 )
@@ -10,6 +12,18 @@ func init() {
 	// Initialize memguard's secure memory handling.
 	// This sets up memory locking and secure allocation.
 	memguard.CatchInterrupt()
+}
+
+// ManageInterrupts lets a foreground command own SIGINT and finish cleanup
+// before secure memory is purged. The caller must wait for all request-owned
+// workers before calling the returned restore function. Other commands retain
+// memguard's immediate wipe-and-exit policy.
+func ManageInterrupts() func() {
+	signal.Reset(os.Interrupt)
+	return func() {
+		memguard.Purge()
+		memguard.CatchInterrupt()
+	}
 }
 
 // Secret wraps memguard.LockedBuffer with panic-on-misuse semantics.

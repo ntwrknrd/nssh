@@ -6,6 +6,8 @@ then inspect current source for implementation details.
 
 ## Setup
 
+On macOS, run the build and test commands in an OrbStack Linux machine.
+
 ```bash
 git clone https://github.com/YOUR_USERNAME/nssh.git
 cd nssh
@@ -14,6 +16,22 @@ make build
 
 Optional runtime tools depend on what you are testing: `sops`, `age`, `op`, `bw`,
 `fzf`, `asciinema`, Docker, and VHS.
+
+## macOS test environment
+
+Run nssh builds and executable tests inside an OrbStack Linux machine. Keep the
+checkout, generated binaries, Go cache, and temporary test files in the machine's
+Linux filesystem. Use `orb list` to select the machine, then run the commands
+below from its checkout.
+
+```bash
+orb -m alma -w /path/to/linux/checkout make test
+orb -m alma -w /path/to/linux/checkout go test ./cmd/nssh -run TestREPLProcess -v
+```
+
+The process tests use fake SSH executables and local PTYs, covering separate
+streams, per-host failures, stdin ownership, cancellation, completion, history,
+resize, and host-key decisions.
 
 ## Commands
 
