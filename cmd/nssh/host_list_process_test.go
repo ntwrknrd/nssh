@@ -62,7 +62,10 @@ func (f *hostListFixture) command(t *testing.T, args ...string) *exec.Cmd {
 }
 func (f *hostListFixture) run(t *testing.T, args ...string) (string, error) {
 	t.Helper()
-	_, err := f.command(t, args...).CombinedOutput()
+	output, err := f.command(t, args...).CombinedOutput()
+	if err != nil {
+		t.Logf("nssh output: %s", output)
+	}
 	return f.readLog(t), err
 }
 func (f *hostListFixture) readLog(t *testing.T) string {

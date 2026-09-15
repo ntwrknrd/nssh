@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"sort"
@@ -697,22 +698,27 @@ func (c *Config) ResolveInventoryAuth(ctx InventoryAuthContext) InventoryAuthRes
 	if c == nil {
 		c = DefaultConfig()
 	}
-	c.syncSchemaAliases()
+	// Resolution is read-only: alias normalization writes provider table
+	// entries, so normalize private tables rather than the shared snapshot.
+	inventory := c.Inventory
+	inventory.Provider = maps.Clone(inventory.Provider)
+	inventory.Providers = maps.Clone(inventory.Providers)
+	inventory.syncAliasFields()
 	var res InventoryAuthResolution
-	applyAuth(&res, c.Inventory.Auth, "inventory default")
+	applyAuth(&res, inventory.Auth, "inventory default")
 	providerName := ctx.Provider
 	groupName := ctx.Group
 	if parsedProvider, parsedGroup, err := ParseInventoryGroupID(ctx.Group); err == nil {
 		providerName = parsedProvider
 		groupName = parsedGroup
 	}
-	if provider, ok := c.Inventory.Provider[providerName]; ok {
+	if provider, ok := inventory.Provider[providerName]; ok {
 		applyAuth(&res, provider.Auth, "provider "+providerName)
 	}
-	if group, ok := c.Inventory.ProviderGroup(providerName, groupName); ok {
+	if group, ok := inventory.ProviderGroup(providerName, groupName); ok {
 		applyAuth(&res, group.Auth, "group "+FormatInventoryGroupID(providerName, groupName))
 	}
-	if host, ok := c.Inventory.Host[ctx.Host]; ok {
+	if host, ok := inventory.Host[ctx.Host]; ok {
 		if host.AuthDisabled {
 			res.Disabled = true
 			res.Source = "disabled"
@@ -723,7 +729,7 @@ func (c *Config) ResolveInventoryAuth(ctx InventoryAuthContext) InventoryAuthRes
 			applyAuth(&res, host.Auth, "host "+ctx.Host)
 		}
 	}
-	if provider, ok := c.Inventory.Provider[providerName]; ok {
+	if provider, ok := inventory.Provider[providerName]; ok {
 		if host, ok := provider.Hosts[ctx.Host]; ok {
 			if host.AuthDisabled {
 				res.Disabled = true

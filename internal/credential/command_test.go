@@ -1,8 +1,11 @@
 package credential
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
@@ -54,5 +57,56 @@ func TestCanceledCommandDoesNotConnectAgent(t *testing.T) {
 	_, err := (agentProviderTransport{autoStart: true, ctx: ctx}).ProviderRequest(providerexec.ProviderRequest{})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestConcurrentCommandRegistriesAndAuthKeepSnapshotUnchanged(t *testing.T) {
+	cfg := &config.Config{
+		Credential: config.CredentialConfig{Provider: map[string]config.CredentialProviderConfig{
+			"op": {Type: "1password", Config: config.CredentialProviderDetailConfig{Vault: "fixture"}},
+		}},
+		Inventory: config.InventoryConfig{Providers: map[string]config.InventoryProviderConfig{
+			"local": {Type: config.ProviderLocal, Groups: map[string]config.GroupConfig{
+				"lab": {Auth: config.InventoryAuthConfig{Mode: config.AuthModeKey, Username: "fixture"}},
+			}},
+		}},
+	}
+	before, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workers sync.WaitGroup
+	start := make(chan struct{})
+	for range 16 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			for range 64 {
+				registry, err := NewCommandRegistry(context.Background(), cfg)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if registry.Provider("op") == nil {
+					t.Error("provider missing")
+					return
+				}
+				auth := cfg.ResolveInventoryAuth(config.InventoryAuthContext{Provider: "local", Group: "lab", Host: "edge"})
+				if auth.Username != "fixture" || auth.AuthMode != config.AuthModeKey {
+					t.Errorf("auth=%+v", auth)
+					return
+				}
+			}
+		}()
+	}
+	close(start)
+	workers.Wait()
+	after, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("registry or auth resolution modified the shared config")
 	}
 }
