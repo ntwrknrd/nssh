@@ -21,6 +21,8 @@ type tuiBlock struct {
 	size  int
 }
 type tuiState struct {
+	configMode                                      bool
+	configDraft                                     string
 	blocks                                          []tuiBlock
 	bytes, width, height, batch                     int
 	total, running, done, failed, canceled, skipped int
@@ -108,7 +110,7 @@ func (m *model) addBlock(b tuiBlock) {
 	// An oversized individual result becomes a bounded text block with attribution.
 	size := len(text)
 	if b.event != nil {
-		size = max(size, len(b.event.Result.Stdout)+len(b.event.Result.Stderr)+len(b.event.Command)+len(b.event.Target.Identity))
+		size = max(size, len(b.event.Result.Stdout)+len(b.event.Result.Stderr)+len(b.event.Command)+len(b.event.Target.Identity)+len(b.event.Result.Prompt))
 	}
 	if size > limit {
 		if len(text) > limit {
@@ -140,11 +142,18 @@ func (m *model) addBlock(b tuiBlock) {
 
 func resultLabel(e core.Event) string {
 	status := strings.ToUpper(hostListStatus(e.State))
-	if e.State == core.Failed {
+	if e.Result.Interactive && !e.Result.StatusKnown && e.State == core.Completed {
+		status = "READY"
+	}
+	if e.State == core.Failed && (!e.Result.Interactive || e.Result.StatusKnown) {
 		status += fmt.Sprintf(" exit %d", e.Result.ExitCode)
 	}
 	command := strings.ReplaceAll(displayLabel(e.Command), "'", "\\'")
-	return status + ":  [" + e.Target.Identity + "] ('" + command + "')"
+	label := status + ":  [" + e.Target.Identity + "] ('" + command + "')"
+	if e.Result.Prompt != "" {
+		label += "  " + displayLabel(e.Result.Prompt)
+	}
+	return label
 }
 
 func resultHeading(e core.Event, width int) string {
@@ -393,6 +402,11 @@ func (m model) tuiView() string {
 	}
 	pending := max(0, m.total-m.running-m.done-m.failed-m.canceled-m.skipped)
 	status := fmt.Sprintf("running %d  done %d  failed %d  pending %d  canceled %d  skipped %d", m.running, m.done, m.failed, pending, m.canceled, m.skipped)
+	if m.configMode {
+		status = "config | " + status
+	} else {
+		status = "ops | " + status
+	}
 	if m.diff {
 		status += " | diff on"
 	}

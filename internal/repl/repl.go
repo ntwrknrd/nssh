@@ -1,4 +1,4 @@
-// Package repl contains the UI-independent parser and multi-host scheduler for nssh repl.
+// Package repl contains the UI-independent parser and multi-host scheduler for nssh --tui.
 package repl
 
 import (
@@ -211,10 +211,12 @@ type ResolvedTarget struct {
 }
 type Resolver func(context.Context, Target) ([]ResolvedTarget, error)
 type Result struct {
-	Stdout, Stderr []byte
-	ExitCode       int
-	Err            error
-	Truncated      bool
+	Interactive, StatusKnown bool
+	Prompt                   string
+	Stdout, Stderr           []byte
+	ExitCode                 int
+	Err                      error
+	Truncated                bool
 }
 type Runner func(context.Context, ResolvedTarget, []string) Result
 type State string

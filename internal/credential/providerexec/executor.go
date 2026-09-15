@@ -415,7 +415,7 @@ func runOnePasswordWithSignin(ctx context.Context, cfg *OnePasswordProviderConfi
 		return out, err
 	}
 	if isNonInteractive(ctx) {
-		return nil, fmt.Errorf("1Password requires authentication before starting nssh repl")
+		return nil, fmt.Errorf("1Password requires authentication before starting nssh --tui")
 	}
 	signinArgs := []string{"signin"}
 	if cfg.Account != "" {

@@ -1,6 +1,7 @@
-# Multi-host REPL
+# Terminal interface and multi-host commands
 
-`nssh repl` is the normal multi-host command in the 0.3 development series.
+`nssh --tui` opens the terminal interface in the 0.3 development series.
+The old `repl` subcommand is removed; `nssh repl` now addresses a host.
 Go/Charm provides the interactive interface when stdin and stdout are terminals.
 `--plain` or piped input uses line-oriented output. No feature flag is required.
 
@@ -18,8 +19,8 @@ Enter one submission per line:
 Targets and commands must be single quoted and separated with commas. `\'`
 escapes a quote; other backslashes are preserved. A trailing `prefix(1,2)` expands
 suffixes. Empty values, trailing commas, ranges, and nested expansions are not
-supported. Commands pass unchanged to the remote command mechanism; this is not
-a persistent remote shell.
+supported. Interactive commands run in each device's retained shell. Plain
+mode continues to use separate remote command execution.
 
 One `select:` expression may replace the target list. It uses `nssh inv list`
 matching: case-insensitive regular expressions for plain terms, exact
@@ -40,16 +41,52 @@ bare comma list. It shares REPL's four-worker default and execution limits:
 ```fish
 nssh 'irn-border-sw1, irn-border-sw2' 'show env power'
 nssh --target repl 'show version'
-printf '%s\n' "[ 'irn-border-sw(1,2)' ] ( 'show env power' )" | nssh repl
+printf '%s\n' "[ 'irn-border-sw(1,2)' ] ( 'show env power' )" | nssh --tui
 ```
 
 Root lists require a command. Use the REPL grammar for several commands, target
-expansion, or selectors. `--target repl` escapes the command name when connecting
-to a host literally named `repl`.
+expansion, or selectors. A host literally named `repl` no longer needs an escape.
+
+## Persistent sessions
+
+The interactive TUI opens a foreground SSH shell lazily for each device and
+retains it across submissions until TUI exit or `:disconnect`. It uses the shared
+inventory, credential, proxy, and host-key preparation. It does not borrow or
+leave behind a shared OpenSSH master. Up to 128 device sessions are retained.
+Changed inventory or SSH policy applies after an explicit disconnect.
+
+- `:sessions` lists retained sessions and their last recognized prompts.
+- `:disconnect` closes all retained sessions. A subsequent submission opens new
+  ones. Canceled or lost sessions never reconnect or replay commands on their own.
+- `:platform auto|eos|junos|linux` selects the profile for new sessions. Auto uses
+  the login prompt; ambiguous or customized prompts need an explicit profile.
+- EOS and Junos retain their interactive CLI context and disable pagination for
+  that session. Linux uses a persistent `/bin/sh`, retaining its working directory
+  and shell variables. Each submitted command must be one line.
+- `:mode ops` runs the current multi-device operations workflow. `:mode config`
+  requires exactly one resolved device and keeps its device form between commands.
+  Mode selection does not send `configure`, `enable`, `commit`, `save`, or `exit`.
+  Enter those remote commands explicitly as appropriate for the current prompt.
+  Type `:` in an empty command row to use internal controls without clearing the
+  selected device.
+- When a configuration command waits for input, its output appears and the input
+  becomes `:reply `. Enter `:reply TEXT` to answer it. Replies are neither retried
+  nor added to command history. No confirmation is answered automatically.
+- EOS/Junos results say READY when the known device prompt returns. This is not
+  an exit code or proof that a configuration change succeeded. Linux reports the
+  shell's exit status. The status heading includes the current device prompt;
+  Junos hierarchy banners are retained with it.
+
+Prompt recognition uses the original device identity and known submode syntax.
+Customized prompts, hostname changes, and commands that leave the device CLI
+may require disconnecting and choosing a different profile. Commands time out
+after two minutes if no recognized prompt returns. Cancellation closes the SSH
+process and its local children; it cannot reverse remote configuration changes.
+Full-screen applications and terminal emulation are not part of these forms.
 
 ## Interactive command prompt
 
-Run `nssh repl` to edit Devices and Commands in separate boxes. Each value has
+Run `nssh --tui` to edit Devices and Commands in separate boxes. Each value has
 its own row. The boxes are always stacked, Devices above Commands.
 History retains the existing submission syntax. Typing a hostname
 into an empty prompt inserts the submission template and places the text inside the first
@@ -103,13 +140,14 @@ hosts because the execution window also bounds buffered output. Failure skips
 later commands on that host while other hosts continue. REPL does not retry commands. Only one
 submission runs at a time.
 
-Progress updates while commands run. Complete retained output appears in requested host order, with host/command attribution and distinct stdout/stderr.
+Progress updates while commands run. Complete retained output appears in requested host order, with host/command attribution. Interactive PTY output merges stdout and stderr.
 Plain mode sends remote stdout to stdout and remote stderr/status to stderr,
 without a prompt or UI styling. It processes lines sequentially and stops at the
 first failed submission. Exit codes are zero for success, one for a failed
 submission, and 130 for interruption; results show original per-command exits.
 
-Remote stdin is EOF. Commands requiring input must be run through ordinary
+In plain mode, remote stdin is EOF. Commands requiring input must use the TUI
+configuration workflow or ordinary
 `nssh HOST` instead. Authenticate credential providers before starting REPL;
 REPL uses existing sessions and never starts provider sign-in or unlock prompts.
 Interactive host-key decisions use one modal prompt at a time; the REPL
@@ -131,7 +169,7 @@ the available full width. Trailing table padding is removed for display; real
 blank lines and indentation remain. Stderr, failures,
 and truncation remain visible.
 
-Use `:help` or `nssh repl --explain` for keys and syntax:
+Use `:help` or `nssh --tui --explain` for keys and syntax:
 
 - Shift-Tab switches between boxes. Enter in
   Devices advances to Commands. Alt-Enter adds a row to the current box; Up/Down
@@ -173,3 +211,9 @@ limited to 2 MiB before and after suffix expansion, 1,000 unique targets,
 Incremental output streaming, selected-result diffs, a multi-select completion
 picker, and a Rust frontend are deferred. See
 [frontend-alternatives.md](frontend-alternatives.md) for the evaluated Rust design.
+
+## Session profile references
+
+The device profiles follow the prompt and mode conventions in the
+[Arista EOS CLI guide](https://www.arista.com/en/um-eos/eos-command-line-interface-cli)
+and [Junos CLI guide](https://www.juniper.net/documentation/us/en/software/junos/cli/topics/topic-map/getting-started.html).

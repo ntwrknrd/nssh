@@ -66,7 +66,7 @@ func (p *bitwardenProvider) transportGet(scope credentialScope, name string, ref
 	})
 	if isBitwardenAuthRequired(err) {
 		if p.noUnlock {
-			return nil, fmt.Errorf("bitwarden requires authentication before starting nssh repl")
+			return nil, fmt.Errorf("bitwarden requires authentication before starting nssh --tui")
 		}
 		session, unlockErr := unlockBitwardenProvider()
 		if unlockErr != nil {

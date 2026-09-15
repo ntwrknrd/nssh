@@ -39,7 +39,7 @@ prompts, and can record sessions.
   and typed SSH option rendering.
 - Recordings: optional asciinema session capture is managed with `nssh log`.
 - SCP: `nssh cp` uses the same host and credential resolution path as connect.
-- Multi-host commands: `nssh repl` provides an interactive terminal prompt or
+- Multi-host commands: `nssh --tui` provides an interactive terminal prompt or
   plain piped input. A root command may also target a bare comma list such as
   `nssh 'edge1, edge2' 'show version'`; it runs one command per host with four
   workers by default. Lists require a remote command and keep its argv unchanged.
@@ -50,7 +50,7 @@ Run `nssh --help` or read the generated help snapshots under
 
 ## Multi-host commands
 
-Start `nssh repl`, then submit targets and commands:
+Start `nssh --tui`, then submit targets and commands:
 
 ```text
 [ 'irn-border-sw(1,2)', 'irn-agg-sw(1,2)' ] ( 'show env power' )
@@ -59,14 +59,16 @@ Start `nssh repl`, then submit targets and commands:
 Or pipe a submission from fish:
 
 ```fish
-printf '%s\n' "[ 'irn-border-sw(1,2)', 'irn-agg-sw(1,2)' ] ( 'show env power' )" | nssh repl
+printf '%s\n' "[ 'irn-border-sw(1,2)', 'irn-agg-sw(1,2)' ] ( 'show env power' )" | nssh --tui
 ```
 
-REPL is a normal command in the 0.3 development series. A literal host named
-`repl` uses `nssh --target repl`. Authenticate credential providers before
-entering the REPL. Output appears when each command
-finishes; commands cannot read interactive input. See the
-[REPL guide](skills/nssh/references/repl.md) for grammar, keys, limits, and errors.
+The TUI opens a persistent shell per device and closes it on exit. Operations
+mode supports multiple devices; `:mode config` requires one device and permits
+explicit replies to interactive prompts. EOS, Junos, and Linux shells are
+supported; `:platform` selects a profile when prompt detection is ambiguous.
+Authenticate credential providers before starting. Piped or `--plain` input
+retains per-command capture. The old `repl` subcommand is removed.
+See the [TUI guide](skills/nssh/references/repl.md) for keys and session behavior.
 
 ## Installation
 

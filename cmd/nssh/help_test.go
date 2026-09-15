@@ -129,6 +129,7 @@ func TestHelpSnapshots(t *testing.T) {
 
 	// Add root command
 	cases["nssh.txt"] = []string{}
+	cases["tui.txt"] = []string{"--tui"}
 
 	for snapshotPath, cmdPath := range cases {
 		t.Run(snapshotPath, func(t *testing.T) {

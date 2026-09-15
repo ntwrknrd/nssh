@@ -159,3 +159,24 @@ func (m *model) clampFormCursor() {
 	}
 	m.input.SetCursor(closest)
 }
+
+func (m model) emptyCommandField() bool {
+	if !m.commandFocused() {
+		return false
+	}
+	_, commands := m.formFields()
+	for _, field := range commands {
+		if field.start == field.end && m.input.Position() == field.start {
+			return true
+		}
+	}
+	return false
+}
+func (m *model) resetInput() {
+	if m.configMode && m.configDraft != "" {
+		m.input.SetValue(m.configDraft)
+		m.focusForm(true)
+	} else {
+		m.input.SetValue("")
+	}
+}

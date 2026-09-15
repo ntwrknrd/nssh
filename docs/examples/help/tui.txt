@@ -1,10 +1,22 @@
-$ nssh repl --help
+$ nssh --tui --help
 ╭─ Usage ──────────────────────────────────────────────────────────────────────╮
-│   nssh repl [flags]                 Run commands across inventory targets    │
+│   nssh [flags] [ssh-options] HOST [command]                                  │
+│   nssh [flags] [ssh-options] 'HOST1,HOST2' command                           │
+│   nssh --tui [--plain] [--concurrency N]                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────╮
+│   agent                             Manage nssh agent                        │
+│   cp                                Copy files via SCP                       │
+│   inv                               Manage inventory                         │
+│   log                               Manage session recordings                │
+│   self                              Manage nssh                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Flags ──────────────────────────────────────────────────────────────────────╮
 │   --concurrency INT                 Maximum simultaneous hosts               │
 │   --plain                           Use line-oriented plain output           │
+│   --select                          Open smart target picker                 │
+│   --target STRING                   Use literal target                       │
+│   --tui                             Open the persistent-session termina...   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

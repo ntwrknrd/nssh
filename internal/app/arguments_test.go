@@ -196,3 +196,21 @@ func TestRootHostListRoutingPreservesSSHForms(t *testing.T) {
 		t.Fatalf("literal fallback: connected=%v err=%v", connected, err)
 	}
 }
+
+func TestTUIFlagAndRemovedReplCommand(t *testing.T) {
+	invocation, err := parseRootArgs([]string{"--tui", "--plain"})
+	if err != nil || invocation.request != nil || len(invocation.commandArgs) != 2 {
+		t.Fatalf("TUI routing: %+v, %v", invocation, err)
+	}
+	invocation, err = parseRootArgs([]string{"repl", "show"})
+	if err != nil || invocation.request == nil || invocation.request.Host != "repl" {
+		t.Fatalf("old command remains reserved: %+v, %v", invocation, err)
+	}
+	invocation, err = parseRootArgs([]string{"edge", "echo", "--tui"})
+	if err != nil || invocation.request == nil || len(invocation.request.RemoteCommand) != 2 {
+		t.Fatal("TUI flag consumed inside remote command")
+	}
+	if _, err = parseRootArgs([]string{"-p", "2222", "--tui"}); err == nil {
+		t.Fatal("root SSH options silently ignored by TUI")
+	}
+}

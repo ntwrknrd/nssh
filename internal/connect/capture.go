@@ -22,6 +22,7 @@ type CaptureOptions struct {
 	SSHArgs        []string
 	MaxOutputBytes int
 	HostKeyPrompt  connector.HostKeyPromptFunc
+	preparedShell  func(context.Context, captured.Request) (captured.Result, error)
 }
 
 // RunRemoteCommandCapture shares normal SSH preparation without printing results.

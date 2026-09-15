@@ -111,3 +111,22 @@ func TestFormsAllowIncrementalExplicitSyntax(t *testing.T) {
 		t.Fatalf("explicit syntax changed: %q", m.input.Value())
 	}
 }
+
+func TestConfigurationControlsRemainAccessible(t *testing.T) {
+	m := testTUI(120)
+	m.input.Focus()
+	m.owner = &terminalOwner{}
+	m.configMode = true
+	m.configDraft = "[ 'edge' ] ( '' )"
+	m.resetInput()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":sessions")})
+	m = next.(model)
+	if m.input.Value() != ":sessions" {
+		t.Fatal("control trapped inside remote command field")
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if m.input.Value() != m.configDraft || !m.commandFocused() {
+		t.Fatal("session control lost selected device")
+	}
+}

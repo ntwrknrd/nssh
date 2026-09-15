@@ -51,7 +51,7 @@ func TestRootCommandRegistersPublicCommands(t *testing.T) {
 			got = append(got, cmd.Name())
 		}
 	}
-	want := []string{"agent", "cp", "inv", "log", "repl", "self"}
+	want := []string{"agent", "cp", "inv", "log", "self"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("public commands = %v, want %v", got, want)
 	}

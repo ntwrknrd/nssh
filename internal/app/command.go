@@ -24,7 +24,6 @@ var (
 		"agent":              true,
 		"log":                true,
 		"cp":                 true,
-		"repl":               true,
 		"self":               true,
 		"smart-connect":      true,
 		"__list-subcommands": true,
@@ -55,12 +54,12 @@ and record sessions.
 Run one remote command across a bare comma-separated host list:
   nssh 'host1,host2' 'show version'
 Lists use four workers, require a command, and close remote stdin.
-Use --target to force a literal destination.`,
+Use --target to force a literal destination.` + "\n\n" + repl.Explanation(),
 		SilenceUsage:      true,
 		SilenceErrors:     true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 		Annotations: map[string]string{
-			ui.UsageLinesAnnotation: "nssh [flags] [ssh-options] HOST [command]\nnssh [flags] [ssh-options] 'HOST1,HOST2' command",
+			ui.UsageLinesAnnotation: "nssh [flags] [ssh-options] HOST [command]\nnssh [flags] [ssh-options] 'HOST1,HOST2' command\nnssh --tui [--plain] [--concurrency N]",
 		},
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			if showVersion {
@@ -89,7 +88,18 @@ Use --target to force a literal destination.`,
 	rootCmd.AddCommand(newInvCmd())
 	rootCmd.AddCommand(newLogCmd())
 	rootCmd.AddCommand(newCpCmd())
-	rootCmd.AddCommand(newReplCmd())
+	tuiCmd := repl.NewCmd()
+	rootCmd.Flags().AddFlagSet(tuiCmd.Flags())
+	rootCmd.Flags().Bool("tui", false, "Open the persistent-session terminal interface")
+	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if enabled, _ := cmd.Flags().GetBool("tui"); enabled {
+			if len(args) != 0 || cmd.Flags().Changed("target") || cmd.Flags().Changed("select") {
+				return fmt.Errorf("--tui does not accept a destination; choose devices in the interface")
+			}
+			return tuiCmd.RunE(cmd, args)
+		}
+		return cmd.Help()
+	}
 	rootCmd.AddCommand(newSelfCmd())
 	rootCmd.AddCommand(newListSubcommandsCmd())
 
@@ -184,12 +194,6 @@ func newCpCmd() *cobra.Command {
 	return cp.NewCmd()
 }
 
-func newReplCmd() *cobra.Command {
-	cmd := repl.NewCmd()
-	ui.ApplyStyledHelp(cmd)
-	return cmd
-}
-
 func newBenchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bench",
@@ -234,7 +238,7 @@ func newListSubcommandsCmd() *cobra.Command {
 		Use:    "__list-subcommands",
 		Hidden: true,
 		Run: func(cmd *cobra.Command, args []string) {
-			for _, subcmd := range []string{"inv", "agent", "log", "cp", "repl", "self"} {
+			for _, subcmd := range []string{"inv", "agent", "log", "cp", "self"} {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), subcmd)
 			}
 		},

@@ -1,4 +1,4 @@
-// Package repl implements the nssh repl command presentations.
+// Package repl implements the nssh --tui command presentations.
 package repl
 
 import (
@@ -25,16 +25,19 @@ import (
 	core "github.com/ntwrknrd/nssh/internal/repl"
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
+	"github.com/ntwrknrd/nssh/internal/ssh/session"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
+func Explanation() string { return replHelp }
+
 func NewCmd() *cobra.Command {
 	var plain bool
 	var concurrency int
 	cmd := &cobra.Command{
-		Use:   "repl",
+		Use:   "--tui",
 		Short: "Run commands across inventory targets",
 		Long:  replHelp,
 		Args:  cobra.NoArgs,
@@ -62,6 +65,12 @@ const replHelp = `Run grouped remote commands across exact inventory or literal 
 
 TUI commands:
   :help         Open help (Esc/Enter closes)
+  :mode ops     Multi-device operations (default)
+  :mode config  Single-device configuration with explicit prompt replies
+  :platform auto|eos|junos|linux  Profile for newly opened sessions
+  :sessions     List retained device sessions and prompts
+  :disconnect   Close retained sessions; next submission opens fresh sessions
+  :reply TEXT   Answer the active device in configuration mode
   :clear        Clear scrollback; keep command history (also Ctrl-K)
   :wipe         Clear scrollback and saved command history
   :quit, :exit  Exit the REPL
@@ -74,12 +83,18 @@ Syntax:
 Values are single quoted; \' escapes a quote. Other backslashes are preserved.
 Trailing prefix(1,2) expands suffixes. One select:QUERY may replace the target
 list, using nssh inv list fields: host, hostname, id, user, port, provider, group.
-No fuzzy selection or inventory creation occurs. Use --target repl at the root
-to connect to a host named repl.
+No fuzzy selection or inventory creation occurs. The old repl subcommand is
+removed; use nssh --tui. A destination named repl follows normal SSH routing.
 
 Each command runs across all hosts before the next starts. Results appear in
 requested host order, with separate stdout/stderr. A failure skips later
-commands only on that host. Remote stdin is EOF; authenticate credential providers first.
+commands only on that host. Authenticate credential providers first.
+Interactive sessions retain each device shell until disconnect or TUI exit.
+EOS/Junos report READY when the prompt returns, not a remote exit status.
+Linux uses a persistent /bin/sh with exact command exit status. Auto detection
+can be overridden with :platform before opening a session. Cancellation or loss
+closes that session; it never reconnects or replays commands automatically.
+Plain mode retains per-command execution with remote stdin at EOF.
 Interactive host-key approval is serialized. Plain mode cannot prompt for trust.
 
 Interactive: Devices and Commands use stacked boxes. Shift-Tab switches boxes.
@@ -175,6 +190,26 @@ func runSubmission(ctx context.Context, submission core.Submission, concurrency 
 			owner.program.Send(replEventMsg{text: text})
 		} else {
 			_, _ = io.WriteString(errOut, text)
+		}
+	}
+	if owner != nil {
+		owner.sessionMu.Lock()
+		single := owner.configMode
+		owner.sessionMu.Unlock()
+		if single {
+			identities := map[string]bool{}
+			for _, spec := range submission.Targets {
+				targets, err := catalogResolver(cfg, cat)(ctx, spec)
+				if err != nil {
+					return err
+				}
+				for _, t := range targets {
+					identities[t.Identity] = true
+				}
+			}
+			if len(identities) != 1 {
+				return fmt.Errorf("configuration mode requires exactly one device")
+			}
 		}
 	}
 	executor := core.Executor{Concurrency: concurrency, Resolve: catalogResolver(cfg, cat), Run: captureRunner(owner),
@@ -336,6 +371,9 @@ func captureRunner(owner *terminalOwner) core.Runner {
 		if !ok {
 			return core.Result{Err: fmt.Errorf("invalid target request")}
 		}
+		if owner != nil && owner.program != nil {
+			return owner.runSession(ctx, target, request, command)
+		}
 		resolved, err := connect.ResolveLiteralHostFromCatalog(ctx, request.host, request.user, request.cfg, request.cat)
 		if err != nil {
 			return core.Result{Err: err, ExitCode: 1}
@@ -389,9 +427,15 @@ type trustRequest struct {
 }
 type trustFinishedMsg struct{ request *trustRequest }
 type terminalOwner struct {
-	program *tea.Program
-	ctx     context.Context
-	workers sync.WaitGroup
+	sessionMu      sync.Mutex
+	sessions, busy map[string]*connect.PersistentSession
+	profile        session.Profile
+	configMode     bool
+	width, height  int
+	opening        int
+	program        *tea.Program
+	ctx            context.Context
+	workers        sync.WaitGroup
 }
 
 // The main UI owns stdin throughout a serialized modal trust decision. Workers
@@ -430,7 +474,7 @@ type model struct {
 func runTUI(concurrency int) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	owner := &terminalOwner{ctx: ctx}
+	owner := &terminalOwner{ctx: ctx, profile: session.Auto}
 	input := textinput.New()
 	input.Prompt = ""
 	input.Placeholder = "[ 'host' ] ( 'command' )"
@@ -448,6 +492,7 @@ func runTUI(concurrency int) error {
 	_, err := p.Run()
 	cancel()
 	owner.workers.Wait()
+	owner.closeSessions()
 	return err
 }
 func loadCandidates() []string {
@@ -521,6 +566,9 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = v.Width, v.Height
+		if m.owner != nil {
+			m.owner.resizeSessions(v.Width, v.Height)
+		}
 		m.selected = false
 		m.refreshLayout()
 		return m, nil
@@ -569,6 +617,15 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.trust.response <- action
 			m.trust = nil
 			return m, nil
+		}
+		if m.active && m.configMode && v.Type == tea.KeyEnter {
+			text, ok := strings.CutPrefix(m.input.Value(), ":reply ")
+			if !ok {
+				m.message = "use :reply TEXT to answer the active device"
+				return m, nil
+			}
+			m.input.SetValue("")
+			return m, func() tea.Msg { return sessionReplyMsg{m.owner.reply(text)} }
 		}
 		if v.Type == tea.KeyCtrlD {
 			if m.active {
@@ -653,10 +710,42 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			line := strings.TrimSpace(m.input.Value())
+			if line == ":sessions" {
+				m.appendTranscript(m.owner.sessionSummary() + "\n")
+				m.resetInput()
+				return m, nil
+			}
+			if line == ":disconnect" {
+				m.owner.closeSessions()
+				m.message = "device sessions closed; next submission opens new sessions"
+				m.resetInput()
+				return m, nil
+			}
+			if strings.HasPrefix(line, ":platform ") {
+				profile := session.Profile(strings.TrimSpace(strings.TrimPrefix(line, ":platform ")))
+				if !session.ValidProfile(profile) {
+					m.message = "platform must be auto, eos, junos, or linux"
+					return m, nil
+				}
+				m.owner.sessionMu.Lock()
+				m.owner.profile = profile
+				m.owner.sessionMu.Unlock()
+				m.message = "platform for new sessions: " + string(profile)
+				m.resetInput()
+				return m, nil
+			}
+			if line == ":mode config" || line == ":mode ops" {
+				m.configMode = line == ":mode config"
+				m.owner.sessionMu.Lock()
+				m.owner.configMode = m.configMode
+				m.owner.sessionMu.Unlock()
+				m.resetInput()
+				return m, nil
+			}
 			if line == ":help" {
 				m.helpOpen = true
 				m.helpOffset = 0
-				m.input.SetValue("")
+				m.resetInput()
 				return m, nil
 			}
 			if line == ":clear" || line == ":wipe" {
@@ -668,7 +757,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.entries = nil
 					m.historyAt = 0
 				}
-				m.input.SetValue("")
+				m.resetInput()
 				m.clearScrollback()
 				if line == ":wipe" {
 					m.message = "scrollback and history cleared"
@@ -686,12 +775,38 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = err.Error()
 				return m, nil
 			}
+			if m.configMode {
+				_, commands := m.formFields()
+				if len(commands) > 0 {
+					m.configDraft = string([]rune(m.input.Value())[:commands[0].start]) + "' )"
+				}
+			}
 			m.input.SetValue("")
 			m.startSubmission(submission, line)
 			return m, nil
 		}
+	case sessionWaitingMsg:
+		m.appendTranscript("[" + displayLabel(v.host) + "] waiting for a recognized prompt:\n" + safeTerminalText(v.text) + "\n")
+		if m.configMode {
+			m.message = "Reply with :reply TEXT; Ctrl-C cancels and closes this session"
+			if m.input.Value() == "" {
+				m.input.SetValue(":reply ")
+			}
+		}
+		return m, nil
+	case sessionReplyMsg:
+		if v.err != nil {
+			m.message = v.err.Error()
+		} else {
+			m.message = "reply sent"
+		}
+		return m, nil
 	case finishedMsg:
 		m.active = false
+		if m.configMode && m.configDraft != "" {
+			m.input.SetValue(m.configDraft)
+			m.focusForm(true)
+		}
 		m.cancel = nil
 		m.candidates = loadCandidates()
 		if v.err != nil && v.err != context.Canceled {
@@ -700,10 +815,17 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.active {
+		if m.configMode {
+			if key, ok := msg.(tea.KeyMsg); ok {
+				var cmd tea.Cmd
+				m.input, cmd = m.input.Update(key)
+				return m, cmd
+			}
+		}
 		return m, nil
 	}
 	if key, ok := msg.(tea.KeyMsg); ok {
-		if key.Type == tea.KeyRunes && len(key.Runes) > 0 && key.Runes[0] == ':' && emptyEditor(m.input.Value()) {
+		if key.Type == tea.KeyRunes && len(key.Runes) > 0 && key.Runes[0] == ':' && (emptyEditor(m.input.Value()) || m.emptyCommandField()) {
 			m.input.SetValue("")
 		}
 		if cmd, handled := m.deleteEditorField(key); handled {

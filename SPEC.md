@@ -38,10 +38,10 @@ preserve.
   distinct stdout, stderr, and remote exit status.
 - SCP uses the same host, SSH policy, proxy, credential, and host-key resolution
   as SSH connections.
-- `nssh repl` is an explicit multi-host command surface. Its grouped grammar is
-  separate from root OpenSSH parsing; it resolves each target through the
-  inventory/literal resolution path and retains attributed command output.
-  The literal target `repl` remains accessible with `--target repl`.
+- `nssh --tui` opens the terminal interface. Its grouped grammar is separate
+  from root OpenSSH parsing and resolves targets through the shared inventory
+  and literal resolution path. The old `repl` subcommand has no alias; `repl`
+  is an ordinary destination. Piped or `--plain` input retains batch capture.
 - Generated help is the command and flag authority.
 
 ## Configuration And Inventory
@@ -100,20 +100,31 @@ preserve.
   later commands on that host; other hosts continue. Commands are never retried.
 - One submission owns execution at a time. Cancellation waits for local cleanup
   before allowing another submission; it cannot undo remote effects.
-- Remote stdin is EOF. Credential providers must already be authenticated.
+- Plain mode and root host lists close remote stdin. Credential providers must
+  already be authenticated.
   Only an explicit, serialized terminal callback can request host-key approval.
   Root host lists fail closed when a host-key decision cannot be completed.
 - Root host lists reject interactive, forwarding, tunnel, background, and control
   modes, including incompatible resolved YAML SSH policy, before opening a
   connection. Single-target SSH retains its existing transport modes.
-- Output keeps stream identity, host, command, and exit status. Capture,
+- Plain output keeps stream identity, host, command, and exit status. Interactive
+  PTY output merges streams and distinguishes a returned CLI prompt from a
+  known remote exit status. Capture,
   transcript, input, and status retention are bounded, with visible truncation.
 - Interactive history stores submitted text under XDG state with private
   permissions and bounded retention. Plain sessions do not write history.
-- The interactive Go frontend keeps structured result blocks, adaptive device
-  comparisons, a command prompt with inventory completion, and a persistent progress
-  footer. The host picker inserts quoted targets into the editable submission.
-  Enter submits that syntax, which is also used by plain mode and history. Remote control sequences cannot execute through its rendering path.
+- The interactive Go frontend owns persistent foreground SSH shells, opened
+  lazily per device and closed on exit or explicit disconnect. Operations can
+  use multiple devices; configuration mode requires exactly one resolved device.
+  It retains CLI mode or POSIX shell state across submissions. Shared connection
+  preparation still owns credentials, proxies, trust, and auditing.
+- Session cancellation or loss closes the session. It never reconnects or
+  replays commands automatically. Configuration replies are explicit and are
+  excluded from command history. Mode switching never sends remote commands.
+- The frontend keeps structured result blocks, stacked device/command forms,
+  inventory selection, and a persistent progress footer. Plain mode and history
+  retain the grouped submission grammar. Remote controls cannot execute through
+  the transcript renderer.
 - Go/Charm is the maintained frontend. Rust is a documented evaluated alternative,
   with no shipped bridge or ongoing frontend parity requirement.
 
@@ -140,8 +151,9 @@ preserve.
   recursively recording its inner process.
 - Live sessions inherit the operator's real terminal size. Fixed dimensions
   apply only to exports.
-- Interactive PTY bytes pass through without syntax highlighting or rendering
-  delays.
+- Ordinary single-target interactive PTY bytes pass through without syntax
+  highlighting or rendering delays. TUI shells collect attributed text and
+  render it without executing remote controls.
 - Highlighting is allowed only where nssh owns complete output, currently
   remote-command stdout or future managed renderers.
 - Root command output preserves existing ANSI and control data. The REPL keeps

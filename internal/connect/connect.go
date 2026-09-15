@@ -334,7 +334,13 @@ func captureResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, s
 	if opts.capture != nil {
 		req.MaxOutputBytes -= len(diagnostics.data)
 	}
-	result, err := runCapturedCommandFunc(ctx, req)
+	var result captured.Result
+	var err error
+	if opts.capture != nil && opts.capture.preparedShell != nil {
+		result, err = opts.capture.preparedShell(ctx, req)
+	} else {
+		result, err = runCapturedCommandFunc(ctx, req)
+	}
 	if opts.capture != nil {
 		result.Stderr = append(diagnostics.data, result.Stderr...)
 		result.Truncated = result.Truncated || diagnostics.truncated

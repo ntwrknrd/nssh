@@ -270,6 +270,11 @@ func readOutputEvents(stream Stream, r io.Reader, output *outputBuffer) error {
 	}
 }
 
+// BuildCommand exposes the shared OpenSSH argv and environment for a persistent shell.
+func BuildCommand(req Request) Command {
+	return Command{Name: "ssh", Args: buildOpenSSHArgs(req), Env: req.Env, Stdin: req.Stdin, MaxOutputBytes: req.MaxOutputBytes}
+}
+
 func buildOpenSSHArgs(req Request) []string {
 	pinnedOptions, sshArgs := connector.SplitPinnedHostKeyOptions(req.SSHArgs)
 	args := connector.ComposeSSHOptions(connector.SSHOptionPlan{

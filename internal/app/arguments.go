@@ -24,6 +24,12 @@ func parseRootArgs(args []string) (rootInvocation, error) {
 	listCandidate := false
 	for i := 0; i < len(args); {
 		arg := args[i]
+		if !terminated && request == nil && arg == "--tui" {
+			if len(options) > 0 {
+				return rootInvocation{}, fmt.Errorf("--tui cannot be combined with root SSH options")
+			}
+			return rootInvocation{commandArgs: append(globals, args[i:]...)}, nil
+		}
 		if !terminated && arg == "--" {
 			terminated = true
 			i++

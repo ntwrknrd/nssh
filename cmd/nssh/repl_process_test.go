@@ -214,6 +214,52 @@ func TestREPLProcess(t *testing.T) {
 			t.Fatal("ran command after cancellation")
 		}
 	})
+	t.Run("PTY persistent configuration and explicit reply", func(t *testing.T) {
+		f := newREPLFixture(t, binary)
+		s := f.terminal(t)
+		s.write(t, ":mode config\r")
+		s.settle()
+		s.write(t, "go\t\r\rconfigure terminal\r")
+		s.await(t, "good(config)#")
+		s.settle()
+		s.write(t, "set value kept\r")
+		s.await(t, "stdout-good-set value kept")
+		s.settle()
+		s.write(t, "show value\r")
+		s.await(t, "value=kept")
+		s.settle()
+		s.write(t, "confirm\r")
+		s.await(t, "Proceed?")
+		s.await(t, ":reply ")
+		s.settle()
+		s.write(t, "yes\r")
+		s.await(t, "answer=yes")
+		s.settle()
+		starts, err := os.ReadFile(filepath.Join(f.dir, "sessions"))
+		if err != nil || len(strings.Fields(string(starts))) != 2 {
+			t.Fatalf("session not reused: %q %v", starts, err)
+		}
+		s.write(t, "\x03")
+		s.wait(t, 0)
+		history, _ := os.ReadFile(filepath.Join(f.dir, "state", "nssh", "repl_history"))
+		if strings.Contains(string(history), ":reply") || strings.Contains(string(history), "yes") {
+			t.Fatal("reply entered command history")
+		}
+	})
+	t.Run("PTY configuration rejects multiple devices before SSH", func(t *testing.T) {
+		f := newREPLFixture(t, binary)
+		s := f.terminal(t)
+		s.write(t, ":mode config\r")
+		s.settle()
+		s.write(t, "[ 'good', 'bad' ] ( 'one' )\r")
+		s.await(t, "configuration mode requires exactly one device")
+		s.settle()
+		if f.log() != "" {
+			t.Fatal("opened SSH before validating configuration scope")
+		}
+		s.write(t, "\x03")
+		s.wait(t, 0)
+	})
 	t.Run("PTY trust cancellation leaves input usable", func(t *testing.T) {
 		f := newREPLFixture(t, binary)
 		s := f.terminal(t)
@@ -294,6 +340,28 @@ if [ "$probe" = yes ]; then
   fi
   exit 255
 fi
+if [ "$command" = "fixture@$host" ]; then
+  printf '%s %s\n' "$host" "$$" >> "$NSSH_TEST_SESSIONS"
+  mode=
+  value=unset
+  printf '%s# ' "$host"
+  while IFS= read -r command; do
+    printf '%s\n' "$command"
+    if [ "$command" = 'terminal length 0' ]; then printf '%s# ' "$host"; continue; fi
+    printf '%s %s\n' "$host" "$command" >> "$NSSH_TEST_LOG"
+    if [ "$command" = hold ]; then printf '%s\n' "$$" > "$NSSH_TEST_PID"; exec sleep 60; fi
+    case "$command" in
+      'configure terminal') mode='(config)' ;;
+      'set value kept') value=kept ;;
+      'show value') printf 'value=%s\n' "$value" ;;
+      confirm) printf 'Proceed? [yes/no] '; IFS= read -r answer; printf '\nanswer=%s\n' "$answer" ;;
+    esac
+    printf 'stdout-%s-%s\n' "$host" "$command"
+    printf 'stderr-%s-%s\n' "$host" "$command"
+    printf '%s%s# ' "$host" "$mode"
+  done
+  exit 0
+fi
 printf '%s %s\n' "$host" "$command" >> "$NSSH_TEST_LOG"
 if read -r unexpected; then
   printf '%s\n' 'remote stdin was not EOF' >&2
@@ -320,14 +388,14 @@ func writeProcessFile(t *testing.T, path, body string, mode os.FileMode) {
 }
 func (f *replFixture) command(args ...string) *exec.Cmd {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	cmd := exec.CommandContext(ctx, f.binary, append([]string{"repl"}, args...)...)
+	cmd := exec.CommandContext(ctx, f.binary, append([]string{"--tui"}, args...)...)
 	f.t.Cleanup(func() {
 		cancel()
 		if cmd.Process != nil && cmd.ProcessState == nil {
 			_ = cmd.Wait()
 		}
 	})
-	cmd.Env = []string{"PATH=" + filepath.Join(f.dir, "bin") + ":/usr/bin:/bin", "HOME=" + filepath.Join(f.dir, "home"), "XDG_CONFIG_HOME=" + filepath.Join(f.dir, "config"), "XDG_DATA_HOME=" + filepath.Join(f.dir, "data"), "XDG_STATE_HOME=" + filepath.Join(f.dir, "state"), "TERM=xterm-256color", "NO_COLOR=1", "NSSH_TEST_LOG=" + filepath.Join(f.dir, "commands"), "NSSH_TEST_PID=" + filepath.Join(f.dir, "pid")}
+	cmd.Env = []string{"PATH=" + filepath.Join(f.dir, "bin") + ":/usr/bin:/bin", "HOME=" + filepath.Join(f.dir, "home"), "XDG_CONFIG_HOME=" + filepath.Join(f.dir, "config"), "XDG_DATA_HOME=" + filepath.Join(f.dir, "data"), "XDG_STATE_HOME=" + filepath.Join(f.dir, "state"), "TERM=xterm-256color", "NO_COLOR=1", "NSSH_TEST_LOG=" + filepath.Join(f.dir, "commands"), "NSSH_TEST_PID=" + filepath.Join(f.dir, "pid"), "NSSH_TEST_SESSIONS=" + filepath.Join(f.dir, "sessions")}
 	return cmd
 }
 func (f *replFixture) log() string {
@@ -418,8 +486,8 @@ func (s *replTerminal) await(t *testing.T, text string) {
 	awaitProcess(t, func() bool { return strings.Contains(ansi.Strip(s.output.String()), text) }, text, &s.output)
 }
 
-// Allow the terminal's next render tick to finish after observing command output.
-func (s *replTerminal) settle() { time.Sleep(100 * time.Millisecond) }
+// Allow prompt recognition and the terminal render tick to finish after output.
+func (s *replTerminal) settle() { time.Sleep(350 * time.Millisecond) }
 func (s *replTerminal) wait(t *testing.T, want int) {
 	t.Helper()
 	if code := processExitCode(s.cmd.Wait()); code != want {
