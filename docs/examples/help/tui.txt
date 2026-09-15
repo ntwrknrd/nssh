@@ -16,7 +16,7 @@ $ nssh --tui --help
 │   --plain                           Use line-oriented plain output           │
 │   --select                          Open smart target picker                 │
 │   --target STRING                   Use literal target                       │
-│   --tui                             Open the persistent-session termina...   │
+│   --tui                             Open batch requests and interactive...   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Flags ───────────────────────────────────────────────────────────────╮
 │   -e, --explain                     Print command explanation                │

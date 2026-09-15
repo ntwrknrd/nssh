@@ -107,24 +107,21 @@ preserve.
 - Root host lists reject interactive, forwarding, tunnel, background, and control
   modes, including incompatible resolved YAML SSH policy, before opening a
   connection. Single-target SSH retains its existing transport modes.
-- Plain output keeps stream identity, host, command, and exit status. Interactive
-  PTY output merges streams and distinguishes a returned CLI prompt from a
-  known remote exit status. Capture,
-  transcript, input, and status retention are bounded, with visible truncation.
-- Interactive history stores submitted text under XDG state with private
-  permissions and bounded retention. Plain sessions do not write history.
-- The interactive Go frontend owns persistent foreground SSH shells, opened
-  lazily per device and closed on exit or explicit disconnect. Operations can
-  use multiple devices; configuration mode requires exactly one resolved device.
-  It retains CLI mode or POSIX shell state across submissions. Shared connection
-  preparation still owns credentials, proxies, trust, and auditing.
-- Session cancellation or loss closes the session. It never reconnects or
-  replays commands automatically. Configuration replies are explicit and are
-  excluded from command history. Mode switching never sends remote commands.
-- The frontend keeps structured result blocks, stacked device/command forms,
-  inventory selection, and a persistent progress footer. Plain mode and history
-  retain the grouped submission grammar. Remote controls cannot execute through
-  the transcript renderer.
+- Batch mode and plain output preserve stream identity, host, command, and exit
+  status. Batch uses one editable grouped request. Its private, bounded history
+  stores the complete target list and commands together. Plain mode writes no
+  history. Capture and transcript retention remain bounded.
+- Interactive mode selects a fixed device group and opens one foreground SSH
+  terminal per device. Shared input broadcasts to explicitly displayed targets;
+  operators can focus one pane. It preserves remote shell and CLI state without
+  replacing the shell, interpreting prompts, or injecting commands.
+- Closing the group or TUI closes its local SSH terminals. Session loss pauses
+  broadcasting; there is no reconnect or replay. Operators handle confirmations
+  and differing device state by focusing individual panes. Interactive command
+  history is memory-only, separate from batch history, and scoped to the group.
+- The frontend emulates each terminal in an isolated, bounded pane. Remote control
+  sequences affect that virtual terminal, not the outer terminal or clipboard.
+  Shared connection preparation owns credentials, proxies, trust, and auditing.
 - Go/Charm is the maintained frontend. Rust is a documented evaluated alternative,
   with no shipped bridge or ongoing frontend parity requirement.
 
@@ -134,8 +131,8 @@ preserve.
 - Inventory owns provider discovery, cached state, grouping, and reconciliation.
 - Credential providers own external secret retrieval.
 - REPL core owns grammar and scheduling; CLI presentation owns input, completion,
-  history, terminal interaction, and transcript rendering. Both plain and
-  interactive modes share the core and connection layer.
+  history, terminal interaction, and transcript rendering. Batch and plain modes share
+  the scheduler; interactive panes use the shared connection layer directly.
 - The connection layer owns shared SSH and SCP resolution and orchestration.
 - The SSH layer owns OpenSSH process, PTY, askpass, host-key, and stdio mechanics
   without depending on higher-level CLI behavior.
@@ -152,12 +149,10 @@ preserve.
 - Live sessions inherit the operator's real terminal size. Fixed dimensions
   apply only to exports.
 - Ordinary single-target interactive PTY bytes pass through without syntax
-  highlighting or rendering delays. TUI shells collect attributed text and
-  render it without executing remote controls.
+  highlighting or rendering delays. Interactive TUI panes interpret terminal controls within a virtual terminal.
 - Highlighting is allowed only where nssh owns complete output, currently
   remote-command stdout or future managed renderers.
-- Root command output preserves existing ANSI and control data. The REPL keeps
-  raw stream bytes internally and in plain mode; its interactive transcript
+- Root command output preserves existing ANSI and control data. Batch keeps raw stream bytes internally and in plain mode; its transcript
   renders text without executing remote terminal controls.
 
 ## State And Lifecycle

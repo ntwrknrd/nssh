@@ -35,7 +35,7 @@ func TestREPLProcess(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: %v\n%s", flag, err, output)
 			}
-			if !strings.Contains(string(output), "Syntax:") || !strings.Contains(string(output), "[ 'host1', 'host2' ]") {
+			if !strings.Contains(string(output), "Batch (default):") || !strings.Contains(string(output), "[ 'host1', 'host2' ]") {
 				t.Fatalf("%s omitted REPL syntax: %s", flag, output)
 			}
 			if f.log() != "" {
@@ -214,51 +214,60 @@ func TestREPLProcess(t *testing.T) {
 			t.Fatal("ran command after cancellation")
 		}
 	})
-	t.Run("PTY persistent configuration and explicit reply", func(t *testing.T) {
+	t.Run("PTY interactive broadcasts and focuses persistent terminals", func(t *testing.T) {
 		f := newREPLFixture(t, binary)
 		s := f.terminal(t)
-		s.write(t, ":mode config\r")
+		s.write(t, ":interactive\r")
+		s.await(t, "Choose devices")
+		// Select both devices across filters, then open the fixed session group.
+		s.write(t, "good \x15bad \r\r")
+		s.await(t, "good#")
+		s.await(t, "bad#")
 		s.settle()
-		s.write(t, "go\t\r\rconfigure terminal\r")
+		s.write(t, "configure terminal\r")
+		awaitProcess(t, func() bool {
+			return strings.Contains(f.log(), "good configure terminal") && strings.Contains(f.log(), "bad configure terminal")
+		}, "broadcast configuration", &s.output)
 		s.await(t, "good(config)#")
+		s.await(t, "bad(config)#")
 		s.settle()
 		s.write(t, "set value kept\r")
-		s.await(t, "stdout-good-set value kept")
 		s.settle()
 		s.write(t, "show value\r")
 		s.await(t, "value=kept")
 		s.settle()
+		s.write(t, ":target 1\r")
+		s.settle()
 		s.write(t, "confirm\r")
 		s.await(t, "Proceed?")
-		s.await(t, ":reply ")
 		s.settle()
 		s.write(t, "yes\r")
 		s.await(t, "answer=yes")
 		s.settle()
-		starts, err := os.ReadFile(filepath.Join(f.dir, "sessions"))
-		if err != nil || len(strings.Fields(string(starts))) != 2 {
-			t.Fatalf("session not reused: %q %v", starts, err)
+		if strings.Count(f.log(), " confirm") != 1 {
+			t.Fatalf("confirmation broadcast: %s", f.log())
 		}
-		s.write(t, "\x03")
+		starts, err := os.ReadFile(filepath.Join(f.dir, "sessions"))
+		if err != nil || len(strings.Fields(string(starts))) != 4 {
+			t.Fatalf("expected two persistent terminals: %q %v", starts, err)
+		}
+		s.write(t, ":keys\r")
+		s.settle()
+		s.write(t, "show value\r")
+		s.settle()
+		s.write(t, "\x1d")
+		s.settle()
+		s.write(t, ":batch\r")
+		s.settle()
+		s.write(t, "[ 'good' ] ( 'batch-only' )\r")
+		s.await(t, "stdout-good-batch-only")
+		s.settle()
+		s.write(t, ":quit\r")
 		s.wait(t, 0)
 		history, _ := os.ReadFile(filepath.Join(f.dir, "state", "nssh", "repl_history"))
-		if strings.Contains(string(history), ":reply") || strings.Contains(string(history), "yes") {
-			t.Fatal("reply entered command history")
+		if !strings.Contains(string(history), "batch-only") || strings.Contains(string(history), "configure terminal") || strings.Contains(string(history), "yes") {
+			t.Fatalf("history modes mixed: %s", history)
 		}
-	})
-	t.Run("PTY configuration rejects multiple devices before SSH", func(t *testing.T) {
-		f := newREPLFixture(t, binary)
-		s := f.terminal(t)
-		s.write(t, ":mode config\r")
-		s.settle()
-		s.write(t, "[ 'good', 'bad' ] ( 'one' )\r")
-		s.await(t, "configuration mode requires exactly one device")
-		s.settle()
-		if f.log() != "" {
-			t.Fatal("opened SSH before validating configuration scope")
-		}
-		s.write(t, "\x03")
-		s.wait(t, 0)
 	})
 	t.Run("PTY trust cancellation leaves input usable", func(t *testing.T) {
 		f := newREPLFixture(t, binary)
@@ -341,6 +350,7 @@ if [ "$probe" = yes ]; then
   exit 255
 fi
 if [ "$command" = "fixture@$host" ]; then
+  stty opost onlcr icrnl
   printf '%s %s\n' "$host" "$$" >> "$NSSH_TEST_SESSIONS"
   mode=
   value=unset

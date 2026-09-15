@@ -90,7 +90,7 @@ Use --target to force a literal destination.` + "\n\n" + repl.Explanation(),
 	rootCmd.AddCommand(newCpCmd())
 	tuiCmd := repl.NewCmd()
 	rootCmd.Flags().AddFlagSet(tuiCmd.Flags())
-	rootCmd.Flags().Bool("tui", false, "Open the persistent-session terminal interface")
+	rootCmd.Flags().Bool("tui", false, "Open batch requests and interactive SSH panes")
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if enabled, _ := cmd.Flags().GetBool("tui"); enabled {
 			if len(args) != 0 || cmd.Flags().Changed("target") || cmd.Flags().Changed("select") {

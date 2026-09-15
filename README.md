@@ -62,13 +62,12 @@ Or pipe a submission from fish:
 printf '%s\n' "[ 'irn-border-sw(1,2)', 'irn-agg-sw(1,2)' ] ( 'show env power' )" | nssh --tui
 ```
 
-The TUI opens a persistent shell per device and closes it on exit. Operations
-mode supports multiple devices; `:mode config` requires one device and permits
-explicit replies to interactive prompts. EOS, Junos, and Linux shells are
-supported; `:platform` selects a profile when prompt detection is ambiguous.
-Authenticate credential providers before starting. Piped or `--plain` input
-retains per-command capture. The old `repl` subcommand is removed.
-See the [TUI guide](skills/nssh/references/repl.md) for keys and session behavior.
+The TUI starts in **batch** mode: one request bar and history entries containing
+both devices and commands. Enter `:interactive` to select a fixed device group
+and open live SSH panes. Shared input broadcasts to the displayed targets;
+click a pane to focus one device, or use `:all` to restore broadcast. Enter
+`:batch` to close those sessions and return to batch requests.
+See the [TUI guide](skills/nssh/references/repl.md) for keys and history behavior.
 
 ## Installation
 

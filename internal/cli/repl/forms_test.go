@@ -13,7 +13,7 @@ import (
 func TestFormsSwitchAndAddRowsWithoutChangingSyntax(t *testing.T) {
 	m := testTUI(120)
 	m.input.Focus()
-	m.input.SetValue("[ 'edge1' ] ( 'show version' )")
+	m.input.SetValue("[ 'edge1' ] ( '' )")
 	m.input.SetCursor(8)
 	before := m.input.Value()
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -21,6 +21,8 @@ func TestFormsSwitchAndAddRowsWithoutChangingSyntax(t *testing.T) {
 	if !m.commandFocused() || m.input.Value() != before || m.active {
 		t.Fatal("device Enter should only advance")
 	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("show version")})
+	m = next.(model)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
 	m = next.(model)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("show clock")})
@@ -42,30 +44,15 @@ func TestFormsSwitchAndAddRowsWithoutChangingSyntax(t *testing.T) {
 	}
 }
 
-func TestFormsStackedLayoutAndVisibleRows(t *testing.T) {
+func TestBatchRequestIsOneBox(t *testing.T) {
 	m := testTUI(120)
-	m.input.SetValue("[ 'edge1', 'edge2' ] ( 'one', 'two', 'three', 'four', 'five' )")
-	m.focusForm(true)
-	for i := 0; i < 4; i++ {
-		m.moveFormRow(1)
+	m.input.SetValue("[ 'edge1', 'edge2' ] ( 'show version' )")
+	text := ansi.Strip(m.formsView(120))
+	if strings.Contains(text, "Devices") || strings.Contains(text, "Commands") || !strings.Contains(text, m.input.Value()) {
+		t.Fatal(text)
 	}
-	for _, width := range []int{45, 120} {
-		view := m.formsView(width)
-		plain := ansi.Strip(view)
-		if !strings.Contains(plain, "Devices") || !strings.Contains(plain, "Commands (2-5/5)") || !strings.Contains(plain, "'five'") {
-			t.Fatal(plain)
-		}
-		if lipgloss.Width(view) > width {
-			t.Fatalf("overflow at %d", width)
-		}
-	}
-	if lipgloss.Height(m.formsView(120)) != lipgloss.Height(m.formsView(45)) {
-		t.Fatal("forms should stack at every width")
-	}
-	before := m.input.Value()
-	m.formsView(120)
-	if m.input.Value() != before {
-		t.Fatal("render mutated submission")
+	if lipgloss.Height(m.formsView(120)) != 3 {
+		t.Fatal("expected one command bar")
 	}
 }
 
@@ -109,24 +96,5 @@ func TestFormsAllowIncrementalExplicitSyntax(t *testing.T) {
 	}
 	if m.input.Value() != want {
 		t.Fatalf("explicit syntax changed: %q", m.input.Value())
-	}
-}
-
-func TestConfigurationControlsRemainAccessible(t *testing.T) {
-	m := testTUI(120)
-	m.input.Focus()
-	m.owner = &terminalOwner{}
-	m.configMode = true
-	m.configDraft = "[ 'edge' ] ( '' )"
-	m.resetInput()
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":sessions")})
-	m = next.(model)
-	if m.input.Value() != ":sessions" {
-		t.Fatal("control trapped inside remote command field")
-	}
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = next.(model)
-	if m.input.Value() != m.configDraft || !m.commandFocused() {
-		t.Fatal("session control lost selected device")
 	}
 }

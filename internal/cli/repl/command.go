@@ -25,7 +25,6 @@ import (
 	core "github.com/ntwrknrd/nssh/internal/repl"
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
-	"github.com/ntwrknrd/nssh/internal/ssh/session"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -61,68 +60,76 @@ func NewCmd() *cobra.Command {
 
 func isTerminal(f *os.File) bool { return f != nil && term.IsTerminal(int(f.Fd())) }
 
-const replHelp = `Run grouped remote commands across exact inventory or literal targets.
+const replHelp = `Run grouped remote commands or open interactive SSH panes with nssh --tui.
 
-TUI commands:
-  :help         Open help (Esc/Enter closes)
-  :mode ops     Multi-device operations (default)
-  :mode config  Single-device configuration with explicit prompt replies
-  :platform auto|eos|junos|linux  Profile for newly opened sessions
-  :sessions     List retained device sessions and prompts
-  :disconnect   Close retained sessions; next submission opens fresh sessions
-  :reply TEXT   Answer the active device in configuration mode
-  :clear        Clear scrollback; keep command history (also Ctrl-K)
-  :wipe         Clear scrollback and saved command history
-  :quit, :exit  Exit the REPL
-
-Syntax:
+Batch (default):
   [ 'host1', 'host2' ] ( 'command1', 'command2' )
-  [ 'irn-border-sw(1,2)', 'irn-agg-sw(1,2)' ] ( 'show env power' )
+  [ 'irn-border-sw(1,2)' ] ( 'show env power' )
   [ 'select:provider:netbox' ] ( 'show version' )
 
+One request bar contains both devices and commands. Up/Down or Ctrl-P/N recalls
+complete requests, including their devices. Enter runs a filled request. If its
+command is empty, Enter moves into the command quotes. Shift-Tab moves between
+host and command fields; Alt-Enter adds a quoted value. Deletion preserves the
+syntax delimiters. Typing a hostname in an empty bar starts a request template.
+Tab opens device selection. Type to filter, Space selects, Up/Down moves,
+Enter inserts selected devices, and Esc restores the draft.
+
+Commands run in order across the requested hosts. Failures skip later commands
+on that host; commands are never retried. Each command uses a separate execution
+with remote stdin at EOF. History saves devices and commands together, deduplicates
+identical requests, and restores the whole request for editing.
+
+Interactive:
+  :interactive  Choose devices, then Enter opens a fixed group of SSH panes
+  :batch        Close the group and return to batch
+  :target N     Send input only to pane N (or click that pane)
+  :all          Resume broadcasting to every pane
+  :keys        Send keys directly; Ctrl-] returns to the command bar
+  :next, :prev  Change the visible page when more than four panes are open
+  :disconnect  Close the group and return to batch
+
+The command bar sends its text plus Enter to the displayed targets. Each pane
+shows the real remote prompt and output. Sessions retain their own shell, CLI
+mode, variables, and working directory. There is no ops/config mode, platform
+profile, injected shell, automatic configuration, prompt parsing, or replay.
+Wait for each device's prompt before sending input. Focus a pane before answering
+its confirmation or handling different device states; nssh does not infer whether
+prompts agree. A closed session pauses broadcast; :all explicitly resumes it,
+but input still requires every targeted session to be open.
+
+Up/Down recalls commands for the current interactive group, separately from
+batch history. This history is memory-only and disappears when the group closes.
+Tab sends the draft for remote completion and enters direct keyboard input.
+In direct input, arrows, Tab, Enter and control keys go to the target terminals.
+Ctrl-] toggles back to the local bar. Ctrl-C/Ctrl-D go to the selected terminals;
+use :quit to exit the TUI. Remote commands starting with a colon can use direct
+input or a leading space in the command bar. Remote pagination is unchanged.
+
+Common controls:
+  :help         Open this index; Esc/Enter closes, arrows/PgUp/PgDn scroll
+  :clear        Clear scrollback (also Ctrl-K); keep history
+  :wipe         Clear scrollback and history for the current mode
+  :quit, :exit  Exit and close all local SSH terminals
+
+PgUp/PgDn or the mouse wheel scroll output. Drag selects lines in one pane;
+Ctrl-Y copies, and right-click copies then clears the selection. Clipboard
+copies are limited to 64 KiB. In batch, status headings are selectable and stay
+pinned above their output. Ctrl-L toggles stacked batch results; Ctrl-G toggles
+line comparison. New output or resizing clears selections.
+
+Interactive supports 1-16 devices, with up to four visible per page and 1000
+scrollback rows per pane. Host-key approval uses a serialized modal prompt.
+Authenticate credential providers before starting the TUI. Cancellation and
+closing a terminal cannot undo commands already sent to a device.
+
+--plain or piped input uses batch syntax and separate stdout/stderr. It stops on
+failure (exit 1); interruption exits 130. Plain sessions do not write history.
 Values are single quoted; \' escapes a quote. Other backslashes are preserved.
-Trailing prefix(1,2) expands suffixes. One select:QUERY may replace the target
-list, using nssh inv list fields: host, hostname, id, user, port, provider, group.
-No fuzzy selection or inventory creation occurs. The old repl subcommand is
-removed; use nssh --tui. A destination named repl follows normal SSH routing.
-
-Each command runs across all hosts before the next starts. Results appear in
-requested host order, with separate stdout/stderr. A failure skips later
-commands only on that host. Authenticate credential providers first.
-Interactive sessions retain each device shell until disconnect or TUI exit.
-EOS/Junos report READY when the prompt returns, not a remote exit status.
-Linux uses a persistent /bin/sh with exact command exit status. Auto detection
-can be overridden with :platform before opening a session. Cancellation or loss
-closes that session; it never reconnects or replays commands automatically.
-Plain mode retains per-command execution with remote stdin at EOF.
-Interactive host-key approval is serialized. Plain mode cannot prompt for trust.
-
-Interactive: Devices and Commands use stacked boxes. Shift-Tab switches boxes.
-Enter in Devices advances; Enter in Commands runs.
-Alt-Enter adds a row; Up/Down moves within lists. Ctrl-P/N recalls history.
-Tab opens a fresh searchable device picker, including for a single match.
-Tab on an empty prompt starts
-a target list. In the picker, type to filter, Space selects, Up/Down moves,
-Enter inserts selected hosts, and Esc closes without changing the command.
-Selections persist across filters. Up/Down outside the picker
-recall history. PgUp/PgDn or the mouse wheel scroll. Ctrl-L toggles stacked
-results; Ctrl-G toggles line comparison in split panes. Drag selects lines in
-one device pane, including its status heading. The full device/command status
-line stays pinned while scrolling and can be selected together with its output.
-Ctrl-Y copies; right-click copies and clears the selection after a successful
-write. Copy sends up to 64 KiB to the terminal clipboard.
-Ctrl-C cancels active work and waits for local cleanup, or
-exits when idle. :help opens a scrollable overlay in the TUI (Esc/Enter closes);
-plain mode prints help. :quit, :exit, or EOF exits.
-Cancellation cannot undo remote effects. Normal interactive quit returns zero.
-Plain input stops on failure (exit 1); interruption exits 130.
-
-History: XDG state/nssh/repl_history, mode 0600, up to 1000 entries or 1 MiB.
-History stores submitted hosts and commands, which may contain sensitive arguments.
-Piped input does not write history. Capture is capped at 8 MiB per command;
-the transcript at 32 MiB / 4096 display blocks, with visible truncation/eviction.
-Submissions: at most 2 MiB before and after suffix expansion, 1000 targets,
-100 commands, 10000 host/command pairs.`
+Suffix lists expand prefix(1,2). Selectors use inventory list matching rules.
+Batch history: XDG state/nssh/repl_history, mode 0600, 1000 entries or 1 MiB.
+The old repl subcommand is removed; use nssh --tui.
+`
 
 func runPlain(in io.Reader, out, errOut io.Writer, concurrency int) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -149,7 +156,7 @@ func runPlainContext(ctx context.Context, in io.Reader, out, errOut io.Writer, c
 			continue
 		}
 		if line == ":help" {
-			_, _ = fmt.Fprintln(out, replHelp)
+			_, _ = fmt.Fprint(out, replHelp)
 			continue
 		}
 		if line == ":quit" || line == ":exit" {
@@ -190,26 +197,6 @@ func runSubmission(ctx context.Context, submission core.Submission, concurrency 
 			owner.program.Send(replEventMsg{text: text})
 		} else {
 			_, _ = io.WriteString(errOut, text)
-		}
-	}
-	if owner != nil {
-		owner.sessionMu.Lock()
-		single := owner.configMode
-		owner.sessionMu.Unlock()
-		if single {
-			identities := map[string]bool{}
-			for _, spec := range submission.Targets {
-				targets, err := catalogResolver(cfg, cat)(ctx, spec)
-				if err != nil {
-					return err
-				}
-				for _, t := range targets {
-					identities[t.Identity] = true
-				}
-			}
-			if len(identities) != 1 {
-				return fmt.Errorf("configuration mode requires exactly one device")
-			}
 		}
 	}
 	executor := core.Executor{Concurrency: concurrency, Resolve: catalogResolver(cfg, cat), Run: captureRunner(owner),
@@ -371,9 +358,6 @@ func captureRunner(owner *terminalOwner) core.Runner {
 		if !ok {
 			return core.Result{Err: fmt.Errorf("invalid target request")}
 		}
-		if owner != nil && owner.program != nil {
-			return owner.runSession(ctx, target, request, command)
-		}
 		resolved, err := connect.ResolveLiteralHostFromCatalog(ctx, request.host, request.user, request.cfg, request.cat)
 		if err != nil {
 			return core.Result{Err: err, ExitCode: 1}
@@ -427,15 +411,9 @@ type trustRequest struct {
 }
 type trustFinishedMsg struct{ request *trustRequest }
 type terminalOwner struct {
-	sessionMu      sync.Mutex
-	sessions, busy map[string]*connect.PersistentSession
-	profile        session.Profile
-	configMode     bool
-	width, height  int
-	opening        int
-	program        *tea.Program
-	ctx            context.Context
-	workers        sync.WaitGroup
+	program *tea.Program
+	ctx     context.Context
+	workers sync.WaitGroup
 }
 
 // The main UI owns stdin throughout a serialized modal trust decision. Workers
@@ -474,7 +452,7 @@ type model struct {
 func runTUI(concurrency int) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	owner := &terminalOwner{ctx: ctx, profile: session.Auto}
+	owner := &terminalOwner{ctx: ctx}
 	input := textinput.New()
 	input.Prompt = ""
 	input.Placeholder = "[ 'host' ] ( 'command' )"
@@ -489,10 +467,12 @@ func runTUI(concurrency int) error {
 	}
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	owner.program = p
-	_, err := p.Run()
+	final, err := p.Run()
 	cancel()
 	owner.workers.Wait()
-	owner.closeSessions()
+	if m, ok := final.(model); ok {
+		m.closePanes()
+	}
 	return err
 }
 func loadCandidates() []string {
@@ -525,7 +505,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key, ok := msg.(tea.KeyMsg); ok {
 			switch key.Type {
 			case tea.KeyLeft, tea.KeyRight, tea.KeyHome, tea.KeyEnd, tea.KeyCtrlA, tea.KeyCtrlE, tea.KeyUp, tea.KeyDown, tea.KeyCtrlP, tea.KeyCtrlN, tea.KeyTab, tea.KeyShiftTab:
-				updated.clampFormCursor()
+				if !updated.interactive {
+					updated.clampFormCursor()
+				}
 			}
 		}
 		updated.refreshLayout()
@@ -535,6 +517,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if next, cmd, handled := m.updateInteractive(msg); handled {
+		return next, cmd
+	}
+
 	switch v := msg.(type) {
 	case tuiCopyMsg:
 		m.message = "selection sent to terminal clipboard"
@@ -566,9 +552,6 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = v.Width, v.Height
-		if m.owner != nil {
-			m.owner.resizeSessions(v.Width, v.Height)
-		}
 		m.selected = false
 		m.refreshLayout()
 		return m, nil
@@ -617,15 +600,6 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.trust.response <- action
 			m.trust = nil
 			return m, nil
-		}
-		if m.active && m.configMode && v.Type == tea.KeyEnter {
-			text, ok := strings.CutPrefix(m.input.Value(), ":reply ")
-			if !ok {
-				m.message = "use :reply TEXT to answer the active device"
-				return m, nil
-			}
-			m.input.SetValue("")
-			return m, func() tea.Msg { return sessionReplyMsg{m.owner.reply(text)} }
 		}
 		if v.Type == tea.KeyCtrlD {
 			if m.active {
@@ -680,12 +654,6 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport, cmd = m.viewport.Update(v)
 			return m, cmd
 		}
-		if !m.active && v.Type == tea.KeyUp && m.moveFormRow(-1) {
-			return m, nil
-		}
-		if !m.active && v.Type == tea.KeyDown && m.moveFormRow(1) {
-			return m, nil
-		}
 		if !m.active && (v.Type == tea.KeyUp || v.Type == tea.KeyCtrlP) && len(m.entries) > 0 {
 			if m.historyAt > 0 {
 				m.historyAt--
@@ -704,42 +672,29 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if !m.active && v.Type == tea.KeyEnter {
-			devices, commands := m.formFields()
-			if !m.commandFocused() && len(devices) > 0 && len(commands) > 0 {
-				m.focusForm(true)
-				return m, nil
-			}
 			line := strings.TrimSpace(m.input.Value())
-			if line == ":sessions" {
-				m.appendTranscript(m.owner.sessionSummary() + "\n")
-				m.resetInput()
-				return m, nil
-			}
-			if line == ":disconnect" {
-				m.owner.closeSessions()
-				m.message = "device sessions closed; next submission opens new sessions"
-				m.resetInput()
-				return m, nil
-			}
-			if strings.HasPrefix(line, ":platform ") {
-				profile := session.Profile(strings.TrimSpace(strings.TrimPrefix(line, ":platform ")))
-				if !session.ValidProfile(profile) {
-					m.message = "platform must be auto, eos, junos, or linux"
+			if !strings.HasPrefix(line, ":") && !m.commandFocused() {
+				_, commands := m.formFields()
+				if len(commands) == 1 && commands[0].start == commands[0].end {
+					m.focusForm(true)
 					return m, nil
 				}
-				m.owner.sessionMu.Lock()
-				m.owner.profile = profile
-				m.owner.sessionMu.Unlock()
-				m.message = "platform for new sessions: " + string(profile)
-				m.resetInput()
+			}
+			if line == ":interactive" || line == ":mode interactive" {
+				m.batchDraft = m.input.Value()
+				if strings.HasPrefix(m.batchDraft, ":") {
+					m.batchDraft = ""
+				}
+				m.interactive = true
+				m.choosing = true
+				m.input.SetValue("[ '' ] ( '' )")
+				m.input.SetCursor(3)
+				m.openPicker()
+				m.refreshLayout()
 				return m, nil
 			}
-			if line == ":mode config" || line == ":mode ops" {
-				m.configMode = line == ":mode config"
-				m.owner.sessionMu.Lock()
-				m.owner.configMode = m.configMode
-				m.owner.sessionMu.Unlock()
-				m.resetInput()
+			if line == ":batch" || line == ":mode batch" {
+				m.input.SetValue("")
 				return m, nil
 			}
 			if line == ":help" {
@@ -775,38 +730,12 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = err.Error()
 				return m, nil
 			}
-			if m.configMode {
-				_, commands := m.formFields()
-				if len(commands) > 0 {
-					m.configDraft = string([]rune(m.input.Value())[:commands[0].start]) + "' )"
-				}
-			}
 			m.input.SetValue("")
 			m.startSubmission(submission, line)
 			return m, nil
 		}
-	case sessionWaitingMsg:
-		m.appendTranscript("[" + displayLabel(v.host) + "] waiting for a recognized prompt:\n" + safeTerminalText(v.text) + "\n")
-		if m.configMode {
-			m.message = "Reply with :reply TEXT; Ctrl-C cancels and closes this session"
-			if m.input.Value() == "" {
-				m.input.SetValue(":reply ")
-			}
-		}
-		return m, nil
-	case sessionReplyMsg:
-		if v.err != nil {
-			m.message = v.err.Error()
-		} else {
-			m.message = "reply sent"
-		}
-		return m, nil
 	case finishedMsg:
 		m.active = false
-		if m.configMode && m.configDraft != "" {
-			m.input.SetValue(m.configDraft)
-			m.focusForm(true)
-		}
 		m.cancel = nil
 		m.candidates = loadCandidates()
 		if v.err != nil && v.err != context.Canceled {
@@ -815,13 +744,6 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.active {
-		if m.configMode {
-			if key, ok := msg.(tea.KeyMsg); ok {
-				var cmd tea.Cmd
-				m.input, cmd = m.input.Update(key)
-				return m, cmd
-			}
-		}
 		return m, nil
 	}
 	if key, ok := msg.(tea.KeyMsg); ok {

@@ -1,11 +1,7 @@
 package repl
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 )
 
 func (m model) formFields() (devices, commands []editorField) {
@@ -62,84 +58,20 @@ func (m *model) addFormRow() {
 	m.input.SetCursor(at + 3)
 }
 
-// Both forms edit ranges in the same submission, so history and parsing keep
-// their existing contract. Only the display separates values into rows.
+// Batch has one editable request, including its targets and commands.
 func (m model) formsView(width int) string {
-	if m.input.Value() == "" {
-		m.input.SetValue("[ '' ] ( '' )")
-		m.input.SetCursor(3)
+	if m.interactive && m.choosing {
+		devices, _ := m.formFields()
+		if len(devices) > 0 {
+			value := []rune(m.input.Value())
+			m.input.SetValue(string(value[:devices[len(devices)-1].end+1]) + " ]")
+			m.input.Placeholder = "Choose devices"
+		}
 	}
-	devices, commands := m.formFields()
-	if strings.HasPrefix(strings.TrimSpace(m.input.Value()), ":") || len(devices) == 0 || len(commands) == 0 {
-		return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("8")).Width(max(1, width-2)).Render(m.editorView(max(1, width-4)))
-	}
-	boxWidth := width
-	render := func(title string, fields []editorField, focused bool) string {
-		inner := max(1, boxWidth-4)
-		rows := []string{title}
-		current := 0
-		for i, f := range fields {
-			if m.input.Position() >= f.start && m.input.Position() <= f.end {
-				current = i
-			}
-		}
-		start := 0
-		if focused {
-			start = max(0, current-3)
-		}
-		value := []rune(m.input.Value())
-		for i := start; i < min(len(fields), start+4); i++ {
-			f := fields[i]
-			first := f.start - 1
-			if focused && i == current {
-				for first < m.input.Position() && ansi.StringWidth(string(value[first:m.input.Position()])) > max(1, inner-3) {
-					first++
-				}
-			}
-			var row strings.Builder
-			for pos := first; pos <= f.end; pos++ {
-				style := lipgloss.NewStyle()
-				if focused && pos == m.input.Position() {
-					style = style.Reverse(true)
-				}
-				row.WriteString(style.Render(safeTerminalText(string(value[pos]))))
-			}
-			rows = append(rows, ansi.Truncate(row.String(), inner, ""))
-		}
-		if len(fields) > 4 {
-			rows[0] += " (" + fmt.Sprintf("%d-%d/%d", start+1, min(len(fields), start+4), len(fields)) + ")"
-		}
-		border := lipgloss.Color("8")
-		if focused {
-			border = lipgloss.Color("81")
-		}
-		return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(border).Width(max(1, boxWidth-2)).Render(strings.Join(rows, "\n"))
-	}
-	left := render("Devices", devices, !m.commandFocused())
-	right := render("Commands", commands, m.commandFocused())
-	return left + "\n" + right
+	return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("8")).Width(max(1, width-2)).Render(m.editorView(max(1, width-4)))
 }
 
-func (m *model) moveFormRow(delta int) bool {
-	devices, commands := m.formFields()
-	fields := devices
-	if m.commandFocused() {
-		fields = commands
-	}
-	if len(fields) < 2 {
-		return false
-	}
-	for i, field := range fields {
-		if m.input.Position() >= field.start && m.input.Position() <= field.end {
-			target := fields[max(0, min(len(fields)-1, i+delta))]
-			m.input.SetCursor(min(target.end, target.start+m.input.Position()-field.start))
-			return true
-		}
-	}
-	return false
-}
-
-// Hidden submission delimiters are not cursor destinations in the forms.
+// Keep navigation inside the editable values of the batch request.
 func (m *model) clampFormCursor() {
 	devices, commands := m.formFields()
 	if len(devices) == 0 || len(commands) == 0 {
@@ -172,11 +104,4 @@ func (m model) emptyCommandField() bool {
 	}
 	return false
 }
-func (m *model) resetInput() {
-	if m.configMode && m.configDraft != "" {
-		m.input.SetValue(m.configDraft)
-		m.focusForm(true)
-	} else {
-		m.input.SetValue("")
-	}
-}
+func (m *model) resetInput() { m.input.SetValue("") }

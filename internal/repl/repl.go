@@ -211,12 +211,10 @@ type ResolvedTarget struct {
 }
 type Resolver func(context.Context, Target) ([]ResolvedTarget, error)
 type Result struct {
-	Interactive, StatusKnown bool
-	Prompt                   string
-	Stdout, Stderr           []byte
-	ExitCode                 int
-	Err                      error
-	Truncated                bool
+	Stdout, Stderr []byte
+	ExitCode       int
+	Err            error
+	Truncated      bool
 }
 type Runner func(context.Context, ResolvedTarget, []string) Result
 type State string
