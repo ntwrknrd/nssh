@@ -150,7 +150,7 @@ func resultLabel(e core.Event) string {
 }
 
 func resultHeading(e core.Event, width int) string {
-	return tuiTarget.Bold(true).Render(ansi.Truncate(resultLabel(e), width, "..."))
+	return hostListColor(os.Stdout, ansi.Truncate(resultLabel(e), width, "..."), e.State)
 }
 
 // Device tables often pad rows to a fixed width. Trim only trailing display
