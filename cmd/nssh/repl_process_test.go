@@ -137,12 +137,33 @@ func TestREPLProcess(t *testing.T) {
 			t.Fatalf("exit=%d\n%s", code, output.String())
 		}
 	})
+	t.Run("PTY guided inventory and multiple commands", func(t *testing.T) {
+		f := newREPLFixture(t, binary)
+		s := f.terminal(t)
+		s.write(t, "\x1bOQ") // Back to guided mode from the legacy test helper.
+		s.await(t, "Filter:")
+		s.write(t, "good\r")
+		s.write(t, "one\rtwo")
+		s.write(t, "\x1b[15~") // F5
+		s.await(t, "stdout-good-two")
+		s.await(t, "done 2")
+		s.settle()
+		if !strings.Contains(f.log(), "good one\ngood two\n") {
+			t.Fatalf("commands not executed in order: %q", f.log())
+		}
+		s.write(t, "\x10") // Ctrl-P recalls the guided submission.
+		s.write(t, "\x1b[15~")
+		awaitProcess(t, func() bool { return strings.Count(f.log(), "good two\n") == 2 }, "guided history replay", &s.output)
+		s.settle()
+		s.write(t, "\x03")
+		s.wait(t, 0)
+	})
 	t.Run("PTY completion history resize and quit", func(t *testing.T) {
 		f := newREPLFixture(t, binary)
 		s := f.terminal(t)
 		s.write(t, "[ 'go\t' ] ( 'one' )\r")
 		s.await(t, "stdout-good-one")
-		s.await(t, "Summary (requested order)")
+		s.await(t, "done 1")
 		s.settle()
 		s.write(t, "\x1b[A\r")
 		awaitProcess(t, func() bool { return strings.Count(f.log(), "good one\n") == 2 }, "history replay", &s.output)
@@ -371,6 +392,7 @@ func (f *replFixture) terminal(t *testing.T) *replTerminal {
 	go func() { _, _ = io.Copy(&s.output, file); close(s.readDone) }()
 	t.Cleanup(func() { _ = file.Close(); <-s.readDone })
 	s.await(t, "nssh repl")
+	s.write(t, "\x1bOQ") // F2: existing cases exercise the syntax editor.
 	return s
 }
 func (s *replTerminal) write(t *testing.T, text string) {

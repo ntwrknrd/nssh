@@ -3,13 +3,11 @@ package self
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/ui"
@@ -142,20 +140,12 @@ func runInstallerWithEvents(shellCmd string) (installerResult, error) {
 		if err != nil {
 			return err
 		}
-		stderr, err := installCmd.StderrPipe()
-		if err != nil {
-			return err
-		}
+		// Let exec.Cmd drain stderr before Wait returns; calling Wait with an
+		// active StderrPipe reader can close the pipe and lose diagnostics.
+		installCmd.Stderr = &stderrText
 		if err := installCmd.Start(); err != nil {
 			return err
 		}
-
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_, _ = io.Copy(&stderrText, stderr)
-		}()
 
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
@@ -177,7 +167,6 @@ func runInstallerWithEvents(shellCmd string) (installerResult, error) {
 		}
 		scanErr := scanner.Err()
 		waitErr := installCmd.Wait()
-		wg.Wait()
 		if scanErr != nil && waitErr == nil {
 			return scanErr
 		}

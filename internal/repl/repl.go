@@ -306,58 +306,54 @@ func (e Executor) Execute(ctx context.Context, submission Submission) ([]Event, 
 		stored.Result.Stderr = nil
 		events = append(events, stored)
 	}
-	for _, target := range targets {
-		for commandIndex, command := range submission.Commands {
+	failed := make([]bool, len(targets))
+	window := min(e.Concurrency, len(targets))
+	for commandIndex, command := range submission.Commands {
+		for _, target := range targets {
 			emit(Event{Target: target, Command: command, CommandIndex: commandIndex, State: Queued})
 		}
-	}
-	jobs := make(chan ResolvedTarget, len(targets))
-	for _, target := range targets {
-		jobs <- target
-	}
-	close(jobs)
-	workerCount := e.Concurrency
-	if workerCount > len(targets) {
-		workerCount = len(targets)
-	}
-	var wg sync.WaitGroup
-	worker := func() {
-		defer wg.Done()
-		for target := range jobs {
-			failed := false
-			for commandIndex, command := range submission.Commands {
-				if failed {
-					emit(Event{Target: target, Command: command, CommandIndex: commandIndex, State: Skipped})
-					continue
+		// Only a sliding window of jobs can run or retain output. A slow early
+		// host applies backpressure instead of buffering the entire inventory.
+		results := make([]chan Event, len(targets))
+		launch := func(i int) {
+			results[i] = make(chan Event, 1)
+			go func() {
+				event := Event{Target: targets[i], Command: command, CommandIndex: commandIndex}
+				switch {
+				case failed[i]:
+					event.State = Skipped
+				case ctx.Err() != nil:
+					event.State, event.Err = Canceled, ctx.Err()
+				default:
+					event.State = Running
+					emit(event)
+					event.Result = limitResult(e.Run(ctx, event.Target, []string{command}))
+					event.Err = event.Result.Err
+					event.State = Completed
+					if event.Err != nil || event.Result.ExitCode != 0 {
+						event.State = Failed
+					}
+					if ctx.Err() != nil {
+						event.State, event.Err = Canceled, ctx.Err()
+						event.Result.Err = event.Err
+					}
 				}
-				if ctx.Err() != nil {
-					emit(Event{Target: target, Command: command, CommandIndex: commandIndex, State: Canceled, Err: ctx.Err()})
-					failed = true
-					continue
-				}
-				emit(Event{Target: target, Command: command, CommandIndex: commandIndex, State: Running})
-				result := e.Run(ctx, target, []string{command})
-				state := Completed
-				if result.Err != nil || result.ExitCode != 0 {
-					state = Failed
-					failed = true
-				}
-				if ctx.Err() != nil {
-					state = Canceled
-					result.Err = ctx.Err()
-					failed = true
-				}
-				emit(Event{Target: target, Command: command, CommandIndex: commandIndex, State: state, Result: limitResult(result), Err: result.Err})
+				results[i] <- event
+			}()
+		}
+		for i := range window {
+			launch(i)
+		}
+		for i := range targets {
+			event := <-results[i]
+			failed[i] = failed[i] || event.State == Failed || event.State == Canceled
+			emit(event)
+			if next := i + window; next < len(targets) {
+				launch(next)
 			}
 		}
+		// All results, including callbacks, finish before the next command.
 	}
-	wg.Add(workerCount)
-	for range workerCount {
-		go worker()
-	}
-	wg.Wait()
-	mu.Lock()
-	defer mu.Unlock()
 	return append([]Event(nil), events...), ctx.Err()
 }
 func limitResult(result Result) Result {

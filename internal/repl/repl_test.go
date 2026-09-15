@@ -232,3 +232,47 @@ func TestParseBoundsExpandedSubmission(t *testing.T) {
 		t.Fatalf("rejected expansion at the target limit: %v", err)
 	}
 }
+
+func TestExecutorOrdersResultsAndWaitsBetweenCommands(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	secondDone := make(chan struct{})
+	var printed []string
+	var printedCount atomic.Int32
+	e := Executor{Concurrency: 2,
+		Resolve: func(_ context.Context, target Target) ([]ResolvedTarget, error) {
+			return []ResolvedTarget{{Identity: target.Value}}, nil
+		},
+		Run: func(ctx context.Context, target ResolvedTarget, commands []string) Result {
+			if commands[0] == "one" {
+				switch target.Identity {
+				case "a":
+					select {
+					case <-secondDone:
+					case <-ctx.Done():
+						return Result{Err: ctx.Err()}
+					}
+				case "b":
+					close(secondDone)
+				}
+			} else if printedCount.Load() < 3 {
+				t.Error("next command started before all previous results were printed")
+			}
+			return Result{Stdout: []byte(target.Identity)}
+		},
+		OnEvent: func(event Event) {
+			if event.State == Completed {
+				printed = append(printed, event.Command+":"+event.Target.Identity)
+				printedCount.Add(1)
+			}
+		},
+	}
+	_, err := e.Execute(ctx, Submission{Targets: []Target{{Value: "a"}, {Value: "b"}, {Value: "c"}}, Commands: []string{"one", "two"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"one:a", "one:b", "one:c", "two:a", "two:b", "two:c"}
+	if !reflect.DeepEqual(printed, want) {
+		t.Fatalf("printed=%v want=%v", printed, want)
+	}
+}

@@ -71,21 +71,31 @@ list, using nssh inv list fields: host, hostname, id, user, port, provider, grou
 No fuzzy selection or inventory creation occurs. Use --target repl at the root
 to connect to a host named repl.
 
-Commands run in order per host. A failure skips that host's later commands;
-other hosts continue. Output appears when each command finishes, with separate
-stdout/stderr. Remote stdin is EOF; authenticate credential providers first.
+Each command runs across all hosts before the next starts. Results appear in
+requested host order, with separate stdout/stderr. A failure skips later
+commands only on that host. Remote stdin is EOF; authenticate credential providers first.
 Interactive host-key approval is serialized. Plain mode cannot prompt for trust.
 
-Keys: Tab completes the target at the cursor; Up/Down recall history;
-PgUp/PgDn scroll. Ctrl-C cancels active work and waits for local cleanup, or
+Interactive default: type to filter inventory, Up/Down moves, Space selects,
+Enter opens commands. Enter one command per line; F5 runs the selected hosts.
+Tab switches hosts/commands. Selections persist across filters and runs.
+Ctrl-A selects matching hosts; Ctrl-X clears selection in the host list.
+Ctrl-P/Ctrl-N recalls history. F2 switches to the syntax editor and back.
+
+Syntax editor: Tab completes a unique host or opens a multi-select picker. There,
+Space selects, Up/Down moves, Enter inserts, and Esc closes. Up/Down otherwise
+recall history. PgUp/PgDn or the mouse wheel scroll. Ctrl-L toggles stacked
+results; Ctrl-G toggles line comparison in split panes. Drag selects lines in
+one device pane; Ctrl-Y sends up to 64 KiB to the terminal clipboard.
+Ctrl-C cancels active work and waits for local cleanup, or
 exits when idle. :help shows help; :quit, :exit, or EOF exits.
 Cancellation cannot undo remote effects. Normal interactive quit returns zero.
 Plain input stops on failure (exit 1); interruption exits 130.
 
 History: XDG state/nssh/repl_history, mode 0600, up to 1000 entries or 1 MiB.
-History stores submitted text, which may contain sensitive arguments.
+History stores submitted hosts and commands, which may contain sensitive arguments.
 Piped input does not write history. Capture is capped at 8 MiB per command;
-the transcript at 32 MiB, with visible truncation/eviction.
+the transcript at 32 MiB / 4096 display blocks, with visible truncation/eviction.
 Submissions: at most 2 MiB before and after suffix expansion, 1000 targets,
 100 commands, 10000 host/command pairs.`
 
@@ -138,6 +148,10 @@ func runLine(ctx context.Context, line string, concurrency int, out, errOut io.W
 	if err != nil {
 		return err
 	}
+	return runSubmission(ctx, submission, concurrency, out, errOut, owner)
+}
+
+func runSubmission(ctx context.Context, submission core.Submission, concurrency int, out, errOut io.Writer, owner *terminalOwner) error {
 	cfg, err := config.LoadDefault()
 	if err != nil {
 		return err
@@ -155,6 +169,10 @@ func runLine(ctx context.Context, line string, concurrency int, out, errOut io.W
 	}
 	executor := core.Executor{Concurrency: concurrency, Resolve: catalogResolver(cfg, cat), Run: captureRunner(owner),
 		OnTargets: func(targets []core.ResolvedTarget) {
+			if owner != nil && owner.program != nil {
+				owner.program.Send(tuiBatchMsg{targets: len(targets), commands: len(submission.Commands)})
+				return
+			}
 			names := make([]string, len(targets))
 			for i, target := range targets {
 				names[i] = target.Identity
@@ -162,13 +180,15 @@ func runLine(ctx context.Context, line string, concurrency int, out, errOut io.W
 			emitText(fmt.Sprintf("%d targets: %s\n", len(names), strings.Join(names, ", ")))
 		}, OnEvent: func(event core.Event) {
 			if owner != nil && owner.program != nil {
-				owner.program.Send(replEventMsg{text: renderEvent(event)})
+				owner.program.Send(tuiResultMsg{event: event})
 				return
 			}
 			writePlainEvent(event, out, errOut)
 		}}
 	events, execErr := executor.Execute(ctx, submission)
-	emitText(renderSummary(events))
+	if owner == nil || owner.program == nil {
+		emitText(renderSummary(events))
+	}
 	if execErr != nil {
 		return execErr
 	}
@@ -233,41 +253,6 @@ func renderSummary(events []core.Event) string {
 			}
 			b.WriteByte('\n')
 		}
-	}
-	return b.String()
-}
-
-func renderEvent(event core.Event) string {
-	prefix := fmt.Sprintf("[%s] %s: ", event.Target.Identity, event.Command)
-	switch event.State {
-	case core.Queued, core.Running:
-		return prefix + string(event.State) + "\n"
-	case core.Skipped:
-		return prefix + string(event.State) + "\n"
-	}
-	var b strings.Builder
-	if len(event.Result.Stdout) > 0 {
-		_, _ = fmt.Fprintf(&b, "%sstdout:\n%s", prefix, event.Result.Stdout)
-		if event.Result.Stdout[len(event.Result.Stdout)-1] != '\n' {
-			b.WriteByte('\n')
-		}
-	}
-	if len(event.Result.Stderr) > 0 {
-		_, _ = fmt.Fprintf(&b, "%sstderr:\n%s", prefix, event.Result.Stderr)
-		if event.Result.Stderr[len(event.Result.Stderr)-1] != '\n' {
-			b.WriteByte('\n')
-		}
-	}
-	if event.Result.Truncated {
-		_, _ = fmt.Fprintln(&b, prefix+"output truncated")
-	}
-	switch {
-	case event.State == core.Failed:
-		_, _ = fmt.Fprintf(&b, "%sfailed (exit %d): %v\n", prefix, event.Result.ExitCode, event.Err)
-	case event.State == core.Canceled:
-		_, _ = fmt.Fprintln(&b, prefix+"canceled")
-	case b.Len() == 0:
-		_, _ = fmt.Fprintln(&b, prefix+"completed")
 	}
 	return b.String()
 }
@@ -417,6 +402,9 @@ func (o *terminalOwner) prompt(ctx context.Context, prompt connector.HostKeyProm
 }
 
 type model struct {
+	composer
+	tuiState
+
 	input               textinput.Model
 	viewport            viewport.Model
 	transcript          limitedBuffer
@@ -443,10 +431,11 @@ func runTUI(concurrency int) error {
 	candidates := loadCandidates()
 	vp := viewport.New(80, 20)
 	m := model{input: input, viewport: vp, transcript: limitedBuffer{max: core.MaxSessionOutput}, concurrency: concurrency, owner: owner, history: defaultHistoryStore(), entries: entries, historyAt: len(entries), candidates: candidates}
+	m.composer = newComposer()
 	if historyErr != nil {
 		m.appendTranscript("history: " + historyErr.Error() + "\n")
 	}
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	owner.program = p
 	_, err := p.Run()
 	cancel()
@@ -474,21 +463,27 @@ func safeTerminalText(text string) string {
 	}, ansi.Strip(text))
 }
 func (m *model) appendTranscript(text string) {
-	atBottom := m.viewport.AtBottom()
-	_, _ = m.transcript.Write([]byte(safeTerminalText(text)))
-	m.viewport.SetContent(m.transcriptContent())
-	if atBottom {
-		m.viewport.GotoBottom()
-	}
+	m.addBlock(tuiBlock{text: safeTerminalText(text)})
 }
-func (m model) transcriptContent() string {
-	if m.transcript.truncated {
-		return "[older transcript output evicted]\n" + m.transcript.String()
-	}
-	return m.transcript.String()
-}
+func (m model) transcriptContent() string { return m.renderBlocks() }
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch v := msg.(type) {
+	case tuiCopyMsg:
+		m.message = "selection sent to terminal clipboard"
+		if v.err != nil {
+			m.message = "clipboard write failed"
+		}
+		return m, nil
+	case tuiBatchMsg:
+		m.batch++
+		m.total, m.running, m.done, m.failed, m.canceled, m.skipped = v.targets*v.commands, 0, 0, 0, 0, 0
+		m.commandIndex = -1
+		return m, nil
+	case tuiResultMsg:
+		m.acceptResult(v.event)
+		return m, nil
+	case tea.MouseMsg:
+		return m.handleMouse(v)
 	case *trustRequest:
 		m.trust = v
 		return m, nil
@@ -498,10 +493,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.WindowSizeMsg:
-		m.viewport.Width = v.Width
-		m.viewport.Height = max(1, v.Height-5)
-		m.input.Width = max(1, v.Width-3)
-		m.viewport.SetContent(m.transcriptContent())
+		m.width, m.height = v.Width, v.Height
+		m.selected = false
+		m.refreshLayout()
 		return m, nil
 	case replEventMsg:
 		m.appendTranscript(v.text)
@@ -537,16 +531,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
+		if v.Type == tea.KeyCtrlG {
+			m.diff = !m.diff
+			m.selected = false
+			m.refreshLayout()
+			return m, nil
+		}
+		if v.Type == tea.KeyCtrlL {
+			m.stacked = !m.stacked
+			m.selected = false
+			m.refreshLayout()
+			return m, nil
+		}
+		if v.Type == tea.KeyCtrlY {
+			return m, m.copySelection()
+		}
+		if v.Type == tea.KeyF2 && !m.active {
+			m.guided = !m.guided
+			m.matches = nil
+			m.refreshLayout()
+			return m, nil
+		}
+		if m.guided && !m.active {
+			return m.updateComposer(v)
+		}
+		if len(m.matches) > 0 {
+			m.updatePicker(v)
+			return m, nil
+		}
 		if v.Type == tea.KeyEsc && !m.active {
 			return m, tea.Quit
 		}
 		if v.Type == tea.KeyTab && !m.active {
-			value, cursor, remaining := completeTargetToken(m.input.Value(), m.input.Position(), m.candidates)
-			m.input.SetValue(value)
-			m.input.SetCursor(cursor)
-			if len(remaining) > 0 {
-				m.appendTranscript("matches: " + strings.Join(remaining, ", ") + "\n")
-			}
+			m.openPicker()
 			return m, nil
 		}
 		if v.Type == tea.KeyPgUp || v.Type == tea.KeyPgDown || v.String() == "up" && m.active || v.String() == "down" && m.active {
@@ -558,13 +575,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.historyAt > 0 {
 				m.historyAt--
 			}
-			m.input.SetValue(m.entries[m.historyAt])
+			m.restoreHistory(m.entries[m.historyAt])
 			return m, nil
 		}
 		if !m.active && v.Type == tea.KeyDown && len(m.entries) > 0 {
 			if m.historyAt < len(m.entries)-1 {
 				m.historyAt++
-				m.input.SetValue(m.entries[m.historyAt])
+				m.restoreHistory(m.entries[m.historyAt])
 			} else {
 				m.historyAt = len(m.entries)
 				m.input.SetValue("")
@@ -584,22 +601,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if line == "" {
 				return m, nil
 			}
-			m.input.SetValue("")
-			m.active = true
-			ctx, cancel := context.WithCancel(m.owner.ctx)
-			m.cancel = cancel
-			m.entries = boundedHistory(append(m.entries, line))
-			m.historyAt = len(m.entries)
-			if err := m.history.append(line); err != nil {
-				m.appendTranscript("history: " + err.Error() + "\n")
+			submission, err := core.Parse(line)
+			if err != nil {
+				m.message = err.Error()
+				return m, nil
 			}
-			m.owner.workers.Add(1)
-			go func() {
-				defer m.owner.workers.Done()
-				defer cancel()
-				err := runLine(ctx, line, m.concurrency, io.Discard, io.Discard, m.owner)
-				m.owner.program.Send(finishedMsg{err: err})
-			}()
+			m.input.SetValue("")
+			m.startSubmission(submission, line)
 			return m, nil
 		}
 	case finishedMsg:
@@ -615,21 +623,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	var cmd tea.Cmd
+	if m.guided {
+		if m.commandFocus {
+			m.commands, cmd = m.commands.Update(msg)
+		} else {
+			m.hostFilter, cmd = m.hostFilter.Update(msg)
+		}
+		return m, cmd
+	}
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
 }
-func (m model) View() string {
-	status := ""
-	if m.active {
-		status = " (running; Ctrl-C cancels)"
-	}
-	if m.trust != nil {
-		p := m.trust.prompt
-		warning := "Verify host key"
-		if p.Changed {
-			warning = "CHANGED HOST KEY: verify replacement"
-		}
-		return m.viewport.View() + "\n" + safeTerminalText(fmt.Sprintf("%s for %s: %s %s\n[o] accept once  [a] trust permanently  [r] reject  Ctrl-C cancel\n", warning, p.Host, p.KeyType, p.Fingerprint))
-	}
-	return "nssh repl" + status + "  PgUp/PgDn scroll\n\n" + m.viewport.View() + "\n> " + m.input.View() + "\n"
-}
+func (m model) View() string { return m.tuiView() }
