@@ -312,7 +312,7 @@ func (m *model) refreshLayout() {
 		height = m.viewport.Height + 7
 	}
 	m.viewport.Width = max(1, width)
-	footer := 5
+	footer := 2 + lipgloss.Height(m.formsView(max(1, width)))
 	if m.pickerOpen {
 		footer += max(1, min(6, len(m.matches)))
 	}
@@ -389,8 +389,7 @@ func (m model) tuiView() string {
 		if m.pickerOpen {
 			parts = append(parts, m.pickerView())
 		}
-		box := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("8")).Width(max(1, width-2)).Render(m.editorView(max(1, width-4)))
-		parts = append(parts, box)
+		parts = append(parts, m.formsView(width))
 	}
 	pending := max(0, m.total-m.running-m.done-m.failed-m.canceled-m.skipped)
 	status := fmt.Sprintf("running %d  done %d  failed %d  pending %d  canceled %d  skipped %d", m.running, m.done, m.failed, pending, m.canceled, m.skipped)

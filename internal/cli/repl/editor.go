@@ -97,7 +97,7 @@ func (m *model) advanceCompletedTarget(candidate string) bool {
 			if at := strings.LastIndex(host, "@"); at >= 0 {
 				host = host[at+1:]
 			}
-			if m.input.Position() == field.end && strings.EqualFold(host, candidate) {
+			if m.input.Position() >= field.start && m.input.Position() <= field.end && strings.EqualFold(host, candidate) {
 				completed = true
 			}
 		} else if completed {

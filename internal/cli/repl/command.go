@@ -82,7 +82,10 @@ requested host order, with separate stdout/stderr. A failure skips later
 commands only on that host. Remote stdin is EOF; authenticate credential providers first.
 Interactive host-key approval is serialized. Plain mode cannot prompt for trust.
 
-Interactive: edit a submission and press Enter to run. Tab completes a unique
+Interactive: Devices and Commands have separate boxes. Tab/Shift-Tab switch
+boxes after host selection. Enter in Devices advances; Enter in Commands runs.
+Alt-Enter adds a row; Up/Down moves within lists. Ctrl-P/N recalls history.
+Tab completes a unique
 host or opens a searchable multi-select picker. Tab on an empty prompt starts
 a target list. In the picker, type to filter, Space selects, Up/Down moves,
 Enter inserts selected hosts, and Esc closes without changing the command.
@@ -472,6 +475,21 @@ func (m *model) appendTranscript(text string) {
 }
 func (m model) transcriptContent() string { return m.renderBlocks() }
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if updated, ok := next.(model); ok && (updated.input.Value() != m.input.Value() || updated.input.Position() != m.input.Position()) {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.Type {
+			case tea.KeyLeft, tea.KeyRight, tea.KeyHome, tea.KeyEnd, tea.KeyCtrlA, tea.KeyCtrlE, tea.KeyUp, tea.KeyDown, tea.KeyCtrlP, tea.KeyCtrlN, tea.KeyTab, tea.KeyShiftTab:
+				updated.clampFormCursor()
+			}
+		}
+		updated.refreshLayout()
+		return updated, cmd
+	}
+	return next, cmd
+}
+
+func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch v := msg.(type) {
 	case tuiCopyMsg:
 		m.message = "selection sent to terminal clipboard"
@@ -585,8 +603,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.Type == tea.KeyEsc && !m.active {
 			return m, tea.Quit
 		}
+		if !m.active && v.Type == tea.KeyShiftTab {
+			m.focusForm(!m.commandFocused())
+			return m, nil
+		}
+		if !m.active && v.Type == tea.KeyEnter && v.Alt {
+			m.addFormRow()
+			return m, nil
+		}
 		if v.Type == tea.KeyTab && !m.active {
-			m.openPicker()
+			if m.commandFocused() {
+				m.focusForm(false)
+			} else {
+				m.openPicker()
+			}
 			return m, nil
 		}
 		if v.Type == tea.KeyPgUp || v.Type == tea.KeyPgDown || v.String() == "up" && m.active || v.String() == "down" && m.active {
@@ -594,14 +624,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport, cmd = m.viewport.Update(v)
 			return m, cmd
 		}
-		if !m.active && v.Type == tea.KeyUp && len(m.entries) > 0 {
+		if !m.active && v.Type == tea.KeyUp && m.moveFormRow(-1) {
+			return m, nil
+		}
+		if !m.active && v.Type == tea.KeyDown && m.moveFormRow(1) {
+			return m, nil
+		}
+		if !m.active && (v.Type == tea.KeyUp || v.Type == tea.KeyCtrlP) && len(m.entries) > 0 {
 			if m.historyAt > 0 {
 				m.historyAt--
 			}
 			m.restoreHistory(m.entries[m.historyAt])
 			return m, nil
 		}
-		if !m.active && v.Type == tea.KeyDown && len(m.entries) > 0 {
+		if !m.active && (v.Type == tea.KeyDown || v.Type == tea.KeyCtrlN) && len(m.entries) > 0 {
 			if m.historyAt < len(m.entries)-1 {
 				m.historyAt++
 				m.restoreHistory(m.entries[m.historyAt])
@@ -612,6 +648,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if !m.active && v.Type == tea.KeyEnter {
+			devices, commands := m.formFields()
+			if !m.commandFocused() && len(devices) > 0 && len(commands) > 0 {
+				m.focusForm(true)
+				return m, nil
+			}
 			line := strings.TrimSpace(m.input.Value())
 			if line == ":help" {
 				m.helpOpen = true
