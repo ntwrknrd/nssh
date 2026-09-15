@@ -257,6 +257,11 @@ func TestPromptPickerFiltersAndPreservesSelections(t *testing.T) {
 	if m.pickerOpen || m.active || m.input.Value() != "[ 'agg1', 'border1' ] ( '' )" {
 		t.Fatal(m.input.Value())
 	}
+	if _, target := activeTargetStart([]rune(m.input.Value()), m.input.Position()); !target {
+		t.Fatal("Enter should keep focus in devices")
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = next.(model)
 	if m.input.Position() != len([]rune(m.input.Value()))-3 {
 		t.Fatal("cursor not in command field")
 	}

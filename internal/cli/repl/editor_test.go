@@ -71,3 +71,16 @@ func TestEditorDeletionKeepsQuotedCommandStructure(t *testing.T) {
 		t.Fatal("deleting escape damaged quoted structure")
 	}
 }
+
+func TestTabCompletedTargetMovesToCommand(t *testing.T) {
+	m := testTUI(120)
+	m.candidates = []string{"edge1", "edge10"}
+	m.input.SetValue("[ 'ops@edge1' ] ( 'show version' )")
+	m.input.SetCursor(len([]rune("[ 'ops@edge1")))
+	before := m.input.Value()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = next.(model)
+	if m.pickerOpen || m.input.Value() != before || m.input.Position() != len([]rune("[ 'ops@edge1' ] ( '")) {
+		t.Fatalf("Tab transition: %q at %d, picker=%v", m.input.Value(), m.input.Position(), m.pickerOpen)
+	}
+}

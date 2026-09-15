@@ -160,8 +160,8 @@ func TestREPLProcess(t *testing.T) {
 		if f.log() != "" {
 			t.Fatal("picker Enter executed a command")
 		}
-		// The picker leaves the cursor inside the command quotes.
-		s.write(t, "one', 'two\r")
+		// Tab moves from the accepted device into the command quotes.
+		s.write(t, "\tone', 'two\r")
 		s.await(t, "stdout-good-two")
 		s.await(t, "done 2")
 		s.settle()

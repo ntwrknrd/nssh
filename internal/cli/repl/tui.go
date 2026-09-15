@@ -465,6 +465,11 @@ func (m *model) openPicker() {
 	if !ok {
 		return
 	}
+	for _, candidate := range m.candidates {
+		if m.advanceCompletedTarget(candidate) {
+			return
+		}
+	}
 	_, _, matches := completeTargetToken(m.input.Value(), m.input.Position(), m.candidates)
 	if len(matches) == 1 {
 		m.insertHosts(matches)
@@ -542,9 +547,6 @@ func (m *model) updatePicker(key tea.KeyMsg) {
 			return
 		}
 		m.insertHosts(chosen)
-		if emptyEditor(m.pickerDraft) {
-			m.input.SetCursor(len([]rune(m.input.Value())) - 3)
-		}
 		m.pickerOpen = false
 		m.matches = nil
 	default:
@@ -579,9 +581,6 @@ func (m *model) insertHosts(hosts []string) {
 	replacement := strings.Join(escaped, "', '")
 	m.input.SetValue(string(value[:start]) + replacement + string(value[end:]))
 	m.input.SetCursor(start + len([]rune(replacement)))
-	if string(value) == "[ '' ] ( '' )" {
-		m.input.SetCursor(len([]rune(m.input.Value())) - 3)
-	}
 }
 
 // Mouse selection copies only the chosen pane's displayed lines. Clipboard

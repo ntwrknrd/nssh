@@ -85,3 +85,25 @@ func (m *model) deleteEditorField(msg tea.KeyMsg) (tea.Cmd, bool) {
 	// erase it. Move into a value to edit that value.
 	return nil, true
 }
+
+// Tab on a completed device moves directly into the first command's quotes.
+func (m *model) advanceCompletedTarget(candidate string) bool {
+	value := []rune(m.input.Value())
+	fields, _ := editorFields(string(value))
+	completed := false
+	for _, field := range fields {
+		if _, target := activeTargetStart(value, field.start); target {
+			host := string(value[field.start:field.end])
+			if at := strings.LastIndex(host, "@"); at >= 0 {
+				host = host[at+1:]
+			}
+			if m.input.Position() == field.end && strings.EqualFold(host, candidate) {
+				completed = true
+			}
+		} else if completed {
+			m.input.SetCursor(field.start)
+			return true
+		}
+	}
+	return false
+}

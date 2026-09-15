@@ -65,8 +65,9 @@ starts explicit submission syntax. Press Enter to run the completed submission.
   Selections persist across filters. Enter inserts the selected hosts into the
   command; it does not execute it. Esc closes the picker and restores the draft.
 - Selected hosts are quoted and separated automatically. Existing command text
-  and an explicit username remain intact. A new submission places the cursor
-  in the command field after inserting hosts.
+  and an explicit username remain intact. Enter keeps the cursor in the device
+  field after inserting hosts. Tab on a completed device moves directly into the
+  first command field.
 - Up/Down outside the picker recalls history. The submitted syntax is stored
   exactly as entered after trimming outer whitespace. Repeating an identical
   submission moves it to the newest history position.
