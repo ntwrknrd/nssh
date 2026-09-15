@@ -90,6 +90,33 @@ func (h historyStore) append(line string) error {
 	return err
 }
 
+// Truncate the existing inode under the same lock used by append. Unlinking
+// would let other sessions keep writing to an orphaned history file.
+func (h historyStore) clear() error {
+	if h.path == "" {
+		return nil
+	}
+	f, err := os.OpenFile(h.path, os.O_RDWR, 0600)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	if err = f.Chmod(0600); err != nil {
+		return err
+	}
+	if err = f.Truncate(0); err != nil {
+		return err
+	}
+	return f.Sync()
+}
+
 func readHistory(f *os.File) ([]string, error) {
 	info, err := f.Stat()
 	if err != nil {

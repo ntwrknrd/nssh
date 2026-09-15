@@ -60,6 +60,12 @@ func isTerminal(f *os.File) bool { return f != nil && term.IsTerminal(int(f.Fd()
 
 const replHelp = `Run grouped remote commands across exact inventory or literal targets.
 
+TUI commands:
+  :help         Open help (Esc/Enter closes)
+  :clear        Clear scrollback; keep command history (also Ctrl-K)
+  :wipe         Clear scrollback and saved command history
+  :quit, :exit  Exit the REPL
+
 Syntax:
   [ 'host1', 'host2' ] ( 'command1', 'command2' )
   [ 'irn-border-sw(1,2)', 'irn-agg-sw(1,2)' ] ( 'show env power' )
@@ -553,6 +559,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
+		if v.Type == tea.KeyCtrlK {
+			m.clearScrollback()
+			return m, nil
+		}
 		if v.Type == tea.KeyCtrlG {
 			m.diff = !m.diff
 			m.selected = false
@@ -609,6 +619,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.input.SetValue("")
 				return m, nil
 			}
+			if line == ":clear" || line == ":wipe" {
+				if line == ":wipe" {
+					if err := m.history.clear(); err != nil {
+						m.message = "history wipe failed: " + displayLabel(err.Error())
+						return m, nil
+					}
+					m.entries = nil
+					m.historyAt = 0
+				}
+				m.input.SetValue("")
+				m.clearScrollback()
+				if line == ":wipe" {
+					m.message = "scrollback and history cleared"
+				}
+				return m, nil
+			}
 			if line == ":quit" || line == ":exit" {
 				return m, tea.Quit
 			}
@@ -640,4 +666,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
 }
+
+// Clear retained display output without canceling work or changing the draft,
+// command history, execution counters, or layout preferences.
+func (m *model) clearScrollback() {
+	m.blocks = nil
+	m.bytes = 0
+	m.transcript = limitedBuffer{max: m.transcript.max}
+	m.selected = false
+	m.selecting = false
+	m.selectionHeader = false
+	m.selectionStart = 0
+	m.selectionEnd = 0
+	m.selectionBlock = 0
+	m.selectionBodyStart = 0
+	m.viewport.SetContent("")
+	m.viewport.GotoTop()
+	m.message = "scrollback cleared"
+}
+
 func (m model) View() string { return m.tuiView() }

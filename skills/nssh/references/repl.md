@@ -66,6 +66,12 @@ Run `nssh repl` to edit a submission directly. Press Enter to run it.
   a scrollable help and command index overlay. Up/Down, Page Up/Page Down, or the
   mouse wheel scroll the pane; Esc or Enter closes it without changing output.
 
+Use `:clear` or Ctrl-K to clear retained output and its selection while keeping
+command history. Ctrl-K also keeps the current draft and does not cancel running
+work; new results can still appear. Use `:wipe` to clear both retained output and
+saved command history. These commands are available in the interactive TUI and
+are not added to history. Other open sessions retain their in-memory recall.
+
 Older form history is converted to editable syntax when it preserves the same
 hosts and commands. Entries that cannot be converted safely show an explanation
 and leave the current draft intact.
