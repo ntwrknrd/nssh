@@ -94,11 +94,12 @@ ordinary interactive connection before retrying.
 
 The Go TUI has a command prompt with host completion and a
 persistent running/done/failed/pending/canceled/skipped counts. Results stay
-under their command heading. At 100 columns or wider, adjacent devices for the
-same command appear side by side; narrow terminals stack them. Long output lines
-wrap within each pane. Trailing table padding is removed for display; real blank
-lines and indentation remain. Paired source rows stay aligned when either side
-wraps, and continuation rows do not receive new line numbers. Stderr, failures,
+under a `Command: ...` heading with the same separator as root multi-host output.
+At 100 columns or wider, adjacent devices for the same command appear side by
+side only when both headings and every output line fit, including line-number
+space. Otherwise, devices stack at full width. Lines wrap only when they exceed
+the available full width. Trailing table padding is removed for display; real
+blank lines and indentation remain. Stderr, failures,
 and truncation remain visible.
 
 Use `:help` or `nssh repl --explain` for keys and syntax:

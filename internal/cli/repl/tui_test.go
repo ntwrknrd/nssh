@@ -22,7 +22,7 @@ func TestTUIAdaptiveResultsAndCommandBoundaries(t *testing.T) {
 	m.acceptResult(tuiEvent("alpha", "one", "left unique\nshared", 0))
 	m.acceptResult(tuiEvent("beta", "one", "right unique\nshared", 0))
 	text := ansi.Strip(m.renderBlocks())
-	if !strings.Contains(text, "Command 1: one") {
+	if !strings.Contains(text, taskBanner("Command: one")) {
 		t.Fatal(text)
 	}
 	paired := false
@@ -191,23 +191,47 @@ func TestTUITablePaddingDoesNotCreateBlankRows(t *testing.T) {
 	}
 }
 
-func TestTUIPairsSourceRowsBeforeWrapping(t *testing.T) {
-	m := testTUI(100)
-	m.acceptResult(tuiEvent("a", "show", strings.Repeat("x", 50)+"\nEt2 left", 0))
-	m.acceptResult(tuiEvent("b", "show", "short\nEt2 right", 0))
+func TestTUIStacksWhenPairWouldWrap(t *testing.T) {
+	m := testTUI(120)
+	body := strings.Repeat("x", 80) + "\nsecond"
+	m.acceptResult(tuiEvent("a", "show env power", body, 0))
+	m.acceptResult(tuiEvent("b", "show env power", body, 0))
 	for _, row := range m.renderRows() {
-		line := ansi.Strip(row.styled)
-		if strings.Contains(line, "Et2 left") {
-			if !strings.Contains(line, "Et2 right") {
-				t.Fatalf("second source rows drifted: %q", line)
-			}
-			if strings.Count(line, "     2 ") != 2 {
-				t.Fatalf("line numbers count wrapped display rows: %q", line)
-			}
-			return
+		if len(row.spans) > 1 {
+			t.Fatal("paired output that needs wrapping")
 		}
 	}
-	t.Fatal("missing second source row")
+	if strings.Count(ansi.Strip(m.renderBlocks()), strings.Repeat("x", 80)) != 2 {
+		t.Fatal("full-width rows were wrapped")
+	}
+	m.width = 200
+	m.refreshLayout()
+	paired := false
+	for _, row := range m.renderRows() {
+		if len(row.spans) == 2 {
+			paired = true
+		}
+	}
+	if !paired {
+		t.Fatal("wide terminal did not pair")
+	}
+}
+
+func TestTUIPairFitIncludesGutterUnicodeAndLabels(t *testing.T) {
+	a := tuiEvent("a", "show", strings.Repeat("界", 25)+"x"+strings.Repeat(" ", 80), 0)
+	b := tuiEvent("b", "show", "short", 0)
+	if !resultsFitPair(a, b, 120) {
+		t.Fatal("exact fit with trailing padding rejected")
+	}
+	a.Result.Stdout = []byte(strings.Repeat("界", 26))
+	if resultsFitPair(a, b, 120) {
+		t.Fatal("Unicode overflow accepted")
+	}
+	a.Result.Stdout = []byte("short")
+	a.Target.Identity = strings.Repeat("h", 55)
+	if resultsFitPair(a, b, 120) {
+		t.Fatal("long heading accepted")
+	}
 }
 
 func TestPromptPickerFiltersAndPreservesSelections(t *testing.T) {

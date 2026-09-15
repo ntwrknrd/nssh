@@ -48,7 +48,7 @@ var (
 func (m *model) acceptResult(e core.Event) {
 	if e.State != core.Queued && e.CommandIndex != m.commandIndex {
 		m.commandIndex = e.CommandIndex
-		m.appendTranscript(fmt.Sprintf("Command %d: %s\n", e.CommandIndex+1, displayLabel(e.Command)))
+		m.appendTranscript(taskBanner("Command: "+displayLabel(e.Command)) + "\n")
 	}
 	switch e.State {
 	case core.Queued:
@@ -141,12 +141,16 @@ func (m *model) addBlock(b tuiBlock) {
 	}
 }
 
-func resultHeading(e core.Event, width int) string {
+func resultLabel(e core.Event) string {
 	status := strings.ToUpper(hostListStatus(e.State))
 	if e.State == core.Failed {
 		status += fmt.Sprintf(" exit %d", e.Result.ExitCode)
 	}
-	return tuiTarget.Bold(true).Render(ansi.Truncate("["+e.Target.Identity+"] "+status, width, "..."))
+	return "[" + e.Target.Identity + "] " + status
+}
+
+func resultHeading(e core.Event, width int) string {
+	return tuiTarget.Bold(true).Render(ansi.Truncate(resultLabel(e), width, "..."))
 }
 
 // Device tables often pad rows to a fixed width. Trim only trailing display
@@ -201,7 +205,7 @@ func (m model) renderRows() []tuiRow {
 		}
 		if !m.stacked && width >= 100 && i+1 < len(m.blocks) {
 			next := m.blocks[i+1]
-			if next.event != nil && next.batch == b.batch && next.event.CommandIndex == b.event.CommandIndex {
+			if next.event != nil && next.batch == b.batch && next.event.CommandIndex == b.event.CommandIndex && resultsFitPair(*b.event, *next.event, width) {
 				rows = append(rows, m.renderPair(*b.event, *next.event, width, i)...)
 				i++
 				continue
@@ -230,6 +234,24 @@ func (m model) renderBlocks() string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// Include the four-cell gap and seven-cell line-number gutter when deciding
+// whether both devices fit. Measure the same normalized rows used by rendering.
+func resultsFitPair(left, right core.Event, width int) bool {
+	column := (width - 4) / 2
+	for _, event := range []core.Event{left, right} {
+		if ansi.StringWidth(resultLabel(event)) > column {
+			return false
+		}
+		for _, line := range sourceLines(event) {
+			if ansi.StringWidth(line) > column-7 {
+				return false
+			}
+		}
+	}
+	return column > 7
+}
+
 func (m model) renderPair(left, right core.Event, width, block int) []tuiRow {
 	column := (width - 4) / 2
 	a, b := sourceLines(left), sourceLines(right)
