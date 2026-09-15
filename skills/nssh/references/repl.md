@@ -54,6 +54,9 @@ prompt inserts the submission template and places the text inside the first
 device's quotes. Input beginning with `:` remains an internal command; `[`
 starts explicit submission syntax. Press Enter to run the completed submission.
 
+- Deletion stays inside the quoted host or command at the cursor. Backspace,
+  word deletion, and delete-to-start preserve brackets, parentheses, quotes,
+  and separators. Type `:` into an empty template to enter an internal command.
 - Tab completes a unique host at the cursor or opens a searchable host picker.
   Tab on an empty prompt starts a submission and opens the picker.
 - In the picker, type to filter, use Up/Down to move, and Space to select hosts.

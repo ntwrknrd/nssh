@@ -160,8 +160,8 @@ func TestREPLProcess(t *testing.T) {
 		if f.log() != "" {
 			t.Fatal("picker Enter executed a command")
 		}
-		// Replace the completed draft with a multi-command submission.
-		s.write(t, "\x05\x15[ 'good' ] ( 'one', 'two' )\r")
+		// The picker leaves the cursor inside the command quotes.
+		s.write(t, "one', 'two\r")
 		s.await(t, "stdout-good-two")
 		s.await(t, "done 2")
 		s.settle()
