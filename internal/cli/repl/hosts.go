@@ -95,22 +95,13 @@ func RunHosts(ctx context.Context, req connect.Request) (handled bool, err error
 	for _, part := range parts {
 		sub.Targets = append(sub.Targets, core.Target{Value: part})
 	}
+	output := hostListOutput{out: os.Stdout, errOut: os.Stderr}
 	executor := core.Executor{Concurrency: core.DefaultConcurrency, Resolve: resolve, Run: run,
-		OnTargets: func(targets []core.ResolvedTarget) {
-			names := make([]string, len(targets))
-			for i, target := range targets {
-				names[i] = target.Identity
-			}
-			_, _ = fmt.Fprintf(os.Stderr, "%d targets: %s\n", len(names), strings.Join(names, ", "))
-		},
-		OnEvent: func(event core.Event) {
-			if event.State != core.Queued && event.State != core.Running {
-				writePlainEvent(event, os.Stdout, os.Stderr)
-			}
-		},
+		OnTargets: func(targets []core.ResolvedTarget) { output.start(label, targets) },
+		OnEvent:   output.event,
 	}
 	events, err := executor.Execute(ctx, sub)
-	_, _ = fmt.Fprint(os.Stderr, renderSummary(events))
+	output.recap(events)
 	if ctx.Err() != nil {
 		return true, &exit.ExitError{Code: 130}
 	}
