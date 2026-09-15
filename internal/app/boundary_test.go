@@ -1,13 +1,15 @@
 package app
 
 import (
+	"context"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"testing"
+
+	"github.com/ntwrknrd/nssh/internal/connect"
 )
 
 func TestMainEntrypointStaysThin(t *testing.T) {
@@ -35,11 +37,24 @@ func TestMainEntrypointStaysThin(t *testing.T) {
 	}
 }
 
-func TestPreprocessVerbosityLadder(t *testing.T) {
-	got := PreprocessArgs([]string{"-vvv", "edge01"})
-	want := []string{"-vvv", "smart-connect", "edge01"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("PreprocessArgs = %#v, want %#v", got, want)
+func TestRootVerbosityLadder(t *testing.T) {
+	old := connectRequestFunc
+	defer func() { connectRequestFunc = old }()
+	var got connect.Request
+	connectRequestFunc = func(_ context.Context, req connect.Request) error { got = req; return nil }
+	for _, args := range [][]string{{"-vvv", "edge01"}, {"-v", "-v", "-v", "edge01"}, {"-vvvJjump", "edge01"}} {
+		if err := execute(Options{}, args); err != nil {
+			t.Fatal(err)
+		}
+		if got.Options.Verbosity != 3 || got.Options.SSHVerbosity != 2 {
+			t.Fatalf("verbosity: %+v", got.Options)
+		}
+	}
+	if err := execute(Options{}, []string{"edge01"}); err != nil {
+		t.Fatal(err)
+	}
+	if got.Options.Verbosity != 0 || got.Options.SSHVerbosity != 0 {
+		t.Fatalf("verbosity leaked: %+v", got.Options)
 	}
 }
 

@@ -22,6 +22,12 @@ prompts, and can record sessions.
   through nssh inventory lookup, partial host matching, and optional `fzf`
   selection. Use `nssh --target HOST` for literal destinations that collide
   with nssh command names.
+- SSH command line: root invocations keep SSH-style option and command
+  boundaries. In 0.3, recognized SSH options can appear before or after the
+  destination until the remote command starts. Use `--` when a remote command
+  begins with `-`; `nssh -- HOST -p 2222` and
+  `nssh HOST -- -p 2222` both run `-p 2222` on `HOST` rather than treating it
+  as an SSH port option.
 - Inventory: `nssh inv` manages local hosts and external providers; current
   providers are NetBox and containerlab.
 - Credentials: SOPS+age, 1Password, and Bitwarden providers are selected by
@@ -54,9 +60,9 @@ Or pipe a submission from fish:
 printf '%s\n' "[ 'irn-border-sw(1,2)', 'irn-agg-sw(1,2)' ] ( 'show env power' )" | nssh repl
 ```
 
-REPL is a normal command in the 0.3 development series. Root SSH syntax remains
-unchanged; a literal host named `repl` uses `nssh --target repl`. Authenticate
-credential providers before entering the REPL. Output appears when each command
+REPL is a normal command in the 0.3 development series. A literal host named
+`repl` uses `nssh --target repl`. Authenticate credential providers before
+entering the REPL. Output appears when each command
 finishes; commands cannot read interactive input. See the
 [REPL guide](skills/nssh/references/repl.md) for grammar, keys, limits, and errors.
 

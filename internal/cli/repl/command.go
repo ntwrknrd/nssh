@@ -69,7 +69,7 @@ Values are single quoted; \' escapes a quote. Other backslashes are preserved.
 Trailing prefix(1,2) expands suffixes. One select:QUERY may replace the target
 list, using nssh inv list fields: host, hostname, id, user, port, provider, group.
 No fuzzy selection or inventory creation occurs. Use --target repl at the root
-to connect to a host named repl. Root SSH syntax is unchanged.
+to connect to a host named repl.
 
 Commands run in order per host. A failure skips that host's later commands;
 other hosts continue. Output appears when each command finishes, with separate

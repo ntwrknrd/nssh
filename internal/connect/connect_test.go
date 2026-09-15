@@ -91,6 +91,9 @@ func TestExtractExplicitUser(t *testing.T) {
 		{name: "user at host", hostname: "admin@edge01", want: "admin"},
 		{name: "split login flag", hostname: "edge01", sshArgs: []string{"-l", "admin"}, want: "admin"},
 		{name: "joined login flag", hostname: "edge01", sshArgs: []string{"-ladmin"}, want: "admin"},
+		{name: "option-looking identity", hostname: "edge01", sshArgs: []string{"-i", "-lwrong", "-o", "User=right"}, want: "right"},
+		{name: "clustered user", hostname: "edge01", sshArgs: []string{"-ql", "admin"}, want: "admin"},
+		{name: "first option wins", hostname: "edge01", sshArgs: []string{"-oUser=first", "-lsecond"}, want: "first"},
 		{name: "no explicit user", hostname: "edge01", sshArgs: []string{"-p", "2222"}, want: ""},
 	}
 	for _, tt := range tests {

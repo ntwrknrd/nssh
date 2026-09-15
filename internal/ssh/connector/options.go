@@ -11,6 +11,7 @@ import (
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ssh/compat"
+	"github.com/ntwrknrd/nssh/internal/ssh/sshargs"
 )
 
 // SSHOptionPlan describes the precedence sources for an OpenSSH invocation.
@@ -112,17 +113,34 @@ func renderResolvedSSHOptions(opts config.SSHHostConfig) []string {
 func withoutSSHConfigFileOptions(args []string) []string {
 	filtered := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "-F" {
-			if i+1 < len(args) {
-				i++
+		word := args[i]
+		options, consumed, err := sshargs.Next(args[i:])
+		if err != nil {
+			if word == "-F" {
+				if i+1 < len(args) {
+					i++
+				}
+				continue
 			}
+			filtered = append(filtered, args[i:]...)
+			break
+		}
+		removeAt := -1
+		for _, option := range options {
+			if option.Name == 'F' {
+				removeAt = strings.IndexByte(word, 'F')
+				break
+			}
+		}
+		if removeAt >= 0 {
+			if removeAt > 1 {
+				filtered = append(filtered, word[:removeAt])
+			}
+			i += consumed - 1
 			continue
 		}
-		if strings.HasPrefix(arg, "-F") && len(arg) > 2 {
-			continue
-		}
-		filtered = append(filtered, arg)
+		filtered = append(filtered, args[i:i+consumed]...)
+		i += consumed - 1
 	}
 	return filtered
 }
@@ -135,63 +153,36 @@ func EffectiveSSHOption(args []string, want string) string {
 }
 
 func effectiveSSHOption(args []string, want string) string {
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			return ""
-		}
-		if value, consumed, ok := shortSSHOptionValue(args, i, want); ok {
-			return value
-		} else if consumed {
-			i++
-			continue
-		}
-		if arg == "-o" && i+1 < len(args) {
-			key, value, ok := splitOpenSSHOption(args[i+1])
-			if ok && strings.EqualFold(key, want) {
-				return value
-			}
-			i++
-			continue
-		}
-		if strings.HasPrefix(arg, "-o") && len(arg) > 2 {
-			key, value, ok := splitOpenSSHOption(arg[2:])
-			if ok && strings.EqualFold(key, want) {
-				return value
-			}
-		}
+	aliases := map[string]byte{
+		"bindaddress":   'b',
+		"ciphers":       'c',
+		"controlpath":   'S',
+		"identityfile":  'i',
+		"localforward":  'L',
+		"macs":          'm',
+		"port":          'p',
+		"proxyjump":     'J',
+		"remoteforward": 'R',
+		"user":          'l',
 	}
-	return ""
-}
-
-func shortSSHOptionValue(args []string, index int, want string) (value string, consumed, ok bool) {
-	aliases := map[string]string{
-		"bindaddress":   "-b",
-		"ciphers":       "-c",
-		"controlpath":   "-S",
-		"identityfile":  "-i",
-		"localforward":  "-L",
-		"macs":          "-m",
-		"port":          "-p",
-		"proxyjump":     "-J",
-		"remoteforward": "-R",
-		"user":          "-l",
-	}
-	alias := aliases[strings.ToLower(want)]
-	if alias == "" {
-		return "", false, false
-	}
-	arg := args[index]
-	if arg == alias {
-		if index+1 >= len(args) {
-			return "", false, false
+	shortAlias := aliases[strings.ToLower(want)]
+	value := ""
+	sshargs.Walk(args, func(option sshargs.Option) bool {
+		if option.Name == shortAlias && shortAlias != 0 {
+			value = option.Value
+			return false
 		}
-		return args[index+1], true, true
-	}
-	if strings.HasPrefix(arg, alias) && len(arg) > len(alias) {
-		return arg[len(alias):], false, true
-	}
-	return "", false, false
+		if option.Name != 'o' {
+			return true
+		}
+		key, optionValue, ok := splitOpenSSHOption(option.Value)
+		if !ok || !strings.EqualFold(key, want) {
+			return true
+		}
+		value = optionValue
+		return false
+	})
+	return value
 }
 
 func splitOpenSSHOption(raw string) (string, string, bool) {
@@ -200,13 +191,24 @@ func splitOpenSSHOption(raw string) (string, string, bool) {
 		return "", "", false
 	}
 	if key, value, ok := strings.Cut(raw, "="); ok {
-		return strings.TrimSpace(key), strings.TrimSpace(value), true
+		return strings.TrimSpace(key), unquoteOpenSSHOptionValue(value), true
 	}
 	fields := strings.Fields(raw)
 	if len(fields) < 2 {
 		return "", "", false
 	}
-	return fields[0], strings.Join(fields[1:], " "), true
+	return fields[0], unquoteOpenSSHOptionValue(strings.Join(fields[1:], " ")), true
+}
+
+// OpenSSH's command-line -o parser removes a surrounding double-quoted
+// value. Single quotes have already been consumed by the invoking shell and
+// are not SSH configuration syntax.
+func unquoteOpenSSHOptionValue(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 && value[0] == 0x22 && value[len(value)-1] == 0x22 {
+		return value[1 : len(value)-1]
+	}
+	return value
 }
 
 func findSSHOption(options config.SSHOptions, key string) (string, config.SSHOptionValue, bool) {

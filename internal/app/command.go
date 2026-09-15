@@ -13,6 +13,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/cli/self"
 	"github.com/ntwrknrd/nssh/internal/cli/self/bench"
 	"github.com/ntwrknrd/nssh/internal/connect"
+	"github.com/ntwrknrd/nssh/internal/ssh/sshargs"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -34,34 +35,6 @@ var (
 		"completion":       true,
 		"__complete":       true,
 		"__completeNoDesc": true,
-	}
-
-	sshFlagsWithValue = map[string]bool{
-		"-b": true,
-		"-c": true,
-		"-D": true,
-		"-E": true,
-		"-F": true,
-		"-I": true,
-		"-i": true,
-		"-J": true,
-		"-L": true,
-		"-l": true,
-		"-m": true,
-		"-O": true,
-		"-o": true,
-		"-p": true,
-		"-Q": true,
-		"-R": true,
-		"-S": true,
-		"-W": true,
-		"-w": true,
-	}
-
-	globalFlags = map[string]bool{
-		"-v": true,
-		"-V": true,
-		"-h": true,
 	}
 
 	verboseCount int
@@ -118,86 +91,6 @@ and record sessions.`,
 	return rootCmd
 }
 
-// PreprocessArgs transforms root nssh invocations into hidden smart-connect
-// calls while preserving OpenSSH grammar: options before destination, command
-// after destination.
-func PreprocessArgs(args []string) []string {
-	if len(args) == 0 {
-		return args
-	}
-
-	var globalFlagArgs []string
-	var sshOptionArgs []string
-
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-
-		if arg == "--select" {
-			result := append([]string{}, globalFlagArgs...)
-			return append(result, "smart-connect")
-		}
-		if arg == "--target" {
-			if i+1 >= len(args) {
-				return args
-			}
-			target := args[i+1]
-			command := args[i+2:]
-			return buildSmartConnectArgs(globalFlagArgs, true, target, sshOptionArgs, command)
-		}
-
-		switch {
-		case globalFlags[arg] || isVerboseCluster(arg):
-			globalFlagArgs = append(globalFlagArgs, arg)
-		case len(arg) == 2 && sshFlagsWithValue[arg]:
-			sshOptionArgs = append(sshOptionArgs, arg)
-			if i+1 < len(args) {
-				i++
-				sshOptionArgs = append(sshOptionArgs, args[i])
-			}
-		case arg == "--":
-			if i+1 >= len(args) {
-				return args
-			}
-			target := args[i+1]
-			command := args[i+2:]
-			return buildSmartConnectArgs(globalFlagArgs, false, target, sshOptionArgs, command)
-		case strings.HasPrefix(arg, "--"):
-			if arg == "--verbose" || arg == "--version" || arg == "--help" {
-				globalFlagArgs = append(globalFlagArgs, arg)
-			} else {
-				sshOptionArgs = append(sshOptionArgs, arg)
-			}
-		case strings.HasPrefix(arg, "-"):
-			sshOptionArgs = append(sshOptionArgs, arg)
-		default:
-			if subcommands[arg] {
-				return args
-			}
-			target := arg
-			command := args[i+1:]
-			return buildSmartConnectArgs(globalFlagArgs, false, target, sshOptionArgs, command)
-		}
-	}
-
-	return args
-}
-
-func buildSmartConnectArgs(globalArgs []string, literal bool, target string, sshArgs, command []string) []string {
-	result := make([]string, 0, len(globalArgs)+len(sshArgs)+len(command)+4)
-	result = append(result, globalArgs...)
-	result = append(result, "smart-connect")
-	if literal {
-		result = append(result, "--literal-target")
-	}
-	result = append(result, target)
-	result = append(result, sshArgs...)
-	if len(command) > 0 {
-		result = append(result, "--")
-		result = append(result, command...)
-	}
-	return result
-}
-
 func newSmartConnectCmd() *cobra.Command {
 	var literalTarget bool
 	cmd := &cobra.Command{
@@ -206,24 +99,22 @@ func newSmartConnectCmd() *cobra.Command {
 		Args:   cobra.ArbitraryArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var user, host string
+			req := &connect.Request{}
 			if len(args) > 0 {
-				user, host = parseUserHost(args[0])
+				var err error
+				req, err = destinationRequest(args[0], nil)
+				if err != nil {
+					return err
+				}
 			}
-			var sshArgs, remoteCommand []string
 			if len(args) > 1 {
-				sshArgs, remoteCommand = splitSmartConnectArgs(args[1:])
+				sshArgs, command := splitSmartConnectArgs(args[1:])
+				req.SSHArgs = append(req.SSHArgs, sshArgs...)
+				req.RemoteCommand = command
 			}
-			if user != "" {
-				sshArgs = append([]string{"-l", user}, sshArgs...)
-			}
-			return connectRequestFunc(context.Background(), connect.Request{
-				Host:          host,
-				LiteralTarget: literalTarget,
-				SSHArgs:       sshArgs,
-				RemoteCommand: remoteCommand,
-				Options:       connect.Options{Verbosity: verboseCount, SSHVerbosity: sshVerbosity()},
-			})
+			req.LiteralTarget = literalTarget
+			req.Options = connect.Options{Verbosity: verboseCount, SSHVerbosity: sshVerbosity()}
+			return connectRequestFunc(context.Background(), *req)
 		},
 	}
 
@@ -234,24 +125,7 @@ func newSmartConnectCmd() *cobra.Command {
 }
 
 func splitSmartConnectArgs(args []string) (sshArgs, remoteCommand []string) {
-	for i, arg := range args {
-		if arg == "--" {
-			return args[:i], args[i+1:]
-		}
-	}
-	return args, nil
-}
-
-func isVerboseCluster(arg string) bool {
-	if len(arg) < 2 || arg[0] != '-' {
-		return false
-	}
-	for _, ch := range arg[1:] {
-		if ch != 'v' {
-			return false
-		}
-	}
-	return true
+	return sshargs.Split(args)
 }
 
 func sshVerbosity() int {

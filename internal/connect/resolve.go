@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/config"
@@ -51,6 +52,7 @@ type ResolvedHost struct {
 }
 
 type ResolvedProxy struct {
+	ssh        config.SSHHostConfig
 	Canonical  string
 	Hostname   string
 	Port       int
@@ -170,6 +172,7 @@ func resolveCatalogHostWithRegistry(query, explicitUser string, c *config.Config
 			return nil, fmt.Errorf("resolve proxy credential: %w", err)
 		}
 		resolved.Proxy = &ResolvedProxy{
+			ssh:        hostData.ManagedProxy.SSH,
 			Canonical:  hostData.ManagedProxy.Canonical,
 			Hostname:   hostData.ManagedProxy.Hostname,
 			Port:       hostData.ManagedProxy.Port,
@@ -487,4 +490,30 @@ func ResolveLiteralHostFromCatalog(ctx context.Context, query, explicitUser stri
 	}
 	return &ResolvedHost{Query: query, Canonical: host, Hostname: host, Port: 22, Username: user,
 		SSH: config.MergeSSH(config.SSHHostConfig{}, cfg.SSH.Defaults), Highlight: cfg.Highlight, Config: cfg}, nil
+}
+
+// applyRuntimePort keeps managed proxy forwarding and endpoint consumers in
+// agreement with OpenSSH's first explicit Port. Inventory data stays unchanged.
+func applyRuntimePort(resolved *ResolvedHost, sshArgs []string) error {
+	value := connector.EffectiveSSHOption(sshArgs, "Port")
+	if value == "" {
+		return nil
+	}
+	port, err := strconv.Atoi(value)
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("invalid SSH port %q", value)
+	}
+	resolved.Port = port
+	if proxy := resolved.Proxy; proxy != nil {
+		command := formatManagedProxyCommand(&ResolvedHostData{
+			Hostname: proxy.Hostname, Port: proxy.Port, Username: proxy.Username, SSH: proxy.ssh,
+		}, resolved.Hostname, port)
+		if command != "" {
+			if resolved.SSH.Options == nil {
+				resolved.SSH.Options = config.SSHOptions{}
+			}
+			resolved.SSH.Options["ProxyCommand"] = config.NewSSHOptionString(command)
+		}
+	}
+	return nil
 }

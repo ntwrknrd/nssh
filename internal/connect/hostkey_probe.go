@@ -13,6 +13,7 @@ import (
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
+	"github.com/ntwrknrd/nssh/internal/ssh/sshargs"
 )
 
 type hostKeyProbeStatus int
@@ -88,7 +89,7 @@ func buildHostKeyProbeArgs(resolved *ResolvedHost, sshArgs []string, cfg *config
 	if resolved.Port != 0 && resolved.Port != 22 && connector.EffectiveSSHOption(args, "Port") == "" {
 		args = append(args, "-p", fmt.Sprintf("%d", resolved.Port))
 	}
-	args = append(args, connectTarget(resolved.Username, resolved.Hostname))
+	args = append(args, "--", connectTarget(resolved.Username, resolved.Hostname))
 	return args
 }
 
@@ -130,12 +131,7 @@ func withoutAskpassEnv(env []string) []string {
 }
 
 func splitConnectSSHArgs(args []string) (options, command []string) {
-	for i, arg := range args {
-		if arg == "--" {
-			return args[:i], args[i+1:]
-		}
-	}
-	return args, nil
+	return sshargs.Split(args)
 }
 
 func connectTarget(username, hostname string) string {

@@ -74,7 +74,7 @@ func BuildMuxCheckArgs(req MuxCheckRequest) ([]string, bool) {
 	if req.Port != 0 && req.Port != 22 && effectiveSSHOption(args, "Port") == "" {
 		args = append(args, "-p", fmt.Sprintf("%d", req.Port))
 	}
-	args = append(args, "-O", "check", muxTarget(req.Username, req.Hostname))
+	args = append(args, "-O", "check", "--", muxTarget(req.Username, req.Hostname))
 	return args, true
 }
 
@@ -124,7 +124,7 @@ func BuildMuxStartArgs(req MuxStartRequest) ([]string, bool) {
 	if req.Port != 0 && req.Port != 22 && effectiveSSHOption(args, "Port") == "" {
 		args = append(args, "-p", fmt.Sprintf("%d", req.Port))
 	}
-	args = append(args, "-M", "-N", "-f", muxTarget(req.Username, req.Hostname))
+	args = append(args, "-M", "-N", "-f", "--", muxTarget(req.Username, req.Hostname))
 	return args, true
 }
 

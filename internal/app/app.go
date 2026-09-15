@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/connect"
 	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/ui"
+	"github.com/spf13/cobra"
 )
 
 // Options configures the root application runtime.
@@ -64,8 +66,18 @@ func execute(opts Options, args []string) error {
 		return fmt.Errorf("shell completion is not supported")
 	}
 
+	invocation, err := parseRootArgs(args)
+	if err != nil {
+		return err
+	}
 	rootCmd := NewRootCmd(opts)
-	rootCmd.SetArgs(PreprocessArgs(args))
+	rootCmd.SetArgs(append([]string{}, invocation.commandArgs...))
+	if req := invocation.request; req != nil {
+		rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
+			req.Options = connect.Options{Verbosity: verboseCount, SSHVerbosity: sshVerbosity()}
+			return connectRequestFunc(context.Background(), *req)
+		}
+	}
 	return rootCmd.Execute()
 }
 

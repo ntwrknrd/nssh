@@ -34,7 +34,8 @@ usernames and separately configured identities remain distinct. Config and the
 local inventory catalog reload for each submission; REPL does not refresh remote
 inventory itself.
 
-The original root syntax still takes one destination:
+Use the REPL grouped grammar for multi-host commands. Root comma-list support is
+pending integration, so it is not a released root-command interface:
 
 ```fish
 nssh irn-border-sw1 'show env power'
@@ -42,8 +43,8 @@ nssh --target repl 'show version'
 printf '%s\n' "[ 'irn-border-sw(1,2)' ] ( 'show env power' )" | nssh repl
 ```
 
-A comma-separated root target is a single hostname. `--target repl` escapes the
-new command name when connecting to a host literally named `repl`.
+`--target repl` escapes the command name when connecting to a host literally
+named `repl`.
 
 ## Execution and output
 

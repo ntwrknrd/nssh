@@ -224,6 +224,10 @@ func RunControlCommand(ctx context.Context, hostname string, literal bool, sshAr
 			return fmt.Errorf("resolve host: %w", err)
 		}
 	}
+	if err := applyRuntimePort(resolved, controlSSHArgs); err != nil {
+		destroyImmediateResolvedPasswords(resolved)
+		return err
+	}
 	return connector.RunControlCommand(ctx, controlCommandRequest(resolved, controlCommand, controlSSHArgs, resolved.Config, options), nil)
 }
 
@@ -238,6 +242,10 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 func captureResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshArgs, command []string, cfg *config.Config, opts Options) (captured.Result, error) {
 	if resolved == nil {
 		return captured.Result{}, fmt.Errorf("resolved host is required")
+	}
+	if err := applyRuntimePort(resolved, sshArgs); err != nil {
+		destroyImmediateResolvedPasswords(resolved)
+		return captured.Result{}, err
 	}
 	req := captured.Request{
 		Hostname:      resolved.Hostname,
@@ -712,6 +720,10 @@ func newConnectAudit(cfg *config.Config) *audit.Logger {
 }
 
 func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger, opts Options) connectionResult {
+	if err := applyRuntimePort(resolved, sshArgs); err != nil {
+		destroyImmediateResolvedPasswords(resolved)
+		return connectionResult{Err: err}
+	}
 	passwordFuture, muxHot := preparePasswordPrefetch(ctx, resolved, sshArgs, cfg, opts)
 	if passwordFuture != nil {
 		defer passwordFuture.Close()
@@ -1082,13 +1094,8 @@ func isCompatibilityError(err error) bool {
 }
 
 func extractExplicitUser(hostname string, sshArgs []string) string {
-	for i, arg := range sshArgs {
-		if arg == "-l" && i+1 < len(sshArgs) {
-			return sshArgs[i+1]
-		}
-		if strings.HasPrefix(arg, "-l") && len(arg) > 2 {
-			return arg[2:]
-		}
+	if user := connector.EffectiveSSHOption(sshArgs, "User"); user != "" {
+		return user
 	}
 	if idx := strings.LastIndex(hostname, "@"); idx != -1 {
 		return hostname[:idx]

@@ -296,8 +296,10 @@ func buildOpenSSHArgs(req Request) []string {
 	if req.Username != "" {
 		target = req.Username + "@" + target
 	}
-	args = append(args, target)
-	args = append(args, req.RemoteCommand...)
+	args = append(args, "--", target)
+	if len(req.RemoteCommand) > 0 {
+		args = append(args, req.RemoteCommand...)
+	}
 	return args
 }
 

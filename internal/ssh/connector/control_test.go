@@ -25,6 +25,18 @@ func TestExtractControlCommandSupportsSplitAndJoinedForms(t *testing.T) {
 	}
 }
 
+func TestExtractControlCommandHonorsClustersAndOpaqueValues(t *testing.T) {
+	command, rest, ok := ExtractControlCommand([]string{"-vOcheck", "-p", "2222"})
+	if !ok || command != "check" || !reflect.DeepEqual(rest, []string{"-v", "-p", "2222"}) {
+		t.Fatalf("cluster command=%q rest=%#v ok=%v", command, rest, ok)
+	}
+
+	command, rest, ok = ExtractControlCommand([]string{"-J", "-O", "exit"})
+	if ok || command != "" || !reflect.DeepEqual(rest, []string{"-J", "-O", "exit"}) {
+		t.Fatalf("opaque value command=%q rest=%#v ok=%v", command, rest, ok)
+	}
+}
+
 func TestBuildControlCommandArgsUsesRenderedOptionsAndTarget(t *testing.T) {
 	args := BuildControlCommandArgs(ControlCommandRequest{
 		Hostname: "edge01.example.com",
@@ -45,7 +57,7 @@ func TestBuildControlCommandArgsUsesRenderedOptionsAndTarget(t *testing.T) {
 		"-o", "ControlPath=~/.ssh/sockets/%r@%h:%p",
 		"-p", "2200",
 		"-O", "exit",
-		"netops@edge01.example.com",
+		"--", "netops@edge01.example.com",
 	}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("args = %#v, want %#v", args, want)

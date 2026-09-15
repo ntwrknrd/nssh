@@ -14,10 +14,19 @@ preserve.
 ## Public Contract
 
 - Root invocation follows `nssh [ssh-options] HOST [command]`.
-- SSH options occur before `HOST`; tokens after `HOST` form the remote command.
+- SSH options can occur before or after `HOST` until the remote command begins.
+  `--` ends option recognition. Command arguments retain their original order
+  and content.
+- Destinations accept `user@host`, IPv6 addresses, and `ssh://user@host:port`.
+  Username and port follow OpenSSH's first-value precedence across command-line
+  options and destination components.
+- nssh owns inventory and SSH configuration. A supplied `-F` does not load an
+  OpenSSH configuration file; use nssh YAML configuration for host policy.
 - Smart lookup resolves managed inventory and may offer selection or local host
   creation. Literal targeting bypasses fuzzy selection without discarding known
-  inventory metadata.
+  inventory metadata. `--target HOST` changes only resolution to literal;
+  it shares the root option grammar. Public command names retain their existing
+  routing and literal-target escape.
 - Interactive connections preserve terminal semantics. Remote commands preserve
   distinct stdout, stderr, and remote exit status.
 - SCP uses the same host, SSH policy, proxy, credential, and host-key resolution

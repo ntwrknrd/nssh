@@ -34,7 +34,7 @@ func TestBuildMuxCheckArgsUsesRenderedOptionsAndTarget(t *testing.T) {
 		"-o", "ControlPath=~/.ssh/sockets/%r@%h:%p",
 		"-p", "2200",
 		"-O", "check",
-		"netops@edge01.example.com",
+		"--", "netops@edge01.example.com",
 	}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("args = %#v, want %#v", args, want)
@@ -139,7 +139,7 @@ func TestBuildMuxStartArgsUsesRenderedOptionsTargetAndEnvironment(t *testing.T) 
 		"-o", "BatchMode=yes",
 		"-p", "2200",
 		"-M", "-N", "-f",
-		"netops@edge01.example.com",
+		"--", "netops@edge01.example.com",
 	}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("args = %#v, want %#v", args, want)
@@ -166,7 +166,7 @@ func TestBuildMuxStartArgsAllowsOnePasswordPromptWithAskpass(t *testing.T) {
 		"-o", "ControlPersist=43200",
 		"-o", "NumberOfPasswordPrompts=1",
 		"-M", "-N", "-f",
-		"edge01.example.com",
+		"--", "edge01.example.com",
 	}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("args = %#v, want %#v", args, want)
