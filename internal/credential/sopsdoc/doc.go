@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 type Runner interface {
@@ -16,7 +17,8 @@ type Runner interface {
 }
 
 type CLIRunner struct {
-	Command string
+	Command        string
+	NonInteractive bool
 }
 
 type Document struct {
@@ -96,6 +98,9 @@ func (r CLIRunner) Run(ctx context.Context, env []string, args ...string) ([]byt
 		command = "sops"
 	}
 	cmd := exec.CommandContext(ctx, command, args...)
+	if r.NonInteractive {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	}
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
 	}

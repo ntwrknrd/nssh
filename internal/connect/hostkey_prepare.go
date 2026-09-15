@@ -84,15 +84,7 @@ func runHostKeyPreparation(ctx context.Context, resolved *ResolvedHost, sshArgs 
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	var prep *connector.HostKeyPreparation
-	apply := func() error { var err error; prep, err = decision(); return err }
-	if opts.capture.Interaction != nil {
-		err = opts.capture.Interaction(ctx, apply)
-	} else {
-		err = apply()
-	}
-	return prep, err
-
+	return decision()
 }
 
 func writeTemporaryKnownHosts(line, algorithm string) (*connector.HostKeyPreparation, error) {

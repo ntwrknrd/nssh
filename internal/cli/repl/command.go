@@ -33,18 +33,24 @@ import (
 func NewCmd() *cobra.Command {
 	var plain bool
 	var concurrency int
-	cmd := &cobra.Command{Use: "repl", Short: "Run commands across inventory targets", Long: replHelp, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		restoreInterrupts := secret.ManageInterrupts()
-		defer restoreInterrupts()
-		if concurrency < 1 {
-			return fmt.Errorf("concurrency must be at least one")
-		}
-		interactive := !plain && isTerminal(os.Stdin) && isTerminal(os.Stdout)
-		if interactive {
-			return runTUI(concurrency)
-		}
-		return runPlain(os.Stdin, os.Stdout, os.Stderr, concurrency)
-	}}
+	cmd := &cobra.Command{
+		Use:   "repl",
+		Short: "Run commands across inventory targets",
+		Long:  replHelp,
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			restoreInterrupts := secret.ManageInterrupts()
+			defer restoreInterrupts()
+			if concurrency < 1 {
+				return fmt.Errorf("concurrency must be at least one")
+			}
+			interactive := !plain && isTerminal(os.Stdin) && isTerminal(os.Stdout)
+			if interactive {
+				return runTUI(concurrency)
+			}
+			return runPlain(os.Stdin, os.Stdout, os.Stderr, concurrency)
+		},
+	}
 	cmd.Flags().BoolVar(&plain, "plain", false, "Use line-oriented plain output")
 	cmd.Flags().IntVar(&concurrency, "concurrency", core.DefaultConcurrency, "Maximum simultaneous hosts")
 	return cmd
@@ -80,7 +86,8 @@ History: XDG state/nssh/repl_history, mode 0600, up to 1000 entries or 1 MiB.
 History stores submitted text, which may contain sensitive arguments.
 Piped input does not write history. Capture is capped at 8 MiB per command;
 the transcript at 32 MiB, with visible truncation/eviction.
-Submissions: at most 2 MiB, 1000 targets, 100 commands, 10000 host/command pairs.`
+Submissions: at most 2 MiB before and after suffix expansion, 1000 targets,
+100 commands, 10000 host/command pairs.`
 
 func runPlain(in io.Reader, out, errOut io.Writer, concurrency int) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)

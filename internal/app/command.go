@@ -9,7 +9,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/cli/cp"
 	"github.com/ntwrknrd/nssh/internal/cli/inv"
 	"github.com/ntwrknrd/nssh/internal/cli/log"
-	replcmd "github.com/ntwrknrd/nssh/internal/cli/repl"
+	"github.com/ntwrknrd/nssh/internal/cli/repl"
 	"github.com/ntwrknrd/nssh/internal/cli/self"
 	"github.com/ntwrknrd/nssh/internal/cli/self/bench"
 	"github.com/ntwrknrd/nssh/internal/connect"
@@ -110,7 +110,7 @@ and record sessions.`,
 	rootCmd.AddCommand(newInvCmd())
 	rootCmd.AddCommand(newLogCmd())
 	rootCmd.AddCommand(newCpCmd())
-	rootCmd.AddCommand(replcmd.NewCmd())
+	rootCmd.AddCommand(newReplCmd())
 	rootCmd.AddCommand(newSelfCmd())
 	rootCmd.AddCommand(newListSubcommandsCmd())
 
@@ -304,6 +304,12 @@ func newCpCmd() *cobra.Command {
 	return cp.NewCmd()
 }
 
+func newReplCmd() *cobra.Command {
+	cmd := repl.NewCmd()
+	ui.ApplyStyledHelp(cmd)
+	return cmd
+}
+
 func newBenchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bench",
@@ -348,8 +354,8 @@ func newListSubcommandsCmd() *cobra.Command {
 		Use:    "__list-subcommands",
 		Hidden: true,
 		Run: func(cmd *cobra.Command, args []string) {
-			for _, subcmd := range []string{"inv", "agent", "log", "cp", "self"} {
-				fmt.Println(subcmd)
+			for _, subcmd := range []string{"inv", "agent", "log", "cp", "repl", "self"} {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), subcmd)
 			}
 		},
 	}

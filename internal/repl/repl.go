@@ -70,6 +70,10 @@ func Parse(line string) (Submission, error) {
 		return Submission{}, fmt.Errorf("targets and commands are required")
 	}
 	out := Submission{Commands: commands}
+	remainingBytes := MaxSubmissionBytes
+	for _, command := range commands {
+		remainingBytes -= len(command)
+	}
 	for _, target := range targets {
 		if strings.HasPrefix(target, "select:") {
 			if len(targets) != 1 {
@@ -81,14 +85,12 @@ func Parse(line string) (Submission, error) {
 			}
 			return Submission{Targets: []Target{{Value: query, Selector: true}}, Commands: commands}, nil
 		}
-		expanded, err := expandTarget(target)
+		expanded, err := expandTarget(target, MaxSubmissionTargets-len(out.Targets), remainingBytes)
 		if err != nil {
 			return Submission{}, err
 		}
-		if len(out.Targets)+len(expanded) > MaxSubmissionTargets {
-			return Submission{}, fmt.Errorf("submission exceeds target limit")
-		}
 		for _, value := range expanded {
+			remainingBytes -= len(value)
 			out.Targets = append(out.Targets, Target{Value: value})
 		}
 	}
@@ -163,9 +165,15 @@ func quotedList(s string) ([]string, error) {
 
 var suffixExpansion = regexp.MustCompile(`^(.*)\(([^(),]+(?:,[^(),]+)*)\)$`)
 
-func expandTarget(value string) ([]string, error) {
+func expandTarget(value string, maxTargets, maxBytes int) ([]string, error) {
+	if maxTargets < 1 {
+		return nil, fmt.Errorf("submission exceeds target limit")
+	}
 	m := suffixExpansion.FindStringSubmatch(value)
 	if m == nil {
+		if len(value) > maxBytes {
+			return nil, fmt.Errorf("expanded submission exceeds %d bytes", MaxSubmissionBytes)
+		}
 		if strings.ContainsAny(value, "()") {
 			return nil, fmt.Errorf("invalid target expansion %q", value)
 		}
@@ -174,16 +182,27 @@ func expandTarget(value string) ([]string, error) {
 	if m[1] == "" || strings.ContainsAny(m[1], "()") {
 		return nil, fmt.Errorf("invalid target expansion %q", value)
 	}
+	if strings.Count(m[2], ",")+1 > maxTargets {
+		return nil, fmt.Errorf("submission exceeds target limit")
+	}
 	parts := strings.Split(m[2], ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
+	// Check expansion size before duplicating the prefix into each target.
+	size := 0
+	for i, part := range parts {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			return nil, fmt.Errorf("empty target suffix")
 		}
-		out = append(out, m[1]+part)
+		size += len(m[1]) + len(part)
+		if size > maxBytes {
+			return nil, fmt.Errorf("expanded submission exceeds %d bytes", MaxSubmissionBytes)
+		}
+		parts[i] = part
 	}
-	return out, nil
+	for i, part := range parts {
+		parts[i] = m[1] + part
+	}
+	return parts, nil
 }
 
 type ResolvedTarget struct {

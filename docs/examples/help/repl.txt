@@ -7,6 +7,7 @@ $ nssh repl --help
 │   --plain                           Use line-oriented plain output           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Global Flags ───────────────────────────────────────────────────────────────╮
+│   -e, --explain                     Print command explanation                │
 │   -h, --help                        Print command help                       │
 │   -v, --verbose COUNT               Increase debug verbosity                 │
 │   -V, --version                     Print command version                    │

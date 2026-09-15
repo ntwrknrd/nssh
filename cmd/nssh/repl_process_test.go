@@ -26,6 +26,23 @@ import (
 // or external credentials. Run them inside Linux when developing on macOS.
 func TestREPLProcess(t *testing.T) {
 	binary := buildBinary(t)
+	t.Run("explanation exits before session setup", func(t *testing.T) {
+		for _, flag := range []string{"--explain", "-e"} {
+			f := newREPLFixture(t, binary)
+			cmd := f.command(flag, "--plain", "--concurrency=0")
+			cmd.Stdin = strings.NewReader("invalid submission\n")
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("%s: %v\n%s", flag, err, output)
+			}
+			if !strings.Contains(string(output), "Syntax:") || !strings.Contains(string(output), "[ 'host1', 'host2' ]") {
+				t.Fatalf("%s omitted REPL syntax: %s", flag, output)
+			}
+			if f.log() != "" {
+				t.Fatal("explanation started SSH")
+			}
+		}
+	})
 	t.Run("plain streams and remote EOF", func(t *testing.T) {
 		f := newREPLFixture(t, binary)
 		cmd := f.command("--plain")

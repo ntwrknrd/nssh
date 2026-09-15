@@ -13,14 +13,13 @@ import (
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 )
 
-// CaptureOptions keeps REPL I/O and trust decisions request scoped. Interaction
-// owns terminal suspension and must finish before returning. A nil prompt rejects
-// trust decisions instead of reading ambient stdin.
+// CaptureOptions keeps REPL I/O and trust decisions request scoped. The terminal
+// owner supplies host-key decisions. A nil prompt rejects trust decisions
+// instead of reading ambient stdin.
 type CaptureOptions struct {
 	Options
 	MaxOutputBytes int
 	HostKeyPrompt  connector.HostKeyPromptFunc
-	Interaction    func(context.Context, func() error) error
 }
 
 // RunRemoteCommandCapture shares normal SSH preparation without printing results.

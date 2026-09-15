@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -176,6 +177,35 @@ func TestRootCommandRegistersPublicCommands(t *testing.T) {
 	want := []string{"agent", "cp", "inv", "log", "repl", "self"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("public commands = %v, want %v", got, want)
+	}
+}
+
+func TestPublicCommandIntegration(t *testing.T) {
+	root := NewRootCmd(Options{Version: "test"})
+	var want []string
+	for _, cmd := range root.Commands() {
+		if cmd.Hidden {
+			continue
+		}
+		want = append(want, cmd.Name())
+		args := []string{cmd.Name(), "--help"}
+		if got := PreprocessArgs(args); !slices.Equal(got, args) {
+			t.Errorf("public command %s routed to SSH: %v", cmd.Name(), got)
+		}
+		if cmd.Long != "" && cmd.Flags().Lookup("explain") == nil {
+			t.Errorf("public command %s has extended help but no --explain flag", cmd.Name())
+		}
+	}
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetArgs([]string{"__list-subcommands"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Fields(out.String())
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("listed commands = %v, registered commands = %v", got, want)
 	}
 }
 

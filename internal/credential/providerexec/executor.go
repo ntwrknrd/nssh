@@ -296,7 +296,14 @@ func (e *Executor) handleSOPSAgeGet(ctx context.Context, cfg *SOPSAgeProviderCon
 	if cfg == nil {
 		return ProviderResponse{}, errors.New("credential provider is nil")
 	}
-	doc, err := sopsdoc.Decrypt(ctx, cfg.Runner, cfg.File, cfg.AgeKeyFile)
+	runner := cfg.Runner
+	if isNonInteractive(ctx) {
+		if cli, ok := runner.(sopsdoc.CLIRunner); ok {
+			cli.NonInteractive = true
+			runner = cli
+		}
+	}
+	doc, err := sopsdoc.Decrypt(ctx, runner, cfg.File, cfg.AgeKeyFile)
 	if err != nil {
 		return ProviderResponse{}, err
 	}

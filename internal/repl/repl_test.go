@@ -210,3 +210,25 @@ func TestExecutorDeliversBoundedOutputWithoutRetainingIt(t *testing.T) {
 		}
 	}
 }
+
+func TestParseBoundsExpandedSubmission(t *testing.T) {
+	prefix := strings.Repeat("x", MaxSubmissionBytes/4)
+	for _, targets := range []string{
+		"'" + prefix + "(1,2,3,4,5)'",
+		"'" + prefix + "(1,2,3)', '" + prefix + "(4,5,6)'",
+	} {
+		line := "[ " + targets + " ] ( 'show version' )"
+		if len(line) >= MaxSubmissionBytes {
+			t.Fatal("fixture must fit before expansion")
+		}
+		if _, err := Parse(line); err == nil || !strings.Contains(err.Error(), "expanded submission") {
+			t.Fatalf("accepted oversized expansion: %v", err)
+		}
+	}
+	if _, err := expandTarget("edge("+strings.Repeat("1,", MaxSubmissionTargets)+"2)", MaxSubmissionTargets, MaxSubmissionBytes); err == nil {
+		t.Fatal("expanded more than the target limit")
+	}
+	if _, err := Parse("[ 'edge(" + strings.Repeat("1,", MaxSubmissionTargets-1) + "2)' ] ( 'show version' )"); err != nil {
+		t.Fatalf("rejected expansion at the target limit: %v", err)
+	}
+}

@@ -85,7 +85,8 @@ clear history. Piped sessions do not write it.
 Capture retains up to 8 MiB of stdout/stderr combined per command. The interactive
 transcript retains at most 32 MiB. Truncation or eviction is reported while SSH
 output continues draining and the command outcome is recorded. A submission is
-limited to 2 MiB, 1,000 unique targets, 100 commands, and 10,000 host/command pairs.
+limited to 2 MiB before and after suffix expansion, 1,000 unique targets,
+100 commands, and 10,000 host/command pairs.
 
 Incremental output streaming, selected-result diffs, a multi-select completion
 picker, and a Rust frontend are deferred. See
