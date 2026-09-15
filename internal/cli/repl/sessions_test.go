@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
+	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 )
 
 func terminalModel(t *testing.T, width int) model {
@@ -83,5 +84,65 @@ func TestTerminalLossPausesBroadcastAndStaleOutputIsIgnored(t *testing.T) {
 	m, _, _ = m.updateInteractive(terminalOutputMsg{0, 0, []byte("stale")})
 	if strings.Contains(m.panes[0].terminal.String(), "stale") {
 		t.Fatal("stale group mutated current panes")
+	}
+}
+
+func TestInteractiveHostKeyRequestReachesModal(t *testing.T) {
+	m := terminalModel(t, 160)
+	m.direct = true
+	request := &trustRequest{prompt: connector.HostKeyPrompt{Host: "second", KeyType: "ssh-ed25519", Fingerprint: "SHA256:test", Changed: true}, response: make(chan connector.HostKeyAction, 1)}
+	next, _ := m.Update(request)
+	m = next.(model)
+	if m.trust != request {
+		t.Fatal("interactive mode swallowed host-key approval")
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "CHANGED HOST KEY") {
+		t.Fatal("changed-key warning hidden")
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	m = next.(model)
+	select {
+	case got := <-request.response:
+		if got != connector.HostKeyAcceptOnce {
+			t.Fatal(got)
+		}
+	default:
+		t.Fatal("approval not delivered")
+	}
+	if m.trust != nil {
+		t.Fatal("modal remained open")
+	}
+}
+
+func TestSelectingTerminalOutputDoesNotChangeBroadcast(t *testing.T) {
+	m := terminalModel(t, 160)
+	_, _ = m.panes[1].terminal.Write([]byte("device output"))
+	x := m.panes[0].terminal.Width() + 3
+	next, _ := m.Update(tea.MouseMsg{X: x, Y: 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m = next.(model)
+	if m.target != -1 || !m.panes[1].selected {
+		t.Fatal("output selection changed broadcast targets")
+	}
+	next, _ = m.Update(tea.MouseMsg{X: x, Y: 2, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m = next.(model)
+	if m.target != 1 {
+		t.Fatal("header did not focus device")
+	}
+	next, _ = m.Update(tea.MouseMsg{X: x, Y: 7, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m = next.(model)
+	if m.panes[1].selected {
+		t.Fatal("blank click selected empty output")
+	}
+}
+
+func TestTerminalStatusReplyUsesANSIForm(t *testing.T) {
+	emu := newTerminalEmulator(80, 24)
+	replies := make(chan string, 1)
+	go func() { buf := make([]byte, 64); n, _ := emu.Read(buf); replies <- string(buf[:n]) }()
+	_, _ = emu.Write([]byte("\x1b[5n"))
+	got := <-replies
+	_ = emu.InputPipe().(io.Closer).Close()
+	if got != "\x1b[0n" {
+		t.Fatalf("malformed status reply: %q", got)
 	}
 }

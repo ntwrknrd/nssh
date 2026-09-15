@@ -65,7 +65,7 @@ printf '%s\n' "[ 'irn-border-sw(1,2)', 'irn-agg-sw(1,2)' ] ( 'show env power' )"
 The TUI starts in **batch** mode: one request bar and history entries containing
 both devices and commands. Enter `:interactive` to select a fixed device group
 and open live SSH panes. Shared input broadcasts to the displayed targets;
-click a pane to focus one device, or use `:all` to restore broadcast. Enter
+click a pane header to focus one device, or use `:all` to restore broadcast. Enter
 `:batch` to close those sessions and return to batch requests.
 See the [TUI guide](skills/nssh/references/repl.md) for keys and history behavior.
 

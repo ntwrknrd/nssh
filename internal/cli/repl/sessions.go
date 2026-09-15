@@ -183,7 +183,7 @@ func (m *model) startTerminals(targets []core.ResolvedTarget) {
 		}
 	}
 	for _, target := range targets {
-		emu := vt.NewEmulator(80, 24)
+		emu := newTerminalEmulator(80, 24)
 		emu.SetScrollbackSize(1000)
 		wire := &terminalWire{}
 		p := &terminalPane{name: target.Identity, terminal: emu, wire: wire, state: "opening"}
@@ -301,6 +301,10 @@ func (m *model) sendInteractive(data []byte) {
 
 func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 	switch v := msg.(type) {
+	case *trustRequest, trustFinishedMsg:
+		// Connection workers use the shared modal handler in both modes.
+		// Do not consume these as terminal input or cursor-blink events.
+		return m, nil, false
 	case terminalCopyMsg:
 		if v.group == m.group && v.index < len(m.panes) {
 			p := m.panes[v.index]
@@ -430,13 +434,15 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 			switch mouse.Button {
 			case tea.MouseButtonLeft:
 				if mouse.Action == tea.MouseActionPress {
-					m.target = index
-					m.message = "Focused one device; :all restores broadcast"
+					if row < 0 {
+						m.target = index
+						m.message = "Focused one device; :all restores broadcast"
+					}
 					for _, other := range m.panes {
 						other.selected = false
 						other.selecting = false
 					}
-					if row >= 0 && row < p.terminal.Height() {
+					if row >= 0 && row < p.terminal.Height() && p.hasOutputRow(row) {
 						p.selected = true
 						p.selecting = true
 						p.selectionStart = row
@@ -765,7 +771,11 @@ func (m model) interactiveView() string {
 	view := body + "\n" + input + "\n" + status
 	if m.trust != nil {
 		p := m.trust.prompt
-		view = body + "\n" + safeTerminalText(fmt.Sprintf("Verify host key for %s: %s %s\n[o] once [a] always [r] reject", p.Host, p.KeyType, p.Fingerprint)) + "\n" + status
+		warning := "Verify host key"
+		if p.Changed {
+			warning = "CHANGED HOST KEY: verify replacement"
+		}
+		view = body + "\n" + safeTerminalText(fmt.Sprintf("%s for %s: %s %s\n[o] once [a] always [r] reject", warning, p.Host, p.KeyType, p.Fingerprint)) + "\n" + status
 	}
 	if m.helpOpen {
 		return m.helpOverlay(view)
@@ -779,4 +789,26 @@ func (p *terminalPane) clearScrollback() {
 	p.selected = false
 	p.selecting = false
 	p.selectionText = ""
+}
+
+func (p *terminalPane) hasOutputRow(row int) bool {
+	lines := strings.Split(ansi.Strip(p.plainBody()), "\n")
+	return row >= 0 && row < len(lines) && strings.TrimSpace(lines[row]) != ""
+}
+
+// The pinned VT library incorrectly answers ANSI DSR 5 with a DEC-private
+// response (CSI ? 0 n). Use the ANSI response so a remote CLI does not receive
+// an unexpected private sequence as keyboard input. Leave other queries to VT.
+// https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+func newTerminalEmulator(w, h int) *vt.Emulator {
+	emu := vt.NewEmulator(w, h)
+	emu.RegisterCsiHandler('n', func(params ansi.Params) bool {
+		n, _, ok := params.Param(0, 0)
+		if !ok || n != 5 {
+			return false
+		}
+		_, _ = io.WriteString(emu.InputPipe(), "\x1b[0n")
+		return true
+	})
+	return emu
 }

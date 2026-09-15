@@ -269,6 +269,32 @@ func TestREPLProcess(t *testing.T) {
 			t.Fatalf("history modes mixed: %s", history)
 		}
 	})
+	t.Run("PTY interactive trust approval unblocks second terminal", func(t *testing.T) {
+		f := newREPLFixture(t, binary)
+		s := f.terminal(t)
+		s.write(t, ":interactive\r")
+		s.await(t, "Choose devices")
+		s.write(t, "good \x15trust \r\r")
+		s.await(t, "Verify host key")
+		s.settle()
+		starts, _ := os.ReadFile(filepath.Join(f.dir, "sessions"))
+		if strings.Contains(string(starts), "trust ") {
+			t.Fatal("unapproved terminal started")
+		}
+		s.write(t, "o")
+		s.await(t, "trust#")
+		s.await(t, "good#")
+		s.settle()
+		s.write(t, "show version\r")
+		awaitProcess(t, func() bool {
+			return strings.Contains(f.log(), "good show version") && strings.Contains(f.log(), "trust show version")
+		}, "broadcast after host-key approval", &s.output)
+		s.write(t, ":quit\r")
+		s.wait(t, 0)
+		if _, err := os.Stat(filepath.Join(f.dir, "home", ".ssh", "known_hosts")); !os.IsNotExist(err) {
+			t.Fatal("accept once persisted host key")
+		}
+	})
 	t.Run("PTY trust cancellation leaves input usable", func(t *testing.T) {
 		f := newREPLFixture(t, binary)
 		s := f.terminal(t)
@@ -351,6 +377,12 @@ if [ "$probe" = yes ]; then
 fi
 if [ "$command" = "fixture@$host" ]; then
   stty opost onlcr icrnl
+  printf '\033[5n'
+  reply=$(dd bs=1 count=4 2>/dev/null)
+  if [ "$reply" != "$(printf '\033[0n')" ]; then
+    printf 'malformed terminal status reply\n' >&2
+    exit 92
+  fi
   printf '%s %s\n' "$host" "$$" >> "$NSSH_TEST_SESSIONS"
   mode=
   value=unset

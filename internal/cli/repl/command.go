@@ -83,7 +83,7 @@ identical requests, and restores the whole request for editing.
 Interactive:
   :interactive  Choose devices, then Enter opens a fixed group of SSH panes
   :batch        Close the group and return to batch
-  :target N     Send input only to pane N (or click that pane)
+  :target N     Send input only to pane N (or click its header)
   :all          Resume broadcasting to every pane
   :keys        Send keys directly; Ctrl-] returns to the command bar
   :next, :prev  Change the visible page when more than four panes are open
@@ -543,6 +543,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		return m.handleMouse(v)
 	case *trustRequest:
+		m.helpOpen = false
 		m.trust = v
 		return m, nil
 	case trustFinishedMsg:

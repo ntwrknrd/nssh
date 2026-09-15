@@ -75,7 +75,7 @@ keeps its own working directory, variables, CLI hierarchy, and output. Commands
 need not complete before the next input can be sent.
 
 Wait for each device's actual prompt before sending input. To handle a
-confirmation or different state, click its pane or enter `:target N`. This targets
+confirmation or different state, click its pane header or enter `:target N`. This targets
 only that device. Enter `:all` to restore broadcast. nssh cannot determine whether
 different prompts are safe to answer together. A disconnected session pauses
 broadcast, never reconnects, and never replays input. Sending to all still requires
@@ -105,7 +105,7 @@ Ctrl-C and Ctrl-D are sent to the selected terminals in interactive mode. Use
 
 ### Pane controls and limits
 
-- `:target N` or clicking a pane focuses one device; `:all` selects all.
+- `:target N` or clicking a pane header focuses one device; `:all` selects all.
 - `:next` and `:prev` change pages when more than four panes are open.
 - PgUp/PgDn scroll the targeted panes; the mouse wheel scrolls its pane.
 - Drag selects output lines from one pane. Ctrl-Y copies; right-click copies and
