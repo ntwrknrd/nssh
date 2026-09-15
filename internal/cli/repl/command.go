@@ -83,7 +83,8 @@ Enter inserts selected hosts, and Esc closes without changing the command.
 Selections persist across filters. Up/Down outside the picker
 recall history. PgUp/PgDn or the mouse wheel scroll. Ctrl-L toggles stacked
 results; Ctrl-G toggles line comparison in split panes. Drag selects lines in
-one device pane or click the sticky command header to select its command.
+one device pane, including its status heading. The full device/command status
+line stays pinned while scrolling and can be selected together with its output.
 Ctrl-Y copies; right-click copies and clears the selection after a successful
 write. Copy sends up to 64 KiB to the terminal clipboard.
 Ctrl-C cancels active work and waits for local cleanup, or

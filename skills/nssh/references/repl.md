@@ -95,8 +95,9 @@ ordinary interactive connection before retrying.
 The Go TUI has a command prompt with host completion and
 persistent running/done/failed/pending/canceled/skipped counts. Each result
 starts with its status, device, and command: `OK:  [user@device] ('show env power')`.
-The sticky header follows the command at the top of the visible output. Click
-it to select the full command for copying, even if the header is truncated.
+The full device/command status line stays pinned above its visible output.
+Select the status line alone or drag into the output to copy them together.
+A pinned heading is copied once, without including output above the visible area.
 At 100 columns or wider, adjacent devices for the same command appear side by
 side only when both headings and every output line fit, including line-number
 space. Otherwise, devices stack at full width. Lines wrap only when they exceed

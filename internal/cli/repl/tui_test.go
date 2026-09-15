@@ -67,7 +67,7 @@ func TestTUISelectionCopiesOnlyChosenDevice(t *testing.T) {
 	rows := m.renderRows()
 	start := -1
 	for i, row := range rows {
-		if len(row.spans) == 2 {
+		if !row.heading && len(row.spans) == 2 {
 			start = i
 			break
 		}
@@ -76,15 +76,15 @@ func TestTUISelectionCopiesOnlyChosenDevice(t *testing.T) {
 		t.Fatal("no result rows")
 	}
 	m.viewport.GotoTop()
-	next, _ := m.handleMouse(tea.MouseMsg{X: 8, Y: start + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	next, _ := m.handleMouse(tea.MouseMsg{X: 8, Y: start + 1 - m.bodyOffset(), Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	m = next.(model)
-	next, _ = m.handleMouse(tea.MouseMsg{X: 100, Y: start + 2, Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion})
+	next, _ = m.handleMouse(tea.MouseMsg{X: 100, Y: start + 2 - m.bodyOffset(), Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion})
 	m = next.(model)
 	if got := m.selectedText(); got != "left one\nleft two" {
 		t.Fatalf("cross-pane selection: %q", got)
 	}
 	// Header and gutter clicks cannot copy neighboring output.
-	next, _ = m.handleMouse(tea.MouseMsg{X: 2, Y: start + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	next, _ = m.handleMouse(tea.MouseMsg{X: 2, Y: start + 1 - m.bodyOffset(), Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	m = next.(model)
 	if m.selectedText() != "" {
 		t.Fatal("line number gutter selected output")
@@ -212,7 +212,7 @@ func TestTUIStacksWhenPairWouldWrap(t *testing.T) {
 	m.refreshLayout()
 	paired := false
 	for _, row := range m.renderRows() {
-		if len(row.spans) == 2 {
+		if !row.heading && len(row.spans) == 2 {
 			paired = true
 		}
 	}
@@ -313,8 +313,8 @@ func TestStickyCommandFollowsScrolledOutput(t *testing.T) {
 	m.acceptResult(tuiEvent("a", "first", strings.Repeat("one\n", 40), 0))
 	m.acceptResult(tuiEvent("a", "second", strings.Repeat("two\n", 40), 1))
 	m.viewport.SetYOffset(15)
-	if got := m.stickyCommand(); got != "first" {
-		t.Fatal(got)
+	if row, _ := m.stickyHeader(); row.command != "first" {
+		t.Fatal(row)
 	}
 	for i, row := range m.renderRows() {
 		if row.command == "second" {
@@ -322,8 +322,8 @@ func TestStickyCommandFollowsScrolledOutput(t *testing.T) {
 			break
 		}
 	}
-	if got := m.stickyCommand(); got != "second" {
-		t.Fatal(got)
+	if row, _ := m.stickyHeader(); row.command != "second" {
+		t.Fatal(row)
 	}
 	if strings.Contains(ansi.Strip(m.View()), "nssh repl") {
 		t.Fatal("old title retained")
@@ -339,7 +339,7 @@ func TestStickyCommandCopiesFullOriginalText(t *testing.T) {
 	}
 	next, _ := m.handleMouse(tea.MouseMsg{X: 10, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	m = next.(model)
-	if got := m.selectedText(); got != command {
+	if got := m.selectedText(); got != resultLabel(tuiEvent("a", command, "output", 0)) {
 		t.Fatalf("copy=%q", got)
 	}
 	if !strings.Contains(ansi.Strip(m.commandHeader()), "...") {
@@ -354,14 +354,14 @@ func TestRightClickCopiesSelectionAndClearsAfterSuccess(t *testing.T) {
 	m.viewport.GotoTop()
 	row := 0
 	for i, r := range m.renderRows() {
-		if len(r.spans) == 2 {
+		if !r.heading && len(r.spans) == 2 {
 			row = i
 			break
 		}
 	}
-	next, _ := m.handleMouse(tea.MouseMsg{X: 8, Y: row + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	next, _ := m.handleMouse(tea.MouseMsg{X: 8, Y: row + 1 - m.bodyOffset(), Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	m = next.(model)
-	next, _ = m.handleMouse(tea.MouseMsg{X: 8, Y: row + 2, Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion})
+	next, _ = m.handleMouse(tea.MouseMsg{X: 8, Y: row + 2 - m.bodyOffset(), Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion})
 	m = next.(model)
 	next, cmd := m.handleMouse(tea.MouseMsg{X: 100, Y: 0, Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
 	m = next.(model)
@@ -406,7 +406,55 @@ func TestCopyFailurePreservesSelection(t *testing.T) {
 	m = next.(model)
 	next, _ = m.Update(tuiCopyMsg{err: errors.New("write failed"), clearAfter: true, text: "show"})
 	m = next.(model)
-	if !m.selected || m.selectedText() != "show" {
+	if !m.selected || m.selectedText() != "OK:  [a] ('show')" {
 		t.Fatal("failed copy lost selection")
+	}
+}
+
+func TestStickyStatusCopiesWithVisibleOutput(t *testing.T) {
+	m := testTUI(80)
+	m.acceptResult(tuiEvent("user@device", "show lldp nei", strings.Repeat("hidden\n", 30)+"visible one\nvisible two\n"+strings.Repeat("tail\n", 30), 0))
+	m.viewport.SetYOffset(31)
+	next, _ := m.handleMouse(tea.MouseMsg{X: 5, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m = next.(model)
+	next, _ = m.handleMouse(tea.MouseMsg{X: 5, Y: 2, Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion})
+	m = next.(model)
+	want := "OK:  [user@device] ('show lldp nei')\nvisible one\nvisible two"
+	// Use a tall enough body so the viewport can reach the selected offset.
+	if m.viewport.YOffset != 31 {
+		t.Fatal("viewport did not reach test row")
+	}
+	if got := m.selectedText(); got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+func TestStickyStatusIsNotDuplicatedAtTop(t *testing.T) {
+	m := testTUI(120)
+	m.acceptResult(tuiEvent("a", "show", "body", 0))
+	m.viewport.GotoTop()
+	view := ansi.Strip(m.View())
+	if strings.Contains(view, "Command:") || strings.Count(view, "OK:  [a] ('show')") != 1 {
+		t.Fatal(view)
+	}
+	next, _ := m.handleMouse(tea.MouseMsg{X: 1, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m = next.(model)
+	next, _ = m.handleMouse(tea.MouseMsg{X: 1, Y: 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion})
+	m = next.(model)
+	if got := m.selectedText(); got != "OK:  [a] ('show')\nbody" {
+		t.Fatal(got)
+	}
+}
+
+func TestStickyPairedStatusCopiesOnlyItsDevice(t *testing.T) {
+	m := testTUI(120)
+	m.acceptResult(tuiEvent("a", "show", "left", 0))
+	m.acceptResult(tuiEvent("b", "show", "right", 0))
+	m.viewport.GotoTop()
+	next, _ := m.handleMouse(tea.MouseMsg{X: 80, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m = next.(model)
+	next, _ = m.handleMouse(tea.MouseMsg{X: 80, Y: 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion})
+	m = next.(model)
+	if got := m.selectedText(); got != "OK:  [b] ('show')\nright" {
+		t.Fatal(got)
 	}
 }

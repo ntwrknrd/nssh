@@ -36,8 +36,8 @@ type tuiState struct {
 	message                                         string
 	selectionStart, selectionEnd                    int
 	selectionBlock                                  int
-	selectedCommand                                 string
-	latestCommand                                   string
+	selectionHeader                                 bool
+	selectionBodyStart                              int
 	selecting, selected                             bool
 }
 
@@ -48,9 +48,6 @@ var (
 )
 
 func (m *model) acceptResult(e core.Event) {
-	if e.State != core.Queued {
-		m.latestCommand = e.Command
-	}
 	switch e.State {
 	case core.Queued:
 		return
@@ -183,6 +180,7 @@ type tuiSpan struct {
 	text                 string
 }
 type tuiRow struct {
+	heading bool
 	command string
 	styled  string
 	spans   []tuiSpan
@@ -213,7 +211,7 @@ func (m model) renderRows() []tuiRow {
 				continue
 			}
 		}
-		rows = append(rows, tuiRow{command: b.event.Command, styled: resultHeading(*b.event, width)})
+		rows = append(rows, tuiRow{heading: true, command: b.event.Command, styled: resultHeading(*b.event, width), spans: []tuiSpan{{block: i, width: width, text: resultLabel(*b.event)}}})
 		for _, line := range resultLines(*b.event, width) {
 			rows = append(rows, tuiRow{command: b.event.Command, styled: line, spans: []tuiSpan{{block: i, width: width, text: line}}})
 		}
@@ -228,7 +226,7 @@ func (m model) renderBlocks() string {
 		if m.selected && i >= min(m.selectionStart, m.selectionEnd) && i <= max(m.selectionStart, m.selectionEnd) {
 			for _, span := range row.spans {
 				if span.block == m.selectionBlock {
-					line = ansi.Cut(line, 0, span.offset) + lipgloss.NewStyle().Reverse(true).Render(padCells(span.text, span.width)) + ansi.Cut(line, span.offset+span.width, ansi.StringWidth(line))
+					line = ansi.Cut(line, 0, span.offset) + lipgloss.NewStyle().Reverse(true).Render(padCells(ansi.Truncate(span.text, span.width, "..."), span.width)) + ansi.Cut(line, span.offset+span.width, ansi.StringWidth(line))
 				}
 			}
 		}
@@ -257,7 +255,7 @@ func resultsFitPair(left, right core.Event, width int) bool {
 func (m model) renderPair(left, right core.Event, width, block int) []tuiRow {
 	column := (width - 4) / 2
 	a, b := sourceLines(left), sourceLines(right)
-	rows := []tuiRow{{command: left.Command, styled: padCells(resultHeading(left, column), column) + "    " + resultHeading(right, column)}}
+	rows := []tuiRow{{heading: true, command: left.Command, styled: padCells(resultHeading(left, column), column) + "    " + resultHeading(right, column), spans: []tuiSpan{{block: block, width: column, text: resultLabel(left)}, {block: block + 1, offset: column + 4, width: column, text: resultLabel(right)}}}}
 	// Pair original rows first. Wrapping either side adds continuation cells to
 	// that pair, never shifts the next source row or consumes another line number.
 	for i := 0; i < max(len(a), len(b)); i++ {
@@ -327,38 +325,59 @@ func (m *model) refreshLayout() {
 	m.viewport.SetContent(m.transcriptContent())
 }
 
-// Follow the first result at or below the viewport top, including when its
-// device heading has scrolled away. Fall back to the preceding/latest command.
-func (m model) stickyCommand() string {
+// Pin the device status row belonging to the top visible output. Paired
+// results retain both device headings and their independent selection spans.
+func (m model) stickyHeader() (tuiRow, int) {
 	rows := m.renderRows()
 	top := min(m.viewport.YOffset, len(rows))
-	for _, row := range rows[top:] {
-		if row.command != "" {
-			return row.command
+	for i := top; i < len(rows); i++ {
+		if len(rows[i].spans) == 0 {
+			continue
+		}
+		block := rows[i].spans[0].block
+		for j := i; j >= 0; j-- {
+			if rows[j].heading && rows[j].spans[0].block == block {
+				return rows[j], j
+			}
 		}
 	}
-	for i := top - 1; i >= 0; i-- {
-		if rows[i].command != "" {
-			return rows[i].command
-		}
+	return tuiRow{}, -1
+}
+func (m model) bodyOffset() int {
+	_, index := m.stickyHeader()
+	if index == m.viewport.YOffset {
+		return index + 1
 	}
-	return m.latestCommand
+	return m.viewport.YOffset
 }
 func (m model) commandHeader() string {
-	command := m.stickyCommand()
-	if command == "" {
+	row, index := m.stickyHeader()
+	if index < 0 {
 		return ""
 	}
-	text := ansi.Truncate("Command: "+displayLabel(command), max(1, m.viewport.Width), "...")
-	if m.selected && m.selectionBlock == -1 && m.selectedCommand == command {
-		return lipgloss.NewStyle().Reverse(true).Render(text)
+	if m.selected && (m.selectionHeader || index >= min(m.selectionStart, m.selectionEnd) && index <= max(m.selectionStart, m.selectionEnd)) {
+		for _, span := range row.spans {
+			if span.block == m.selectionBlock {
+				row.styled = ansi.Cut(row.styled, 0, span.offset) + lipgloss.NewStyle().Reverse(true).Render(padCells(ansi.Truncate(span.text, span.width, "..."), span.width)) + ansi.Cut(row.styled, span.offset+span.width, ansi.StringWidth(row.styled))
+			}
+		}
 	}
-	return tuiCommand.Render(text)
+	return row.styled
+}
+func (m model) bodyView() string {
+	view := m.viewport.View()
+	if m.bodyOffset() > m.viewport.YOffset {
+		lines := strings.Split(view, "\n")
+		if len(lines) > 0 {
+			return strings.Join(append(lines[1:], ""), "\n")
+		}
+	}
+	return view
 }
 
 func (m model) tuiView() string {
 	width := max(1, m.viewport.Width)
-	parts := []string{m.commandHeader(), m.viewport.View()}
+	parts := []string{m.commandHeader(), m.bodyView()}
 	switch {
 	case m.trust != nil:
 		p := m.trust.prompt
@@ -598,19 +617,6 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonRight {
 		return m, m.copySelection(true)
 	}
-	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && msg.Y == 0 {
-		m.selected = false
-		m.selecting = false
-		command := m.stickyCommand()
-		if command != "" && msg.X >= 0 && msg.X < min(m.viewport.Width, ansi.StringWidth("Command: "+displayLabel(command))) {
-			m.selectionBlock = -1
-			m.selectedCommand = command
-			m.selected = true
-			m.message = "command selected"
-		}
-		m.viewport.SetContent(m.renderBlocks())
-		return m, nil
-	}
 	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
@@ -620,8 +626,12 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.selecting = false
 		return m, nil
 	}
-	row := msg.Y - 1 + m.viewport.YOffset
-	if msg.Y < 1 || msg.Y > m.viewport.Height {
+	row := msg.Y - 1 + m.bodyOffset()
+	sticky, index := m.stickyHeader()
+	if msg.Y == 0 {
+		row = index
+	}
+	if msg.Y < 0 || msg.Y > m.viewport.Height {
 		return m, nil
 	}
 	rows := m.renderRows()
@@ -631,6 +641,8 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 		m.selected = false
 		m.selecting = false
+		m.selectionHeader = msg.Y == 0
+		m.selectionBodyStart = m.bodyOffset()
 		for _, span := range rows[row].spans {
 			if msg.X >= span.offset && msg.X < span.offset+span.width {
 				m.selectionStart = row
@@ -643,6 +655,10 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	} else if msg.Action == tea.MouseActionMotion && m.selecting {
 		m.selectionEnd = row
+		if msg.Y == 0 && len(sticky.spans) > 0 {
+			m.selectionHeader = true
+			m.selectionBodyStart = m.bodyOffset()
+		}
 	}
 	if m.selected {
 		m.message = "lines selected"
@@ -654,12 +670,6 @@ func (m model) selectedText() string {
 	if !m.selected {
 		return ""
 	}
-	if m.selectionBlock == -1 {
-		if m.selectedCommand != m.stickyCommand() {
-			return ""
-		}
-		return m.selectedCommand
-	}
 	rows := m.renderRows()
 	start, end := min(m.selectionStart, m.selectionEnd), max(m.selectionStart, m.selectionEnd)
 	if start < 0 || start >= len(rows) {
@@ -667,9 +677,25 @@ func (m model) selectedText() string {
 	}
 	end = min(end, len(rows)-1)
 	var selected []string
+	if m.selectionHeader {
+		// Include the pinned status once, followed only by selected visible output.
+		for _, row := range rows {
+			if row.heading {
+				for _, span := range row.spans {
+					if span.block == m.selectionBlock {
+						selected = append(selected, span.text)
+					}
+				}
+			}
+		}
+		start = max(start, m.selectionBodyStart)
+	}
+	if start > end {
+		return strings.Join(selected, "\n")
+	}
 	for _, row := range rows[start : end+1] {
 		for _, span := range row.spans {
-			if span.block == m.selectionBlock {
+			if span.block == m.selectionBlock && !(m.selectionHeader && row.heading) {
 				selected = append(selected, span.text)
 			}
 		}
