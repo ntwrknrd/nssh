@@ -154,7 +154,7 @@ func TestREPLProcess(t *testing.T) {
 		f := newREPLFixture(t, binary)
 		s := f.terminal(t)
 		s.write(t, "\t")
-		s.await(t, "Filter:")
+		s.await(t, "[ ] good")
 		s.write(t, "good\r")
 		s.settle()
 		if f.log() != "" {

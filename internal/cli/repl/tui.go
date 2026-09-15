@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -31,7 +30,6 @@ type tuiState struct {
 	pickerOpen                                      bool
 	pickerDraft                                     string
 	pickerCursor                                    int
-	pickFilter                                      textinput.Model
 	matches                                         []string
 	picked                                          map[string]bool
 	pickAt                                          int
@@ -316,14 +314,13 @@ func (m *model) refreshLayout() {
 	m.viewport.Width = max(1, width)
 	footer := 5
 	if m.pickerOpen {
-		footer += max(1, min(6, len(m.matches))) + 1
+		footer += max(1, min(6, len(m.matches)))
 	}
 	if m.trust != nil {
 		footer += 2
 	}
 	m.viewport.Height = max(1, height-footer)
 	m.input.Width = max(1, width-6)
-	m.pickFilter.Width = max(1, width-10)
 	m.viewport.SetContent(m.transcriptContent())
 }
 
@@ -420,21 +417,6 @@ func (m model) editorView(width int) string {
 	if len(value) == 0 {
 		return ansi.Truncate("> "+tuiDim.Render("[ 'host' ] ( 'command' )"), width, "")
 	}
-	suggestion := ""
-	_, _, matches := completeTargetToken(m.input.Value(), pos, m.candidates)
-	if len(matches) > 0 {
-		if token, ok := activeTargetStart(value, pos); ok {
-			for i := token; i < pos; i++ {
-				if value[i] == '@' {
-					token = i + 1
-				}
-			}
-			candidate := []rune(matches[0])
-			if pos-token <= len(candidate) {
-				suggestion = string(candidate[pos-token:])
-			}
-		}
-	}
 	start := 0
 	for start < pos && ansi.StringWidth(string(value[start:pos])) > max(1, width-5) {
 		start++
@@ -452,11 +434,6 @@ func (m model) editorView(width int) string {
 		}
 		if visible >= width-1 {
 			break
-		}
-		if i == pos && suggestion != "" {
-			ghost := ansi.Truncate(displayLabel(suggestion), max(0, width-visible-1), "")
-			out.WriteString(tuiDim.Render(ghost))
-			visible += ansi.StringWidth(ghost)
 		}
 		visible += ansi.StringWidth(string(r))
 		style := tuiCommand
@@ -484,7 +461,7 @@ func (m *model) openPicker() {
 		m.input.SetValue("[ '' ] ( '' )")
 		m.input.SetCursor(3)
 	}
-	start, ok := activeTargetStart([]rune(m.input.Value()), m.input.Position())
+	_, ok := activeTargetStart([]rune(m.input.Value()), m.input.Position())
 	if !ok {
 		return
 	}
@@ -493,15 +470,7 @@ func (m *model) openPicker() {
 		m.insertHosts(matches)
 		return
 	}
-	prefix := string([]rune(m.input.Value())[start:m.input.Position()])
-	if at := strings.LastIndex(prefix, "@"); at >= 0 {
-		prefix = prefix[at+1:]
-	}
-	m.pickFilter = textinput.New()
-	m.pickFilter.Prompt = "Filter: "
-	m.pickFilter.CharLimit = 256
-	m.pickFilter.SetValue(prefix)
-	m.pickFilter.Focus()
+	m.input.Focus()
 	m.picked = map[string]bool{}
 	m.pickerOpen = true
 	m.filterPicker()
@@ -509,7 +478,14 @@ func (m *model) openPicker() {
 }
 func (m *model) filterPicker() {
 	m.matches = nil
-	query := strings.ToLower(m.pickFilter.Value())
+	query := ""
+	if start, ok := activeTargetStart([]rune(m.input.Value()), m.input.Position()); ok {
+		query = string([]rune(m.input.Value())[start:m.input.Position()])
+		if at := strings.LastIndex(query, "@"); at >= 0 {
+			query = query[at+1:]
+		}
+	}
+	query = strings.ToLower(query)
 	for _, name := range m.candidates {
 		if strings.Contains(strings.ToLower(name), query) {
 			m.matches = append(m.matches, name)
@@ -518,7 +494,7 @@ func (m *model) filterPicker() {
 	m.pickAt = 0
 }
 func (m model) pickerView() string {
-	rows := []string{m.pickFilter.View()}
+	var rows []string
 	start := max(0, m.pickAt-5)
 	for i := start; i < min(len(m.matches), start+6); i++ {
 		marker := "[ ]"
@@ -566,10 +542,15 @@ func (m *model) updatePicker(key tea.KeyMsg) {
 			return
 		}
 		m.insertHosts(chosen)
+		if emptyEditor(m.pickerDraft) {
+			m.input.SetCursor(len([]rune(m.input.Value())) - 3)
+		}
 		m.pickerOpen = false
 		m.matches = nil
 	default:
-		m.pickFilter, _ = m.pickFilter.Update(key)
+		if _, handled := m.deleteEditorField(key); !handled {
+			m.input, _ = m.input.Update(key)
+		}
 		m.filterPicker()
 	}
 	m.refreshLayout()

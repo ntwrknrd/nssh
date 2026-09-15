@@ -59,7 +59,9 @@ starts explicit submission syntax. Press Enter to run the completed submission.
   and separators. Type `:` into an empty template to enter an internal command.
 - Tab completes a unique host at the cursor or opens a searchable host picker.
   Tab on an empty prompt starts a submission and opens the picker.
-- In the picker, type to filter, use Up/Down to move, and Space to select hosts.
+- In the picker, typing edits the device in the command bar and filters the list
+  above it. No separate filter box or inline completion preview is shown.
+  Use Up/Down to move and Space to select hosts.
   Selections persist across filters. Enter inserts the selected hosts into the
   command; it does not execute it. Esc closes the picker and restores the draft.
 - Selected hosts are quoted and separated automatically. Existing command text

@@ -95,8 +95,8 @@ func TestTUIPickerPreservesCommandAndUsername(t *testing.T) {
 	m.candidates = []string{"edge1", "edge2"}
 	m.input.SetValue("[ 'alice@ed' ] ( 'show version' )")
 	m.input.SetCursor(len([]rune("[ 'alice@ed")))
-	if got := ansi.Strip(m.editorView(110)); !strings.Contains(got, "alice@edge1") {
-		t.Fatalf("missing inline suggestion: %q", got)
+	if got := ansi.Strip(m.editorView(110)); !strings.Contains(got, "alice@ed'") || strings.Contains(got, "alice@edge1") {
+		t.Fatalf("unexpected inline completion: %q", got)
 	}
 	m.openPicker()
 	if len(m.matches) != 2 {
@@ -243,6 +243,12 @@ func TestPromptPickerFiltersAndPreservesSelections(t *testing.T) {
 	m.candidates = []string{"agg1", "border1", "border2"}
 	m.openPicker()
 	m.updatePicker(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("border")})
+	if m.input.Value() != "[ 'border' ] ( '' )" || len(m.matches) != 2 {
+		t.Fatalf("prompt filter: %q, %v", m.input.Value(), m.matches)
+	}
+	if strings.Contains(ansi.Strip(m.View()), "Filter:") {
+		t.Fatal("duplicate filter input")
+	}
 	m.updatePicker(tea.KeyMsg{Type: tea.KeySpace})
 	m.updatePicker(tea.KeyMsg{Type: tea.KeyCtrlU})
 	m.updatePicker(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("agg")})
