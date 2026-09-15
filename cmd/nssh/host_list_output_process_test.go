@@ -45,10 +45,13 @@ func TestHostListOutputProcess(t *testing.T) {
 				}
 			}
 			text := strings.ReplaceAll(ansi.Strip(string(output)), "\r\n", "\n")
-			for _, want := range []string{"TASK [show env power]", "2 hosts", "ok: [alpha]\nPower    Input\n", "ok: [beta]\nPower    Input\n", "PLAY RECAP", "alpha : ok=1  failed=0  canceled=0\nbeta  : ok=1  failed=0  canceled=0"} {
+			for _, want := range []string{"Command: show env power", "2 hosts", "[alpha] OK", "[beta] OK", "\nPower    Input\n", "Results", "alpha : ok=1  failed=0  canceled=0\nbeta  : ok=1  failed=0  canceled=0"} {
 				if !strings.Contains(text, want) {
 					t.Errorf("missing %q:\n%s", want, text)
 				}
+			}
+			if strings.Index(text, "[alpha] OK") > strings.Index(text, "[beta] OK") {
+				t.Fatalf("hosts printed out of order: %s", text)
 			}
 			if strings.Contains(text, "alpha-user@") || strings.Contains(text, "completed") {
 				t.Errorf("redundant identity/status:\n%s", text)

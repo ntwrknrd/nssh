@@ -50,12 +50,13 @@ to a host literally named `repl`.
 ## Execution and output
 
 The default is four simultaneous hosts; `--concurrency N` changes that limit.
-Commands run in listed order for each host. Failure skips later commands on that
-host while other hosts continue. REPL does not retry commands. Only one
+Each command runs across all hosts, with results printed in requested host
+order, before the next command starts. A slow earlier host can delay later
+hosts because the execution window also bounds buffered output. Failure skips
+later commands on that host while other hosts continue. REPL does not retry commands. Only one
 submission runs at a time.
 
-Progress updates while commands run. Complete retained output appears when each
-command finishes, with host/command attribution and distinct stdout/stderr.
+Progress updates while commands run. Complete retained output appears in requested host order, with host/command attribution and distinct stdout/stderr.
 Plain mode sends remote stdout to stdout and remote stderr/status to stderr,
 without a prompt or UI styling. It processes lines sequentially and stops at the
 first failed submission. Exit codes are zero for success, one for a failed

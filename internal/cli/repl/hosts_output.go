@@ -20,7 +20,7 @@ type hostListOutput struct {
 
 func (p *hostListOutput) start(command string, targets []core.ResolvedTarget) {
 	p.targets = targets
-	_, _ = fmt.Fprintf(p.errOut, "%s\n%d hosts\n\n", taskBanner("TASK ["+displayLabel(command)+"]"), len(targets))
+	_, _ = fmt.Fprintf(p.errOut, "%s\n%d hosts\n\n", taskBanner("Command: "+displayLabel(command)), len(targets))
 }
 
 func (p *hostListOutput) event(event core.Event) {
@@ -29,7 +29,7 @@ func (p *hostListOutput) event(event core.Event) {
 	}
 	name := hostListName(event.Target)
 	status := hostListStatus(event.State)
-	heading := fmt.Sprintf("%s: [%s]", status, name)
+	heading := fmt.Sprintf("[%s] %s", name, strings.ToUpper(status))
 	if event.State == core.Failed {
 		heading += fmt.Sprintf(" (exit %d)", event.Result.ExitCode)
 	}
@@ -41,12 +41,12 @@ func (p *hostListOutput) event(event core.Event) {
 	if len(event.Result.Stderr) > 0 {
 		stderrHeading := heading
 		if len(event.Result.Stdout) > 0 {
-			stderrHeading = "stderr: [" + name + "]"
+			stderrHeading = "[" + name + "] STDERR"
 		}
 		p.block(p.errOut, stderrHeading, event.Result.Stderr, event.State)
 	}
 	if len(event.Result.Stdout) == 0 && len(event.Result.Stderr) == 0 {
-		_, _ = fmt.Fprintln(p.errOut, hostListColor(p.errOut, heading, event.State))
+		_, _ = fmt.Fprintln(p.errOut, hostListColor(p.errOut, taskBanner(heading), event.State))
 	}
 	if event.Err != nil && event.State == core.Failed {
 		_, _ = fmt.Fprintf(p.errOut, "error: [%s] %s\n", name, displayLabel(event.Err.Error()))
@@ -57,12 +57,12 @@ func (p *hostListOutput) event(event core.Event) {
 }
 
 func (p *hostListOutput) block(w io.Writer, heading string, data []byte, state core.State) {
-	_, _ = fmt.Fprintln(w, hostListColor(w, heading, state))
+	_, _ = fmt.Fprintln(w, hostListColor(w, taskBanner(heading), state))
 	_, _ = w.Write(data)
 	if data[len(data)-1] != '\n' {
 		_, _ = fmt.Fprintln(w)
 	}
-	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, strings.Repeat("-", 80)+"\n")
 }
 
 func (p *hostListOutput) recap(events []core.Event) {
@@ -79,7 +79,7 @@ func (p *hostListOutput) recap(events []core.Event) {
 			states[event.Target.Identity] = event.State
 		}
 	}
-	_, _ = fmt.Fprintf(p.errOut, "%s\n", taskBanner("PLAY RECAP"))
+	_, _ = fmt.Fprintf(p.errOut, "%s\n", taskBanner("Results"))
 	for _, target := range p.targets {
 		state := states[target.Identity]
 		ok, failed, canceled := 0, 0, 0
@@ -108,7 +108,7 @@ func hostListStatus(state core.State) string {
 	}
 	return string(state)
 }
-func taskBanner(title string) string { return title + " " + strings.Repeat("*", max(1, 79-len(title))) }
+func taskBanner(title string) string { return title + " " + strings.Repeat("-", max(1, 79-len(title))) }
 
 // Escape control characters in metadata; remote output bytes remain untouched.
 func displayLabel(value string) string {

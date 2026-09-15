@@ -56,10 +56,12 @@ An exact inventory alias containing the whole comma token remains one host.
 `--target`, `user@host`, and `ssh://` forms are always single targets. An explicit
 `-l` applies to all members; otherwise each member uses its inventory username.
 The SSH-option tokens are shared unchanged. Lists use four workers by default,
-require a remote command, and send EOF on remote stdin. Output uses a task
-heading, separate `ok`/`failed` host blocks, and a `PLAY RECAP` in requested
-order. Labels use the supplied host names; device tables start on their own
-line. Results appear as hosts finish, with stdout and stderr kept separate.
+require a remote command, and send EOF on remote stdin. Output uses a command
+heading, bordered device blocks with status, and a compact results summary.
+Both blocks and summary follow the requested host order. Labels use the supplied
+host names; device tables start on their own line and retain their formatting.
+A slow earlier host holds later results within a bounded execution window.
+Stdout and stderr remain separate.
 Status color is limited to terminals and respects `NO_COLOR`. A failed member
 exits 1; SIGINT exits 130 after cleanup.
 

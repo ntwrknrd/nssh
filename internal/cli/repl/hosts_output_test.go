@@ -24,7 +24,7 @@ func TestHostListOutputKeepsTablesAndRecapsRequestedOrder(t *testing.T) {
 		p.event(e)
 	}
 	p.recap(events)
-	if want := "ok: [agg]\n" + table + "\nok: [border]\n" + table + "\n"; out.String() != want {
+	if want := taskBanner("[agg] OK") + "\n" + table + strings.Repeat("-", 80) + "\n\n" + taskBanner("[border] OK") + "\n" + table + strings.Repeat("-", 80) + "\n\n"; out.String() != want {
 		t.Fatalf("output=%q want=%q", out.String(), want)
 	}
 	recap := errOut.String()
@@ -33,7 +33,7 @@ func TestHostListOutputKeepsTablesAndRecapsRequestedOrder(t *testing.T) {
 			t.Errorf("redundant %q in output", forbidden)
 		}
 	}
-	if strings.Count(recap, "show env power") != 1 || !strings.Contains(recap, "TASK [show env power]") || !strings.Contains(recap, "2 hosts") || !strings.Contains(recap, "PLAY RECAP") {
+	if strings.Count(recap, "show env power") != 1 || !strings.Contains(recap, "Command: show env power") || !strings.Contains(recap, "2 hosts") || !strings.Contains(recap, "Results") {
 		t.Fatalf("headings: %s", recap)
 	}
 	if !strings.Contains(recap, "border : ok=1  failed=0  canceled=0\nagg    : ok=1  failed=0  canceled=0\n") {
@@ -51,10 +51,10 @@ func TestHostListOutputAttributesStderrAndFailureWithoutChangingBytes(t *testing
 	}}
 	p.event(event)
 	p.recap([]core.Event{event})
-	if out.String() != "failed: [alias] (exit 7)\n\x1b[32mdevice\x1b[0m\n\n" {
+	if out.String() != taskBanner("[alias] FAILED (exit 7)")+"\n\x1b[32mdevice\x1b[0m\n"+strings.Repeat("-", 80)+"\n\n" {
 		t.Fatalf("stdout=%q", out.String())
 	}
-	for _, want := range []string{"stderr: [alias]\ndiagnostic\n", "error: [alias] SSH failed", "warning: [alias] output truncated", "alias : ok=0  failed=1  canceled=0"} {
+	for _, want := range []string{taskBanner("[alias] STDERR") + "\ndiagnostic\n", "error: [alias] SSH failed", "warning: [alias] output truncated", "alias : ok=0  failed=1  canceled=0"} {
 		if !strings.Contains(errOut.String(), want) {
 			t.Errorf("missing %q: %q", want, errOut.String())
 		}
@@ -77,7 +77,7 @@ func TestHostListOutputEmptyAndCanceled(t *testing.T) {
 	event := core.Event{Target: target, State: core.Canceled}
 	p.event(event)
 	p.recap([]core.Event{event})
-	if out.Len() != 0 || strings.Count(errOut.String(), "canceled: [host]") != 1 || !strings.Contains(errOut.String(), "ok=0  failed=0  canceled=1") {
+	if out.Len() != 0 || strings.Count(errOut.String(), "[host] CANCELED") != 1 || !strings.Contains(errOut.String(), "ok=0  failed=0  canceled=1") {
 		t.Fatalf("out=%q err=%q", out.String(), errOut.String())
 	}
 }

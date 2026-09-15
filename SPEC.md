@@ -94,7 +94,9 @@ preserve.
   and the same size, target, output, and concurrency caps. One remote command
   runs per host. Per-host output remains attributed and a final summary reports
   every result. Any failed host exits 1; SIGINT exits 130 after local cleanup.
-- Commands run in order per host, with bounded host concurrency. A failure skips
+- Each command runs across the hosts before the next command starts. Results
+  print in requested host order. A bounded window limits concurrent jobs and
+  retained output; a slow earlier host can delay later hosts. A failure skips
   later commands on that host; other hosts continue. Commands are never retried.
 - One submission owns execution at a time. Cancellation waits for local cleanup
   before allowing another submission; it cannot undo remote effects.
