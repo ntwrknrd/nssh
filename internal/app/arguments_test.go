@@ -33,7 +33,6 @@ func TestRootSSHGrammar(t *testing.T) {
 		{"literal reserved", []string{"--target", "repl", "echo"}, "repl", nil, []string{"echo"}, true},
 		{"literal equals", []string{"--target=log", "-p22", "echo"}, "log", []string{"-p22"}, []string{"echo"}, true},
 		{"delimited reserved", []string{"--", "repl", "echo"}, "repl", nil, []string{"echo"}, false},
-		{"comma remains one destination", []string{"a,b", "echo"}, "a,b", nil, []string{"echo"}, false},
 		{"comma username", []string{"ops,team@edge", "echo"}, "edge", []string{"-l", "ops,team"}, []string{"echo"}, false},
 		{"multiple at username", []string{"alice@a,bob@edge"}, "edge", []string{"-l", "alice@a,bob"}, nil, false},
 		{"user before destination", []string{"-lfirst", "second@edge"}, "edge", []string{"-lfirst", "-l", "second"}, nil, false},
@@ -94,6 +93,8 @@ func TestRootParserMatchesOpenSSH(t *testing.T) {
 		{"-qp", "2222", "edge.invalid"}, {"edge.invalid", "-p2222", "echo", "-p99"},
 		{"-qJ", "jump1,jump2", "edge.invalid"}, {"-i", "-lbogus", "edge.invalid"},
 		{"-lfirst", "second@edge.invalid"}, {"first@edge.invalid", "-lsecond"},
+		{"-o", "ControlPath=/first", "-S", "/last", "edge.invalid"},
+		{"-S/first", "-o", "ControlPath=/ignored", "-S/last", "edge.invalid"},
 		{"-o", "User=first", "second@edge.invalid"}, {"first@edge.invalid", "-o", "User=second"},
 		{"ssh://ops%2Cteam@edge.invalid:2222"},
 		{"ssh://ops+team@edge.invalid"}, {"ssh://ops%2Bteam@edge.invalid"},
@@ -135,7 +136,7 @@ func TestRootParserMatchesOpenSSH(t *testing.T) {
 					t.Errorf("%s=%q, native=%q", key, parsed[key], native[key])
 				}
 			}
-			for _, key := range []string{"User", "Port"} {
+			for _, key := range []string{"User", "Port", "ControlPath"} {
 				if value := connector.EffectiveSSHOption(req.SSHArgs, key); value != "" && value != native[strings.ToLower(key)] {
 					t.Errorf("resolver %s=%q, native=%q", key, value, native[strings.ToLower(key)])
 				}
@@ -154,5 +155,44 @@ func TestRootExplanationKeepsLegacyShortcutWithoutStealingSSHEscape(t *testing.T
 	got, err := parseRootArgs([]string{"-e", "none", "edge"})
 	if err != nil || got.request == nil || !slices.Equal(got.request.SSHArgs, []string{"-e", "none"}) {
 		t.Fatalf("escape: %+v %v", got, err)
+	}
+}
+
+func TestRootHostListRoutingPreservesSSHForms(t *testing.T) {
+	oldConnect, oldList := connectRequestFunc, runHostListFunc
+	defer func() { connectRequestFunc, runHostListFunc = oldConnect, oldList }()
+	for _, tt := range []struct {
+		args []string
+		list bool
+	}{
+		{[]string{"a,b", "show env power"}, true},
+		{[]string{"a, b", "show env power"}, true},
+		{[]string{"-vJ", "jump1,jump2", "a,b", "show"}, true},
+		{[]string{"--", "a,b", "-p22"}, true},
+		{[]string{"--target", "a,b", "show"}, false},
+		{[]string{"ops@a,b", "show"}, false},
+		{[]string{"alice@a,bob@host", "show"}, false},
+		{[]string{"ops,team@host", "show"}, false},
+		{[]string{"ssh://ops,team@host", "show"}, false},
+		{[]string{"-o", "ProxyCommand=echo a,b", "host", "show"}, false},
+		{[]string{"host", "echo", "a,b"}, false},
+	} {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			listed, connected := false, false
+			runHostListFunc = func(_ context.Context, req connect.Request) (bool, error) { listed = true; return true, nil }
+			connectRequestFunc = func(_ context.Context, req connect.Request) error { connected = true; return nil }
+			if err := execute(Options{}, tt.args); err != nil {
+				t.Fatal(err)
+			}
+			if listed != tt.list || connected == tt.list {
+				t.Fatalf("listed=%v connected=%v want list=%v", listed, connected, tt.list)
+			}
+		})
+	}
+	runHostListFunc = func(context.Context, connect.Request) (bool, error) { return false, nil }
+	connected := false
+	connectRequestFunc = func(context.Context, connect.Request) error { connected = true; return nil }
+	if err := execute(Options{}, []string{"whole,alias"}); err != nil || !connected {
+		t.Fatalf("literal fallback: connected=%v err=%v", connected, err)
 	}
 }

@@ -267,3 +267,21 @@ func TestRenderSSHOptionsCompatibilityFloorExtendsExplicitAlgorithmBaseline(t *t
 		}
 	}
 }
+
+func TestControlPathAssignmentOrder(t *testing.T) {
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-o", "ControlPath=/first", "-S", "/last"}, "/last"},
+		{[]string{"-S/first", "-o", "ControlPath=/ignored"}, "/first"},
+		{[]string{"-S/first", "-qS/last"}, "/last"},
+		{[]string{"-o", "ControlPath=/first", "-o", "ControlPath=/ignored"}, "/first"},
+		{[]string{"-o", "ControlPath=/first", "-S", "none"}, "none"},
+		{[]string{"-i", "-S/ignored", "-S/actual"}, "/actual"},
+	} {
+		if got := EffectiveSSHOption(tt.args, "ControlPath"); got != tt.want {
+			t.Errorf("%q: %q want %q", tt.args, got, tt.want)
+		}
+	}
+}

@@ -142,3 +142,16 @@ func TestCommandPreparationDiagnosticsAreBounded(t *testing.T) {
 		t.Fatalf("bytes=%d err=%v", len(output), err)
 	}
 }
+func TestCommandCapturePassesSSHArgs(t *testing.T) {
+	captureTestHooks(t)
+	host := &ResolvedHost{Hostname: "edge", Canonical: "edge", AuthMode: config.AuthModeKey, Config: config.DefaultConfig()}
+	runCapturedCommandFunc = func(_ context.Context, req captured.Request) (captured.Result, error) {
+		if got, want := strings.Join(req.SSHArgs, " "), "-l operator -p 2202"; got != want {
+			t.Fatalf("SSHArgs=%q want=%q", got, want)
+		}
+		return captured.Result{}, nil
+	}
+	if _, err := RunRemoteCommandCapture(context.Background(), host, []string{"show"}, CaptureOptions{SSHArgs: []string{"-l", "operator", "-p", "2202"}}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -41,6 +41,7 @@ var (
 	showVersion  bool
 
 	connectRequestFunc = connect.ConnectRequest
+	runHostListFunc    = repl.RunHosts
 )
 
 // NewRootCmd creates and configures the root Cobra command with all subcommands.
@@ -49,12 +50,17 @@ func NewRootCmd(opts Options) *cobra.Command {
 		Use:   "nssh [opts] host [cmd]",
 		Short: "Smart connect to host",
 		Long: `SSH wrapper for power users: manage hosts and credentials, inject passwords automatically,
-and record sessions.`,
+and record sessions.
+
+Run one remote command across a bare comma-separated host list:
+  nssh 'host1,host2' 'show version'
+Lists use four workers, require a command, and close remote stdin.
+Use --target to force a literal destination.`,
 		SilenceUsage:      true,
 		SilenceErrors:     true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 		Annotations: map[string]string{
-			ui.UsageLinesAnnotation: "nssh [flags] [ssh-options] HOST [command]",
+			ui.UsageLinesAnnotation: "nssh [flags] [ssh-options] HOST [command]\nnssh [flags] [ssh-options] 'HOST1,HOST2' command",
 		},
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			if showVersion {

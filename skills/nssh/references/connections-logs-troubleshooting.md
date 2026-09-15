@@ -41,6 +41,30 @@ file from a supplied `-F`;
 configure those settings in nssh YAML instead. `nssh --target HOST` changes only resolution to literal; it shares
 this same 0.3 pre- and post-destination option parsing.
 
+### Root host lists
+
+A bare comma-separated destination with a remote command runs that one argv for
+each member. Quote a destination containing spaces so the shell passes it as one
+argument:
+
+```fish
+nssh 'irn-border-sw1,irn-border-sw2,irn-agg-sw1,irn-agg-sw2' 'show env power'
+nssh 'irn-border-sw1, irn-border-sw2, irn-agg-sw1, irn-agg-sw2' 'show env power'
+```
+
+An exact inventory alias containing the whole comma token remains one host.
+`--target`, `user@host`, and `ssh://` forms are always single targets. An explicit
+`-l` applies to all members; otherwise each member uses its inventory username.
+The SSH-option tokens are shared unchanged. Lists use four workers by default,
+require a remote command, send EOF on remote stdin, and print attributed output
+plus a final summary. A failed member exits 1; SIGINT exits 130 after cleanup.
+
+Lists reject interactive, forwarding, tunnel, background, and control modes,
+including incompatible resolved YAML policy, before connecting. A host-key
+approval that cannot be completed fails closed. Multiplexing remains available
+when `ControlPath` contains `%C` or all of `%h`, `%p`, and `%r`; shared static
+sockets are rejected. Use `-S none` or `-o ControlPath=none` to disable reuse.
+
 Put nssh-specific flags such as `--help` and `--explain` before the destination.
 The standalone `nssh -e` explanation shortcut remains available; `-e VALUE`
 selects SSH's escape character.

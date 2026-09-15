@@ -18,6 +18,8 @@ import (
 // instead of reading ambient stdin.
 type CaptureOptions struct {
 	Options
+	// SSHArgs preserves root OpenSSH options for scoped command capture.
+	SSHArgs        []string
 	MaxOutputBytes int
 	HostKeyPrompt  connector.HostKeyPromptFunc
 }
@@ -37,7 +39,7 @@ func RunRemoteCommandCapture(ctx context.Context, resolved *ResolvedHost, comman
 		defer func() { _ = audit.Close() }()
 		audit.Info("ssh_remote_command_start", "host", resolved.Hostname, "command", command)
 	}
-	result, err := captureResolvedRemoteCommand(ctx, resolved, nil, command, resolved.Config, opts.Options)
+	result, err := captureResolvedRemoteCommand(ctx, resolved, opts.SSHArgs, command, resolved.Config, opts.Options)
 	if ctx.Err() != nil {
 		err = ctx.Err()
 	}

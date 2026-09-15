@@ -12,14 +12,16 @@ import (
 
 // rootInvocation keeps SSH data out of Cobra's subcommand/flag parser.
 type rootInvocation struct {
-	commandArgs []string
-	request     *connect.Request
+	commandArgs   []string
+	request       *connect.Request
+	listCandidate bool
 }
 
 func parseRootArgs(args []string) (rootInvocation, error) {
 	var globals, options []string
 	var request *connect.Request
 	terminated := false
+	listCandidate := false
 	for i := 0; i < len(args); {
 		arg := args[i]
 		if !terminated && arg == "--" {
@@ -97,6 +99,9 @@ func parseRootArgs(args []string) (rootInvocation, error) {
 				return rootInvocation{commandArgs: args}, nil
 			}
 			var err error
+			// Classify before normalizing userinfo or URI destinations. Commas in
+			// those SSH forms never become a list. --target is always literal.
+			listCandidate = strings.Contains(arg, ",") && !strings.Contains(arg, "@") && !strings.HasPrefix(arg, "ssh://")
 			request, err = destinationRequest(arg, options)
 			if err != nil {
 				return rootInvocation{}, err
@@ -117,7 +122,7 @@ func parseRootArgs(args []string) (rootInvocation, error) {
 		return rootInvocation{commandArgs: globals}, nil
 	}
 	request.SSHArgs = options
-	return rootInvocation{commandArgs: globals, request: request}, nil
+	return rootInvocation{commandArgs: globals, request: request, listCandidate: listCandidate}, nil
 }
 
 // Insert destination-derived overrides at its original position in the option

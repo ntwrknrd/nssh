@@ -170,13 +170,21 @@ func effectiveSSHOption(args []string, want string) string {
 	sshargs.Walk(args, func(option sshargs.Option) bool {
 		if option.Name == shortAlias && shortAlias != 0 {
 			value = option.Value
-			return false
+			// -S assigns unconditionally; later -S replaces an earlier -S
+			// or -o ControlPath. Other scalar aliases retain first-value rules.
+			return shortAlias == 'S'
 		}
 		if option.Name != 'o' {
 			return true
 		}
 		key, optionValue, ok := splitOpenSSHOption(option.Value)
 		if !ok || !strings.EqualFold(key, want) {
+			return true
+		}
+		if shortAlias == 'S' {
+			if value == "" {
+				value = optionValue
+			}
 			return true
 		}
 		value = optionValue

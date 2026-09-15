@@ -27,6 +27,13 @@ preserve.
   inventory metadata. `--target HOST` changes only resolution to literal;
   it shares the root option grammar. Public command names retain their existing
   routing and literal-target escape.
+- A bare comma-separated destination, such as `'host1, host2'`, is a root host
+  list when it has a remote command. Members are trimmed. An exact managed alias
+  equal to the whole comma-containing token remains one destination. `--target`,
+  `user@host`, and `ssh://` destinations are always single destinations.
+- A root host list applies an explicit `-l` user to every member; otherwise each
+  member uses its resolved inventory username. It preserves the one remote argv
+  and shared SSH-option tokens for every host. Root lists require a command.
 - Interactive connections preserve terminal semantics. Remote commands preserve
   distinct stdout, stderr, and remote exit status.
 - SCP uses the same host, SSH policy, proxy, credential, and host-key resolution
@@ -83,12 +90,20 @@ preserve.
 
 - REPL takes one config/catalog snapshot per submission and resolves explicit
   targets literally. Selectors use the inventory list's matching rules.
+- Root host lists use the same scheduler limits as REPL: four workers by default
+  and the same size, target, output, and concurrency caps. One remote command
+  runs per host. Per-host output remains attributed and a final summary reports
+  every result. Any failed host exits 1; SIGINT exits 130 after local cleanup.
 - Commands run in order per host, with bounded host concurrency. A failure skips
   later commands on that host; other hosts continue. Commands are never retried.
 - One submission owns execution at a time. Cancellation waits for local cleanup
   before allowing another submission; it cannot undo remote effects.
 - Remote stdin is EOF. Credential providers must already be authenticated.
   Only an explicit, serialized terminal callback can request host-key approval.
+  Root host lists fail closed when a host-key decision cannot be completed.
+- Root host lists reject interactive, forwarding, tunnel, background, and control
+  modes, including incompatible resolved YAML SSH policy, before opening a
+  connection. Single-target SSH retains its existing transport modes.
 - Output keeps stream identity, host, command, and exit status. Capture,
   transcript, input, and status retention are bounded, with visible truncation.
 - Interactive history stores submitted text under XDG state with private

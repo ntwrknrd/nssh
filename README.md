@@ -40,7 +40,9 @@ prompts, and can record sessions.
 - Recordings: optional asciinema session capture is managed with `nssh log`.
 - SCP: `nssh cp` uses the same host and credential resolution path as connect.
 - Multi-host commands: `nssh repl` provides an interactive terminal prompt or
-  plain piped input, with bounded concurrency and attributed command output.
+  plain piped input. A root command may also target a bare comma list such as
+  `nssh 'edge1, edge2' 'show version'`; it runs one command per host with four
+  workers by default. Lists require a remote command and keep its argv unchanged.
 
 Run `nssh --help` or read the generated help snapshots under
 [docs/examples/help](docs/examples/help). The first-run config template is

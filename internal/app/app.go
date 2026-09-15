@@ -75,6 +75,11 @@ func execute(opts Options, args []string) error {
 	if req := invocation.request; req != nil {
 		rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
 			req.Options = connect.Options{Verbosity: verboseCount, SSHVerbosity: sshVerbosity()}
+			if invocation.listCandidate {
+				if handled, err := runHostListFunc(context.Background(), *req); handled {
+					return err
+				}
+			}
 			return connectRequestFunc(context.Background(), *req)
 		}
 	}
