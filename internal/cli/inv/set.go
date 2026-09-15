@@ -353,7 +353,6 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 		return err
 	}
 	paths := config.DefaultPaths()
-	pendingCreatedGroup := ""
 	if group != "" || hostname != "" || len(aliases) > 0 || user != "" || portSet || !authPatch.HasChange() {
 		existing, err := findInventoryHost(cfg, paths, host)
 		if err != nil {
@@ -364,7 +363,7 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 		}
 		interactiveAdd := shouldPromptLocalHostAddDetails(existing, group, hostname, user, portSet, authPatch)
 		ui.Info(`Inventory Provider: "local"`)
-		ui.Info("%s", localProviderOwnerLabel(paths))
+		ui.Info("Inventory Filepath: %s", localProviderYAMLPath(cfg, paths))
 		patch := hostPatch{
 			Host:     host,
 			HostName: hostname,
@@ -373,8 +372,7 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 			Port:     port,
 			PortSet:  portSet,
 		}
-		hostAuthChanged := false
-		var groupCreated bool
+		connectionVerified := false
 		for {
 			if interactiveAdd {
 				patch, err = promptLocalHostHost(patch, nil)
@@ -422,15 +420,17 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 				}
 				host = patch.Host
 			}
-			groupCreated, err = ensureLocalGroup(cfg, patch.Group, patch)
+			_, err = ensureLocalGroup(cfg, patch.Group, patch)
 			if err != nil {
 				return err
 			}
-			if groupCreated {
-				pendingCreatedGroup = patch.Group
-			}
 			if interactiveAdd {
-				hostAuthChanged = applyInteractiveHostAuthSelection(cfg, patch)
+				if patch.AuthMode == config.AuthModeKey {
+					patch, err = promptLocalHostIdentity(patch)
+					if err != nil {
+						return err
+					}
+				}
 				credentialRecord, err := resolveLocalHostCredentialRecord(cfg, patch)
 				if err != nil {
 					return err
@@ -458,15 +458,15 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 				if err != nil {
 					return err
 				}
+				connectionVerified = result.Success
+				patch.CompatFixes = result.FixesApplied
 				switch {
-				case len(result.FixesApplied) > 0:
-					patch.CompatFixes = result.FixesApplied
-					ui.Success("Compatibility fixes validated for %s", patch.Host)
 				case result.Success:
 					ui.Success("Connection test passed for %s", patch.Host)
+
 				default:
 					ui.Warning("Connection test did not pass: %s", result.StoppedReason)
-					keep, err := ui.Confirm("Add host entry anyway?", false)
+					keep, err := ui.Confirm("Save host without a verified connection?", false)
 					if err != nil || !keep {
 						return nil
 					}
@@ -477,26 +477,26 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 		if err := upsertLocalHost(cfg, paths, patch); err != nil {
 			return err
 		}
-		switch {
-		case groupCreated && hostAuthChanged:
-			if err := config.SaveInventoryGroupAndHostAuth(config.DefaultPaths().ConfigFile, cfg, patch.Group, patch.Host); err != nil {
-				return err
-			}
-			ui.Success("Group %q created", patch.Group)
-			stopAgentAfterInventoryAuthMutation()
-			pendingCreatedGroup = ""
-		case groupCreated && !authPatch.HasChange():
-			if err := config.SaveInventoryGroup(config.DefaultPaths().ConfigFile, cfg, patch.Group); err != nil {
-				return err
-			}
-			ui.Success("Group %q created", patch.Group)
-			pendingCreatedGroup = ""
-		case hostAuthChanged:
-			if err := config.SaveInventoryHostAuth(config.DefaultPaths().ConfigFile, cfg, patch.Host); err != nil {
-				return err
+		if err := config.EnsureInclude(paths.ConfigFile, localProviderYAMLPath(cfg, paths)); err != nil {
+			return err
+		}
+		reloaded, err := config.Load(paths.ConfigFile)
+		if err != nil {
+			return fmt.Errorf("reload saved inventory: %w", err)
+		}
+		if _, ok := reloaded.Inventory.Providers[config.ProviderLocal].Hosts[patch.Host]; !ok {
+			return fmt.Errorf("saved host %q is not discoverable after reloading configuration", patch.Host)
+		}
+		cfg = reloaded
+		if interactiveAdd {
+			if connectionVerified {
+				ui.Success("Saved host; connection verified")
+			} else {
+				ui.Warning("Saved host; connection remains unverified")
 			}
 			stopAgentAfterInventoryAuthMutation()
 		}
+
 		if interactiveAdd {
 			printLocalWrittenHostConfig(cfg, paths, patch.Host)
 		}
@@ -505,14 +505,18 @@ func runSetHost(host, group, hostname string, aliases []string, user string, por
 		if err := applyInventoryAuthPatch(cfg, config.DefaultPaths(), host, authPatch); err != nil {
 			return err
 		}
-		if pendingCreatedGroup != "" {
-			if err := config.SaveInventoryGroupAndHostAuth(config.DefaultPaths().ConfigFile, cfg, pendingCreatedGroup, host); err != nil {
-				return err
-			}
-			ui.Success("Group %q created", pendingCreatedGroup)
-		} else if err := config.SaveInventoryHostAuth(config.DefaultPaths().ConfigFile, cfg, host); err != nil {
+		entry, err := findInventoryHost(cfg, paths, host)
+		if err != nil {
 			return err
 		}
+		if entry != nil && metadataForHost(entry, cfg, paths, nil).Owner == "local" {
+			if err := saveLocalProviderHostInventory(cfg, paths, entry.Host); err != nil {
+				return err
+			}
+		} else if err := config.SaveInventoryHostAuth(paths.ConfigFile, cfg, host); err != nil {
+			return err
+		}
+
 		stopAgentAfterInventoryAuthMutation()
 	}
 	return nil

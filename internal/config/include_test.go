@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,5 +157,55 @@ func writeConfigFile(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(strings.TrimSpace(content)+"\n"), 0600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func TestEmptyIncludeGlobAllowsBootstrap(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "config.yaml")
+	writeConfigFile(t, root, "include: [inventory/*.yaml]\n")
+	if _, err := Load(root); err != nil {
+		t.Fatal(err)
+	}
+	writeConfigFile(t, root, "include: [inventory/local.yaml]\n")
+	if _, err := Load(root); err == nil {
+		t.Fatal("missing explicit include accepted")
+	}
+	writeConfigFile(t, root, "include: ['inventory/[']\n")
+	if _, err := Load(root); err == nil {
+		t.Fatal("invalid glob accepted")
+	}
+}
+
+func TestEnsureIncludePreservesExistingIncludes(t *testing.T) {
+	for _, includes := range []string{"", "include: [inventory/*.yaml]\n", "include: [nested.yaml]\n"} {
+		t.Run(includes, func(t *testing.T) {
+			dir := t.TempDir()
+			root := filepath.Join(dir, "config.yaml")
+			target := filepath.Join(dir, "inventory", "local.yaml")
+			writeConfigFile(t, root, includes+"agent:\n  idle_timeout: 2h\n")
+			writeConfigFile(t, filepath.Join(dir, "nested.yaml"), "include: [inventory/*.yaml]\n")
+			writeConfigFile(t, target, "inventory:\n  providers:\n    local:\n      type: local\n")
+			if err := EnsureInclude(root, target); err != nil {
+				t.Fatal(err)
+			}
+			first, _ := os.ReadFile(root)
+			if err := EnsureInclude(root, target); err != nil {
+				t.Fatal(err)
+			}
+			second, _ := os.ReadFile(root)
+			if !bytes.Equal(first, second) {
+				t.Fatal("include is not idempotent")
+			}
+			cfg, err := Load(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.InventoryProviderSource("local") != target {
+				t.Fatalf("source = %q", cfg.InventoryProviderSource("local"))
+			}
+			if includes != "" && string(first) != includes+"agent:\n  idle_timeout: 2h\n" {
+				t.Fatal("rewrote an already included file")
+			}
+		})
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/creack/pty"
+	"github.com/ntwrknrd/nssh/internal/exit"
 )
 
 func TestStartPTYInheritsCurrentTerminalSizeBeforeChildRuns(t *testing.T) {
@@ -143,4 +144,17 @@ func recordAttrs(record slog.Record) map[string]slog.Value {
 		return true
 	})
 	return attrs
+}
+
+func TestWaitChildReportsSignal(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "kill -TERM $$")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	c := &Connector{sshCmd: cmd}
+	err := c.waitChild()
+	var exitErr *exit.ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 143 || !strings.Contains(exitErr.Message, "terminated") {
+		t.Fatalf("signal result = %#v", err)
+	}
 }

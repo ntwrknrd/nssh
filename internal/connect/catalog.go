@@ -244,11 +244,22 @@ func selectedSSHDefaultOptions(defaults config.SSHOptions, names []string) confi
 }
 
 func applyAuthModeSSH(ssh config.SSHHostConfig, authMode string) config.SSHHostConfig {
-	if authMode != config.AuthModePassword {
+	if authMode != config.AuthModePassword && authMode != config.AuthModeKey {
 		return ssh
 	}
 	if ssh.Options == nil {
 		ssh.Options = make(config.SSHOptions)
+	}
+	// Remove inherited variants before writing canonical options.
+	for key := range ssh.Options {
+		if strings.EqualFold(key, "PreferredAuthentications") || strings.EqualFold(key, "PubkeyAuthentication") {
+			delete(ssh.Options, key)
+		}
+	}
+	if authMode == config.AuthModeKey {
+		ssh.Options["PreferredAuthentications"] = config.NewSSHOptionString("publickey")
+		ssh.Options["PubkeyAuthentication"] = config.NewSSHOptionBool(true)
+		return ssh
 	}
 	ssh.Options["PreferredAuthentications"] = config.NewSSHOptionString("keyboard-interactive,password")
 	ssh.Options["PubkeyAuthentication"] = config.NewSSHOptionBool(false)

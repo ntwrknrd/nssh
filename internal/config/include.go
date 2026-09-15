@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -177,6 +178,10 @@ func expandInclude(fromFile, pattern string) ([]string, error) {
 		return nil, fmt.Errorf("invalid config include pattern %q: %w", pattern, err)
 	}
 	if len(matches) == 0 {
+		if strings.ContainsAny(pattern, "*?[") {
+			slog.Debug("config include glob has no matches", "pattern", pattern)
+			return nil, nil
+		}
 		return nil, fmt.Errorf("config include %q has no matches", pattern)
 	}
 	sort.Strings(matches)

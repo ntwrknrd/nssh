@@ -826,3 +826,33 @@ func sortedMapKeys(in map[string]any) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// EnsureInclude makes a saved inventory file reachable without duplicating an
+// existing include (including nested includes and glob patterns).
+func EnsureInclude(path, target string) error {
+	root := make(map[string]any)
+	if _, err := os.Stat(path); err == nil {
+		doc, err := loadConfigDocument(path)
+		if err != nil {
+			return err
+		}
+		for _, file := range doc.files {
+			if sameConfigPath(file, target) {
+				return nil
+			}
+		}
+		root = doc.root
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	includes, err := includeValues(root["include"], "include")
+	if err != nil {
+		return err
+	}
+	relative, err := filepath.Rel(filepath.Dir(path), target)
+	if err != nil {
+		return err
+	}
+	root["include"] = append(includes, relative)
+	return saveRootTable(path, root)
+}

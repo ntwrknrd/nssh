@@ -9,6 +9,7 @@ import (
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/inventory"
+	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 )
 
 func TestCatalogUsesProviderHostsAsOverlays(t *testing.T) {
@@ -472,11 +473,11 @@ func TestCatalogKeyAuthDoesNotForcePasswordOnlySSHOptions(t *testing.T) {
 	if !ok {
 		t.Fatalf("Find(edge01) failed")
 	}
-	if _, ok := host.SSH.Options["PubkeyAuthentication"]; ok {
-		t.Fatalf("PubkeyAuthentication should not be forced for key auth: %#v", host.SSH.Options)
+	if got := host.SSH.Options["PubkeyAuthentication"].StringValue(); got != "yes" {
+		t.Fatalf("PubkeyAuthentication = %q", got)
 	}
-	if _, ok := host.SSH.Options["PreferredAuthentications"]; ok {
-		t.Fatalf("PreferredAuthentications should not be forced for key auth: %#v", host.SSH.Options)
+	if got := host.SSH.Options["PreferredAuthentications"].StringValue(); got != "publickey" {
+		t.Fatalf("PreferredAuthentications = %q", got)
 	}
 }
 
@@ -987,4 +988,26 @@ func buildCatalogForTest(t *testing.T, cfg *config.Config, states []*inventory.P
 		t.Fatalf("buildHostCatalog: %v", err)
 	}
 	return cat
+}
+
+func TestKeyModeOverridesInheritedPasswordPolicyInOpenSSH(t *testing.T) {
+	if _, err := exec.LookPath("ssh"); err != nil {
+		t.Skip("OpenSSH unavailable")
+	}
+	cfg := applyAuthModeSSH(config.SSHHostConfig{Options: config.SSHOptions{
+		"preferredauthentications": config.NewSSHOptionString("password,keyboard-interactive"),
+		"pubkeyauthentication":     config.NewSSHOptionBool(false),
+		"IdentityFile":             config.NewSSHOptionItems("~/.ssh/pi-test-key"),
+	}}, config.AuthModeKey)
+	args := connector.RenderSSHOptions(cfg, 0)
+	args = append(args, "-G", "example.invalid")
+	output, err := exec.Command("ssh", args...).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"preferredauthentications publickey", "pubkeyauthentication true", "identityfile ~/.ssh/pi-test-key"} {
+		if !strings.Contains(string(output), want) {
+			t.Fatalf("OpenSSH effective config missing %q", want)
+		}
+	}
 }

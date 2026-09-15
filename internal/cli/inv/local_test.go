@@ -122,17 +122,6 @@ func TestUpsertLocalHostPatchesHostWithoutRewritingExistingGroup(t *testing.T) {
 	}
 }
 
-func TestLocalProviderOwnerLabelUsesLocalProviderFile(t *testing.T) {
-	tmp := t.TempDir()
-	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh")}
-
-	got := localProviderOwnerLabel(paths)
-	want := "Inventory Filepath: " + filepath.Join(paths.ConfigDir, "inventory", "local.yaml")
-	if got != want {
-		t.Fatalf("label = %q, want %q", got, want)
-	}
-}
-
 func TestPromptLocalHostAddDetailsCollectsHostUserPortAndAuth(t *testing.T) {
 	cfg := &config.Config{
 		Credential: config.CredentialConfig{Provider: map[string]config.CredentialProviderConfig{
@@ -358,56 +347,6 @@ func TestPromptLocalHostAddDetailsCanBackOutOfCredentialProvider(t *testing.T) {
 	}
 	if options := prompter.options["Credential provider"]; options[len(options)-1].Value != promptBackValue {
 		t.Fatalf("credential provider options missing back: %+v", options)
-	}
-}
-
-func TestApplyInteractiveHostAuthSelectionClearsStaleHostAuthForGroupCredential(t *testing.T) {
-	cfg := &config.Config{
-		Inventory: config.InventoryConfig{
-			Host: map[string]config.InventoryHostConfig{
-				"edge01": {AuthDisabled: true},
-			},
-		},
-	}
-
-	changed := applyInteractiveHostAuthSelection(cfg, hostPatch{Host: "edge01"})
-
-	if !changed {
-		t.Fatal("expected stale host auth to be cleared")
-	}
-	if _, ok := cfg.Inventory.Host["edge01"]; ok {
-		t.Fatalf("host auth still present: %+v", cfg.Inventory.Host["edge01"])
-	}
-}
-
-func TestApplyInteractiveHostAuthSelectionStoresHostCredential(t *testing.T) {
-	cfg := &config.Config{}
-	patch := hostPatch{
-		Host: "edge01",
-		Auth: config.InventoryAuthConfig{CredentialProvider: "sops", PasswordRef: "hosts.edge01.password"},
-	}
-
-	changed := applyInteractiveHostAuthSelection(cfg, patch)
-
-	if !changed {
-		t.Fatal("expected host auth change")
-	}
-	if got := cfg.Inventory.Host["edge01"].Auth; got.CredentialProvider != "sops" || got.PasswordRef != "hosts.edge01.password" {
-		t.Fatalf("host auth = %+v", got)
-	}
-}
-
-func TestApplyInteractiveHostAuthSelectionStoresDisabledAuth(t *testing.T) {
-	cfg := &config.Config{}
-	patch := hostPatch{Host: "edge01", AuthDisabled: true}
-
-	changed := applyInteractiveHostAuthSelection(cfg, patch)
-
-	if !changed {
-		t.Fatal("expected host auth change")
-	}
-	if !cfg.Inventory.Host["edge01"].AuthDisabled {
-		t.Fatalf("host auth = %+v", cfg.Inventory.Host["edge01"])
 	}
 }
 
@@ -1839,4 +1778,83 @@ func (p fakeCredentialProvider) GetRef(config.CredentialRefConfig) (*credential.
 
 func secretFromTest(value string) *secret.Secret {
 	return secret.NewFromString(value)
+}
+
+func TestHostCreationBootstrapsReloadableInventory(t *testing.T) {
+	for _, initial := range []string{"include: [inventory/*.yaml]\n", "{}\n", "# keep root\nagent:\n  idle_timeout: 2h\ninventory:\n  providers:\n    local:\n      type: local\n"} {
+		t.Run(initial, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", dir)
+			t.Setenv("XDG_STATE_HOME", filepath.Join(dir, "state"))
+			paths := config.DefaultPaths()
+			savedPaths := *paths
+			*paths = config.Paths{ConfigDir: filepath.Join(dir, "nssh"), ConfigFile: filepath.Join(dir, "nssh", "config.yaml"), StateDir: filepath.Join(dir, "state"), DataDir: filepath.Join(dir, "data"), BackupDir: filepath.Join(dir, "backups"), SSHConfigDir: filepath.Join(dir, "ssh")}
+			t.Cleanup(func() { *paths = savedPaths })
+
+			if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(paths.ConfigFile, []byte(initial), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := runSetHost("rpi-a.home.arpa", "local/default", "", nil, "cj", 22, true, inventoryAuthPatch{}); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := config.Load(paths.ConfigFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := cfg.Inventory.Providers["local"].Hosts["rpi-a.home.arpa"]; !ok {
+				t.Fatal("host missing after reload")
+			}
+			if len(cfg.Inventory.Host) != 0 {
+				t.Fatal("generated root override")
+			}
+			if err := runSetHost("rpi-a.home.arpa", "", "", nil, "", 0, false, inventoryAuthPatch{Auth: config.InventoryAuthConfig{Mode: config.AuthModeKey}}); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err = config.Load(paths.ConfigFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Inventory.Providers["local"].Hosts["rpi-a.home.arpa"].Auth.Mode != "key" || len(cfg.Inventory.Host) != 0 {
+				t.Fatal("auth did not stay in inventory owner")
+			}
+			if strings.Contains(initial, "# keep root") {
+				data, _ := os.ReadFile(paths.ConfigFile)
+				if !strings.Contains(string(data), "# keep root") || !strings.Contains(string(data), "idle_timeout: 2h") {
+					t.Fatal("root configuration lost")
+				}
+			}
+		})
+	}
+}
+
+func TestImportedIdentityIsUsedByProbeAndSavedHost(t *testing.T) {
+	identity := parseSSHIdentitySettings("identityfile ~/.ssh/pi\nidentityfile ~/.ssh/second\nidentityagent /tmp/agent socket\nidentitiesonly yes\nuser ignored\n")
+	patch := hostPatch{Host: "pi.example", Group: "local/default", AuthMode: config.AuthModeKey, Identity: identity}
+	dir := t.TempDir()
+	paths := &config.Paths{ConfigDir: dir}
+	probe := localHostProbeEntry(paths, patch, "", "cj")
+	text := strings.Join(probe.Lines, "")
+	for _, want := range []string{"IdentityFile ~/.ssh/pi", "IdentityFile ~/.ssh/second", `IdentityAgent "/tmp/agent socket"`, "PreferredAuthentications publickey", "PubkeyAuthentication yes"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in probe: %s", want, text)
+		}
+	}
+	cfg := config.DefaultConfig()
+	if _, err := ensureLocalGroup(cfg, patch.Group, patch); err != nil {
+		t.Fatal(err)
+	}
+	if err := upsertLocalHost(cfg, paths, patch); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := config.Load(filepath.Join(dir, "inventory", "local.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := saved.Inventory.Providers["local"].Hosts[patch.Host].SSH.Options
+	if len(opts["IdentityFile"].Items) != 2 || opts["IdentityAgent"].StringValue() != "/tmp/agent socket" {
+		t.Fatalf("identity lost: %+v", opts)
+	}
 }

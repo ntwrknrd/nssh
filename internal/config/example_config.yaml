@@ -89,6 +89,10 @@ agent:
 #           auth:
 #             mode: key
 #             username: netops
+#           ssh:
+#             options:
+#               IdentityFile: ~/.ssh/id_ed25519
+#               IdentitiesOnly: true
 #         jump01.lab.example.net:
 #           group: lab
 #           aliases:
