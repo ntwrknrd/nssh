@@ -47,6 +47,25 @@ Root lists require a command. Use the REPL grammar for several commands, target
 expansion, or selectors. `--target repl` escapes the command name when connecting
 to a host literally named `repl`.
 
+## Guided interactive prompt
+
+Run `nssh repl` to pick inventory hosts and enter commands without learning the
+quoted submission syntax:
+
+1. Type to filter the inventory. Use Up/Down to move and Space to select hosts.
+   Selection follows the order you pick hosts and survives filter changes.
+   Ctrl-A selects all matches; Ctrl-X clears the selection.
+2. Press Enter to move to commands. If no hosts were selected, Enter selects
+   the highlighted host first. Type one command per line; Enter adds another.
+3. Press F5 to run. Tab switches between hosts and commands. The selected hosts
+   and command text remain available after the run for editing or repetition.
+
+Ctrl-P/Ctrl-N recalls previous submissions. F2 switches to the original syntax
+editor for literal hosts, patterns, selectors, or pasted submission syntax;
+F2 returns to the guided draft. Plain mode continues to use the original syntax.
+Guided inventory selections are literal, and command quotes and backslashes are
+passed through without adding submission quoting.
+
 ## Execution and output
 
 The default is four simultaneous hosts; `--concurrency N` changes that limit.
@@ -71,7 +90,7 @@ ordinary interactive connection before retrying.
 
 ## Keys, history, and limits
 
-The Go TUI has a boxed command editor, hostname suggestions, a host picker, and
+The Go TUI has a guided inventory and command editor, a syntax editor, and
 persistent running/done/failed/pending/canceled/skipped counts. Results stay
 under their command heading. At 100 columns or wider, adjacent devices for the
 same command appear side by side; narrow terminals stack them. Long output lines
@@ -82,9 +101,9 @@ and truncation remain visible.
 
 Use `:help` or `nssh repl --explain` for keys and syntax:
 
-- Tab completes a unique hostname or opens the picker. Space selects hosts,
+- In the syntax editor, Tab completes a unique hostname or opens the picker. Space selects hosts,
   Up/Down moves, Enter inserts selected hosts, and Escape closes the picker.
-- Outside the picker, Up/Down recalls history. Page Up/Page Down and the mouse
+- In the syntax editor outside the picker, Up/Down recalls history. Page Up/Page Down and the mouse
   wheel scroll output.
 - Ctrl-L switches between automatic split layout and stacked full-width results.
 - Ctrl-G highlights differing displayed lines in paired panes. This is a line
@@ -103,7 +122,7 @@ stay visible; a normal quit returns zero. Cancellation cannot undo commands
 already executed remotely or guarantee termination of every remote process.
 
 Interactive history is `$XDG_STATE_HOME/nssh/repl_history`, normally
-`~/.local/state/nssh/repl_history`, with mode 0600. It contains submitted text,
+`~/.local/state/nssh/repl_history`, with mode 0600. It contains submitted hosts and command text,
 which may contain sensitive arguments; it does not store resolved credentials
 or remote output. History retains at most 1,000 entries and 1 MiB, and concurrent
 REPL instances coordinate updates. Close sessions before deleting this file to

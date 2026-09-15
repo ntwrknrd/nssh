@@ -286,6 +286,9 @@ func (m *model) refreshLayout() {
 	}
 	m.viewport.Width = max(1, width)
 	footer := 5
+	if m.guided {
+		footer = 2 + len(strings.Split(m.composerView(max(1, width)), "\n"))
+	}
 	if len(m.matches) > 0 {
 		footer += min(6, len(m.matches)) + 1
 	}
@@ -294,11 +297,18 @@ func (m *model) refreshLayout() {
 	}
 	m.viewport.Height = max(1, height-footer)
 	m.input.Width = max(1, width-6)
+	m.hostFilter.Width = max(1, width-12)
+	if m.guided {
+		m.commands.SetWidth(max(1, width-4))
+	}
 	m.viewport.SetContent(m.transcriptContent())
 }
 func (m model) tuiView() string {
 	width := max(1, m.viewport.Width)
-	title := "nssh repl  |  Tab hosts  PgUp/PgDn scroll  Ctrl-L layout  Ctrl-G diff  Ctrl-Y copy"
+	title := "nssh repl  |  F2 guided  Tab hosts  PgUp/PgDn scroll  Ctrl-L layout  Ctrl-G diff  Ctrl-Y copy"
+	if m.guided {
+		title = "nssh repl  |  F5 run  Tab hosts/commands  F2 syntax  PgUp/PgDn scroll"
+	}
 	parts := []string{tuiDim.Render(ansi.Truncate(title, width, "")), m.viewport.View()}
 	if m.trust != nil {
 		p := m.trust.prompt
@@ -307,6 +317,8 @@ func (m model) tuiView() string {
 			warning = "CHANGED HOST KEY: verify replacement"
 		}
 		parts = append(parts, safeTerminalText(fmt.Sprintf("%s for %s: %s %s\n[o] accept once  [a] trust permanently  [r] reject  Ctrl-C cancel", warning, p.Host, p.KeyType, p.Fingerprint)))
+	} else if m.guided {
+		parts = append(parts, m.composerView(width))
 	} else {
 		if len(m.matches) > 0 {
 			parts = append(parts, m.pickerView())
@@ -323,7 +335,7 @@ func (m model) tuiView() string {
 		status += " | diff on"
 	}
 	if m.message != "" {
-		status += " | " + m.message
+		status = m.message + " | " + status
 	}
 	parts = append(parts, tuiDim.Render(ansi.Truncate(status, width, "")))
 	return strings.Join(parts, "\n")

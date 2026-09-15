@@ -76,7 +76,13 @@ requested host order, with separate stdout/stderr. A failure skips later
 commands only on that host. Remote stdin is EOF; authenticate credential providers first.
 Interactive host-key approval is serialized. Plain mode cannot prompt for trust.
 
-Keys: Tab completes a unique host or opens a multi-select picker. In the picker,
+Interactive default: type to filter inventory, Up/Down moves, Space selects,
+Enter opens commands. Enter one command per line; F5 runs the selected hosts.
+Tab switches hosts/commands. Selections persist across filters and runs.
+Ctrl-A selects matching hosts; Ctrl-X clears selection in the host list.
+Ctrl-P/Ctrl-N recalls history. F2 switches to the syntax editor and back.
+
+Syntax editor: Tab completes a unique host or opens a multi-select picker. There,
 Space selects, Up/Down moves, Enter inserts, and Esc closes. Up/Down otherwise
 recall history. PgUp/PgDn or the mouse wheel scroll. Ctrl-L toggles stacked
 results; Ctrl-G toggles line comparison in split panes. Drag selects lines in
@@ -87,7 +93,7 @@ Cancellation cannot undo remote effects. Normal interactive quit returns zero.
 Plain input stops on failure (exit 1); interruption exits 130.
 
 History: XDG state/nssh/repl_history, mode 0600, up to 1000 entries or 1 MiB.
-History stores submitted text, which may contain sensitive arguments.
+History stores submitted hosts and commands, which may contain sensitive arguments.
 Piped input does not write history. Capture is capped at 8 MiB per command;
 the transcript at 32 MiB / 4096 display blocks, with visible truncation/eviction.
 Submissions: at most 2 MiB before and after suffix expansion, 1000 targets,
@@ -142,6 +148,10 @@ func runLine(ctx context.Context, line string, concurrency int, out, errOut io.W
 	if err != nil {
 		return err
 	}
+	return runSubmission(ctx, submission, concurrency, out, errOut, owner)
+}
+
+func runSubmission(ctx context.Context, submission core.Submission, concurrency int, out, errOut io.Writer, owner *terminalOwner) error {
 	cfg, err := config.LoadDefault()
 	if err != nil {
 		return err
@@ -392,6 +402,7 @@ func (o *terminalOwner) prompt(ctx context.Context, prompt connector.HostKeyProm
 }
 
 type model struct {
+	composer
 	tuiState
 
 	input               textinput.Model
@@ -420,6 +431,7 @@ func runTUI(concurrency int) error {
 	candidates := loadCandidates()
 	vp := viewport.New(80, 20)
 	m := model{input: input, viewport: vp, transcript: limitedBuffer{max: core.MaxSessionOutput}, concurrency: concurrency, owner: owner, history: defaultHistoryStore(), entries: entries, historyAt: len(entries), candidates: candidates}
+	m.composer = newComposer()
 	if historyErr != nil {
 		m.appendTranscript("history: " + historyErr.Error() + "\n")
 	}
@@ -534,6 +546,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.Type == tea.KeyCtrlY {
 			return m, m.copySelection()
 		}
+		if v.Type == tea.KeyF2 && !m.active {
+			m.guided = !m.guided
+			m.matches = nil
+			m.refreshLayout()
+			return m, nil
+		}
+		if m.guided && !m.active {
+			return m.updateComposer(v)
+		}
 		if len(m.matches) > 0 {
 			m.updatePicker(v)
 			return m, nil
@@ -554,13 +575,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.historyAt > 0 {
 				m.historyAt--
 			}
-			m.input.SetValue(m.entries[m.historyAt])
+			m.restoreHistory(m.entries[m.historyAt])
 			return m, nil
 		}
 		if !m.active && v.Type == tea.KeyDown && len(m.entries) > 0 {
 			if m.historyAt < len(m.entries)-1 {
 				m.historyAt++
-				m.input.SetValue(m.entries[m.historyAt])
+				m.restoreHistory(m.entries[m.historyAt])
 			} else {
 				m.historyAt = len(m.entries)
 				m.input.SetValue("")
@@ -580,24 +601,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if line == "" {
 				return m, nil
 			}
-			m.input.SetValue("")
-			m.matches = nil
-			m.message = ""
-			m.active = true
-			ctx, cancel := context.WithCancel(m.owner.ctx)
-			m.cancel = cancel
-			m.entries = boundedHistory(append(m.entries, line))
-			m.historyAt = len(m.entries)
-			if err := m.history.append(line); err != nil {
-				m.appendTranscript("history: " + err.Error() + "\n")
+			submission, err := core.Parse(line)
+			if err != nil {
+				m.message = err.Error()
+				return m, nil
 			}
-			m.owner.workers.Add(1)
-			go func() {
-				defer m.owner.workers.Done()
-				defer cancel()
-				err := runLine(ctx, line, m.concurrency, io.Discard, io.Discard, m.owner)
-				m.owner.program.Send(finishedMsg{err: err})
-			}()
+			m.input.SetValue("")
+			m.startSubmission(submission, line)
 			return m, nil
 		}
 	case finishedMsg:
@@ -613,6 +623,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	var cmd tea.Cmd
+	if m.guided {
+		if m.commandFocus {
+			m.commands, cmd = m.commands.Update(msg)
+		} else {
+			m.hostFilter, cmd = m.hostFilter.Update(msg)
+		}
+		return m, cmd
+	}
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
 }
