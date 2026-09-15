@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -192,7 +193,7 @@ func TestEnsureIncludePreservesExistingIncludes(t *testing.T) {
 				t.Fatal(err)
 			}
 			second, _ := os.ReadFile(root)
-			if string(first) != string(second) {
+			if !bytes.Equal(first, second) {
 				t.Fatal("include is not idempotent")
 			}
 			cfg, err := Load(root)
