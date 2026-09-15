@@ -117,8 +117,10 @@ preserve.
   replacing the shell, interpreting prompts, or injecting commands.
 - Closing the group or TUI closes its local SSH terminals. Session loss pauses
   broadcasting; there is no reconnect or replay. Operators handle confirmations
-  and differing device state by focusing individual panes. Interactive command
-  history is memory-only, separate from batch history, and scoped to the group.
+  and differing device state by focusing individual panes. Each tab owns a device
+  group and remains connected in the background or in batch mode. Only the active
+  tab receives keyboard input. Ctrl-K captures local controls until dismissed.
+  Remote shells own interactive history; only batch requests enter local history.
 - The frontend emulates each terminal in an isolated, bounded pane. Remote control
   sequences affect that virtual terminal, not the outer terminal or clipboard.
   Shared connection preparation owns credentials, proxies, trust, and auditing.

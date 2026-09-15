@@ -21,16 +21,20 @@ import (
 )
 
 type interactiveState struct {
-	interactive, choosing, direct bool
-	batchDraft                    string
-	panes                         []*terminalPane
-	group                         int
-	groupCancel                   context.CancelFunc
-	target                        int // -1 broadcasts; otherwise one pane
-	page                          int
-	interactiveHistory            []string
-	interactiveHistoryAt          int
-	broadcastPaused               bool
+	terminalGroup
+	interactive, choosing, controlOpen bool
+	batchDraft                         string
+	tabs                               []terminalGroup
+	nextGroup                          int
+}
+type terminalGroup struct {
+	failure         string
+	panes           []*terminalPane
+	group           int
+	groupCancel     context.CancelFunc
+	target          int // -1 broadcasts; otherwise one pane
+	page            int
+	broadcastPaused bool
 }
 type terminalPane struct {
 	name                         string
@@ -109,7 +113,7 @@ type terminalClosedMsg struct {
 	err          error
 }
 
-func (m *model) closePanes() {
+func (m *model) closeCurrentTab() {
 	if m.groupCancel != nil {
 		m.groupCancel()
 		m.groupCancel = nil
@@ -120,11 +124,8 @@ func (m *model) closePanes() {
 		}
 	}
 	m.panes = nil
-	m.group++
+	m.group = 0
 	m.broadcastPaused = false
-	m.interactiveHistory = nil
-	m.interactiveHistoryAt = 0
-	m.direct = false
 }
 func (m *model) beginInteractive(targets []core.Target) {
 	m.choosing = false
@@ -134,7 +135,11 @@ func (m *model) beginInteractive(targets []core.Target) {
 	m.target = -1
 	m.page = 0
 	m.message = "Resolving devices..."
-	m.group++
+	m.failure = ""
+	if m.group == 0 {
+		m.nextGroup++
+		m.group = m.nextGroup
+	}
 	ctx, cancel := context.WithCancel(m.owner.ctx)
 	m.groupCancel = cancel
 	group := m.group
@@ -173,7 +178,7 @@ func (m *model) beginInteractive(targets []core.Target) {
 func (m *model) startTerminals(targets []core.ResolvedTarget) {
 	m.message = "Opening SSH terminals; wait for each device's prompt before sending input"
 	group, owner := m.group, m.owner
-	// Each group has its own lifetime; switching back to batch closes all panes.
+	// Each tab owns its connections independently of the visible mode.
 	ctx, cancel := context.WithCancel(owner.ctx)
 	old := m.groupCancel
 	m.groupCancel = func() {
@@ -248,7 +253,7 @@ func (m *model) resizePanes() {
 		cols = 2
 	}
 	rows := (n + cols - 1) / cols
-	w, h := max(8, width/cols-2), max(2, (height-6)/rows-3)
+	w, h := max(8, width/cols-2), max(2, (height-3)/rows-3)
 	for _, p := range m.panes {
 		p.selected = false
 		p.selecting = false
@@ -300,6 +305,21 @@ func (m *model) sendInteractive(data []byte) {
 }
 
 func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
+	// Route background output and lifecycle events to their owning tab.
+	id := terminalMessageGroup(msg)
+	if id != 0 && id != m.group {
+		for i, tab := range m.tabs {
+			if tab.group != id {
+				continue
+			}
+			background := m
+			background.terminalGroup = tab
+			next, cmd, _ := background.updateInteractive(msg)
+			m.tabs[i] = next.terminalGroup
+			return m, cmd, true
+		}
+		return m, nil, true
+	}
 	switch v := msg.(type) {
 	case *trustRequest, trustFinishedMsg:
 		// Connection workers use the shared modal handler in both modes.
@@ -326,6 +346,7 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 		}
 		if v.err != nil {
 			m.message = v.err.Error()
+			m.failure = displayLabel(v.err.Error())
 			m.choosing = true
 			m.input.SetValue("[ '' ] ( '' )")
 			m.input.SetCursor(3)
@@ -368,6 +389,16 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 		v := msg.(tea.WindowSizeMsg)
 		m.width, m.height = v.Width, v.Height
 		m.resizePanes()
+		active := m.terminalGroup
+		for i, tab := range m.tabs {
+			if tab.group == m.group {
+				continue
+			}
+			m.terminalGroup = tab
+			m.resizePanes()
+			m.tabs[i] = m.terminalGroup
+		}
+		m.terminalGroup = active
 		m.refreshLayout()
 		return m, nil, true
 	}
@@ -395,11 +426,7 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 					m.closePanes()
 					return m, tea.Quit, true
 				case ":batch", ":mode batch":
-					m.closePanes()
-					m.interactive = false
-					m.choosing = false
-					m.input.SetValue("")
-					m.refreshLayout()
+					m.returnToBatch()
 					return m, nil, true
 				}
 				devices, _ := m.formFields()
@@ -423,14 +450,27 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 		}
 		return m, nil, false
 	}
+	if m.controlOpen {
+		return m.updateTerminalControl(msg)
+	}
+	if key, ok := msg.(tea.KeyMsg); ok && key.Type == tea.KeyCtrlK {
+		m.controlOpen = true
+		m.input.Focus()
+		m.input.SetValue("")
+		return m, nil, true
+	}
 	if mouse, ok := msg.(tea.MouseMsg); ok {
 		index := m.paneAt(mouse.X, mouse.Y)
+		if mouse.Y == 0 && mouse.Button == tea.MouseButtonLeft && mouse.Action == tea.MouseActionPress {
+			m.clickTab(mouse.X)
+			return m, nil, true
+		}
 		if mouse.Button == tea.MouseButtonRight {
 			return m, m.copyTerminalSelection(true), true
 		}
 		if index >= 0 {
 			p := m.panes[index]
-			row := (mouse.Y-1)%(p.terminal.Height()+3) - 2
+			row := (mouse.Y-2)%(p.terminal.Height()+3) - 2
 			switch mouse.Button {
 			case tea.MouseButtonLeft:
 				if mouse.Action == tea.MouseActionPress {
@@ -475,187 +515,67 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd, true
 	}
-	if key.Type == tea.KeyCtrlCloseBracket {
-		m.direct = !m.direct
-		m.message = ""
-		return m, nil, true
-	}
-	if m.direct {
-		var data []byte
-		switch key.Type {
-		case tea.KeyRunes, tea.KeySpace:
-			data = []byte(string(key.Runes))
-		case tea.KeyEnter:
-			data = []byte("\r")
-		case tea.KeyTab:
-			data = []byte("\t")
-		case tea.KeyBackspace:
-			data = []byte{127}
-		case tea.KeyEsc:
-			data = []byte{27}
-		case tea.KeyUp:
-			data = []byte("\x1b[A")
-		case tea.KeyDown:
-			data = []byte("\x1b[B")
-		case tea.KeyRight:
-			data = []byte("\x1b[C")
-		case tea.KeyLeft:
-			data = []byte("\x1b[D")
-		case tea.KeyHome:
-			data = []byte("\x1b[H")
-		case tea.KeyEnd:
-			data = []byte("\x1b[F")
-		case tea.KeyDelete:
-			data = []byte("\x1b[3~")
-		case tea.KeyInsert:
-			data = []byte("\x1b[2~")
-		case tea.KeyPgUp:
-			data = []byte("\x1b[5~")
-		case tea.KeyPgDown:
-			data = []byte("\x1b[6~")
-		case tea.KeyShiftTab:
-			data = []byte("\x1b[Z")
-		case tea.KeyF1:
-			data = []byte("\x1bOP")
-		case tea.KeyF2:
-			data = []byte("\x1bOQ")
-		case tea.KeyF3:
-			data = []byte("\x1bOR")
-		case tea.KeyF4:
-			data = []byte("\x1bOS")
-
-		default:
-			if key.Type >= 0 && key.Type < 32 {
-				data = []byte{byte(key.Type)}
-			}
-		}
-		if key.Alt {
-			data = append([]byte{27}, data...)
-		}
-		if len(data) > 0 {
-			m.sendInteractive(data)
-		}
-		return m, nil, true
-	}
+	var data []byte
 	switch key.Type {
-	case tea.KeyCtrlC:
-		m.sendInteractive([]byte{3})
-		return m, nil, true
-	case tea.KeyCtrlD:
-		m.sendInteractive([]byte{4})
-		return m, nil, true
-	case tea.KeyCtrlY:
-		return m, m.copyTerminalSelection(false), true
-	case tea.KeyCtrlK:
-		for _, p := range m.panes {
-			p.clearScrollback()
-		}
-		m.message = "Terminal scrollback cleared"
-		return m, nil, true
-	case tea.KeyPgUp, tea.KeyPgDown:
-		for i, p := range m.panes {
-			if m.target < 0 || i == m.target {
-				if key.Type == tea.KeyPgUp {
-					p.offset = min(p.terminal.ScrollbackLen(), p.offset+p.terminal.Height())
-				} else {
-					p.offset = max(0, p.offset-p.terminal.Height())
-				}
-			}
-		}
-		return m, nil, true
-	case tea.KeyUp, tea.KeyCtrlP:
-		if len(m.interactiveHistory) > 0 {
-			m.interactiveHistoryAt = max(0, m.interactiveHistoryAt-1)
-			m.input.SetValue(m.interactiveHistory[m.interactiveHistoryAt])
-			m.input.CursorEnd()
-		}
-		return m, nil, true
-	case tea.KeyDown, tea.KeyCtrlN:
-		m.interactiveHistoryAt = min(len(m.interactiveHistory), m.interactiveHistoryAt+1)
-		if m.interactiveHistoryAt < len(m.interactiveHistory) {
-			m.input.SetValue(m.interactiveHistory[m.interactiveHistoryAt])
-		} else {
-			m.input.SetValue("")
-		}
-		m.input.CursorEnd()
-		return m, nil, true
-	case tea.KeyTab:
-		// Flush the local draft and switch to direct keys for remote completion.
-		m.sendInteractive([]byte(m.input.Value() + "\t"))
-		if m.message != "" {
-			return m, nil, true
-		}
-		m.input.SetValue("")
-		m.direct = true
-		return m, nil, true
+	case tea.KeyRunes:
+		data = []byte(string(key.Runes))
+	case tea.KeySpace:
+		data = []byte(" ")
 	case tea.KeyEnter:
-		line := m.input.Value()
-		switch {
-		case line == ":batch" || line == ":mode batch" || line == ":disconnect":
-			m.closePanes()
-			m.interactive = false
-			m.input.SetValue(m.batchDraft)
-			m.refreshLayout()
-			return m, nil, true
-		case line == ":quit" || line == ":exit":
-			m.closePanes()
-			return m, tea.Quit, true
-		case line == ":help":
-			m.helpOpen = true
-			m.helpOffset = 0
-			m.input.SetValue("")
-			return m, nil, true
-		case line == ":keys":
-			m.direct = true
-		case line == ":all":
-			m.target = -1
-			m.broadcastPaused = false
-			m.message = "Broadcast targets all open panes"
-		case strings.HasPrefix(line, ":target "):
-			var n int
-			if _, err := fmt.Sscanf(line, ":target %d", &n); err != nil || n < 1 || n > len(m.panes) {
-				m.message = "Use :target N with a pane number"
-			} else {
-				m.target = n - 1
-				m.page = (n - 1) / 4
-				m.message = "Focused " + m.panes[n-1].name
-			}
-		case line == ":next":
-			m.page = min((len(m.panes)-1)/4, m.page+1)
-		case line == ":prev":
-			m.page = max(0, m.page-1)
-		case line == ":clear":
-			for _, p := range m.panes {
-				p.clearScrollback()
-			}
-		case line == ":wipe":
-			m.interactiveHistory = nil
-			m.interactiveHistoryAt = 0
-			for _, p := range m.panes {
-				p.clearScrollback()
-			}
-		case strings.HasPrefix(line, ":"):
-			m.message = "Unknown TUI command; :help lists controls. Prefix a remote colon command with a space."
-		default:
-			m.sendInteractive([]byte(line + "\r"))
-			if m.message != "" {
-				return m, nil, true
-			}
-			if m.message == "" && strings.TrimSpace(line) != "" {
-				m.interactiveHistory = boundedHistory(append(m.interactiveHistory, line))
-				m.interactiveHistoryAt = len(m.interactiveHistory)
-			}
+		data = []byte("\r")
+	case tea.KeyTab:
+		data = []byte("\t")
+	case tea.KeyBackspace:
+		data = []byte{127}
+	case tea.KeyEsc:
+		data = []byte{27}
+	case tea.KeyUp:
+		data = []byte("\x1b[A")
+	case tea.KeyDown:
+		data = []byte("\x1b[B")
+	case tea.KeyRight:
+		data = []byte("\x1b[C")
+	case tea.KeyLeft:
+		data = []byte("\x1b[D")
+	case tea.KeyHome:
+		data = []byte("\x1b[H")
+	case tea.KeyEnd:
+		data = []byte("\x1b[F")
+	case tea.KeyDelete:
+		data = []byte("\x1b[3~")
+	case tea.KeyInsert:
+		data = []byte("\x1b[2~")
+	case tea.KeyPgUp:
+		data = []byte("\x1b[5~")
+	case tea.KeyPgDown:
+		data = []byte("\x1b[6~")
+	case tea.KeyShiftTab:
+		data = []byte("\x1b[Z")
+	case tea.KeyF1:
+		data = []byte("\x1bOP")
+	case tea.KeyF2:
+		data = []byte("\x1bOQ")
+	case tea.KeyF3:
+		data = []byte("\x1bOR")
+	case tea.KeyF4:
+		data = []byte("\x1bOS")
+
+	default:
+		if key.Type >= 0 && key.Type < 32 {
+			data = []byte{byte(key.Type)}
 		}
-		m.input.SetValue("")
-		return m, nil, true
 	}
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(key)
-	return m, cmd, true
+	if key.Alt {
+		data = append([]byte{27}, data...)
+	}
+	if len(data) > 0 {
+		m.sendInteractive(data)
+	}
+	return m, nil, true
 }
 
 func (m model) paneAt(x, y int) int {
-	if len(m.panes) == 0 || y < 1 {
+	if len(m.panes) == 0 || y < 2 {
 		return -1
 	}
 	w, h := m.panes[0].terminal.Width()+2, m.panes[0].terminal.Height()+3
@@ -663,8 +583,8 @@ func (m model) paneAt(x, y int) int {
 	if m.width >= 120 && len(m.panes) > 1 {
 		cols = 2
 	}
-	col, row := x/w, (y-1)/h
-	if col >= cols || y >= max(1, m.height)-5 {
+	col, row := x/w, (y-2)/h
+	if col >= cols || y >= max(1, m.height)-1 {
 		return -1
 	}
 	i := m.page*4 + row*cols + col
@@ -737,7 +657,10 @@ func (m model) copyTerminalSelection(clear bool) tea.Cmd {
 }
 func (m model) interactiveView() string {
 	width, height := max(20, m.width), max(10, m.height)
-	rows := []string{ansi.Truncate(m.broadcastLabel(), width, "...")}
+	rows := []string{m.tabBar(), ansi.Truncate(m.broadcastLabel(), width, "...")}
+	if m.failure != "" {
+		rows = append(rows, ansi.Truncate("Unable to open tab: "+m.failure, width, "..."))
+	}
 	cols := 1
 	if width >= 120 && len(m.panes) > 1 {
 		cols = 2
@@ -758,24 +681,23 @@ func (m model) interactiveView() string {
 		}
 	}
 	body := strings.Join(rows, "\n")
-	body = lipgloss.NewStyle().Height(max(1, height-5)).MaxHeight(max(1, height-5)).Render(body)
-	input := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Width(width - 2).Render(m.editorView(width - 4))
-	if m.direct {
-		input = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Width(width - 2).Render("Direct keyboard input -> selected panes | Ctrl-] returns to command bar")
-	}
+	body = lipgloss.NewStyle().Height(max(1, height-1)).MaxHeight(max(1, height-1)).Render(body)
 	status := "interactive | " + m.message
 	if len(m.panes) > 4 {
 		status = fmt.Sprintf("interactive | page %d/%d | ", m.page+1, (len(m.panes)+3)/4) + m.message
 	}
-	status = padCells(ansi.Truncate(status, max(1, width-6), ""), width-5) + ":help"
-	view := body + "\n" + input + "\n" + status
+	status = padCells(ansi.Truncate(status, max(1, width-17), ""), width-16) + "Ctrl+K: controls"
+	view := body + "\n" + status
+	if m.controlOpen {
+		view = m.terminalControlView(view)
+	}
 	if m.trust != nil {
 		p := m.trust.prompt
 		warning := "Verify host key"
 		if p.Changed {
 			warning = "CHANGED HOST KEY: verify replacement"
 		}
-		view = body + "\n" + safeTerminalText(fmt.Sprintf("%s for %s: %s %s\n[o] once [a] always [r] reject", warning, p.Host, p.KeyType, p.Fingerprint)) + "\n" + status
+		view = lipgloss.NewStyle().MaxHeight(height-4).Render(body) + "\n" + safeTerminalText(fmt.Sprintf("%s for %s: %s %s\n[o] once [a] always [r] reject", warning, p.Host, p.KeyType, p.Fingerprint)) + "\n" + status
 	}
 	if m.helpOpen {
 		return m.helpOverlay(view)

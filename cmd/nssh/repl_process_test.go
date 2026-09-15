@@ -236,7 +236,7 @@ func TestREPLProcess(t *testing.T) {
 		s.write(t, "show value\r")
 		s.await(t, "value=kept")
 		s.settle()
-		s.write(t, ":target 1\r")
+		s.write(t, "\x0b:target 1\r")
 		s.settle()
 		s.write(t, "confirm\r")
 		s.await(t, "Proceed?")
@@ -251,11 +251,34 @@ func TestREPLProcess(t *testing.T) {
 		if err != nil || len(strings.Fields(string(starts))) != 4 {
 			t.Fatalf("expected two persistent terminals: %q %v", starts, err)
 		}
-		s.write(t, ":keys\r")
+		s.write(t, "pager\r")
+		s.await(t, "pager ready")
+		s.settle()
+		s.write(t, " q")
+		s.await(t, "pager bytes=2071")
+		s.settle()
+		s.write(t, "\x0b:new\r")
+		s.await(t, "Choose devices")
+		s.settle()
+		s.write(t, "good \r\r")
+		awaitProcess(t, func() bool {
+			starts, _ := os.ReadFile(filepath.Join(f.dir, "sessions"))
+			return len(strings.Fields(string(starts))) == 6
+		}, "third terminal opened in new tab", &s.output)
+		s.settle()
+		s.write(t, "show value\r")
+		s.await(t, "value=unset")
+		s.settle()
+		s.write(t, "\x0b:tab 1\r")
+		s.settle()
+		s.write(t, "show value\r")
+		awaitProcess(t, func() bool { return strings.Count(f.log(), " show value") >= 4 }, "original tab resumed", &s.output)
+		s.settle()
+		s.write(t, "\x0b\x1b")
 		s.settle()
 		s.write(t, "show value\r")
 		s.settle()
-		s.write(t, "\x1d")
+		s.write(t, "\x0b")
 		s.settle()
 		s.write(t, ":batch\r")
 		s.settle()
@@ -289,7 +312,7 @@ func TestREPLProcess(t *testing.T) {
 		awaitProcess(t, func() bool {
 			return strings.Contains(f.log(), "good show version") && strings.Contains(f.log(), "trust show version")
 		}, "broadcast after host-key approval", &s.output)
-		s.write(t, ":quit\r")
+		s.write(t, "\x0b:quit\r")
 		s.wait(t, 0)
 		if _, err := os.Stat(filepath.Join(f.dir, "home", ".ssh", "known_hosts")); !os.IsNotExist(err) {
 			t.Fatal("accept once persisted host key")
@@ -396,6 +419,7 @@ if [ "$command" = "fixture@$host" ]; then
       'configure terminal') mode='(config)' ;;
       'set value kept') value=kept ;;
       'show value') printf 'value=%s\n' "$value" ;;
+      pager) stty -icanon -echo min 1 time 0; printf 'pager ready'; bytes=$(dd bs=1 count=2 2>/dev/null | od -An -tx1 | tr -d ' \n'); stty icanon echo; printf '\npager bytes=%s\n' "$bytes" ;;
       confirm) printf 'Proceed? [yes/no] '; IFS= read -r answer; printf '\nanswer=%s\n' "$answer" ;;
     esac
     printf 'stdout-%s-%s\n' "$host" "$command"

@@ -1,7 +1,7 @@
 # Terminal interface and multi-host commands
 
 Run `nssh --tui`. It starts in **batch** mode. Enter `:interactive` to choose
-devices and open live SSH panes; `:batch` closes that group and returns to batch.
+devices and open live SSH panes, or resume connected tabs.
 The old `repl` subcommand is removed: `nssh repl` addresses a host named repl.
 
 ## Batch requests
@@ -69,56 +69,40 @@ until it closes. EOS, Junos, and Linux retain their native shells and prompts:
 nssh does not replace the shell, disable pagination, parse prompts, or run
 initialization or configuration commands.
 
-The shared command bar shows **Sending to ALL** followed by its target devices.
-Enter sends the bar's text and a carriage return to those terminals. Each terminal
-keeps its own working directory, variables, CLI hierarchy, and output. Commands
-need not complete before the next input can be sent.
+Keyboard input goes directly to the targets listed in **Sending to ALL** or
+**Sending to**. Space, Enter, and q work at pagers; Tab and arrows use remote
+completion and history. Ctrl-C and Ctrl-D go to the selected terminals.
+Each terminal keeps its working directory, variables, CLI hierarchy, and output.
 
-Wait for each device's actual prompt before sending input. To handle a
-confirmation or different state, click its pane header or enter `:target N`. This targets
-only that device. Enter `:all` to restore broadcast. nssh cannot determine whether
-different prompts are safe to answer together. A disconnected session pauses
-broadcast, never reconnects, and never replays input. Sending to all still requires
-every targeted session to be open; focus a remaining pane or reopen the group.
+Wait for each device's prompt before sending input. Click a pane header to target
+only that device. Output selection does not change targets. A disconnected
+session pauses broadcast and never reconnects or replays input.
 
-Interactive history contains command-bar submissions for the current group.
-Up/Down recalls them without changing the devices. This history stays in memory,
-is separate from saved batch history, and disappears when the group closes.
-Avoid putting secrets in the command bar; use direct keyboard input for password
-prompts so replies are not added to local history.
+### Local controls and tabs
 
-### Direct keyboard input
+Press Ctrl-K to open the local control overlay. While it is open, typing stays
+local. Esc or Ctrl-K returns to direct input. These commands run in the overlay:
 
-Enter `:keys` or press Ctrl-] to send keys directly to the selected terminals.
-This supports remote line editing, confirmations, pagination, and interactive
-programs. Ctrl-] returns to the local command bar. Remote input remains as it was;
-switching input modes does not clear a partially typed remote line.
-
-Tab from the local bar sends the current draft followed by Tab and enters direct
-input for remote completion. Subsequent typing and Enter act on the remote line.
-Direct input uses each remote shell's own history. It does not populate the local
-command-bar history.
-
-Ctrl-C and Ctrl-D are sent to the selected terminals in interactive mode. Use
-`:quit` from the local command bar to exit the TUI. A remote command starting with
-`:` can use direct input or a leading space in the command bar.
-
-### Pane controls and limits
-
-- `:target N` or clicking a pane header focuses one device; `:all` selects all.
+- `:new` selects devices and opens a new session tab.
+- `:tab N` switches tabs; clicking a tab also switches it.
+- `:close` disconnects the current tab's devices.
+- `:target N` focuses one device; `:all` restores broadcast to this tab.
 - `:next` and `:prev` change pages when more than four panes are open.
-- PgUp/PgDn scroll the targeted panes; the mouse wheel scrolls its pane.
-- Drag selects output lines from one pane. Ctrl-Y copies; right-click copies and
-  clears the selection after a successful write. Clipboard copies use OSC 52
-  and are limited to 64 KiB. New output or resize clears selection.
-- `:clear` or Ctrl-K clears scrollback while keeping history. In interactive
-  mode, the current terminal screen remains visible.
-- `:wipe` also clears history for the current mode. Interactive wipe does not
-  erase batch history or the remote shell's own history.
-- `:batch` or `:disconnect` closes the group and returns to batch.
-- `:quit` or `:exit` closes the TUI and its local SSH terminals.
+- `:clear` clears this tab's scrollback; the current screen stays visible.
+- `:copy` copies selected output.
+- `:batch` returns to batch while keeping session tabs connected.
+- `:help` opens the full command index.
+- `:quit` closes every session and exits.
 
-Interactive mode supports 1-16 devices, up to four panes per page, and 1000
+Only the active tab receives keyboard input. Background tabs keep receiving
+output. From batch, `:interactive` resumes the tabs. Remote shells own interactive
+history; nssh saves only complete batch requests in its history file.
+
+The mouse wheel scrolls its pane. Drag selects output lines from one pane.
+Right-click copies and clears selection after a successful write. Clipboard
+copies use OSC 52 and are limited to 64 KiB. New output or resize clears selection.
+
+Interactive mode supports eight tabs with 1-16 devices each, up to four panes per page, and 1000
 scrollback rows per pane. Terminal dimensions follow pane size. Rendered terminal
 controls remain inside each virtual pane; remote clipboard requests do not reach
 the outer terminal. Terminal emulation is provided by the pinned Charm VT package;
@@ -126,7 +110,9 @@ full application and platform coverage still requires representative testing.
 
 ## Shared controls and plain input
 
-The bottom-right `:help` hint opens a scrollable overlay. Esc or Enter closes it.
+In batch, `:help` opens a scrollable overlay. Interactive help is available through
+Ctrl-K. Esc or Enter closes help. Batch Ctrl-K or `:clear` clears scrollback;
+`:wipe` also erases saved batch history.
 Batch output supports the same drag and clipboard controls as interactive panes,
 including selectable status headings. In batch, Ctrl-C cancels active work and
 waits for local cleanup, or exits when idle. Closing or canceling local SSH cannot

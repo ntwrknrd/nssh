@@ -81,44 +81,44 @@ with remote stdin at EOF. History saves devices and commands together, deduplica
 identical requests, and restores the whole request for editing.
 
 Interactive:
-  :interactive  Choose devices, then Enter opens a fixed group of SSH panes
-  :batch        Close the group and return to batch
+  :interactive  Choose devices or resume the connected session tabs
+
+Keys go directly to the displayed targets, including Space, Enter, q, Tab,
+arrows and Ctrl-C/Ctrl-D. Remote shells own their history and line editing.
+Ctrl-K opens local controls and pauses remote input. Esc returns to sessions.
+Within local controls:
+  :new          Choose devices for a new tab
+  :tab N        Switch tabs (or click a tab)
+  :close        Disconnect this tab
+  :batch        Return to batch, keeping tabs connected
   :target N     Send input only to pane N (or click its header)
-  :all          Resume broadcasting to every pane
-  :keys        Send keys directly; Ctrl-] returns to the command bar
+  :all          Resume broadcasting to every pane in this tab
   :next, :prev  Change the visible page when more than four panes are open
-  :disconnect  Close the group and return to batch
+  :clear        Clear this tab's scrollback
+  :copy         Copy selected output
+  :help         Open this index
+  :quit         Close every session and exit
 
-The command bar sends its text plus Enter to the displayed targets. Each pane
-shows the real remote prompt and output. Sessions retain their own shell, CLI
-mode, variables, and working directory. There is no ops/config mode, platform
-profile, injected shell, automatic configuration, prompt parsing, or replay.
+Only the active tab receives input. Background tabs retain their connections
+and output. Each pane preserves its remote shell, CLI state and pagination.
 Wait for each device's prompt before sending input. Focus a pane before answering
-its confirmation or handling different device states; nssh does not infer whether
-prompts agree. A closed session pauses broadcast; :all explicitly resumes it,
-but input still requires every targeted session to be open.
-
-Up/Down recalls commands for the current interactive group, separately from
-batch history. This history is memory-only and disappears when the group closes.
-Tab sends the draft for remote completion and enters direct keyboard input.
-In direct input, arrows, Tab, Enter and control keys go to the target terminals.
-Ctrl-] toggles back to the local bar. Ctrl-C/Ctrl-D go to the selected terminals;
-use :quit to exit the TUI. Remote commands starting with a colon can use direct
-input or a leading space in the command bar. Remote pagination is unchanged.
+its confirmation or handling different device states. A closed session pauses
+broadcast; input still requires every targeted session to be open. No input is
+replayed and closed sessions do not reconnect automatically.
 
 Common controls:
   :help         Open this index; Esc/Enter closes, arrows/PgUp/PgDn scroll
-  :clear        Clear scrollback (also Ctrl-K); keep history
-  :wipe         Clear scrollback and history for the current mode
+  :clear        Clear scrollback (Ctrl-K in batch); keep history
+  :wipe         Clear batch scrollback and saved batch history
   :quit, :exit  Exit and close all local SSH terminals
 
-PgUp/PgDn or the mouse wheel scroll output. Drag selects lines in one pane;
-Ctrl-Y copies, and right-click copies then clears the selection. Clipboard
+The mouse wheel scrolls output. Batch also supports PgUp/PgDn. Drag selects
+lines; right-click copies then clears selection. Batch Ctrl-Y also copies. Clipboard
 copies are limited to 64 KiB. In batch, status headings are selectable and stay
 pinned above their output. Ctrl-L toggles stacked batch results; Ctrl-G toggles
 line comparison. New output or resizing clears selections.
 
-Interactive supports 1-16 devices, with up to four visible per page and 1000
+Interactive supports eight tabs of 1-16 devices each, with up to four visible per page and 1000
 scrollback rows per pane. Host-key approval uses a serialized modal prompt.
 Authenticate credential providers before starting the TUI. Cancellation and
 closing a terminal cannot undo commands already sent to a device.
@@ -686,12 +686,12 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if strings.HasPrefix(m.batchDraft, ":") {
 					m.batchDraft = ""
 				}
-				m.interactive = true
-				m.choosing = true
-				m.input.SetValue("[ '' ] ( '' )")
-				m.input.SetCursor(3)
-				m.openPicker()
-				m.refreshLayout()
+				if m.group != 0 || len(m.tabs) > 0 {
+					m.saveTab()
+					m.switchTab(len(m.tabs) - 1)
+				} else {
+					m.chooseTab()
+				}
 				return m, nil
 			}
 			if line == ":batch" || line == ":mode batch" {

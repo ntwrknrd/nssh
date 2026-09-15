@@ -55,20 +55,18 @@ func TestTerminalPanesEmulateAndIsolateOutput(t *testing.T) {
 		t.Fatal("copy retained selection")
 	}
 }
-func TestTerminalHistoryAndDisconnectDoNotChangeBatchHistory(t *testing.T) {
+func TestTerminalBatchPreservesTabsAndHistory(t *testing.T) {
 	m := terminalModel(t, 100)
-	batch := "[ 'first' ] ( 'one' )"
-	m.entries = []string{batch}
-	m.interactiveHistory = []string{"show version"}
-	m.interactiveHistoryAt = 1
-	m, _, _ = m.updateInteractive(tea.KeyMsg{Type: tea.KeyUp})
-	if m.input.Value() != "show version" {
-		t.Fatal(m.input.Value())
-	}
+	m.entries = []string{"[ 'first' ] ( 'one' )"}
+	m.controlOpen = true
 	m.input.SetValue(":batch")
 	m, _, _ = m.updateInteractive(tea.KeyMsg{Type: tea.KeyEnter})
-	if m.interactive || len(m.panes) != 0 || len(m.entries) != 1 || m.entries[0] != batch {
-		t.Fatal("mixed mode state")
+	if m.interactive || len(m.panes) != 2 || len(m.tabs) != 1 || len(m.entries) != 1 {
+		t.Fatal("lost sessions or history")
+	}
+	m.switchTab(0)
+	if !m.interactive || m.controlOpen || len(m.panes) != 2 {
+		t.Fatal("failed resume")
 	}
 }
 func TestTerminalLossPausesBroadcastAndStaleOutputIsIgnored(t *testing.T) {
@@ -89,7 +87,6 @@ func TestTerminalLossPausesBroadcastAndStaleOutputIsIgnored(t *testing.T) {
 
 func TestInteractiveHostKeyRequestReachesModal(t *testing.T) {
 	m := terminalModel(t, 160)
-	m.direct = true
 	request := &trustRequest{prompt: connector.HostKeyPrompt{Host: "second", KeyType: "ssh-ed25519", Fingerprint: "SHA256:test", Changed: true}, response: make(chan connector.HostKeyAction, 1)}
 	next, _ := m.Update(request)
 	m = next.(model)
@@ -118,12 +115,12 @@ func TestSelectingTerminalOutputDoesNotChangeBroadcast(t *testing.T) {
 	m := terminalModel(t, 160)
 	_, _ = m.panes[1].terminal.Write([]byte("device output"))
 	x := m.panes[0].terminal.Width() + 3
-	next, _ := m.Update(tea.MouseMsg{X: x, Y: 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	next, _ := m.Update(tea.MouseMsg{X: x, Y: 4, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	m = next.(model)
 	if m.target != -1 || !m.panes[1].selected {
 		t.Fatal("output selection changed broadcast targets")
 	}
-	next, _ = m.Update(tea.MouseMsg{X: x, Y: 2, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	next, _ = m.Update(tea.MouseMsg{X: x, Y: 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	m = next.(model)
 	if m.target != 1 {
 		t.Fatal("header did not focus device")
@@ -144,5 +141,49 @@ func TestTerminalStatusReplyUsesANSIForm(t *testing.T) {
 	_ = emu.InputPipe().(io.Closer).Close()
 	if got != "\x1b[0n" {
 		t.Fatalf("malformed status reply: %q", got)
+	}
+}
+
+func TestBackgroundTabOutputAndCloseAreIsolated(t *testing.T) {
+	m := terminalModel(t, 160)
+	m.saveTab()
+	first := m.terminalGroup
+	m.terminalGroup = terminalGroup{group: 2, target: -1}
+	m.saveTab()
+	m, _, _ = m.updateInteractive(terminalOutputMsg{1, 0, []byte("background")})
+	if len(m.panes) != 0 || !strings.Contains(first.panes[0].terminal.String(), "background") {
+		t.Fatal("background output routed incorrectly")
+	}
+	m, _, _ = m.updateInteractive(terminalClosedMsg{1, 1, nil})
+	if m.broadcastPaused || !m.tabs[0].broadcastPaused {
+		t.Fatal("background close affected active broadcast")
+	}
+	m.removeTab()
+	if m.group != 1 || len(m.panes) != 2 {
+		t.Fatal("closing tab did not restore previous tab")
+	}
+	m.closePanes()
+	m, _, _ = m.updateInteractive(terminalOutputMsg{1, 0, []byte("stale")})
+	if len(m.tabs) != 0 || len(m.panes) != 0 {
+		t.Fatal("closed tab revived")
+	}
+}
+func TestControlOverlayCapturesKeysUntilEscape(t *testing.T) {
+	m := terminalModel(t, 100)
+	m, _, _ = m.updateInteractive(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m, _, _ = m.updateInteractive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("local")})
+	if !m.controlOpen || m.input.Value() != "local" || strings.Contains(m.message, "Input not sent") {
+		t.Fatal("control input leaked")
+	}
+	m, _, _ = m.updateInteractive(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.controlOpen || m.input.Value() != "" {
+		t.Fatal("control draft retained")
+	}
+	m, _, _ = m.updateInteractive(tea.KeyMsg{Type: tea.KeySpace})
+	if !strings.Contains(m.message, "Input not sent") {
+		t.Fatal("space did not reach terminal path")
+	}
+	if strings.Contains(ansi.Strip(m.View()), "Type a command") {
+		t.Fatal("command box remains")
 	}
 }
