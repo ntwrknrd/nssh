@@ -57,7 +57,8 @@ An exact inventory alias containing the whole comma token remains one host.
 `-l` applies to all members; otherwise each member uses its inventory username.
 The SSH-option tokens are shared unchanged. Lists use four workers by default,
 require a remote command, and send EOF on remote stdin. Output uses a command
-heading, bordered device blocks with status, and a compact results summary.
+heading, device headings with status, blank lines between device outputs, and
+a compact results summary.
 Both blocks and summary follow the requested host order. Labels use the supplied
 host names; device tables start on their own line and retain their formatting.
 A slow earlier host holds later results within a bounded execution window.

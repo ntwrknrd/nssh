@@ -62,7 +62,7 @@ func (p *hostListOutput) block(w io.Writer, heading string, data []byte, state c
 	if data[len(data)-1] != '\n' {
 		_, _ = fmt.Fprintln(w)
 	}
-	_, _ = fmt.Fprintln(w, strings.Repeat("-", 80)+"\n")
+	_, _ = fmt.Fprintln(w)
 }
 
 func (p *hostListOutput) recap(events []core.Event) {

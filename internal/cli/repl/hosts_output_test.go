@@ -24,7 +24,7 @@ func TestHostListOutputKeepsTablesAndRecapsRequestedOrder(t *testing.T) {
 		p.event(e)
 	}
 	p.recap(events)
-	if want := taskBanner("[agg] OK") + "\n" + table + strings.Repeat("-", 80) + "\n\n" + taskBanner("[border] OK") + "\n" + table + strings.Repeat("-", 80) + "\n\n"; out.String() != want {
+	if want := taskBanner("[agg] OK") + "\n" + table + "\n" + taskBanner("[border] OK") + "\n" + table + "\n"; out.String() != want {
 		t.Fatalf("output=%q want=%q", out.String(), want)
 	}
 	recap := errOut.String()
@@ -51,7 +51,7 @@ func TestHostListOutputAttributesStderrAndFailureWithoutChangingBytes(t *testing
 	}}
 	p.event(event)
 	p.recap([]core.Event{event})
-	if out.String() != taskBanner("[alias] FAILED (exit 7)")+"\n\x1b[32mdevice\x1b[0m\n"+strings.Repeat("-", 80)+"\n\n" {
+	if out.String() != taskBanner("[alias] FAILED (exit 7)")+"\n\x1b[32mdevice\x1b[0m\n"+"\n" {
 		t.Fatalf("stdout=%q", out.String())
 	}
 	for _, want := range []string{taskBanner("[alias] STDERR") + "\ndiagnostic\n", "error: [alias] SSH failed", "warning: [alias] output truncated", "alias : ok=0  failed=1  canceled=0"} {
