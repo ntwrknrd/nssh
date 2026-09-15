@@ -12,7 +12,7 @@ import (
 )
 
 func testTUI(width int) model {
-	return model{tuiState: tuiState{width: width, height: 30, commandIndex: -1}, input: textinput.New(), viewport: viewport.New(width, 25), transcript: limitedBuffer{max: 4096}}
+	return model{tuiState: tuiState{width: width, height: 30}, input: textinput.New(), viewport: viewport.New(width, 25), transcript: limitedBuffer{max: 4096}}
 }
 func tuiEvent(host, command, body string, index int) core.Event {
 	return core.Event{Target: core.ResolvedTarget{Identity: host}, Command: command, CommandIndex: index, State: core.Completed, Result: core.Result{Stdout: []byte(body)}}
@@ -22,7 +22,7 @@ func TestTUIAdaptiveResultsAndCommandBoundaries(t *testing.T) {
 	m.acceptResult(tuiEvent("alpha", "one", "left unique\nshared", 0))
 	m.acceptResult(tuiEvent("beta", "one", "right unique\nshared", 0))
 	text := ansi.Strip(m.renderBlocks())
-	if !strings.Contains(text, taskBanner("Command: one")) {
+	if strings.Contains(text, "Command:") || !strings.Contains(text, "OK:  [alpha] ('one')") {
 		t.Fatal(text)
 	}
 	paired := false
@@ -289,5 +289,17 @@ func TestUniqueCompletionReplacesWholeHostAtCursor(t *testing.T) {
 	m.openPicker()
 	if m.pickerOpen || m.input.Value() != "[ 'ops@edge1' ] ( 'show version' )" {
 		t.Fatal(m.input.Value())
+	}
+}
+
+func TestTUIResultLabelIncludesStatusDeviceAndCommand(t *testing.T) {
+	e := tuiEvent("user@device", "show env power", "output", 0)
+	if got := resultLabel(e); got != "OK:  [user@device] ('show env power')" {
+		t.Fatal(got)
+	}
+	e.State = core.Failed
+	e.Result.ExitCode = 7
+	if got := resultLabel(e); got != "FAILED exit 7:  [user@device] ('show env power')" {
+		t.Fatal(got)
 	}
 }

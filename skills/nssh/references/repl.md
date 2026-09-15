@@ -92,9 +92,9 @@ ordinary interactive connection before retrying.
 
 ## Keys, history, and limits
 
-The Go TUI has a command prompt with host completion and a
-persistent running/done/failed/pending/canceled/skipped counts. Results stay
-under a `Command: ...` heading with the same separator as root multi-host output.
+The Go TUI has a command prompt with host completion and
+persistent running/done/failed/pending/canceled/skipped counts. Each result
+starts with its status, device, and command: `OK:  [user@device] ('show env power')`.
 At 100 columns or wider, adjacent devices for the same command appear side by
 side only when both headings and every output line fit, including line-number
 space. Otherwise, devices stack at full width. Lines wrap only when they exceed

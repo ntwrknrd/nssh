@@ -472,7 +472,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tuiBatchMsg:
 		m.batch++
 		m.total, m.running, m.done, m.failed, m.canceled, m.skipped = v.targets*v.commands, 0, 0, 0, 0, 0
-		m.commandIndex = -1
 		return m, nil
 	case tuiResultMsg:
 		m.acceptResult(v.event)

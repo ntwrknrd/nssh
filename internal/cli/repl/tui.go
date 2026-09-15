@@ -23,7 +23,7 @@ type tuiBlock struct {
 }
 type tuiState struct {
 	blocks                                          []tuiBlock
-	bytes, width, height, batch, commandIndex       int
+	bytes, width, height, batch                     int
 	total, running, done, failed, canceled, skipped int
 	diff, stacked                                   bool
 	pickerOpen                                      bool
@@ -46,10 +46,6 @@ var (
 )
 
 func (m *model) acceptResult(e core.Event) {
-	if e.State != core.Queued && e.CommandIndex != m.commandIndex {
-		m.commandIndex = e.CommandIndex
-		m.appendTranscript(taskBanner("Command: "+displayLabel(e.Command)) + "\n")
-	}
 	switch e.State {
 	case core.Queued:
 		return
@@ -146,7 +142,8 @@ func resultLabel(e core.Event) string {
 	if e.State == core.Failed {
 		status += fmt.Sprintf(" exit %d", e.Result.ExitCode)
 	}
-	return "[" + e.Target.Identity + "] " + status
+	command := strings.ReplaceAll(e.Command, "'", "\\'")
+	return status + ":  [" + e.Target.Identity + "] ('" + command + "')"
 }
 
 func resultHeading(e core.Event, width int) string {
