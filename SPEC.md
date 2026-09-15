@@ -111,10 +111,9 @@ preserve.
 - Interactive history stores submitted text under XDG state with private
   permissions and bounded retention. Plain sessions do not write history.
 - The interactive Go frontend keeps structured result blocks, adaptive device
-  comparisons, a guided inventory picker and command editor, and a persistent progress
-  footer. Guided selections are literal and command text needs no submission
-  quoting; the original syntax remains available in plain mode and the syntax
-  editor. Remote control sequences cannot execute through its rendering path.
+  comparisons, a command prompt with inventory completion, and a persistent progress
+  footer. The host picker inserts quoted targets into the editable submission.
+  Enter submits that syntax, which is also used by plain mode and history. Remote control sequences cannot execute through its rendering path.
 - Go/Charm is the maintained frontend. Rust is a documented evaluated alternative,
   with no shipped bridge or ongoing frontend parity requirement.
 

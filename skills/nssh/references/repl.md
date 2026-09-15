@@ -47,24 +47,26 @@ Root lists require a command. Use the REPL grammar for several commands, target
 expansion, or selectors. `--target repl` escapes the command name when connecting
 to a host literally named `repl`.
 
-## Guided interactive prompt
+## Interactive command prompt
 
-Run `nssh repl` to pick inventory hosts and enter commands without learning the
-quoted submission syntax:
+Run `nssh repl` to edit a submission directly. Press Enter to run it.
 
-1. Type to filter the inventory. Use Up/Down to move and Space to select hosts.
-   Selection follows the order you pick hosts and survives filter changes.
-   Ctrl-A selects all matches; Ctrl-X clears the selection.
-2. Press Enter to move to commands. If no hosts were selected, Enter selects
-   the highlighted host first. Type one command per line; Enter adds another.
-3. Press F5 to run. Tab switches between hosts and commands. The selected hosts
-   and command text remain available after the run for editing or repetition.
+- Tab completes a unique host at the cursor or opens a searchable host picker.
+  Tab on an empty prompt starts a submission and opens the picker.
+- In the picker, type to filter, use Up/Down to move, and Space to select hosts.
+  Selections persist across filters. Enter inserts the selected hosts into the
+  command; it does not execute it. Esc closes the picker and restores the draft.
+- Selected hosts are quoted and separated automatically. Existing command text
+  and an explicit username remain intact. A new submission places the cursor
+  in the command field after inserting hosts.
+- Up/Down outside the picker recalls history. The submitted syntax is stored
+  exactly as entered after trimming outer whitespace.
+- Shortcut hints appear in one bottom bar and change with the active operation.
+  Use `:help` for the full shortcut list.
 
-Ctrl-P/Ctrl-N recalls previous submissions. F2 switches to the original syntax
-editor for literal hosts, patterns, selectors, or pasted submission syntax;
-F2 returns to the guided draft. Plain mode continues to use the original syntax.
-Guided inventory selections are literal, and command quotes and backslashes are
-passed through without adding submission quoting.
+Older form history is converted to editable syntax when it preserves the same
+hosts and commands. Entries that cannot be converted safely show an explanation
+and leave the current draft intact.
 
 ## Execution and output
 
@@ -90,7 +92,7 @@ ordinary interactive connection before retrying.
 
 ## Keys, history, and limits
 
-The Go TUI has a guided inventory and command editor, a syntax editor, and
+The Go TUI has a command prompt with host completion and a
 persistent running/done/failed/pending/canceled/skipped counts. Results stay
 under their command heading. At 100 columns or wider, adjacent devices for the
 same command appear side by side; narrow terminals stack them. Long output lines
@@ -101,9 +103,9 @@ and truncation remain visible.
 
 Use `:help` or `nssh repl --explain` for keys and syntax:
 
-- In the syntax editor, Tab completes a unique hostname or opens the picker. Space selects hosts,
-  Up/Down moves, Enter inserts selected hosts, and Escape closes the picker.
-- In the syntax editor outside the picker, Up/Down recalls history. Page Up/Page Down and the mouse
+- Tab completes a unique hostname or opens the picker. Type to filter, Space selects
+  hosts, Up/Down moves, Enter inserts selected hosts, and Escape closes the picker.
+- Outside the picker, Up/Down recalls history. Page Up/Page Down and the mouse
   wheel scroll output.
 - Ctrl-L switches between automatic split layout and stacked full-width results.
 - Ctrl-G highlights differing displayed lines in paired panes. This is a line

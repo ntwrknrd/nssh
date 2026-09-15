@@ -76,14 +76,11 @@ requested host order, with separate stdout/stderr. A failure skips later
 commands only on that host. Remote stdin is EOF; authenticate credential providers first.
 Interactive host-key approval is serialized. Plain mode cannot prompt for trust.
 
-Interactive default: type to filter inventory, Up/Down moves, Space selects,
-Enter opens commands. Enter one command per line; F5 runs the selected hosts.
-Tab switches hosts/commands. Selections persist across filters and runs.
-Ctrl-A selects matching hosts; Ctrl-X clears selection in the host list.
-Ctrl-P/Ctrl-N recalls history. F2 switches to the syntax editor and back.
-
-Syntax editor: Tab completes a unique host or opens a multi-select picker. There,
-Space selects, Up/Down moves, Enter inserts, and Esc closes. Up/Down otherwise
+Interactive: edit a submission and press Enter to run. Tab completes a unique
+host or opens a searchable multi-select picker. Tab on an empty prompt starts
+a target list. In the picker, type to filter, Space selects, Up/Down moves,
+Enter inserts selected hosts, and Esc closes without changing the command.
+Selections persist across filters. Up/Down outside the picker
 recall history. PgUp/PgDn or the mouse wheel scroll. Ctrl-L toggles stacked
 results; Ctrl-G toggles line comparison in split panes. Drag selects lines in
 one device pane; Ctrl-Y sends up to 64 KiB to the terminal clipboard.
@@ -402,7 +399,6 @@ func (o *terminalOwner) prompt(ctx context.Context, prompt connector.HostKeyProm
 }
 
 type model struct {
-	composer
 	tuiState
 
 	input               textinput.Model
@@ -431,7 +427,6 @@ func runTUI(concurrency int) error {
 	candidates := loadCandidates()
 	vp := viewport.New(80, 20)
 	m := model{input: input, viewport: vp, transcript: limitedBuffer{max: core.MaxSessionOutput}, concurrency: concurrency, owner: owner, history: defaultHistoryStore(), entries: entries, historyAt: len(entries), candidates: candidates}
-	m.composer = newComposer()
 	if historyErr != nil {
 		m.appendTranscript("history: " + historyErr.Error() + "\n")
 	}
@@ -546,16 +541,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.Type == tea.KeyCtrlY {
 			return m, m.copySelection()
 		}
-		if v.Type == tea.KeyF2 && !m.active {
-			m.guided = !m.guided
-			m.matches = nil
-			m.refreshLayout()
-			return m, nil
-		}
-		if m.guided && !m.active {
-			return m.updateComposer(v)
-		}
-		if len(m.matches) > 0 {
+		if m.pickerOpen {
 			m.updatePicker(v)
 			return m, nil
 		}
@@ -623,14 +609,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	var cmd tea.Cmd
-	if m.guided {
-		if m.commandFocus {
-			m.commands, cmd = m.commands.Update(msg)
-		} else {
-			m.hostFilter, cmd = m.hostFilter.Update(msg)
-		}
-		return m, cmd
-	}
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
 }

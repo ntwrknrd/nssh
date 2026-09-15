@@ -209,3 +209,61 @@ func TestTUIPairsSourceRowsBeforeWrapping(t *testing.T) {
 	}
 	t.Fatal("missing second source row")
 }
+
+func TestPromptPickerFiltersAndPreservesSelections(t *testing.T) {
+	m := testTUI(120)
+	m.candidates = []string{"agg1", "border1", "border2"}
+	m.openPicker()
+	m.updatePicker(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("border")})
+	m.updatePicker(tea.KeyMsg{Type: tea.KeySpace})
+	m.updatePicker(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m.updatePicker(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("agg")})
+	m.updatePicker(tea.KeyMsg{Type: tea.KeySpace})
+	m.updatePicker(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.pickerOpen || m.active || m.input.Value() != "[ 'agg1', 'border1' ] ( '' )" {
+		t.Fatal(m.input.Value())
+	}
+	if m.input.Position() != len([]rune(m.input.Value()))-3 {
+		t.Fatal("cursor not in command field")
+	}
+	view := ansi.Strip(m.View())
+	if strings.Contains(strings.Split(view, "\n")[0], "Tab") || strings.Count(view, "Enter run") != 1 || strings.Contains(view, "F5") {
+		t.Fatal(view)
+	}
+}
+
+func TestPromptPickerNoMatchesAndEscapePreserveDraft(t *testing.T) {
+	m := testTUI(120)
+	m.candidates = []string{"edge1", "edge2"}
+	m.input.SetValue("[ 'ed' ] ( 'show version' )")
+	m.input.SetCursor(5)
+	draft, cursor := m.input.Value(), m.input.Position()
+	m.openPicker()
+	m.updatePicker(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("missing")})
+	m.updatePicker(tea.KeyMsg{Type: tea.KeySpace})
+	m.updatePicker(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.pickerOpen || m.active {
+		t.Fatal("no-match picker submitted")
+	}
+	m.updatePicker(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.input.Value() != draft || m.input.Position() != cursor {
+		t.Fatal("draft changed")
+	}
+	m.input.SetValue("")
+	m.openPicker()
+	m.updatePicker(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.input.Value() != "" {
+		t.Fatal("empty draft changed")
+	}
+}
+
+func TestUniqueCompletionReplacesWholeHostAtCursor(t *testing.T) {
+	m := testTUI(120)
+	m.candidates = []string{"edge1"}
+	m.input.SetValue("[ 'ops@edZZ' ] ( 'show version' )")
+	m.input.SetCursor(len([]rune("[ 'ops@ed")))
+	m.openPicker()
+	if m.pickerOpen || m.input.Value() != "[ 'ops@edge1' ] ( 'show version' )" {
+		t.Fatal(m.input.Value())
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -25,8 +26,12 @@ type tuiState struct {
 	bytes, width, height, batch, commandIndex       int
 	total, running, done, failed, canceled, skipped int
 	diff, stacked                                   bool
+	pickerOpen                                      bool
+	pickerDraft                                     string
+	pickerCursor                                    int
+	pickFilter                                      textinput.Model
 	matches                                         []string
-	picked                                          map[int]bool
+	picked                                          map[string]bool
 	pickAt                                          int
 	message                                         string
 	selectionStart, selectionEnd                    int
@@ -285,31 +290,21 @@ func (m *model) refreshLayout() {
 		height = m.viewport.Height + 7
 	}
 	m.viewport.Width = max(1, width)
-	footer := 5
-	if m.guided {
-		footer = 2 + len(strings.Split(m.composerView(max(1, width)), "\n"))
-	}
-	if len(m.matches) > 0 {
-		footer += min(6, len(m.matches)) + 1
+	footer := 6
+	if m.pickerOpen {
+		footer += max(1, min(6, len(m.matches))) + 1
 	}
 	if m.trust != nil {
 		footer += 2
 	}
 	m.viewport.Height = max(1, height-footer)
 	m.input.Width = max(1, width-6)
-	m.hostFilter.Width = max(1, width-12)
-	if m.guided {
-		m.commands.SetWidth(max(1, width-4))
-	}
+	m.pickFilter.Width = max(1, width-10)
 	m.viewport.SetContent(m.transcriptContent())
 }
 func (m model) tuiView() string {
 	width := max(1, m.viewport.Width)
-	title := "nssh repl  |  F2 guided  Tab hosts  PgUp/PgDn scroll  Ctrl-L layout  Ctrl-G diff  Ctrl-Y copy"
-	if m.guided {
-		title = "nssh repl  |  F5 run  Tab hosts/commands  F2 syntax  PgUp/PgDn scroll"
-	}
-	parts := []string{tuiDim.Render(ansi.Truncate(title, width, "")), m.viewport.View()}
+	parts := []string{tuiDim.Render("nssh repl"), m.viewport.View()}
 	switch {
 	case m.trust != nil:
 		p := m.trust.prompt
@@ -318,10 +313,8 @@ func (m model) tuiView() string {
 			warning = "CHANGED HOST KEY: verify replacement"
 		}
 		parts = append(parts, safeTerminalText(fmt.Sprintf("%s for %s: %s %s\n[o] accept once  [a] trust permanently  [r] reject  Ctrl-C cancel", warning, p.Host, p.KeyType, p.Fingerprint)))
-	case m.guided:
-		parts = append(parts, m.composerView(width))
 	default:
-		if len(m.matches) > 0 {
+		if m.pickerOpen {
 			parts = append(parts, m.pickerView())
 		}
 		box := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("8")).Width(max(1, width-2)).Render(m.editorView(max(1, width-4)))
@@ -329,9 +322,6 @@ func (m model) tuiView() string {
 	}
 	pending := max(0, m.total-m.running-m.done-m.failed-m.canceled-m.skipped)
 	status := fmt.Sprintf("running %d  done %d  failed %d  pending %d  canceled %d  skipped %d", m.running, m.done, m.failed, pending, m.canceled, m.skipped)
-	if m.active {
-		status += " | Ctrl-C cancels"
-	}
 	if m.diff {
 		status += " | diff on"
 	}
@@ -339,6 +329,20 @@ func (m model) tuiView() string {
 		status = m.message + " | " + status
 	}
 	parts = append(parts, tuiDim.Render(ansi.Truncate(status, width, "")))
+	hints := "Enter run  Tab complete  Up/Down history  :help"
+	if m.pickerOpen {
+		hints = "Type filter  Space select  Enter insert  Esc close"
+	}
+	if m.active {
+		hints = "Ctrl-C cancel  PgUp/PgDn scroll"
+	}
+	if m.selected {
+		hints += "  Ctrl-Y copy"
+	}
+	if m.trust != nil {
+		hints = ""
+	}
+	parts = append(parts, tuiDim.Render(ansi.Truncate(hints, width, "")))
 	return strings.Join(parts, "\n")
 }
 
@@ -406,57 +410,99 @@ func (m model) editorView(width int) string {
 	return ansi.Truncate(out.String(), width, "")
 }
 func (m *model) openPicker() {
-	value, cursor, matches := completeTargetToken(m.input.Value(), m.input.Position(), m.candidates)
-	if len(matches) == 1 {
-		m.input.SetValue(value)
-		m.input.SetCursor(cursor)
+	m.pickerDraft = m.input.Value()
+	m.pickerCursor = m.input.Position()
+	if strings.TrimSpace(m.input.Value()) == "" {
+		m.input.SetValue("[ '' ] ( '' )")
+		m.input.SetCursor(3)
+	}
+	start, ok := activeTargetStart([]rune(m.input.Value()), m.input.Position())
+	if !ok {
 		return
 	}
-	m.matches = matches
-	m.pickAt = 0
-	m.picked = map[int]bool{}
+	_, _, matches := completeTargetToken(m.input.Value(), m.input.Position(), m.candidates)
+	if len(matches) == 1 {
+		m.insertHosts(matches)
+		return
+	}
+	prefix := string([]rune(m.input.Value())[start:m.input.Position()])
+	if at := strings.LastIndex(prefix, "@"); at >= 0 {
+		prefix = prefix[at+1:]
+	}
+	m.pickFilter = textinput.New()
+	m.pickFilter.Prompt = "Filter: "
+	m.pickFilter.CharLimit = 256
+	m.pickFilter.SetValue(prefix)
+	m.pickFilter.Focus()
+	m.picked = map[string]bool{}
+	m.pickerOpen = true
+	m.filterPicker()
 	m.refreshLayout()
 }
+func (m *model) filterPicker() {
+	m.matches = nil
+	query := strings.ToLower(m.pickFilter.Value())
+	for _, name := range m.candidates {
+		if strings.Contains(strings.ToLower(name), query) {
+			m.matches = append(m.matches, name)
+		}
+	}
+	m.pickAt = 0
+}
 func (m model) pickerView() string {
-	var rows []string
+	rows := []string{m.pickFilter.View()}
 	start := max(0, m.pickAt-5)
 	for i := start; i < min(len(m.matches), start+6); i++ {
 		marker := "[ ]"
-		if m.picked[i] {
+		if m.picked[m.matches[i]] {
 			marker = "[x]"
 		}
-		row := marker + " " + displayLabel(m.matches[i])
+		cursor := "  "
 		if i == m.pickAt {
-			row = "> " + row
-		} else {
-			row = "  " + row
+			cursor = "> "
 		}
-		rows = append(rows, ansi.Truncate(row, m.viewport.Width, "..."))
+		rows = append(rows, ansi.Truncate(cursor+marker+" "+displayLabel(m.matches[i]), m.viewport.Width, "..."))
 	}
-	return strings.Join(rows, "\n") + "\n" + tuiDim.Render("Space select | Enter insert | Esc close")
+	if len(m.matches) == 0 {
+		rows = append(rows, "No matching hosts")
+	}
+	return strings.Join(rows, "\n")
 }
 func (m *model) updatePicker(key tea.KeyMsg) {
 	switch key.Type {
 	case tea.KeyEsc:
+		m.input.SetValue(m.pickerDraft)
+		m.input.SetCursor(m.pickerCursor)
+		m.pickerOpen = false
 		m.matches = nil
 	case tea.KeyUp:
 		m.pickAt = max(0, m.pickAt-1)
 	case tea.KeyDown, tea.KeyTab:
-		m.pickAt = min(len(m.matches)-1, m.pickAt+1)
+		m.pickAt = min(max(0, len(m.matches)-1), m.pickAt+1)
 	case tea.KeySpace:
-		m.picked[m.pickAt] = !m.picked[m.pickAt]
+		if len(m.matches) > 0 {
+			name := m.matches[m.pickAt]
+			m.picked[name] = !m.picked[name]
+		}
 	case tea.KeyEnter:
 		var chosen []string
-		for i, name := range m.matches {
-			if m.picked[i] {
+		for _, name := range m.candidates {
+			if m.picked[name] {
 				chosen = append(chosen, name)
 			}
 		}
-		if len(chosen) == 0 {
+		if len(chosen) == 0 && len(m.matches) > 0 {
 			chosen = []string{m.matches[m.pickAt]}
 		}
+		if len(chosen) == 0 {
+			return
+		}
 		m.insertHosts(chosen)
+		m.pickerOpen = false
 		m.matches = nil
+	default:
+		m.pickFilter, _ = m.pickFilter.Update(key)
+		m.filterPicker()
 	}
 	m.refreshLayout()
 }
@@ -484,6 +530,9 @@ func (m *model) insertHosts(hosts []string) {
 	replacement := strings.Join(escaped, "', '")
 	m.input.SetValue(string(value[:start]) + replacement + string(value[end:]))
 	m.input.SetCursor(start + len([]rune(replacement)))
+	if string(value) == "[ '' ] ( '' )" {
+		m.input.SetCursor(len([]rune(m.input.Value())) - 3)
+	}
 }
 
 // Mouse selection copies only the chosen pane's displayed lines. Clipboard
