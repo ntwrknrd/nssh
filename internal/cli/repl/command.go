@@ -88,7 +88,8 @@ line stays pinned while scrolling and can be selected together with its output.
 Ctrl-Y copies; right-click copies and clears the selection after a successful
 write. Copy sends up to 64 KiB to the terminal clipboard.
 Ctrl-C cancels active work and waits for local cleanup, or
-exits when idle. :help shows help; :quit, :exit, or EOF exits.
+exits when idle. :help opens a scrollable overlay in the TUI (Esc/Enter closes);
+plain mode prints help. :quit, :exit, or EOF exits.
 Cancellation cannot undo remote effects. Normal interactive quit returns zero.
 Plain input stops on failure (exit 1); interruption exits 130.
 
@@ -503,6 +504,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.appendTranscript(v.text)
 		return m, nil
 	case tea.KeyMsg:
+		if m.helpOpen {
+			switch v.Type {
+			case tea.KeyEsc, tea.KeyEnter, tea.KeyCtrlC:
+				m.helpOpen = false
+			case tea.KeyUp:
+				m.helpOffset = max(0, m.helpOffset-1)
+			case tea.KeyDown:
+				m.helpOffset = min(m.helpMaxOffset(), m.helpOffset+1)
+			case tea.KeyPgUp:
+				m.helpOffset = max(0, m.helpOffset-10)
+			case tea.KeyPgDown:
+				m.helpOffset = min(m.helpMaxOffset(), m.helpOffset+10)
+			case tea.KeyHome:
+				m.helpOffset = 0
+			case tea.KeyEnd:
+				m.helpOffset = m.helpMaxOffset()
+			}
+			return m, nil
+		}
 		if v.Type == tea.KeyCtrlC {
 			if m.active {
 				m.cancel()
@@ -584,7 +604,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.active && v.Type == tea.KeyEnter {
 			line := strings.TrimSpace(m.input.Value())
 			if line == ":help" {
-				m.appendTranscript(replHelp + "\n")
+				m.helpOpen = true
+				m.helpOffset = 0
 				m.input.SetValue("")
 				return m, nil
 			}

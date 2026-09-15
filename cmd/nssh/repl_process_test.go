@@ -137,6 +137,19 @@ func TestREPLProcess(t *testing.T) {
 			t.Fatalf("exit=%d\n%s", code, output.String())
 		}
 	})
+	t.Run("PTY help overlay closes without exiting", func(t *testing.T) {
+		f := newREPLFixture(t, binary)
+		s := f.terminal(t)
+		s.write(t, ":help\r")
+		s.await(t, "Help / command index")
+		s.write(t, "\x1b")
+		s.settle()
+		if f.log() != "" {
+			t.Fatal("help executed SSH")
+		}
+		s.write(t, ":quit\r")
+		s.wait(t, 0)
+	})
 	t.Run("PTY picker inserts before Enter executes", func(t *testing.T) {
 		f := newREPLFixture(t, binary)
 		s := f.terminal(t)
@@ -391,7 +404,7 @@ func (f *replFixture) terminal(t *testing.T) *replTerminal {
 	s.file = file
 	go func() { _, _ = io.Copy(&s.output, file); close(s.readDone) }()
 	t.Cleanup(func() { _ = file.Close(); <-s.readDone })
-	s.await(t, "Enter run")
+	s.await(t, ":help")
 	return s
 }
 func (s *replTerminal) write(t *testing.T, text string) {

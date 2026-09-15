@@ -26,6 +26,8 @@ type tuiState struct {
 	bytes, width, height, batch                     int
 	total, running, done, failed, canceled, skipped int
 	diff, stacked                                   bool
+	helpOpen                                        bool
+	helpOffset                                      int
 	pickerOpen                                      bool
 	pickerDraft                                     string
 	pickerCursor                                    int
@@ -312,7 +314,7 @@ func (m *model) refreshLayout() {
 		height = m.viewport.Height + 7
 	}
 	m.viewport.Width = max(1, width)
-	footer := 6
+	footer := 5
 	if m.pickerOpen {
 		footer += max(1, min(6, len(m.matches))) + 1
 	}
@@ -401,29 +403,22 @@ func (m model) tuiView() string {
 	if m.message != "" {
 		status = m.message + " | " + status
 	}
-	parts = append(parts, tuiDim.Render(ansi.Truncate(status, width, "")))
-	hints := "Enter run  Tab complete  Up/Down history  :help"
-	if m.pickerOpen {
-		hints = "Type filter  Space select  Enter insert  Esc close"
+	hint := ansi.Truncate(":help", width, "")
+	leftWidth := max(0, width-ansi.StringWidth(hint)-1)
+	status = ansi.Truncate(status, leftWidth, "")
+	parts = append(parts, tuiDim.Render(padCells(status, width-ansi.StringWidth(hint))+hint))
+	view := strings.Join(parts, "\n")
+	if m.helpOpen {
+		return m.helpOverlay(view)
 	}
-	if m.active {
-		hints = "Ctrl-C cancel  PgUp/PgDn scroll"
-	}
-	if m.selected {
-		hints += "  Ctrl-Y / right-click copy"
-	}
-	if m.trust != nil {
-		hints = ""
-	}
-	parts = append(parts, tuiDim.Render(ansi.Truncate(hints, width, "")))
-	return strings.Join(parts, "\n")
+	return view
 }
 
 func (m model) editorView(width int) string {
 	value := []rune(m.input.Value())
 	pos := m.input.Position()
 	if len(value) == 0 {
-		return "> " + tuiDim.Render("[ 'host' ] ( 'command' )")
+		return ansi.Truncate("> "+tuiDim.Render("[ 'host' ] ( 'command' )"), width, "")
 	}
 	suggestion := ""
 	_, _, matches := completeTargetToken(m.input.Value(), pos, m.candidates)
@@ -611,6 +606,15 @@ func (m *model) insertHosts(hosts []string) {
 // Mouse selection copies only the chosen pane's displayed lines. Clipboard
 // access is explicit (Ctrl-Y or right-click), never triggered by remote terminal sequences.
 func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.helpOpen {
+		if msg.Button == tea.MouseButtonWheelUp {
+			m.helpOffset = max(0, m.helpOffset-3)
+		}
+		if msg.Button == tea.MouseButtonWheelDown {
+			m.helpOffset = min(m.helpMaxOffset(), m.helpOffset+3)
+		}
+		return m, nil
+	}
 	if m.trust != nil {
 		return m, nil
 	}

@@ -61,8 +61,9 @@ Run `nssh repl` to edit a submission directly. Press Enter to run it.
   in the command field after inserting hosts.
 - Up/Down outside the picker recalls history. The submitted syntax is stored
   exactly as entered after trimming outer whitespace.
-- Shortcut hints appear in one bottom bar and change with the active operation.
-  Use `:help` for the full shortcut list.
+- The status row keeps a `:help` hint at the bottom right. Enter `:help` to open
+  a scrollable help and command index overlay. Up/Down, Page Up/Page Down, or the
+  mouse wheel scroll the pane; Esc or Enter closes it without changing output.
 
 Older form history is converted to editable syntax when it preserves the same
 hosts and commands. Entries that cannot be converted safely show an explanation
