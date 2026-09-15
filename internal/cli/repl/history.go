@@ -119,9 +119,10 @@ func readHistory(f *os.File) ([]string, error) {
 func boundedHistory(entries []string) []string {
 	out := make([]string, 0, len(entries))
 	size := 0
+	seen := make(map[string]bool)
 	for i := len(entries) - 1; i >= 0 && len(out) < maxHistoryEntries; i-- {
 		entry := strings.TrimSpace(entries[i])
-		if entry == "" || strings.Contains(entry, "\n") {
+		if entry == "" || strings.Contains(entry, "\n") || seen[entry] {
 			continue
 		}
 		if len(entry)+1 > maxHistoryBytes {
@@ -130,6 +131,7 @@ func boundedHistory(entries []string) []string {
 		if size+len(entry)+1 > maxHistoryBytes {
 			break
 		}
+		seen[entry] = true
 		out = append(out, entry)
 		size += len(entry) + 1
 	}

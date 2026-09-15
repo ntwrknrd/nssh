@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -53,7 +54,7 @@ func TestHistoryLoadReadsBoundedTail(t *testing.T) {
 func TestBoundedHistoryDropsOldEntries(t *testing.T) {
 	entries := make([]string, maxHistoryEntries+1)
 	for i := range entries {
-		entries[i] = "command"
+		entries[i] = fmt.Sprintf("command %d", i)
 	}
 	if got := boundedHistory(entries); len(got) != maxHistoryEntries {
 		t.Fatalf("length=%d", len(got))
@@ -71,5 +72,44 @@ func TestOversizedSubmissionDoesNotEraseHistory(t *testing.T) {
 	got, err := h.load()
 	if err != nil || !reflect.DeepEqual(got, []string{"keep this"}) {
 		t.Fatalf("history=%v err=%v", got, err)
+	}
+}
+
+func TestHistoryDeduplicatesLoadedAndPersistedEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history")
+	if err := os.WriteFile(path, []byte("one\ntwo\none\nthree\ntwo\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	h := historyStore{path: path}
+	got, err := h.load()
+	if err != nil || !reflect.DeepEqual(got, []string{"one", "three", "two"}) {
+		t.Fatalf("history=%v err=%v", got, err)
+	}
+	if err := h.append(" one "); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "three\ntwo\none\n" {
+		t.Fatalf("persisted=%q err=%v", data, err)
+	}
+}
+
+func TestHistoryKeepsDifferentTargetsAndCommandText(t *testing.T) {
+	a := "[ 'a' ] ( 'show version' )"
+	b := "[ 'b' ] ( 'show version' )"
+	c := "[ 'a' ] ( 'show  version' )"
+	got := boundedHistory([]string{a, b, c, "  " + a + "  "})
+	if !reflect.DeepEqual(got, []string{b, c, a}) {
+		t.Fatal(got)
+	}
+}
+
+func TestHistoryDuplicatesDoNotConsumeEntryBudget(t *testing.T) {
+	entries := []string{"older unique"}
+	for i := 0; i < maxHistoryEntries+1; i++ {
+		entries = append(entries, "repeated")
+	}
+	if got := boundedHistory(entries); !reflect.DeepEqual(got, []string{"older unique", "repeated"}) {
+		t.Fatal(got)
 	}
 }

@@ -60,7 +60,8 @@ Run `nssh repl` to edit a submission directly. Press Enter to run it.
   and an explicit username remain intact. A new submission places the cursor
   in the command field after inserting hosts.
 - Up/Down outside the picker recalls history. The submitted syntax is stored
-  exactly as entered after trimming outer whitespace.
+  exactly as entered after trimming outer whitespace. Repeating an identical
+  submission moves it to the newest history position.
 - The status row keeps a `:help` hint at the bottom right. Enter `:help` to open
   a scrollable help and command index overlay. Up/Down, Page Up/Page Down, or the
   mouse wheel scroll the pane; Esc or Enter closes it without changing output.
