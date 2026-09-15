@@ -71,8 +71,29 @@ ordinary interactive connection before retrying.
 
 ## Keys, history, and limits
 
-Use `:help` or `nssh repl --explain` for keys and syntax. Tab completes the current target token; up/down
-recall history. Page Up/Page Down scroll output. Ctrl-C during a submission
+The Go TUI has a boxed command editor, hostname suggestions, a host picker, and
+persistent running/done/failed/pending/canceled/skipped counts. Results stay
+under their command heading. At 100 columns or wider, adjacent devices for the
+same command appear side by side; narrow terminals stack them. Long output lines
+wrap within each pane. Stderr, failures, and truncation remain visible.
+
+Use `:help` or `nssh repl --explain` for keys and syntax:
+
+- Tab completes a unique hostname or opens the picker. Space selects hosts,
+  Up/Down moves, Enter inserts selected hosts, and Escape closes the picker.
+- Outside the picker, Up/Down recalls history. Page Up/Page Down and the mouse
+  wheel scroll output.
+- Ctrl-L switches between automatic split layout and stacked full-width results.
+- Ctrl-G highlights differing displayed lines in paired panes. This is a line
+  comparison; it does not infer semantic differences in device output.
+- Drag selects displayed output lines within one device. Ctrl-Y sends up to
+  64 KiB to the terminal clipboard using OSC 52, if the terminal supports it.
+  Selection excludes line numbers and adjacent devices. Resize or new output
+  clears selection. Native terminal selection depends on the terminal's mouse
+  override shortcut.
+
+Remote terminal-control sequences are removed before TUI rendering.
+ Ctrl-C during a submission
 cancels local SSH work and waits for cleanup before returning to the prompt.
 Ctrl-C while idle, EOF, `:quit`, or `:exit` exits. Interactive command failures
 stay visible; a normal quit returns zero. Cancellation cannot undo commands
@@ -86,7 +107,7 @@ REPL instances coordinate updates. Close sessions before deleting this file to
 clear history. Piped sessions do not write it.
 
 Capture retains up to 8 MiB of stdout/stderr combined per command. The interactive
-transcript retains at most 32 MiB. Truncation or eviction is reported while SSH
+transcript retains at most 32 MiB and 4,096 display blocks. Truncation or eviction is reported while SSH
 output continues draining and the command outcome is recorded. A submission is
 limited to 2 MiB before and after suffix expansion, 1,000 unique targets,
 100 commands, and 10,000 host/command pairs.

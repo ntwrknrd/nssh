@@ -142,7 +142,7 @@ func TestREPLProcess(t *testing.T) {
 		s := f.terminal(t)
 		s.write(t, "[ 'go\t' ] ( 'one' )\r")
 		s.await(t, "stdout-good-one")
-		s.await(t, "Summary (requested order)")
+		s.await(t, "done 1")
 		s.settle()
 		s.write(t, "\x1b[A\r")
 		awaitProcess(t, func() bool { return strings.Count(f.log(), "good one\n") == 2 }, "history replay", &s.output)
