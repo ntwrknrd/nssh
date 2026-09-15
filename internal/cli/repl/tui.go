@@ -310,16 +310,17 @@ func (m model) tuiView() string {
 		title = "nssh repl  |  F5 run  Tab hosts/commands  F2 syntax  PgUp/PgDn scroll"
 	}
 	parts := []string{tuiDim.Render(ansi.Truncate(title, width, "")), m.viewport.View()}
-	if m.trust != nil {
+	switch {
+	case m.trust != nil:
 		p := m.trust.prompt
 		warning := "Verify host key"
 		if p.Changed {
 			warning = "CHANGED HOST KEY: verify replacement"
 		}
 		parts = append(parts, safeTerminalText(fmt.Sprintf("%s for %s: %s %s\n[o] accept once  [a] trust permanently  [r] reject  Ctrl-C cancel", warning, p.Host, p.KeyType, p.Fingerprint)))
-	} else if m.guided {
+	case m.guided:
 		parts = append(parts, m.composerView(width))
-	} else {
+	default:
 		if len(m.matches) > 0 {
 			parts = append(parts, m.pickerView())
 		}
