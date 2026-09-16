@@ -10,7 +10,7 @@ import (
 )
 
 func TestClearPreservesHistoryAndCtrlKPreservesDraft(t *testing.T) {
-	for _, command := range []string{":clear", "ctrl-k"} {
+	for _, command := range []string{":clear", "ctrl-k", "ctrl-l"} {
 		t.Run(command, func(t *testing.T) {
 			m := testTUI(80)
 			m.entries = []string{"saved"}
@@ -21,10 +21,14 @@ func TestClearPreservesHistoryAndCtrlKPreservesDraft(t *testing.T) {
 			m.acceptResult(tuiEvent("a", "show", "output", 0))
 			m.transcript.truncated = true
 			m.selected = true
-			m.input.SetValue(command)
+			m.controlOpen = true
+			m.controlInput.SetValue(command)
 			key := tea.KeyEnter
-			if command == "ctrl-k" {
+			if command != ":clear" {
 				key = tea.KeyCtrlK
+				if command == "ctrl-l" {
+					key = tea.KeyCtrlL
+				}
 				m.input.SetValue("draft")
 				m.active = true
 			}
@@ -58,7 +62,8 @@ func TestWipeClearsMemoryAndSavedHistory(t *testing.T) {
 	m.entries = []string{"saved"}
 	m.historyAt = 1
 	m.acceptResult(tuiEvent("a", "show", "output", 0))
-	m.input.SetValue(":wipe")
+	m.controlOpen = true
+	m.controlInput.SetValue(":wipe")
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
 	after, err := os.Stat(m.history.path)
@@ -82,7 +87,8 @@ func TestWipeFailurePreservesSession(t *testing.T) {
 	m.history = historyStore{path: t.TempDir()}
 	m.entries = []string{"saved"}
 	m.acceptResult(tuiEvent("a", "show", "output", 0))
-	m.input.SetValue(":wipe")
+	m.controlOpen = true
+	m.controlInput.SetValue(":wipe")
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
 	if len(m.entries) != 1 || len(m.blocks) == 0 || m.message == "" {

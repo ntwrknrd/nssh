@@ -1,6 +1,6 @@
 # Terminal interface and multi-host commands
 
-Run `nssh --tui`. It starts in **batch** mode. Enter `:interactive` to choose
+Run `nssh --tui`. It starts in **batch** mode. Open controls with Ctrl-P and enter `:interactive` to choose
 devices and open live SSH panes, or resume connected tabs.
 The old `repl` subcommand is removed: `nssh repl` addresses a host named repl.
 
@@ -15,7 +15,7 @@ One bar contains the complete request:
 [ 'operator@edge1', '2001:db8::10' ] ( 'show version' )
 ```
 
-Enter runs a filled request. Up/Down or Ctrl-P/N recalls the whole request,
+Enter runs a filled request. Up/Down recalls the whole request,
 including its devices, so either part can be edited before running again.
 Identical requests move to the newest history position. History uses the existing
 private XDG state file `nssh/repl_history`, bounded to 1000 entries or 1 MiB.
@@ -58,12 +58,12 @@ or must retain shell state.
 Results start with `OK:  [user@device] ('command')`. The status heading stays
 pinned above its visible output and can be selected with the output. Results
 appear beside each other only when both fit without wrapping; otherwise they
-stack. Ctrl-L toggles stacked results, and Ctrl-G compares displayed lines in
+stack. The `:stacked` overlay command toggles stacked results, and Ctrl-G compares displayed lines in
 paired results. Comparison does not infer semantic differences.
 
 ## Interactive sessions
 
-Enter `:interactive`, select devices, accept the picker, then press Enter to open
+Open controls with Ctrl-P and enter `:interactive`, select devices, accept the picker, then press Enter to open
 the sessions. One live terminal pane appears per device. The group stays fixed
 until it closes. EOS, Junos, and Linux retain their native shells and prompts:
 nssh does not replace the shell, disable pagination, parse prompts, or run
@@ -80,8 +80,8 @@ session pauses broadcast and never reconnects or replays input.
 
 ### Local controls and tabs
 
-Press Ctrl-K to open the local control overlay. While it is open, typing stays
-local. Esc or Ctrl-K returns to direct input. These commands run in the overlay:
+Press Ctrl-P to open the local control overlay. While it is open, typing stays
+local. Esc or Ctrl-P returns to direct input. These commands run in the overlay:
 
 - `:new` selects devices and opens a new session tab.
 - `:tab N` switches tabs; clicking a tab also switches it.
@@ -95,7 +95,7 @@ local. Esc or Ctrl-K returns to direct input. These commands run in the overlay:
 - `:quit` closes every session and exits.
 
 Only the active tab receives keyboard input. Background tabs keep receiving
-output. From batch, `:interactive` resumes the tabs. Remote shells own interactive
+output. From batch, use Ctrl-P then `:interactive` to resume the tabs. Remote shells own interactive
 history; nssh saves only complete batch requests in its history file.
 
 The mouse wheel scrolls its pane. Drag selects the device header and output lines from one pane. The header
@@ -112,9 +112,9 @@ full application and platform coverage still requires representative testing.
 
 ## Shared controls and plain input
 
-In batch, `:help` opens a scrollable overlay. Interactive help is available through
-Ctrl-K. Esc or Enter closes help. Batch Ctrl-K or `:clear` clears scrollback;
-`:wipe` also erases saved batch history.
+Ctrl-P opens local controls in either mode; `:help` opens the help index from
+there. Esc or Enter closes help. Ctrl-K and Ctrl-L clear scrollback in either
+mode. The overlay command `:wipe` also erases saved batch history.
 Batch output supports the same drag and clipboard controls as interactive panes,
 including selectable status headings. In batch, Ctrl-C cancels active work and
 waits for local cleanup, or exits when idle. Closing or canceling local SSH cannot

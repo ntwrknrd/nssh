@@ -59,8 +59,8 @@ func TestTerminalBatchPreservesTabsAndHistory(t *testing.T) {
 	m := terminalModel(t, 100)
 	m.entries = []string{"[ 'first' ] ( 'one' )"}
 	m.controlOpen = true
-	m.input.SetValue(":batch")
-	m, _, _ = m.updateInteractive(tea.KeyMsg{Type: tea.KeyEnter})
+	m.controlInput.SetValue(":batch")
+	m, _, _ = m.updateTerminalControl(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.interactive || len(m.panes) != 2 || len(m.tabs) != 1 || len(m.entries) != 1 {
 		t.Fatal("lost sessions or history")
 	}
@@ -170,16 +170,16 @@ func TestBackgroundTabOutputAndCloseAreIsolated(t *testing.T) {
 }
 func TestControlOverlayCapturesKeysUntilEscape(t *testing.T) {
 	m := terminalModel(t, 100)
-	m, _, _ = m.updateInteractive(tea.KeyMsg{Type: tea.KeyCtrlK})
-	m, _, _ = m.updateInteractive(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("local")})
-	if !m.controlOpen || m.input.Value() != "local" || strings.Contains(m.message, "Input not sent") {
+	m = testUpdate(m, tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = testUpdate(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("local")})
+	if !m.controlOpen || m.controlInput.Value() != "local" || strings.Contains(m.message, "Input not sent") {
 		t.Fatal("control input leaked")
 	}
-	m, _, _ = m.updateInteractive(tea.KeyMsg{Type: tea.KeyEsc})
-	if m.controlOpen || m.input.Value() != "" {
+	m = testUpdate(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.controlOpen || m.controlInput.Value() != "" {
 		t.Fatal("control draft retained")
 	}
-	m, _, _ = m.updateInteractive(tea.KeyMsg{Type: tea.KeySpace})
+	m = testUpdate(m, tea.KeyMsg{Type: tea.KeySpace})
 	if !strings.Contains(m.message, "Input not sent") {
 		t.Fatal("space did not reach terminal path")
 	}
@@ -204,5 +204,36 @@ func TestTerminalHeaderSelectionSurvivesDisconnect(t *testing.T) {
 	}
 	if m.panes[0].selectionText != "[alice@eos]\noutput" {
 		t.Fatal("disconnect changed header copy")
+	}
+}
+
+func testUpdate(m model, msg tea.Msg) model { next, _ := m.Update(msg); return next.(model) }
+
+func TestClearKeysAndControlDraftAcrossModes(t *testing.T) {
+	for _, interactive := range []bool{false, true} {
+		m := terminalModel(t, 100)
+		m.interactive = interactive
+		m.input.SetValue("[ 'draft' ] ( 'show' )")
+		m.entries = []string{"saved"}
+		m = testUpdate(m, tea.KeyMsg{Type: tea.KeyCtrlP})
+		m = testUpdate(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("help")})
+		if !m.controlOpen || m.controlInput.Value() != "help" || m.input.Value() != "[ 'draft' ] ( 'show' )" {
+			t.Fatal("overlay damaged draft")
+		}
+		m = testUpdate(m, tea.KeyMsg{Type: tea.KeyCtrlP})
+		for _, key := range []tea.KeyType{tea.KeyCtrlK, tea.KeyCtrlL} {
+			_, _ = m.panes[0].terminal.Write([]byte(strings.Repeat("line\r\n", 100)))
+			m.acceptResult(tuiEvent("a", "show", "output", 0))
+			m = testUpdate(m, tea.KeyMsg{Type: key})
+			if interactive && m.panes[0].terminal.ScrollbackLen() != 0 {
+				t.Fatal("terminal scrollback retained")
+			}
+			if !interactive && len(m.blocks) != 0 {
+				t.Fatal("batch scrollback retained")
+			}
+			if m.controlOpen || m.input.Value() != "[ 'draft' ] ( 'show' )" || len(m.entries) != 1 {
+				t.Fatal("clear changed input/history")
+			}
+		}
 	}
 }

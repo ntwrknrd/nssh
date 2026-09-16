@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/charmbracelet/bubbles/textinput"
 	"io"
 	"os"
 	"strings"
@@ -21,6 +22,7 @@ import (
 )
 
 type interactiveState struct {
+	controlInput textinput.Model
 	terminalGroup
 	interactive, choosing, controlOpen bool
 	batchDraft                         string
@@ -291,7 +293,7 @@ func (m *model) sendInteractive(data []byte) {
 		return
 	}
 	if m.target < 0 && m.broadcastPaused {
-		m.message = "Broadcast paused; Ctrl+K opens controls"
+		m.message = "Broadcast paused; Ctrl+P opens controls"
 		return
 	}
 	targets := m.panes
@@ -438,20 +440,6 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 				return m, nil, true
 			}
 			if key.Type == tea.KeyEnter {
-				switch strings.TrimSpace(m.input.Value()) {
-				case ":help":
-					m.helpOpen = true
-					m.helpOffset = 0
-					m.input.SetValue("[ '' ] ( '' )")
-					m.input.SetCursor(3)
-					return m, nil, true
-				case ":quit", ":exit":
-					m.closePanes()
-					return m, tea.Quit, true
-				case ":batch", ":mode batch":
-					m.returnToBatch()
-					return m, nil, true
-				}
 				devices, _ := m.formFields()
 				if len(devices) == 0 {
 					m.message = "Choose devices with Tab"
@@ -473,15 +461,6 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 		}
 		return m, nil, false
 	}
-	if m.controlOpen {
-		return m.updateTerminalControl(msg)
-	}
-	if key, ok := msg.(tea.KeyMsg); ok && key.Type == tea.KeyCtrlK {
-		m.controlOpen = true
-		m.input.Focus()
-		m.input.SetValue("")
-		return m, nil, true
-	}
 	if mouse, ok := msg.(tea.MouseMsg); ok {
 		index := m.paneAt(mouse.X, mouse.Y)
 		if mouse.Y == 0 && mouse.Button == tea.MouseButtonLeft && mouse.Action == tea.MouseActionPress {
@@ -499,7 +478,7 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 				if mouse.Action == tea.MouseActionPress {
 					if row == -2 {
 						m.target = index
-						m.message = "Focused one device; Ctrl+K, :all restores broadcast"
+						m.message = "Focused one device; Ctrl+P, :all restores broadcast"
 					}
 					for _, other := range m.panes {
 						other.selected = false
@@ -723,7 +702,7 @@ func (m model) interactiveView() string {
 	if len(m.panes) > 4 {
 		status += fmt.Sprintf(" | page %d/%d", m.page+1, (len(m.panes)+3)/4)
 	}
-	status = padCells(ansi.Truncate(status, max(1, width-17), ""), width-16) + "Ctrl+K: controls"
+	status = padCells(ansi.Truncate(status, max(1, width-17), ""), width-16) + "Ctrl+P: controls"
 	view := body + "\n" + status
 	if m.controlOpen {
 		view = m.terminalControlView(view)

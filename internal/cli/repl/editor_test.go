@@ -40,7 +40,7 @@ func TestEditorCannotDeleteScaffold(t *testing.T) {
 	}
 }
 
-func TestEditorColonEntersControlModeAfterDeletingHost(t *testing.T) {
+func TestEditorColonRemainsFieldTextAfterDeletingHost(t *testing.T) {
 	m := testTUI(120)
 	m.input.Focus()
 	m.input.SetValue("[ 'edge' ] ( '' )")
@@ -49,12 +49,12 @@ func TestEditorColonEntersControlModeAfterDeletingHost(t *testing.T) {
 	m = next.(model)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":help")})
 	m = next.(model)
-	if m.input.Value() != ":help" {
+	if m.input.Value() != "[ ':help' ] ( '' )" {
 		t.Fatal(m.input.Value())
 	}
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	m = next.(model)
-	if m.input.Value() != ":hel" {
+	if m.input.Value() != "[ ':hel' ] ( '' )" {
 		t.Fatal("control mode deletion was protected")
 	}
 }

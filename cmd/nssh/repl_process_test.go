@@ -140,14 +140,14 @@ func TestREPLProcess(t *testing.T) {
 	t.Run("PTY help overlay closes without exiting", func(t *testing.T) {
 		f := newREPLFixture(t, binary)
 		s := f.terminal(t)
-		s.write(t, ":help\r")
+		s.write(t, "\x10:help\r")
 		s.await(t, "Help / command index")
 		s.write(t, "\x1b")
 		s.settle()
 		if f.log() != "" {
 			t.Fatal("help executed SSH")
 		}
-		s.write(t, ":quit\r")
+		s.write(t, "\x10:quit\r")
 		s.wait(t, 0)
 	})
 	t.Run("PTY picker inserts before Enter executes", func(t *testing.T) {
@@ -186,7 +186,7 @@ func TestREPLProcess(t *testing.T) {
 		}
 		s.write(t, "\x1b[5~\x1b[6~")
 		s.settle()
-		s.write(t, ":quit\r")
+		s.write(t, "\x10:quit\r")
 		s.wait(t, 0)
 		history, err := os.ReadFile(filepath.Join(f.dir, "state", "nssh", "repl_history"))
 		if err != nil {
@@ -217,7 +217,7 @@ func TestREPLProcess(t *testing.T) {
 	t.Run("PTY interactive broadcasts and focuses persistent terminals", func(t *testing.T) {
 		f := newREPLFixture(t, binary)
 		s := f.terminal(t)
-		s.write(t, ":interactive\r")
+		s.write(t, "\x10:interactive\r")
 		s.await(t, "Choose devices")
 		// Select both devices across filters, then open the fixed session group.
 		s.write(t, "good \x15bad \r\r")
@@ -236,7 +236,7 @@ func TestREPLProcess(t *testing.T) {
 		s.write(t, "show value\r")
 		s.await(t, "value=kept")
 		s.settle()
-		s.write(t, "\x0b:target 1\r")
+		s.write(t, "\x10:target 1\r")
 		s.settle()
 		s.write(t, "confirm\r")
 		s.await(t, "Proceed?")
@@ -257,7 +257,7 @@ func TestREPLProcess(t *testing.T) {
 		s.write(t, " q")
 		s.await(t, "pager bytes=2071")
 		s.settle()
-		s.write(t, "\x0b:new\r")
+		s.write(t, "\x10:new\r")
 		s.await(t, "Choose devices")
 		s.settle()
 		s.write(t, "good \r\r")
@@ -269,23 +269,23 @@ func TestREPLProcess(t *testing.T) {
 		s.write(t, "show value\r")
 		s.await(t, "value=unset")
 		s.settle()
-		s.write(t, "\x0b:tab 1\r")
+		s.write(t, "\x10:tab 1\r")
 		s.settle()
 		s.write(t, "show value\r")
 		awaitProcess(t, func() bool { return strings.Count(f.log(), " show value") >= 4 }, "original tab resumed", &s.output)
 		s.settle()
-		s.write(t, "\x0b\x1b")
+		s.write(t, "\x10\x1b")
 		s.settle()
 		s.write(t, "show value\r")
 		s.settle()
-		s.write(t, "\x0b")
+		s.write(t, "\x10")
 		s.settle()
 		s.write(t, ":batch\r")
 		s.settle()
 		s.write(t, "[ 'good' ] ( 'batch-only' )\r")
 		s.await(t, "stdout-good-batch-only")
 		s.settle()
-		s.write(t, ":quit\r")
+		s.write(t, "\x10:quit\r")
 		s.wait(t, 0)
 		history, _ := os.ReadFile(filepath.Join(f.dir, "state", "nssh", "repl_history"))
 		if !strings.Contains(string(history), "batch-only") || strings.Contains(string(history), "configure terminal") || strings.Contains(string(history), "yes") {
@@ -295,7 +295,7 @@ func TestREPLProcess(t *testing.T) {
 	t.Run("PTY interactive trust approval unblocks second terminal", func(t *testing.T) {
 		f := newREPLFixture(t, binary)
 		s := f.terminal(t)
-		s.write(t, ":interactive\r")
+		s.write(t, "\x10:interactive\r")
 		s.await(t, "Choose devices")
 		s.write(t, "good \x15trust \r\r")
 		s.await(t, "Verify host key")
@@ -312,7 +312,7 @@ func TestREPLProcess(t *testing.T) {
 		awaitProcess(t, func() bool {
 			return strings.Contains(f.log(), "good show version") && strings.Contains(f.log(), "trust show version")
 		}, "broadcast after host-key approval", &s.output)
-		s.write(t, "\x0b:quit\r")
+		s.write(t, "\x10:quit\r")
 		s.wait(t, 0)
 		if _, err := os.Stat(filepath.Join(f.dir, "home", ".ssh", "known_hosts")); !os.IsNotExist(err) {
 			t.Fatal("accept once persisted host key")
@@ -343,7 +343,7 @@ func TestREPLProcess(t *testing.T) {
 		s.write(t, "o")
 		s.await(t, "stdout-trust-one")
 		s.settle()
-		s.write(t, ":exit\r")
+		s.write(t, "\x10:exit\r")
 		s.wait(t, 0)
 		if _, err := os.Stat(filepath.Join(f.dir, "home", ".ssh", "known_hosts")); !os.IsNotExist(err) {
 			t.Fatalf("accept-once persisted trust: %v", err)
@@ -538,7 +538,7 @@ func (f *replFixture) terminal(t *testing.T) *replTerminal {
 	s.file = file
 	go func() { _, _ = io.Copy(&s.output, file); close(s.readDone) }()
 	t.Cleanup(func() { _ = file.Close(); <-s.readDone })
-	s.await(t, ":help")
+	s.await(t, "Ctrl+P: controls")
 	return s
 }
 func (s *replTerminal) write(t *testing.T, text string) {

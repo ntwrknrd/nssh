@@ -67,7 +67,7 @@ Batch (default):
   [ 'irn-border-sw(1,2)' ] ( 'show env power' )
   [ 'select:provider:netbox' ] ( 'show version' )
 
-One request bar contains both devices and commands. Up/Down or Ctrl-P/N recalls
+One request bar contains both devices and commands. Up/Down recalls
 complete requests, including their devices. Enter runs a filled request. If its
 command is empty, Enter moves into the command quotes. Shift-Tab moves between
 host and command fields; Alt-Enter adds a quoted value. Deletion preserves the
@@ -80,12 +80,13 @@ on that host; commands are never retried. Each command uses a separate execution
 with remote stdin at EOF. History saves devices and commands together, deduplicates
 identical requests, and restores the whole request for editing.
 
-Interactive:
+Local controls (Ctrl-P in either mode; colon commands only here):
   :interactive  Choose devices or resume the connected session tabs
 
 Keys go directly to the displayed targets, including Space, Enter, q, Tab,
 arrows and Ctrl-C/Ctrl-D. Remote shells own their history and line editing.
-Ctrl-K opens local controls and pauses remote input. Esc returns to sessions.
+Ctrl-P opens local controls and pauses remote input. Ctrl-K and Ctrl-L clear
+scrollback in both modes. Esc returns to sessions.
 Within local controls:
   :new          Choose devices for a new tab
   :tab N        Switch tabs (or click a tab)
@@ -106,16 +107,16 @@ its confirmation or handling different device states. A closed session pauses
 broadcast; input still requires every targeted session to be open. No input is
 replayed and closed sessions do not reconnect automatically.
 
-Common controls:
+Other overlay controls:
   :help         Open this index; Esc/Enter closes, arrows/PgUp/PgDn scroll
-  :clear        Clear scrollback (Ctrl-K in batch); keep history
+  :clear        Clear scrollback (Ctrl-K or Ctrl-L in either mode)
   :wipe         Clear batch scrollback and saved batch history
   :quit, :exit  Exit and close all local SSH terminals
 
 The mouse wheel scrolls output. Batch also supports PgUp/PgDn. Drag selects
 lines; right-click copies then clears selection. Batch Ctrl-Y also copies. Clipboard
 copies are limited to 64 KiB. In batch, status headings are selectable and stay
-pinned above their output. Ctrl-L toggles stacked batch results; Ctrl-G toggles
+pinned above their output. The :stacked overlay command toggles stacked batch results; Ctrl-G toggles
 line comparison. New output or resizing clears selections.
 
 Interactive supports eight tabs of 1-16 devices each, with up to four visible per page and 1000
@@ -517,6 +518,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.trust == nil && !m.helpOpen {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.Type {
+			case tea.KeyCtrlK, tea.KeyCtrlL:
+				m.clearDisplay()
+				return m, nil
+			case tea.KeyCtrlP:
+				m.controlOpen = !m.controlOpen
+				if m.controlOpen {
+					m.controlInput = textinput.New()
+					m.controlInput.Focus()
+				}
+				return m, nil
+			}
+		}
+		if m.controlOpen {
+			switch msg.(type) {
+			case tea.KeyMsg, tea.MouseMsg:
+				next, cmd, _ := m.updateTerminalControl(msg)
+				return next, cmd
+			}
+		}
+	}
 	if next, cmd, handled := m.updateInteractive(msg); handled {
 		return next, cmd
 	}
@@ -609,18 +633,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
-		if v.Type == tea.KeyCtrlK {
-			m.clearScrollback()
-			return m, nil
-		}
 		if v.Type == tea.KeyCtrlG {
 			m.diff = !m.diff
-			m.selected = false
-			m.refreshLayout()
-			return m, nil
-		}
-		if v.Type == tea.KeyCtrlL {
-			m.stacked = !m.stacked
 			m.selected = false
 			m.refreshLayout()
 			return m, nil
@@ -655,7 +669,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport, cmd = m.viewport.Update(v)
 			return m, cmd
 		}
-		if !m.active && (v.Type == tea.KeyUp || v.Type == tea.KeyCtrlP) && len(m.entries) > 0 {
+		if !m.active && v.Type == tea.KeyUp && len(m.entries) > 0 {
 			if m.historyAt > 0 {
 				m.historyAt--
 			}
@@ -680,48 +694,6 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.focusForm(true)
 					return m, nil
 				}
-			}
-			if line == ":interactive" || line == ":mode interactive" {
-				m.batchDraft = m.input.Value()
-				if strings.HasPrefix(m.batchDraft, ":") {
-					m.batchDraft = ""
-				}
-				if m.group != 0 || len(m.tabs) > 0 {
-					m.saveTab()
-					m.switchTab(len(m.tabs) - 1)
-				} else {
-					m.chooseTab()
-				}
-				return m, nil
-			}
-			if line == ":batch" || line == ":mode batch" {
-				m.input.SetValue("")
-				return m, nil
-			}
-			if line == ":help" {
-				m.helpOpen = true
-				m.helpOffset = 0
-				m.resetInput()
-				return m, nil
-			}
-			if line == ":clear" || line == ":wipe" {
-				if line == ":wipe" {
-					if err := m.history.clear(); err != nil {
-						m.message = "history wipe failed: " + displayLabel(err.Error())
-						return m, nil
-					}
-					m.entries = nil
-					m.historyAt = 0
-				}
-				m.resetInput()
-				m.clearScrollback()
-				if line == ":wipe" {
-					m.message = "scrollback and history cleared"
-				}
-				return m, nil
-			}
-			if line == ":quit" || line == ":exit" {
-				return m, tea.Quit
 			}
 			if line == "" {
 				return m, nil
@@ -748,18 +720,15 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if key, ok := msg.(tea.KeyMsg); ok {
-		if key.Type == tea.KeyRunes && len(key.Runes) > 0 && key.Runes[0] == ':' && (emptyEditor(m.input.Value()) || m.emptyCommandField()) {
-			m.input.SetValue("")
-		}
 		if cmd, handled := m.deleteEditorField(key); handled {
 			return m, cmd
 		}
 	}
 	// Ordinary typing starts in the first quoted device. Explicit REPL syntax
-	// and internal commands keep their original input path, including paste.
+	// keeps its original input path, including paste.
 	if key, ok := msg.(tea.KeyMsg); ok && key.Type == tea.KeyRunes && len(key.Runes) > 0 && m.input.Value() == "" {
 		first := key.Runes[0]
-		if first != ':' && first != '[' && !unicode.IsSpace(first) {
+		if first != '[' && !unicode.IsSpace(first) {
 			m.input.SetValue("[ '' ] ( '' )")
 			m.input.SetCursor(3)
 		}

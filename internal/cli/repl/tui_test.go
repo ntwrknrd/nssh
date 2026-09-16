@@ -266,7 +266,7 @@ func TestPromptPickerFiltersAndPreservesSelections(t *testing.T) {
 		t.Fatal("cursor not in command field")
 	}
 	view := ansi.Strip(m.View())
-	if strings.Contains(strings.Split(view, "\n")[0], "Tab") || strings.Contains(view, "Enter run") || !strings.HasSuffix(view, ":help") || strings.Contains(view, "F5") {
+	if strings.Contains(strings.Split(view, "\n")[0], "Tab") || strings.Contains(view, "Enter run") || !strings.HasSuffix(view, "Ctrl+P: controls") || strings.Contains(view, "F5") {
 		t.Fatal(view)
 	}
 }

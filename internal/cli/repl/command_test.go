@@ -213,7 +213,11 @@ func TestTypingPreservesInternalCommandsAndExplicitSyntax(t *testing.T) {
 		m.input.Focus()
 		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(input)})
 		m = next.(model)
-		if m.input.Value() != input {
+		expected := input
+		if strings.HasPrefix(input, ":") {
+			expected = "[ '" + input + "' ] ( '' )"
+		}
+		if m.input.Value() != expected {
 			t.Fatalf("input %q became %q", input, m.input.Value())
 		}
 	}

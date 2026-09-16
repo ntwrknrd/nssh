@@ -409,11 +409,14 @@ func (m model) tuiView() string {
 	if m.message != "" {
 		status = m.message + " | " + status
 	}
-	hint := ansi.Truncate(":help", width, "")
+	hint := ansi.Truncate("Ctrl+P: controls", width, "")
 	leftWidth := max(0, width-ansi.StringWidth(hint)-1)
 	status = ansi.Truncate(status, leftWidth, "")
 	parts = append(parts, padCells(status, width-ansi.StringWidth(hint))+hint)
 	view := strings.Join(parts, "\n")
+	if m.controlOpen {
+		view = m.terminalControlView(view)
+	}
 	if m.helpOpen {
 		return m.helpOverlay(view)
 	}
