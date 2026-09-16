@@ -30,16 +30,19 @@ type interactiveState struct {
 	nextGroup                          int
 }
 type terminalGroup struct {
-	failure         string
-	panes           []*terminalPane
-	group           int
-	groupCancel     context.CancelFunc
-	target          int // -1 broadcasts; otherwise one pane
-	page            int
-	broadcastPaused bool
+	failure           string
+	groupContext      context.Context
+	independentScroll bool
+	panes             []*terminalPane
+	group             int
+	groupCancel       context.CancelFunc
+	target            int // -1 broadcasts; otherwise one pane
+	page              int
+	broadcastPaused   bool
 }
 type terminalPane struct {
 	name                         string
+	destination                  core.ResolvedTarget
 	terminal                     *vt.Emulator
 	wire                         *terminalWire
 	state                        string
@@ -179,9 +182,10 @@ func (m *model) beginInteractive(targets []core.Target) {
 }
 func (m *model) startTerminals(targets []core.ResolvedTarget) {
 	m.message = "Opening SSH terminals; wait for each device's prompt before sending input"
-	group, owner := m.group, m.owner
+	owner := m.owner
 	// Each tab owns its connections independently of the visible mode.
 	ctx, cancel := context.WithCancel(owner.ctx)
+	m.groupContext = ctx
 	old := m.groupCancel
 	m.groupCancel = func() {
 		cancel()
@@ -193,7 +197,7 @@ func (m *model) startTerminals(targets []core.ResolvedTarget) {
 		emu := newTerminalEmulator(80, 24)
 		emu.SetScrollbackSize(1000)
 		wire := &terminalWire{}
-		p := &terminalPane{name: target.Identity, terminal: emu, wire: wire, state: "opening"}
+		p := &terminalPane{destination: target, name: target.Identity, terminal: emu, wire: wire, state: "opening"}
 		m.panes = append(m.panes, p)
 		go func() {
 			buf := make([]byte, 4096)
@@ -209,9 +213,19 @@ func (m *model) startTerminals(targets []core.ResolvedTarget) {
 		}()
 	}
 	m.resizePanes()
-	sem := make(chan struct{}, max(1, min(m.concurrency, len(targets))))
-	for index, target := range targets {
+	indices := make([]int, len(targets))
+	for i := range indices {
+		indices[i] = i
+	}
+	m.connectTerminals(ctx, indices)
+}
+
+func (m *model) connectTerminals(ctx context.Context, indices []int) {
+	group, owner := m.group, m.owner
+	sem := make(chan struct{}, max(1, min(m.concurrency, len(indices))))
+	for _, index := range indices {
 		p := m.panes[index]
+		target := p.destination
 		w, h := p.terminal.Width(), p.terminal.Height()
 		owner.workers.Add(1)
 		go func() {
@@ -278,6 +292,9 @@ func (m model) broadcastLabel() string {
 	}
 	if open == 0 {
 		return "Connecting..."
+	}
+	if m.target >= 0 && m.target < len(m.panes) && strings.HasPrefix(m.panes[m.target].state, "closed") {
+		return fmt.Sprintf("Pane %d disconnected", m.target+1)
 	}
 	if m.broadcastPaused && m.target < 0 {
 		return "Broadcast paused"
@@ -497,11 +514,9 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 					p.captureSelection()
 				}
 			case tea.MouseButtonWheelUp:
-				p.offset = min(p.terminal.ScrollbackLen(), p.offset+3)
-				p.selected = false
+				m.scrollPanes(index, 3)
 			case tea.MouseButtonWheelDown:
-				p.offset = max(0, p.offset-3)
-				p.selected = false
+				m.scrollPanes(index, -3)
 			}
 		}
 		if mouse.Action == tea.MouseActionRelease {
@@ -699,6 +714,11 @@ func (m model) interactiveView() string {
 			status += " | " + m.message
 		}
 	}
+	if m.independentScroll {
+		status += " | scroll: independent"
+	} else {
+		status += " | scroll: linked"
+	}
 	if len(m.panes) > 4 {
 		status += fmt.Sprintf(" | page %d/%d", m.page+1, (len(m.panes)+3)/4)
 	}
@@ -752,3 +772,44 @@ func newTerminalEmulator(w, h int) *vt.Emulator {
 }
 
 func (p *terminalPane) heading() string { return "[" + displayLabel(p.name) + "]" }
+
+// Reconnection is explicit and limited to closed panes. Preserve their output,
+// but start a fresh native SSH session without replaying terminal input.
+func (m *model) reconnectTerminals(index int) {
+	var indices []int
+	for i, p := range m.panes {
+		if index >= 0 && index != i {
+			continue
+		}
+		if !strings.HasPrefix(p.state, "closed") {
+			continue
+		}
+		p.state = "opening"
+		p.wire.mu.Lock()
+		p.wire.shell = nil
+		p.wire.pending = nil
+		p.wire.mu.Unlock()
+		p.selected, p.selecting = false, false
+		p.selectionText = ""
+		p.offset = 0
+		_, _ = p.terminal.Write([]byte("\r\n--- Reconnecting: new SSH session ---\r\n"))
+		indices = append(indices, i)
+	}
+	if len(indices) == 0 {
+		m.message = "No disconnected panes to reconnect"
+		return
+	}
+	m.broadcastPaused = true
+	m.message = "Reconnecting; wait for prompts, then use :all to resume broadcast"
+	m.connectTerminals(m.groupContext, indices)
+}
+func (m *model) scrollPanes(index, delta int) {
+	for i, p := range m.panes {
+		if m.independentScroll && i != index {
+			continue
+		}
+		p.offset = max(0, min(p.terminal.ScrollbackLen(), p.offset+delta))
+		p.selected, p.selecting = false, false
+		p.selectionText = ""
+	}
+}

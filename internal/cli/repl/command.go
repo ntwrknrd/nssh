@@ -89,8 +89,10 @@ Ctrl-P opens local controls and pauses remote input. Ctrl-K and Ctrl-L clear
 scrollback in both modes. Esc returns to sessions.
 Within local controls:
   :new          Choose devices for a new tab
-  :tab N        Switch tabs (or click a tab)
+  :tab N        Switch tabs (or click a tab; Alt-Left/Right cycles)
   :close        Disconnect this tab
+  :reconnect    Reconnect closed panes; :reconnect N reconnects only pane N
+  :scroll-lock  Toggle linked scrolling (on by default for each tab)
   :batch        Return to batch, keeping tabs connected
   :target N     Send input only to pane N (or click its top border)
   :all          Resume broadcasting to every pane in this tab
@@ -105,7 +107,8 @@ and output. Each pane preserves its remote shell, CLI state and pagination.
 Wait for each device's prompt before sending input. Focus a pane before answering
 its confirmation or handling different device states. A closed session pauses
 broadcast; input still requires every targeted session to be open. No input is
-replayed and closed sessions do not reconnect automatically.
+replayed and closed sessions do not reconnect automatically. Explicit reconnect
+starts fresh sessions and retains output; use :all to resume paused broadcast.
 
 Other overlay controls:
   :help         Open this index; Esc/Enter closes, arrows/PgUp/PgDn scroll
@@ -504,6 +507,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	if updated, ok := next.(model); ok && (updated.input.Value() != m.input.Value() || updated.input.Position() != m.input.Position()) {
 		if key, ok := msg.(tea.KeyMsg); ok {
+
 			switch key.Type {
 			case tea.KeyLeft, tea.KeyRight, tea.KeyHome, tea.KeyEnd, tea.KeyCtrlA, tea.KeyCtrlE, tea.KeyUp, tea.KeyDown, tea.KeyCtrlP, tea.KeyCtrlN, tea.KeyTab, tea.KeyShiftTab:
 				if !updated.interactive {
@@ -520,6 +524,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.trust == nil && !m.helpOpen {
 		if key, ok := msg.(tea.KeyMsg); ok {
+			if m.interactive && !m.choosing && key.Alt && (key.Type == tea.KeyLeft || key.Type == tea.KeyRight) {
+				delta := 1
+				if key.Type == tea.KeyLeft {
+					delta = -1
+				}
+				m.cycleTab(delta)
+				return m, nil
+			}
 			switch key.Type {
 			case tea.KeyCtrlK, tea.KeyCtrlL:
 				m.clearDisplay()

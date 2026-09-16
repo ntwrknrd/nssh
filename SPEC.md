@@ -116,7 +116,8 @@ preserve.
   operators can focus one pane. It preserves remote shell and CLI state without
   replacing the shell, interpreting prompts, or injecting commands.
 - Closing the group or TUI closes its local SSH terminals. Session loss pauses
-  broadcasting; there is no reconnect or replay. Operators handle confirmations
+  broadcasting; there is no automatic reconnect or input replay. Explicit
+  reconnection opens fresh sessions only for disconnected panes. Operators handle confirmations
   and differing device state by focusing individual panes. Each tab owns a device
   group and remains connected in the background or in batch mode. Only the active
   tab receives keyboard input. Ctrl-P captures local controls until dismissed.

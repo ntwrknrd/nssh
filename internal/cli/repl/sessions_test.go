@@ -237,3 +237,43 @@ func TestClearKeysAndControlDraftAcrossModes(t *testing.T) {
 		}
 	}
 }
+
+func TestPaneScrollLockDefaultsOnAndCanBeDisabled(t *testing.T) {
+	m := terminalModel(t, 160)
+	for _, p := range m.panes {
+		_, _ = p.terminal.Write([]byte(strings.Repeat("line\r\n", 80)))
+	}
+	m = testUpdate(m, tea.MouseMsg{X: 2, Y: 3, Button: tea.MouseButtonWheelUp})
+	if m.panes[0].offset != 3 || m.panes[1].offset != 3 {
+		t.Fatal("scroll did not move together")
+	}
+	m.independentScroll = true
+	m = testUpdate(m, tea.MouseMsg{X: 2, Y: 3, Button: tea.MouseButtonWheelUp})
+	if m.panes[0].offset != 6 || m.panes[1].offset != 3 {
+		t.Fatal("independent scroll affected another pane")
+	}
+}
+func TestTabShortcutsCycleAndWrap(t *testing.T) {
+	m := terminalModel(t, 160)
+	m.saveTab()
+	m.tabs = append(m.tabs, terminalGroup{group: 2, target: -1, independentScroll: true})
+	m = testUpdate(m, tea.KeyMsg{Type: tea.KeyRight, Alt: true})
+	if m.group != 2 || !m.independentScroll {
+		t.Fatal("next tab not selected")
+	}
+	m = testUpdate(m, tea.KeyMsg{Type: tea.KeyRight, Alt: true})
+	if m.group != 1 || m.independentScroll {
+		t.Fatal("next did not wrap or changed tab preference")
+	}
+	m = testUpdate(m, tea.KeyMsg{Type: tea.KeyLeft, Alt: true})
+	if m.group != 2 {
+		t.Fatal("previous did not wrap")
+	}
+}
+func TestReconnectSkipsOpenPanes(t *testing.T) {
+	m := terminalModel(t, 160)
+	m.reconnectTerminals(-1)
+	if m.message != "No disconnected panes to reconnect" || m.panes[0].state != "open" {
+		t.Fatal("reconnect touched live sessions")
+	}
+}

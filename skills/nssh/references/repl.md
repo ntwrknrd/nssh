@@ -76,7 +76,8 @@ Each terminal keeps its working directory, variables, CLI hierarchy, and output.
 
 Wait for each device's prompt before sending input. Click a pane top border to target
 only that device. Output selection does not change targets. A disconnected
-session pauses broadcast and never reconnects or replays input.
+session pauses broadcast. Reconnection requires an explicit control command,
+and input is never replayed.
 
 ### Local controls and tabs
 
@@ -84,8 +85,14 @@ Press Ctrl-P to open the local control overlay. While it is open, typing stays
 local. Esc or Ctrl-P returns to direct input. These commands run in the overlay:
 
 - `:new` selects devices and opens a new session tab.
-- `:tab N` switches tabs; clicking a tab also switches it.
+- `:tab N` switches tabs; clicking a tab also switches it. Alt-Left and Alt-Right
+  cycle tabs without opening controls, wrapping at either end.
 - `:close` disconnects the current tab's devices.
+- `:reconnect` reconnects disconnected panes in the current tab. `:reconnect N`
+  reconnects only pane N. Live sessions stay open; old output remains visible.
+  Each reconnection starts a fresh SSH session. Wait for prompts, then use
+  `:all` to resume paused broadcast.
+- `:scroll-lock` toggles linked scrolling for the current tab. It starts enabled.
 - `:target N` focuses one device; `:all` restores broadcast to this tab.
 - `:next` and `:prev` change pages when more than four panes are open.
 - `:clear` clears this tab's scrollback; the current screen stays visible.
@@ -98,7 +105,9 @@ Only the active tab receives keyboard input. Background tabs keep receiving
 output. From batch, use Ctrl-P then `:interactive` to resume the tabs. Remote shells own interactive
 history; nssh saves only complete batch requests in its history file.
 
-The mouse wheel scrolls its pane. Drag selects the device header and output lines from one pane. The header
+The mouse wheel scrolls all panes in the tab together by default, with each pane
+stopping at its own scrollback limit. Disable scroll lock to scroll only the
+pane under the pointer. Drag selects the device header and output lines from one pane. The header
 keeps its identity when the session disconnects; connection state appears in the
 footer. Direct input does not provide a tracked command label.
 Right-click copies and clears selection after a successful write. Clipboard

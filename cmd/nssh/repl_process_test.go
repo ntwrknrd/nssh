@@ -257,22 +257,37 @@ func TestREPLProcess(t *testing.T) {
 		s.write(t, " q")
 		s.await(t, "pager bytes=2071")
 		s.settle()
+		s.write(t, "exit\r")
+		s.await(t, "Pane 1 disconnected")
+		s.settle()
+		s.write(t, "\x10:reconnect 1\r")
+		awaitProcess(t, func() bool {
+			starts, _ := os.ReadFile(filepath.Join(f.dir, "sessions"))
+			return len(strings.Fields(string(starts))) == 6
+		}, "closed pane reconnected", &s.output)
+		s.settle()
+		s.write(t, "show value\r")
+		s.await(t, "value=unset")
+		s.settle()
+		if strings.Count(f.log(), " configure terminal") != 2 || strings.Count(f.log(), " set value kept") != 2 {
+			t.Fatal("reconnect replayed input")
+		}
 		s.write(t, "\x10:new\r")
 		s.await(t, "Choose devices")
 		s.settle()
 		s.write(t, "good \r\r")
 		awaitProcess(t, func() bool {
 			starts, _ := os.ReadFile(filepath.Join(f.dir, "sessions"))
-			return len(strings.Fields(string(starts))) == 6
+			return len(strings.Fields(string(starts))) == 8
 		}, "third terminal opened in new tab", &s.output)
 		s.settle()
 		s.write(t, "show value\r")
 		s.await(t, "value=unset")
 		s.settle()
-		s.write(t, "\x10:tab 1\r")
+		s.write(t, "\x1b[1;3D")
 		s.settle()
 		s.write(t, "show value\r")
-		awaitProcess(t, func() bool { return strings.Count(f.log(), " show value") >= 4 }, "original tab resumed", &s.output)
+		awaitProcess(t, func() bool { return strings.Count(f.log(), "bad show value") >= 3 }, "original tab resumed", &s.output)
 		s.settle()
 		s.write(t, "\x10\x1b")
 		s.settle()
@@ -416,6 +431,7 @@ if [ "$command" = "fixture@$host" ]; then
     printf '%s %s\n' "$host" "$command" >> "$NSSH_TEST_LOG"
     if [ "$command" = hold ]; then printf '%s\n' "$$" > "$NSSH_TEST_PID"; exec sleep 60; fi
     case "$command" in
+      exit) exit 0 ;;
       'configure terminal') mode='(config)' ;;
       'set value kept') value=kept ;;
       'show value') printf 'value=%s\n' "$value" ;;

@@ -206,6 +206,21 @@ func (m model) updateTerminalControl(msg tea.Msg) (model, tea.Cmd, bool) {
 		m.controlOpen = false
 		m.helpOpen = true
 		m.helpOffset = 0
+	case (line == "reconnect" || strings.HasPrefix(line, "reconnect ")) && m.interactive:
+		index := -1
+		if line != "reconnect" {
+			var n int
+			if _, err := fmt.Sscanf(line, "reconnect %d", &n); err != nil || n < 1 || n > len(m.panes) {
+				m.message = "Use :reconnect or :reconnect N"
+				return m, nil, true
+			}
+			index = n - 1
+		}
+		m.reconnectTerminals(index)
+		m.controlOpen = false
+	case line == "scroll-lock" && m.interactive:
+		m.independentScroll = !m.independentScroll
+		m.controlOpen = false
 	case line == "all" && m.interactive:
 		m.target = -1
 		m.broadcastPaused = false
@@ -245,7 +260,7 @@ func (m model) terminalControlView(base string) string {
 	input := m.controlInput
 	input.Placeholder = ":help"
 	input.Width = max(1, width-4)
-	text := "Local controls - input stays here\n\n:interactive  Open or resume sessions\n:new       Open a new session tab\n:tab N     Switch tab\n:close     Disconnect this tab\n:target N  Focus one device\n:all       Broadcast to all devices\n:next / :prev  Change pane page\n:clear     Clear scrollback (Ctrl+K / Ctrl+L)\n:wipe      Clear batch output and history\n:stacked   Toggle stacked batch results\n:copy      Copy selection\n:batch     Return to batch; keep tabs connected\n:help      Full help\n:quit      Close every session and exit\n\n> " + input.View() + "\nEsc / Ctrl+P closes controls"
+	text := "Local controls - input stays here\n\n:interactive  Open or resume sessions\n:new       Open a new session tab\n:tab N     Switch tab (Alt-Left/Right cycles)\n:close     Disconnect this tab\n:reconnect [N]  Reconnect closed panes (or pane N)\n:scroll-lock   Toggle synchronized scrolling\n:target N  Focus one device\n:all       Broadcast to all devices\n:next / :prev  Change pane page\n:clear     Clear scrollback (Ctrl+K / Ctrl+L)\n:wipe      Clear batch output and history\n:stacked   Toggle stacked batch results\n:copy      Copy selection\n:batch     Return to batch; keep tabs connected\n:help      Full help\n:quit      Close every session and exit\n\n> " + input.View() + "\nEsc / Ctrl+P closes controls"
 	lines := strings.Split(ansi.Hardwrap(text, width, true), "\n")
 	if len(lines) > max(4, m.height-4) {
 		lines = append(lines[:max(1, m.height-8)], ":help lists all controls", "> "+input.View(), "Esc / Ctrl+P returns")
@@ -274,4 +289,19 @@ func (m *model) clearDisplay() {
 	} else {
 		m.clearScrollback()
 	}
+}
+
+func (m *model) cycleTab(delta int) {
+	m.saveTab()
+	if len(m.tabs) < 2 {
+		return
+	}
+	index := 0
+	for i, tab := range m.tabs {
+		if tab.group == m.group {
+			index = i
+			break
+		}
+	}
+	m.switchTab((index + delta + len(m.tabs)) % len(m.tabs))
 }
