@@ -58,7 +58,7 @@ func (m *model) chooseTab() {
 	m.interactive, m.choosing, m.controlOpen = true, true, false
 	m.input.SetValue("[ '' ] ( '' )")
 	m.input.SetCursor(3)
-	m.openPicker()
+	m.input.Focus()
 	m.refreshLayout()
 }
 func (m *model) closePanes() {

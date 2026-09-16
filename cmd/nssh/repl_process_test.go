@@ -220,7 +220,7 @@ func TestREPLProcess(t *testing.T) {
 		s.write(t, "\x10:interactive\r")
 		s.await(t, "Choose devices")
 		// Select both devices across filters, then open the fixed session group.
-		s.write(t, "good \x15bad \r")
+		s.write(t, "\tgood \x15bad \r")
 		s.await(t, "good#")
 		s.await(t, "bad#")
 		s.settle()
@@ -275,7 +275,7 @@ func TestREPLProcess(t *testing.T) {
 		s.write(t, "\x10:new\r")
 		s.await(t, "Choose devices")
 		s.settle()
-		s.write(t, "good \r")
+		s.write(t, "\tgood \r")
 		awaitProcess(t, func() bool {
 			starts, _ := os.ReadFile(filepath.Join(f.dir, "sessions"))
 			return len(strings.Fields(string(starts))) == 8
@@ -312,7 +312,7 @@ func TestREPLProcess(t *testing.T) {
 		s := f.terminal(t)
 		s.write(t, "\x10:interactive\r")
 		s.await(t, "Choose devices")
-		s.write(t, "good \x15trust \r")
+		s.write(t, "\tgood \x15trust \r")
 		s.await(t, "Verify host key")
 		s.settle()
 		starts, _ := os.ReadFile(filepath.Join(f.dir, "sessions"))

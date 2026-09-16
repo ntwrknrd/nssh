@@ -39,8 +39,8 @@ func TestFormsSwitchAndAddRowsWithoutChangingSyntax(t *testing.T) {
 	m.focusForm(true)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = next.(model)
-	if m.commandFocused() {
-		t.Fatal("Tab did not return to devices")
+	if !m.commandFocused() || m.pickerOpen {
+		t.Fatal("Tab in command field opened device selection")
 	}
 }
 

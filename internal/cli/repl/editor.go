@@ -85,27 +85,3 @@ func (m *model) deleteEditorField(msg tea.KeyMsg) (tea.Cmd, bool) {
 	// erase it. Move into a value to edit that value.
 	return nil, true
 }
-
-// Reopening completion on an exact device starts a fresh filter, preserving
-// an explicit username. The picker draft still supports Escape restoration.
-func (m *model) resetCompletedTarget() {
-	value := []rune(m.input.Value())
-	fields, _ := editorFields(string(value))
-	for _, f := range fields {
-		if m.input.Position() < f.start || m.input.Position() > f.end {
-			continue
-		}
-		host := string(value[f.start:f.end])
-		user := ""
-		if at := strings.LastIndex(host, "@"); at >= 0 {
-			user, host = host[:at+1], host[at+1:]
-		}
-		for _, candidate := range m.candidates {
-			if strings.EqualFold(host, candidate) {
-				m.input.SetValue(string(value[:f.start]) + user + string(value[f.end:]))
-				m.input.SetCursor(f.start + len([]rune(user)))
-				return
-			}
-		}
-	}
-}

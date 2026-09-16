@@ -79,7 +79,7 @@ func TestTabCompletedTargetRestartsPicker(t *testing.T) {
 	m.input.SetCursor(len([]rune("[ 'ops@edge1")))
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = next.(model)
-	if !m.pickerOpen || m.input.Value() != "[ 'ops@' ] ( 'show version' )" || len(m.matches) != 2 {
+	if !m.pickerOpen || m.input.Value() != "[ 'ops@edge1' ] ( 'show version' )" || m.pickerFilter.Value() != "edge1" || len(m.matches) != 2 {
 		t.Fatalf("Tab transition: %q at %d, picker=%v", m.input.Value(), m.input.Position(), m.pickerOpen)
 	}
 }

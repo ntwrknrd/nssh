@@ -243,14 +243,14 @@ func TestPromptPickerFiltersAndPreservesSelections(t *testing.T) {
 	m.candidates = []string{"agg1", "border1", "border2"}
 	m.openPicker()
 	m.updatePicker(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("border")})
-	if m.input.Value() != "[ 'border' ] ( '' )" || len(m.matches) != 2 {
+	if m.input.Value() != "[ '' ] ( '' )" || m.pickerFilter.Value() != "border" || len(m.matches) != 2 {
 		t.Fatalf("prompt filter: %q, %v", m.input.Value(), m.matches)
 	}
-	if strings.Contains(ansi.Strip(m.View()), "Filter:") {
-		t.Fatal("duplicate filter input")
+	if !strings.Contains(ansi.Strip(m.View()), "Filter:") {
+		t.Fatal("missing filter input")
 	}
 	m.updatePicker(tea.KeyMsg{Type: tea.KeySpace})
-	if m.input.Value() != "[ 'border1', 'border' ] ( '' )" {
+	if m.input.Value() != "[ 'border1' ] ( '' )" {
 		t.Fatal("selection not inserted immediately", m.input.Value())
 	}
 	m.updatePicker(tea.KeyMsg{Type: tea.KeyCtrlU})
@@ -480,7 +480,7 @@ func TestPickerLiveSelectionToggleCancelAndAdvance(t *testing.T) {
 	m.input.SetCursor(5)
 	m.openPicker()
 	m.updatePicker(tea.KeyMsg{Type: tea.KeySpace})
-	if m.input.Value() != "[ 'edge1', 'ed' ] ( 'show version' )" {
+	if m.input.Value() != "[ 'edge1' ] ( 'show version' )" {
 		t.Fatal(m.input.Value())
 	}
 	m.updatePicker(tea.KeyMsg{Type: tea.KeySpace})
@@ -497,5 +497,31 @@ func TestPickerLiveSelectionToggleCancelAndAdvance(t *testing.T) {
 	m.updatePicker(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.pickerOpen || !m.commandFocused() || m.active || m.input.Value() != "[ 'edge1' ] ( 'show version' )" {
 		t.Fatal("Enter failed to advance without running", m.input.Value())
+	}
+}
+
+func TestDevicePickerRequiresTabAndKeepsFilterSeparate(t *testing.T) {
+	m := testTUI(120)
+	m.candidates = []string{"edge1", "edge2"}
+	m.chooseTab()
+	if m.pickerOpen {
+		t.Fatal("interactive setup opened picker automatically")
+	}
+	m = testUpdate(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("ed")})
+	if m.pickerOpen {
+		t.Fatal("typing opened picker")
+	}
+	before := m.input.Value()
+	m = testUpdate(m, tea.KeyMsg{Type: tea.KeyTab})
+	if !m.pickerOpen || m.pickerFilter.Value() != "ed" {
+		t.Fatal("Tab did not seed filter")
+	}
+	m = testUpdate(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("ge1")})
+	if m.input.Value() != before || m.pickerFilter.Value() != "edge1" {
+		t.Fatal("filter edited request")
+	}
+	m = testUpdate(m, tea.KeyMsg{Type: tea.KeySpace})
+	if m.input.Value() != "[ 'edge1' ] ( '' )" {
+		t.Fatal("selection failed to replace prefix", m.input.Value())
 	}
 }

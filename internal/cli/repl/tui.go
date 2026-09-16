@@ -32,6 +32,7 @@ type tuiState struct {
 	pickerOpen                                      bool
 	pickerDraft                                     string
 	pickerInput                                     textinput.Model
+	pickerFilter                                    textinput.Model
 	pickerCursor                                    int
 	matches                                         []string
 	picked                                          map[string]bool
@@ -318,7 +319,7 @@ func (m *model) refreshLayout() {
 	m.viewport.Width = max(1, width)
 	footer := 2 + lipgloss.Height(m.formsView(max(1, width)))
 	if m.pickerOpen {
-		footer += max(1, min(6, len(m.matches)))
+		footer += 1 + max(1, min(6, len(m.matches)))
 	}
 	if m.trust != nil {
 		footer += 2
@@ -401,7 +402,7 @@ func (m model) tuiView() string {
 	pending := max(0, m.total-m.running-m.done-m.failed-m.canceled-m.skipped)
 	status := fmt.Sprintf("running %d  done %d  failed %d  pending %d  canceled %d  skipped %d", m.running, m.done, m.failed, pending, m.canceled, m.skipped)
 	if m.interactive && m.choosing {
-		status = "interactive | Choose devices, then Enter opens sessions"
+		status = "interactive | Choose devices with Tab; Enter opens sessions"
 	} else {
 		status = "batch | " + status
 	}
@@ -464,12 +465,12 @@ func (m model) editorView(width int) string {
 		if strings.ContainsRune("[]()'", r) {
 			style = lipgloss.NewStyle()
 		}
-		if i == pos {
+		if i == pos && !m.pickerOpen {
 			style = style.Reverse(true)
 		}
 		out.WriteString(style.Render(safeTerminalText(string(r))))
 	}
-	if pos == len(value) {
+	if pos == len(value) && !m.pickerOpen {
 		out.WriteString(lipgloss.NewStyle().Reverse(true).Render(" "))
 	}
 
@@ -486,9 +487,20 @@ func (m *model) openPicker() {
 	if !ok {
 		return
 	}
-	m.resetCompletedTarget()
+
 	m.input.Focus()
 	m.pickerInput = m.input
+	start, _ := activeTargetStart([]rune(m.input.Value()), m.input.Position())
+	query := string([]rune(m.input.Value())[start:m.input.Position()])
+	if at := strings.LastIndex(query, "@"); at >= 0 {
+		query = query[at+1:]
+	}
+	m.pickerFilter = textinput.New()
+	m.pickerFilter.CharLimit = core.MaxSubmissionBytes
+	m.pickerFilter.Prompt = "Filter: "
+	m.pickerFilter.SetValue(query)
+	m.pickerFilter.CursorEnd()
+	m.pickerFilter.Focus()
 	m.picked = map[string]bool{}
 	m.pickerOpen = true
 	m.filterPicker()
@@ -496,14 +508,7 @@ func (m *model) openPicker() {
 }
 func (m *model) filterPicker() {
 	m.matches = nil
-	query := ""
-	if start, ok := activeTargetStart([]rune(m.pickerInput.Value()), m.pickerInput.Position()); ok {
-		query = string([]rune(m.pickerInput.Value())[start:m.pickerInput.Position()])
-		if at := strings.LastIndex(query, "@"); at >= 0 {
-			query = query[at+1:]
-		}
-	}
-	query = strings.ToLower(query)
+	query := strings.ToLower(m.pickerFilter.Value())
 	for _, name := range m.candidates {
 		if strings.Contains(strings.ToLower(name), query) {
 			m.matches = append(m.matches, name)
@@ -512,7 +517,9 @@ func (m *model) filterPicker() {
 	m.pickAt = 0
 }
 func (m model) pickerView() string {
-	var rows []string
+	filter := m.pickerFilter
+	filter.Width = max(1, m.viewport.Width-8)
+	rows := []string{ansi.Truncate(filter.View(), m.viewport.Width, "")}
 	start := max(0, m.pickAt-5)
 	for i := start; i < min(len(m.matches), start+6); i++ {
 		marker := "[ ]"
@@ -578,18 +585,13 @@ func (m *model) updatePicker(key tea.KeyMsg) {
 		}
 		m.matches = nil
 	default:
-		m.input = m.pickerInput
-		if _, handled := m.deleteEditorField(key); !handled {
-			m.input, _ = m.input.Update(key)
-		}
-		m.pickerInput = m.input
+		m.pickerFilter, _ = m.pickerFilter.Update(key)
 		m.filterPicker()
-		m.syncPickerInput()
 	}
 	m.refreshLayout()
 }
 
-// Keep selected devices visible while retaining an editable filter slot.
+// Replace the original device field with the live selection; filtering is separate.
 func (m *model) syncPickerInput() {
 	m.input = m.pickerInput
 	var chosen []string
@@ -598,25 +600,9 @@ func (m *model) syncPickerInput() {
 			chosen = append(chosen, name)
 		}
 	}
-	if len(chosen) == 0 {
-		return
+	if len(chosen) > 0 {
+		m.insertHosts(chosen)
 	}
-	value := []rune(m.pickerInput.Value())
-	pos := m.pickerInput.Position()
-	start, ok := activeTargetStart(value, pos)
-	if !ok {
-		return
-	}
-	end := pos
-	for end < len(value) && value[end] != '\'' {
-		end++
-	}
-	query := string(value[start:end])
-	m.insertHosts(chosen)
-	selected := []rune(m.input.Value())
-	at := m.input.Position()
-	m.input.SetValue(string(selected[:at]) + "', '" + query + string(selected[at:]))
-	m.input.SetCursor(at + 4 + pos - start)
 }
 
 func (m *model) insertHosts(hosts []string) {

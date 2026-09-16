@@ -72,8 +72,9 @@ complete requests, including their devices. Enter runs a filled request. If its
 command is empty, Enter moves into the command quotes. Shift-Tab moves between
 host and command fields; Alt-Enter adds a quoted value. Deletion preserves the
 syntax delimiters. Typing a hostname in an empty bar starts a request template.
-Tab opens device selection. Type to filter; Space updates selected devices in
-the bar immediately. Up/Down moves. Enter finishes selection and moves to
+Tab inside a device field opens the picker with its hostname prefix in the
+filter bar. Typing edits only that filter; Space updates selected devices in
+the request bar immediately. Up/Down moves. Enter finishes selection and moves to
 commands (or opens interactive sessions). Esc restores the original draft.
 
 Commands run in order across the requested hosts. Failures skip later commands
@@ -680,7 +681,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if v.Type == tea.KeyTab && !m.active {
 			if m.commandFocused() {
-				m.focusForm(false)
+				return m, nil
 			}
 			m.openPicker()
 			return m, nil
