@@ -39,6 +39,7 @@ type terminalGroup struct {
 	target            int // -1 broadcasts; otherwise one pane
 	page              int
 	broadcastPaused   bool
+	wakePaused        bool
 }
 type terminalPane struct {
 	name                         string
@@ -278,6 +279,9 @@ func (m *model) resizePanes() {
 	}
 }
 func (m model) broadcastLabel() string {
+	if m.wakePaused {
+		return "Input paused; choose targets to resume"
+	}
 	open, closed := 0, 0
 	for _, p := range m.panes {
 		if p.state == "open" {
@@ -305,6 +309,10 @@ func (m model) broadcastLabel() string {
 	return fmt.Sprintf("Input: all %d panes", len(m.panes))
 }
 func (m *model) sendInteractive(data []byte) {
+	if m.wakePaused {
+		m.message = "Input paused; Ctrl+P then :all or :target N resumes"
+		return
+	}
 	if len(m.panes) == 0 {
 		m.message = "No open sessions"
 		return
@@ -495,6 +503,7 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 				if mouse.Action == tea.MouseActionPress {
 					if row == -2 {
 						m.target = index
+						m.wakePaused = false
 						m.message = "Focused one device; Ctrl+P, :all restores broadcast"
 					}
 					for _, other := range m.panes {
@@ -586,6 +595,9 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 		data = append([]byte{27}, data...)
 	}
 	if len(data) > 0 {
+		if m.wakeDisconnectedTargets() {
+			return m, nil, true
+		}
 		m.sendInteractive(data)
 	}
 	return m, nil, true
@@ -689,7 +701,7 @@ func (m model) interactiveView() string {
 	var current []string
 	for i := m.page * 4; i < min(len(m.panes), m.page*4+4); i++ {
 		p := m.panes[i]
-		title := ansi.Truncate(fmt.Sprintf("%d %s", i+1, p.heading()), p.terminal.Width(), "...")
+		title := p.paneTitle(i + 1)
 		if p.selected && min(p.selectionStart, p.selectionEnd) == -1 {
 			title = lipgloss.NewStyle().Reverse(true).Render(padCells(title, p.terminal.Width()))
 		}
@@ -812,4 +824,39 @@ func (m *model) scrollPanes(index, delta int) {
 		p.selected, p.selecting = false, false
 		p.selectionText = ""
 	}
+}
+
+func (p *terminalPane) paneTitle(index int) string {
+	label, color := "connecting", lipgloss.Color("11")
+	if p.state == "open" {
+		label, color = "connected", lipgloss.Color("10")
+	}
+	if strings.HasPrefix(p.state, "closed") {
+		label, color = "disconnected", lipgloss.Color("9")
+	}
+	badge := "[" + label + "]"
+	width := p.terminal.Width()
+	room := max(0, width-ansi.StringWidth(badge)-1)
+	identity := ansi.Truncate(fmt.Sprintf("%d %s", index, p.heading()), room, "")
+	return ansi.Truncate(padCells(identity, room)+" "+lipgloss.NewStyle().Foreground(color).Render(badge), width, "")
+}
+
+// A wake key starts only closed targets and is never delivered or replayed.
+// Require target selection afterward so rapid typing cannot become a partial
+// command in a newly opened shell or reach a live peer.
+func (m *model) wakeDisconnectedTargets() bool {
+	if m.wakePaused {
+		return false
+	}
+	for i, p := range m.panes {
+		if m.target >= 0 && i != m.target {
+			continue
+		}
+		if strings.HasPrefix(p.state, "closed") {
+			m.reconnectTerminals(m.target)
+			m.wakePaused = true
+			return true
+		}
+	}
+	return false
 }

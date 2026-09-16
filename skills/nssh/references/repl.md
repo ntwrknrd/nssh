@@ -79,8 +79,15 @@ Each terminal keeps its working directory, variables, CLI hierarchy, and output.
 
 Wait for each device's prompt before sending input. Click a pane top border to target
 only that device. Output selection does not change targets. A disconnected
-session pauses broadcast. Reconnection requires an explicit control command,
-and input is never replayed.
+session pauses broadcast. Each pane shows a separate connecting, connected, or
+disconnected badge; this is session state, not a command result.
+
+An input key aimed at a disconnected pane reconnects it. With broadcast selected,
+it reconnects disconnected panes in that tab. The triggering key and subsequent
+typing are discarded, including input to live peers. Wait for the new prompts,
+then select a pane by its top border or use `:target N` or `:all` in Ctrl-P controls
+to resume input. This prevents partial commands and answers from crossing into a
+fresh shell. Ctrl-R and the reconnect controls remain available.
 
 ### Local controls and tabs
 
@@ -111,8 +118,8 @@ history; nssh saves only complete batch requests in its history file.
 The mouse wheel scrolls all panes in the tab together by default, with each pane
 stopping at its own scrollback limit. Disable scroll lock to scroll only the
 pane under the pointer. Drag selects the device header and output lines from one pane. The header
-keeps its identity when the session disconnects; connection state appears in the
-footer. Direct input does not provide a tracked command label.
+keeps its identity when the session disconnects; the status badge stays separate
+from the copied header. Direct input does not provide a tracked command label.
 Right-click copies and clears selection after a successful write. Clipboard
 copies use OSC 52 and are limited to 64 KiB. New output or resize clears selection.
 

@@ -277,3 +277,34 @@ func TestReconnectSkipsOpenPanes(t *testing.T) {
 		t.Fatal("reconnect touched live sessions")
 	}
 }
+
+func TestPaneStatusBadgeIsIndependentFromCopiedHeader(t *testing.T) {
+	m := terminalModel(t, 160)
+	p := m.panes[0]
+	for _, tc := range []struct{ state, label string }{{"opening", "[connecting]"}, {"open", "[connected]"}, {"closed (exit status 255)", "[disconnected]"}} {
+		p.state = tc.state
+		title := ansi.Strip(p.paneTitle(1))
+		if !strings.Contains(title, tc.label) || strings.Contains(title, "255") || ansi.StringWidth(title) > p.terminal.Width() {
+			t.Fatal(title)
+		}
+		p.selectionStart, p.selectionEnd = -1, -1
+		p.captureSelection()
+		if p.selectionText != "[alice@eos]" {
+			t.Fatal("status polluted identity copy", p.selectionText)
+		}
+	}
+}
+func TestWakePauseConsumesFurtherInputUntilTargetSelection(t *testing.T) {
+	m := terminalModel(t, 160)
+	m.wakePaused = true
+	m = testUpdate(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("never send")})
+	if !m.wakePaused || !strings.Contains(m.message, "Input paused") {
+		t.Fatal("typing bypassed wake pause")
+	}
+	m.controlOpen = true
+	m.controlInput.SetValue(":target 1")
+	m = testUpdate(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.wakePaused || m.target != 0 {
+		t.Fatal("explicit focus failed to resume")
+	}
+}

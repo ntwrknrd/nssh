@@ -260,12 +260,23 @@ func TestREPLProcess(t *testing.T) {
 		s.write(t, "exit\r")
 		s.await(t, "Pane 1 disconnected")
 		s.settle()
-		s.write(t, "\x12")
+		s.write(t, "\x10:all\r")
+		s.settle()
+		beforeWake := f.log()
+		s.write(t, "must-not-replay\r")
 		awaitProcess(t, func() bool {
 			starts, _ := os.ReadFile(filepath.Join(f.dir, "sessions"))
 			return len(strings.Fields(string(starts))) == 6
 		}, "closed pane reconnected", &s.output)
 		s.settle()
+		if f.log() != beforeWake {
+			t.Fatal("wake input reached a live or reconnecting peer")
+		}
+		s.write(t, "\x10:target 1\r")
+		s.settle()
+		if strings.Contains(f.log(), "must-not-replay") {
+			t.Fatal("wake input reached SSH")
+		}
 		s.write(t, "show value\r")
 		s.await(t, "value=unset")
 		s.settle()

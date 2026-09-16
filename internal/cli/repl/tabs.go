@@ -224,6 +224,7 @@ func (m model) updateTerminalControl(msg tea.Msg) (model, tea.Cmd, bool) {
 	case line == "all" && m.interactive:
 		m.target = -1
 		m.broadcastPaused = false
+		m.wakePaused = false
 		m.controlOpen = false
 		m.message = ""
 	case strings.HasPrefix(line, "target ") && m.interactive:
@@ -232,6 +233,7 @@ func (m model) updateTerminalControl(msg tea.Msg) (model, tea.Cmd, bool) {
 			m.message = "Use :target N with a pane number"
 		} else {
 			m.target = n - 1
+			m.wakePaused = false
 			m.page = (n - 1) / 4
 			m.controlOpen = false
 			m.message = ""

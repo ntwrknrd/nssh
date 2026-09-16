@@ -109,8 +109,10 @@ and output. Each pane preserves its remote shell, CLI state and pagination.
 Wait for each device's prompt before sending input. Focus a pane before answering
 its confirmation or handling different device states. A closed session pauses
 broadcast; input still requires every targeted session to be open. No input is
-replayed and closed sessions do not reconnect automatically. Explicit reconnect
-starts fresh sessions and retains output; use :all to resume paused broadcast.
+replayed. An input key reconnects disconnected targets and is discarded. Input
+stays paused until you click a pane top border or use :target N or :all after
+the new prompts appear. Ctrl-R also reconnects closed panes explicitly.
+Each pane shows its connection state separately from its copyable identity.
 
 Other overlay controls:
   :help         Open this index; Esc/Enter closes, arrows/PgUp/PgDn scroll
