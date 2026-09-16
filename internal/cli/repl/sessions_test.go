@@ -115,12 +115,12 @@ func TestSelectingTerminalOutputDoesNotChangeBroadcast(t *testing.T) {
 	m := terminalModel(t, 160)
 	_, _ = m.panes[1].terminal.Write([]byte("device output"))
 	x := m.panes[0].terminal.Width() + 3
-	next, _ := m.Update(tea.MouseMsg{X: x, Y: 4, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	next, _ := m.Update(tea.MouseMsg{X: x, Y: 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	m = next.(model)
 	if m.target != -1 || !m.panes[1].selected {
 		t.Fatal("output selection changed broadcast targets")
 	}
-	next, _ = m.Update(tea.MouseMsg{X: x, Y: 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	next, _ = m.Update(tea.MouseMsg{X: x, Y: 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	m = next.(model)
 	if m.target != 1 {
 		t.Fatal("header did not focus device")
@@ -185,5 +185,24 @@ func TestControlOverlayCapturesKeysUntilEscape(t *testing.T) {
 	}
 	if strings.Contains(ansi.Strip(m.View()), "Type a command") {
 		t.Fatal("command box remains")
+	}
+}
+
+func TestTerminalHeaderSelectionSurvivesDisconnect(t *testing.T) {
+	m := terminalModel(t, 160)
+	_, _ = m.panes[0].terminal.Write([]byte("output"))
+	m, _, _ = m.updateInteractive(tea.MouseMsg{X: 2, Y: 2, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m, _, _ = m.updateInteractive(tea.MouseMsg{X: 2, Y: 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion})
+	if m.target != -1 || m.panes[0].selectionText != "[alice@eos]\noutput" {
+		t.Fatalf("header not selectable: %q", m.panes[0].selectionText)
+	}
+	m, _, _ = m.updateInteractive(terminalClosedMsg{1, 0, nil})
+	m, _, _ = m.updateInteractive(terminalClosedMsg{1, 1, nil})
+	view := ansi.Strip(m.interactiveView())
+	if strings.Contains(view, "Sending to") || strings.Contains(view, "closed") || strings.Count(view, "alice@eos") != 1 || !strings.Contains(view, "Disconnected") {
+		t.Fatal(view)
+	}
+	if m.panes[0].selectionText != "[alice@eos]\noutput" {
+		t.Fatal("disconnect changed header copy")
 	}
 }

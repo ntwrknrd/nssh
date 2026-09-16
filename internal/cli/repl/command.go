@@ -91,7 +91,7 @@ Within local controls:
   :tab N        Switch tabs (or click a tab)
   :close        Disconnect this tab
   :batch        Return to batch, keeping tabs connected
-  :target N     Send input only to pane N (or click its header)
+  :target N     Send input only to pane N (or click its top border)
   :all          Resume broadcasting to every pane in this tab
   :next, :prev  Change the visible page when more than four panes are open
   :clear        Clear this tab's scrollback

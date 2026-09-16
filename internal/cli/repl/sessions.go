@@ -253,7 +253,7 @@ func (m *model) resizePanes() {
 		cols = 2
 	}
 	rows := (n + cols - 1) / cols
-	w, h := max(8, width/cols-2), max(2, (height-3)/rows-3)
+	w, h := max(8, width/cols-2), max(2, (height-2)/rows-3)
 	for _, p := range m.panes {
 		p.selected = false
 		p.selecting = false
@@ -262,14 +262,28 @@ func (m *model) resizePanes() {
 	}
 }
 func (m model) broadcastLabel() string {
+	open, closed := 0, 0
+	for _, p := range m.panes {
+		if p.state == "open" {
+			open++
+		}
+		if strings.HasPrefix(p.state, "closed") {
+			closed++
+		}
+	}
+	if closed == len(m.panes) && closed > 0 {
+		return "Disconnected"
+	}
+	if open == 0 {
+		return "Connecting..."
+	}
+	if m.broadcastPaused && m.target < 0 {
+		return "Broadcast paused"
+	}
 	if m.target >= 0 && m.target < len(m.panes) {
-		return "Sending to: " + displayLabel(m.panes[m.target].name)
+		return fmt.Sprintf("Input: pane %d", m.target+1)
 	}
-	names := make([]string, len(m.panes))
-	for i, p := range m.panes {
-		names[i] = displayLabel(p.name)
-	}
-	return "Sending to ALL: " + strings.Join(names, ", ")
+	return fmt.Sprintf("Input: all %d panes", len(m.panes))
 }
 func (m *model) sendInteractive(data []byte) {
 	if len(m.panes) == 0 {
@@ -277,7 +291,7 @@ func (m *model) sendInteractive(data []byte) {
 		return
 	}
 	if m.target < 0 && m.broadcastPaused {
-		m.message = "Broadcast paused: focus a pane with :target N; :all explicitly resumes"
+		m.message = "Broadcast paused; Ctrl+K opens controls"
 		return
 	}
 	targets := m.panes
@@ -358,6 +372,15 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 		if v.group == m.group && v.index < len(m.panes) {
 			p := m.panes[v.index]
 			p.state = "open"
+			allOpen := true
+			for _, pane := range m.panes {
+				if pane.state != "open" {
+					allOpen = false
+				}
+			}
+			if allOpen {
+				m.message = ""
+			}
 			v.shell.Resize(p.terminal.Width(), p.terminal.Height())
 		}
 		return m, nil, true
@@ -378,7 +401,7 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 				p.state += " (" + displayLabel(v.err.Error()) + ")"
 			}
 			m.broadcastPaused = true
-			m.message = "A session closed; broadcast paused. No commands were replayed."
+			m.message = ""
 		}
 		return m, nil, true
 	}
@@ -470,19 +493,19 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 		}
 		if index >= 0 {
 			p := m.panes[index]
-			row := (mouse.Y-2)%(p.terminal.Height()+3) - 2
+			row := (mouse.Y-1)%(p.terminal.Height()+3) - 2
 			switch mouse.Button {
 			case tea.MouseButtonLeft:
 				if mouse.Action == tea.MouseActionPress {
-					if row < 0 {
+					if row == -2 {
 						m.target = index
-						m.message = "Focused one device; :all restores broadcast"
+						m.message = "Focused one device; Ctrl+K, :all restores broadcast"
 					}
 					for _, other := range m.panes {
 						other.selected = false
 						other.selecting = false
 					}
-					if row >= 0 && row < p.terminal.Height() && p.hasOutputRow(row) {
+					if row >= -1 && row < p.terminal.Height() && (row == -1 || p.hasOutputRow(row)) {
 						p.selected = true
 						p.selecting = true
 						p.selectionStart = row
@@ -491,7 +514,7 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 					}
 				}
 				if mouse.Action == tea.MouseActionMotion && p.selecting {
-					p.selectionEnd = max(0, min(p.terminal.Height()-1, row))
+					p.selectionEnd = max(-1, min(p.terminal.Height()-1, row))
 					p.captureSelection()
 				}
 			case tea.MouseButtonWheelUp:
@@ -575,7 +598,7 @@ func (m model) updateInteractive(msg tea.Msg) (model, tea.Cmd, bool) {
 }
 
 func (m model) paneAt(x, y int) int {
-	if len(m.panes) == 0 || y < 2 {
+	if len(m.panes) == 0 || y < 1 {
 		return -1
 	}
 	w, h := m.panes[0].terminal.Width()+2, m.panes[0].terminal.Height()+3
@@ -583,7 +606,7 @@ func (m model) paneAt(x, y int) int {
 	if m.width >= 120 && len(m.panes) > 1 {
 		cols = 2
 	}
-	col, row := x/w, (y-2)/h
+	col, row := x/w, (y-1)/h
 	if col >= cols || y >= max(1, m.height)-1 {
 		return -1
 	}
@@ -630,6 +653,10 @@ func (p *terminalPane) captureSelection() {
 	first, last := min(p.selectionStart, p.selectionEnd), max(p.selectionStart, p.selectionEnd)
 	var selected []string
 	for i := first; i <= last && i < len(lines); i++ {
+		if i == -1 {
+			selected = append(selected, p.heading())
+			continue
+		}
 		selected = append(selected, strings.TrimRight(lines[i], " "))
 	}
 	p.selectionText = strings.Join(selected, "\n")
@@ -637,7 +664,7 @@ func (p *terminalPane) captureSelection() {
 func (p *terminalPane) paneBody() string {
 	lines := strings.Split(p.plainBody(), "\n")
 	if p.selected {
-		for i := min(p.selectionStart, p.selectionEnd); i <= max(p.selectionStart, p.selectionEnd) && i < len(lines); i++ {
+		for i := max(0, min(p.selectionStart, p.selectionEnd)); i <= max(p.selectionStart, p.selectionEnd) && i < len(lines); i++ {
 			lines[i] = lipgloss.NewStyle().Reverse(true).Render(padCells(ansi.Strip(lines[i]), p.terminal.Width()))
 		}
 	}
@@ -657,7 +684,7 @@ func (m model) copyTerminalSelection(clear bool) tea.Cmd {
 }
 func (m model) interactiveView() string {
 	width, height := max(20, m.width), max(10, m.height)
-	rows := []string{m.tabBar(), ansi.Truncate(m.broadcastLabel(), width, "...")}
+	rows := []string{m.tabBar()}
 	if m.failure != "" {
 		rows = append(rows, ansi.Truncate("Unable to open tab: "+m.failure, width, "..."))
 	}
@@ -668,7 +695,10 @@ func (m model) interactiveView() string {
 	var current []string
 	for i := m.page * 4; i < min(len(m.panes), m.page*4+4); i++ {
 		p := m.panes[i]
-		title := fmt.Sprintf("%d [%s] %s", i+1, displayLabel(p.name), p.state)
+		title := ansi.Truncate(fmt.Sprintf("%d %s", i+1, p.heading()), p.terminal.Width(), "...")
+		if p.selected && min(p.selectionStart, p.selectionEnd) == -1 {
+			title = lipgloss.NewStyle().Reverse(true).Render(padCells(title, p.terminal.Width()))
+		}
 		color := lipgloss.Color("8")
 		if m.target < 0 || m.target == i {
 			color = lipgloss.Color("10")
@@ -682,9 +712,16 @@ func (m model) interactiveView() string {
 	}
 	body := strings.Join(rows, "\n")
 	body = lipgloss.NewStyle().Height(max(1, height-1)).MaxHeight(max(1, height-1)).Render(body)
-	status := "interactive | " + m.message
+	status := m.broadcastLabel()
+	if status != "Disconnected" && m.message != "" && m.message != status {
+		if strings.HasPrefix(m.message, status) {
+			status = m.message
+		} else {
+			status += " | " + m.message
+		}
+	}
 	if len(m.panes) > 4 {
-		status = fmt.Sprintf("interactive | page %d/%d | ", m.page+1, (len(m.panes)+3)/4) + m.message
+		status += fmt.Sprintf(" | page %d/%d", m.page+1, (len(m.panes)+3)/4)
 	}
 	status = padCells(ansi.Truncate(status, max(1, width-17), ""), width-16) + "Ctrl+K: controls"
 	view := body + "\n" + status
@@ -734,3 +771,5 @@ func newTerminalEmulator(w, h int) *vt.Emulator {
 	})
 	return emu
 }
+
+func (p *terminalPane) heading() string { return "[" + displayLabel(p.name) + "]" }

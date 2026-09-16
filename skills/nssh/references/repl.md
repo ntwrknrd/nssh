@@ -74,7 +74,7 @@ Keyboard input goes directly to the targets listed in **Sending to ALL** or
 completion and history. Ctrl-C and Ctrl-D go to the selected terminals.
 Each terminal keeps its working directory, variables, CLI hierarchy, and output.
 
-Wait for each device's prompt before sending input. Click a pane header to target
+Wait for each device's prompt before sending input. Click a pane top border to target
 only that device. Output selection does not change targets. A disconnected
 session pauses broadcast and never reconnects or replays input.
 
@@ -98,7 +98,9 @@ Only the active tab receives keyboard input. Background tabs keep receiving
 output. From batch, `:interactive` resumes the tabs. Remote shells own interactive
 history; nssh saves only complete batch requests in its history file.
 
-The mouse wheel scrolls its pane. Drag selects output lines from one pane.
+The mouse wheel scrolls its pane. Drag selects the device header and output lines from one pane. The header
+keeps its identity when the session disconnects; connection state appears in the
+footer. Direct input does not provide a tracked command label.
 Right-click copies and clears selection after a successful write. Clipboard
 copies use OSC 52 and are limited to 64 KiB. New output or resize clears selection.
 

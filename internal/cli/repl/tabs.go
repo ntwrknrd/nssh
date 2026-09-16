@@ -105,17 +105,11 @@ func (m model) tabTitles() []string {
 	}
 	var labels []string
 	for i, tab := range tabs {
-		name := "opening"
-		if len(tab.panes) > 0 {
-			name = displayLabel(tab.panes[0].name)
-		}
-		name = strings.TrimPrefix(name, strings.Split(name, "@")[0]+"@")
-		name = ansi.Truncate(name, max(1, min(24, m.width/max(1, len(tabs))-7)), "~")
 		marker := " "
 		if tab.group == m.group {
 			marker = "*"
 		}
-		labels = append(labels, fmt.Sprintf("[%s%d %s] ", marker, i+1, name))
+		labels = append(labels, fmt.Sprintf("[%sTab %d] ", marker, i+1))
 	}
 	return labels
 }
