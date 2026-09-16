@@ -24,6 +24,8 @@ Older form entries are converted only when their meaning can be preserved.
 Typing a hostname into an empty bar starts the quoted request template.
 Deletion stays inside quoted values and preserves delimiters. Shift-Tab moves
 between device and command fields; Alt-Enter inserts another quoted value.
+Left/Right at a quoted value boundary jumps to the adjacent value, skipping
+quotes, commas, brackets, and parentheses.
 If the command field is empty, Enter moves into it instead of running.
 
 The picker opens only when Tab is pressed inside a device field. The hostname

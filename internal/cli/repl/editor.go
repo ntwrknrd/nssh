@@ -85,3 +85,34 @@ func (m *model) deleteEditorField(msg tea.KeyMsg) (tea.Cmd, bool) {
 	// erase it. Move into a value to edit that value.
 	return nil, true
 }
+
+// Arrow navigation follows editable fields in request order, skipping syntax.
+func (m *model) moveEditorCursor(msg tea.KeyMsg) bool {
+	if msg.Alt || (msg.Type != tea.KeyLeft && msg.Type != tea.KeyRight) {
+		return false
+	}
+	fields, _ := editorFields(m.input.Value())
+	if m.choosing {
+		fields, _ = m.formFields()
+	}
+	if len(fields) == 0 {
+		return false
+	}
+	pos := m.input.Position()
+	if msg.Type == tea.KeyLeft {
+		for i := len(fields) - 1; i >= 0; i-- {
+			if pos > fields[i].start {
+				m.input.SetCursor(min(pos-1, fields[i].end))
+				return true
+			}
+		}
+	} else {
+		for _, field := range fields {
+			if pos < field.end {
+				m.input.SetCursor(max(pos+1, field.start))
+				return true
+			}
+		}
+	}
+	return true
+}

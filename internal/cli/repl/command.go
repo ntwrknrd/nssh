@@ -670,6 +670,9 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if !m.active && m.moveEditorCursor(v) {
+			return m, nil
+		}
 		if v.Type == tea.KeyEsc && !m.active {
 			return m, tea.Quit
 		}

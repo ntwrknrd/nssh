@@ -83,3 +83,61 @@ func TestTabCompletedTargetRestartsPicker(t *testing.T) {
 		t.Fatalf("Tab transition: %q at %d, picker=%v", m.input.Value(), m.input.Position(), m.pickerOpen)
 	}
 }
+
+func TestArrowNavigationEditsBothDevicesFromCommand(t *testing.T) {
+	m := testTUI(120)
+	m.input.Focus()
+	m.input.SetValue("[ 'acm-eec-comp-sw4.custcbb.local', 'acm-eec-comp-sw5.custcbb.local' ] ( 'show int status' )")
+	m.focusForm(true)
+	for _, replacement := range []string{"7", "6"} {
+		m = testUpdate(m, tea.KeyMsg{Type: tea.KeyLeft})
+		fields, _ := m.formFields()
+		expected := fields[len(fields)-1].end
+		if replacement == "6" {
+			expected = fields[0].end
+		}
+		if m.input.Position() != expected {
+			t.Fatal("Left did not jump to previous field end")
+		}
+		for range ".custcbb.local" {
+			m = testUpdate(m, tea.KeyMsg{Type: tea.KeyLeft})
+		}
+		m = testUpdate(m, tea.KeyMsg{Type: tea.KeyBackspace})
+		m = testUpdate(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(replacement)})
+		fields, _ = m.formFields()
+		if replacement == "7" {
+			for m.input.Position() > fields[1].start {
+				m = testUpdate(m, tea.KeyMsg{Type: tea.KeyLeft})
+			}
+		}
+	}
+	want := "[ 'acm-eec-comp-sw6.custcbb.local', 'acm-eec-comp-sw7.custcbb.local' ] ( 'show int status' )"
+	if m.input.Value() != want {
+		t.Fatal(m.input.Value())
+	}
+	fields, _ := editorFields(want)
+	for i := 0; i < len(fields)-1; i++ {
+		m.input.SetCursor(fields[i].end)
+		m = testUpdate(m, tea.KeyMsg{Type: tea.KeyRight})
+		if m.input.Position() != fields[i+1].start {
+			t.Fatal("Right did not skip syntax")
+		}
+	}
+}
+
+func TestArrowNavigationTraversesEmptyAndUnicodeFields(t *testing.T) {
+	m := testTUI(120)
+	m.input.SetValue("[ '機器', '' ] ( '', 'show' )")
+	fields, _ := editorFields(m.input.Value())
+	for i := 0; i < len(fields)-1; i++ {
+		m.input.SetCursor(fields[i].end)
+		m = testUpdate(m, tea.KeyMsg{Type: tea.KeyRight})
+		if m.input.Position() != fields[i+1].start {
+			t.Fatal("right skipped an empty field")
+		}
+		m = testUpdate(m, tea.KeyMsg{Type: tea.KeyLeft})
+		if m.input.Position() != fields[i].end {
+			t.Fatal("left skipped an empty field")
+		}
+	}
+}
