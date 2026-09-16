@@ -250,6 +250,9 @@ func TestPromptPickerFiltersAndPreservesSelections(t *testing.T) {
 		t.Fatal("duplicate filter input")
 	}
 	m.updatePicker(tea.KeyMsg{Type: tea.KeySpace})
+	if m.input.Value() != "[ 'border1', 'border' ] ( '' )" {
+		t.Fatal("selection not inserted immediately", m.input.Value())
+	}
 	m.updatePicker(tea.KeyMsg{Type: tea.KeyCtrlU})
 	m.updatePicker(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("agg")})
 	m.updatePicker(tea.KeyMsg{Type: tea.KeySpace})
@@ -257,11 +260,6 @@ func TestPromptPickerFiltersAndPreservesSelections(t *testing.T) {
 	if m.pickerOpen || m.active || m.input.Value() != "[ 'agg1', 'border1' ] ( '' )" {
 		t.Fatal(m.input.Value())
 	}
-	if _, target := activeTargetStart([]rune(m.input.Value()), m.input.Position()); !target {
-		t.Fatal("Enter should keep focus in devices")
-	}
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = next.(model)
 	if m.input.Position() != len([]rune(m.input.Value()))-3 {
 		t.Fatal("cursor not in command field")
 	}
@@ -471,5 +469,33 @@ func TestStickyPairedStatusCopiesOnlyItsDevice(t *testing.T) {
 	m = next.(model)
 	if got := m.selectedText(); got != "OK:  [b] ('show')\nright" {
 		t.Fatal(got)
+	}
+}
+
+func TestPickerLiveSelectionToggleCancelAndAdvance(t *testing.T) {
+	m := testTUI(120)
+	m.candidates = []string{"edge1", "edge2"}
+	draft := "[ 'ed' ] ( 'show version' )"
+	m.input.SetValue(draft)
+	m.input.SetCursor(5)
+	m.openPicker()
+	m.updatePicker(tea.KeyMsg{Type: tea.KeySpace})
+	if m.input.Value() != "[ 'edge1', 'ed' ] ( 'show version' )" {
+		t.Fatal(m.input.Value())
+	}
+	m.updatePicker(tea.KeyMsg{Type: tea.KeySpace})
+	if m.input.Value() != draft {
+		t.Fatal("deselect retained host", m.input.Value())
+	}
+	m.updatePicker(tea.KeyMsg{Type: tea.KeySpace})
+	m.updatePicker(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.input.Value() != draft || m.input.Position() != 5 {
+		t.Fatal("cancel lost original draft")
+	}
+	m.openPicker()
+	m.updatePicker(tea.KeyMsg{Type: tea.KeySpace})
+	m.updatePicker(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.pickerOpen || !m.commandFocused() || m.active || m.input.Value() != "[ 'edge1' ] ( 'show version' )" {
+		t.Fatal("Enter failed to advance without running", m.input.Value())
 	}
 }

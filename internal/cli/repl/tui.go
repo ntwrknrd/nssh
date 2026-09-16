@@ -3,6 +3,7 @@ package repl
 import (
 	"encoding/base64"
 	"fmt"
+	"github.com/charmbracelet/bubbles/textinput"
 	"os"
 	"strings"
 
@@ -30,6 +31,7 @@ type tuiState struct {
 	helpOffset                                      int
 	pickerOpen                                      bool
 	pickerDraft                                     string
+	pickerInput                                     textinput.Model
 	pickerCursor                                    int
 	matches                                         []string
 	picked                                          map[string]bool
@@ -486,6 +488,7 @@ func (m *model) openPicker() {
 	}
 	m.resetCompletedTarget()
 	m.input.Focus()
+	m.pickerInput = m.input
 	m.picked = map[string]bool{}
 	m.pickerOpen = true
 	m.filterPicker()
@@ -494,8 +497,8 @@ func (m *model) openPicker() {
 func (m *model) filterPicker() {
 	m.matches = nil
 	query := ""
-	if start, ok := activeTargetStart([]rune(m.input.Value()), m.input.Position()); ok {
-		query = string([]rune(m.input.Value())[start:m.input.Position()])
+	if start, ok := activeTargetStart([]rune(m.pickerInput.Value()), m.pickerInput.Position()); ok {
+		query = string([]rune(m.pickerInput.Value())[start:m.pickerInput.Position()])
 		if at := strings.LastIndex(query, "@"); at >= 0 {
 			query = query[at+1:]
 		}
@@ -541,6 +544,7 @@ func (m *model) updatePicker(key tea.KeyMsg) {
 	case tea.KeyTab:
 		m.picked = map[string]bool{}
 		m.pickAt = 0
+		m.syncPickerInput()
 	case tea.KeyShiftTab:
 		m.input.SetValue(m.pickerDraft)
 		m.input.SetCursor(m.pickerCursor)
@@ -551,6 +555,7 @@ func (m *model) updatePicker(key tea.KeyMsg) {
 		if len(m.matches) > 0 {
 			name := m.matches[m.pickAt]
 			m.picked[name] = !m.picked[name]
+			m.syncPickerInput()
 		}
 	case tea.KeyEnter:
 		var chosen []string
@@ -565,17 +570,55 @@ func (m *model) updatePicker(key tea.KeyMsg) {
 		if len(chosen) == 0 {
 			return
 		}
+		m.input = m.pickerInput
 		m.insertHosts(chosen)
 		m.pickerOpen = false
+		if !m.choosing {
+			m.focusForm(true)
+		}
 		m.matches = nil
 	default:
+		m.input = m.pickerInput
 		if _, handled := m.deleteEditorField(key); !handled {
 			m.input, _ = m.input.Update(key)
 		}
+		m.pickerInput = m.input
 		m.filterPicker()
+		m.syncPickerInput()
 	}
 	m.refreshLayout()
 }
+
+// Keep selected devices visible while retaining an editable filter slot.
+func (m *model) syncPickerInput() {
+	m.input = m.pickerInput
+	var chosen []string
+	for _, name := range m.candidates {
+		if m.picked[name] {
+			chosen = append(chosen, name)
+		}
+	}
+	if len(chosen) == 0 {
+		return
+	}
+	value := []rune(m.pickerInput.Value())
+	pos := m.pickerInput.Position()
+	start, ok := activeTargetStart(value, pos)
+	if !ok {
+		return
+	}
+	end := pos
+	for end < len(value) && value[end] != '\'' {
+		end++
+	}
+	query := string(value[start:end])
+	m.insertHosts(chosen)
+	selected := []rune(m.input.Value())
+	at := m.input.Position()
+	m.input.SetValue(string(selected[:at]) + "', '" + query + string(selected[at:]))
+	m.input.SetCursor(at + 4 + pos - start)
+}
+
 func (m *model) insertHosts(hosts []string) {
 	value := []rune(m.input.Value())
 	pos := m.input.Position()

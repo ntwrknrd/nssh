@@ -26,8 +26,10 @@ Deletion stays inside quoted values and preserves delimiters. Shift-Tab moves
 between device and command fields; Alt-Enter inserts another quoted value.
 If the command field is empty, Enter moves into it instead of running.
 
-Tab opens the device picker. Type to filter, use Space to select and Up/Down to
-move, then Enter to insert the selection. Selections persist across filters.
+Tab opens the device picker. Type to filter and use Up/Down to move. Space
+selects or deselects a device and updates the request bar immediately. The last
+quoted device field remains the editable filter until Enter finishes selection
+and moves into commands. Selections persist across filters.
 Esc restores the draft. Reopening an exact device starts a fresh filter;
 Tab within the picker clears selection. The picker fills the request bar.
 
@@ -63,7 +65,7 @@ paired results. Comparison does not infer semantic differences.
 
 ## Interactive sessions
 
-Open controls with Ctrl-P and enter `:interactive`, select devices, accept the picker, then press Enter to open
+Open controls with Ctrl-P and enter `:interactive`, select devices, then press Enter to open
 the sessions. One live terminal pane appears per device. The group stays fixed
 until it closes. EOS, Junos, and Linux retain their native shells and prompts:
 nssh does not replace the shell, disable pagination, parse prompts, or run
