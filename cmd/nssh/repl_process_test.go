@@ -260,7 +260,7 @@ func TestREPLProcess(t *testing.T) {
 		s.write(t, "exit\r")
 		s.await(t, "Pane 1 disconnected")
 		s.settle()
-		s.write(t, "\x10:reconnect 1\r")
+		s.write(t, "\x12")
 		awaitProcess(t, func() bool {
 			starts, _ := os.ReadFile(filepath.Join(f.dir, "sessions"))
 			return len(strings.Fields(string(starts))) == 6

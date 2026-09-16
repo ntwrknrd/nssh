@@ -91,7 +91,7 @@ Within local controls:
   :new          Choose devices for a new tab
   :tab N        Switch tabs (or click a tab; Alt-Left/Right cycles)
   :close        Disconnect this tab
-  :reconnect    Reconnect closed panes; :reconnect N reconnects only pane N
+  :reconnect    Reconnect closed panes (Ctrl-R); :reconnect N targets pane N
   :scroll-lock  Toggle linked scrolling (on by default for each tab)
   :batch        Return to batch, keeping tabs connected
   :target N     Send input only to pane N (or click its top border)
@@ -530,6 +530,10 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					delta = -1
 				}
 				m.cycleTab(delta)
+				return m, nil
+			}
+			if key.Type == tea.KeyCtrlR && m.interactive && !m.choosing {
+				m.reconnectTerminals(-1)
 				return m, nil
 			}
 			switch key.Type {

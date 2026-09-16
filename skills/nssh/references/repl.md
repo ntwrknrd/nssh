@@ -88,7 +88,7 @@ local. Esc or Ctrl-P returns to direct input. These commands run in the overlay:
 - `:tab N` switches tabs; clicking a tab also switches it. Alt-Left and Alt-Right
   cycle tabs without opening controls, wrapping at either end.
 - `:close` disconnects the current tab's devices.
-- `:reconnect` reconnects disconnected panes in the current tab. `:reconnect N`
+- Ctrl-R or `:reconnect` reconnects disconnected panes in the current tab. `:reconnect N`
   reconnects only pane N. Live sessions stay open; old output remains visible.
   Each reconnection starts a fresh SSH session. Wait for prompts, then use
   `:all` to resume paused broadcast.
