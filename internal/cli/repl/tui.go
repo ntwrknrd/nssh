@@ -412,10 +412,10 @@ func (m model) tuiView() string {
 	if m.message != "" {
 		status = m.message + " | " + status
 	}
-	hint := ansi.Truncate("Ctrl+P: controls", width, "")
-	leftWidth := max(0, width-ansi.StringWidth(hint)-1)
-	status = ansi.Truncate(status, leftWidth, "")
-	parts = append(parts, padCells(status, width-ansi.StringWidth(hint))+hint)
+	if count := len(m.selectedLines()); count > 0 {
+		status = fmt.Sprintf("%d lines selected | %s", count, status)
+	}
+	parts = append(parts, statusLine(status, width))
 	view := strings.Join(parts, "\n")
 	if m.controlOpen {
 		view = m.terminalControlView(view)
@@ -692,20 +692,20 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.selectionBodyStart = m.bodyOffset()
 		}
 	}
-	if m.selected {
-		m.message = "lines selected"
-	}
 	m.viewport.SetContent(m.renderBlocks())
 	return m, nil
 }
 func (m model) selectedText() string {
+	return strings.Join(m.selectedLines(), "\n")
+}
+func (m model) selectedLines() []string {
 	if !m.selected {
-		return ""
+		return nil
 	}
 	rows := m.renderRows()
 	start, end := min(m.selectionStart, m.selectionEnd), max(m.selectionStart, m.selectionEnd)
 	if start < 0 || start >= len(rows) {
-		return ""
+		return nil
 	}
 	end = min(end, len(rows)-1)
 	var selected []string
@@ -723,7 +723,7 @@ func (m model) selectedText() string {
 		start = max(start, m.selectionBodyStart)
 	}
 	if start > end {
-		return strings.Join(selected, "\n")
+		return selected
 	}
 	for _, row := range rows[start : end+1] {
 		for _, span := range row.spans {
@@ -732,7 +732,7 @@ func (m model) selectedText() string {
 			}
 		}
 	}
-	return strings.Join(selected, "\n")
+	return selected
 }
 func (m model) copySelection(clearAfter bool) tea.Cmd {
 	text := m.selectedText()
@@ -749,4 +749,11 @@ type tuiCopyMsg struct {
 	err        error
 	clearAfter bool
 	text       string
+}
+
+// Both modes share footer spacing and keep controls at the right edge.
+func statusLine(status string, width int) string {
+	hint := ansi.Truncate("Ctrl+P: controls", width, "")
+	leftWidth := max(0, width-ansi.StringWidth(hint)-1)
+	return padCells(ansi.Truncate(status, leftWidth, ""), width-ansi.StringWidth(hint)) + hint
 }

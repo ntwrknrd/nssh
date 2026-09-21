@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -114,7 +115,7 @@ func TestInteractiveHostKeyRequestReachesModal(t *testing.T) {
 func TestSelectingTerminalOutputDoesNotChangeBroadcast(t *testing.T) {
 	m := terminalModel(t, 160)
 	_, _ = m.panes[1].terminal.Write([]byte("device output"))
-	x := m.panes[0].terminal.Width() + 3
+	x := m.panes[0].terminal.Width() + terminalGutter + 3
 	next, _ := m.Update(tea.MouseMsg{X: x, Y: 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	m = next.(model)
 	if m.target != -1 || !m.panes[1].selected {
@@ -284,7 +285,7 @@ func TestPaneStatusBadgeIsIndependentFromCopiedHeader(t *testing.T) {
 	for _, tc := range []struct{ state, label string }{{"opening", "[connecting]"}, {"open", "[connected]"}, {"closed (exit status 255)", "[disconnected]"}} {
 		p.state = tc.state
 		title := ansi.Strip(p.paneTitle(1))
-		if !strings.Contains(title, tc.label) || strings.Contains(title, "255") || ansi.StringWidth(title) > p.terminal.Width() {
+		if !strings.Contains(title, tc.label) || strings.Contains(title, "255") || ansi.StringWidth(title) > p.terminal.Width()+terminalGutter {
 			t.Fatal(title)
 		}
 		p.selectionStart, p.selectionEnd = -1, -1
@@ -306,5 +307,47 @@ func TestWakePauseConsumesFurtherInputUntilTargetSelection(t *testing.T) {
 	m = testUpdate(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.wakePaused || m.target != 0 {
 		t.Fatal("explicit focus failed to resume")
+	}
+}
+
+func TestInteractiveNumberedPanesAndSelectionStatus(t *testing.T) {
+	m := terminalModel(t, 200)
+	p := m.panes[0]
+	_, _ = p.terminal.Write([]byte("first\r\nsecond"))
+	p.selected = true
+	p.selectionStart = 0
+	p.selectionEnd = 1
+	p.captureSelection()
+	m.panes[1].state = "closed"
+	view := ansi.Strip(m.interactiveView())
+	for _, want := range []string{"     1 first", "     2 second", "2 lines selected | interactive | connected 1  connecting 0  disconnected 1"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("missing %q in %s", want, view)
+		}
+	}
+	if p.selectionText != "first\nsecond" {
+		t.Fatal("gutter copied", p.selectionText)
+	}
+	if m.paneAt(101, 3) != 1 {
+		t.Fatal("right pane hit area shifted")
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if ansi.StringWidth(line) > m.width {
+			t.Fatal("view overflow")
+		}
+	}
+}
+
+func TestInteractiveLineNumbersFollowScrollback(t *testing.T) {
+	m := terminalModel(t, 160)
+	p := m.panes[0]
+	for i := 0; i < p.terminal.Height()+5; i++ {
+		_, _ = p.terminal.Write([]byte("row\r\n"))
+	}
+	p.offset = 3
+	body := ansi.Strip(p.paneBody())
+	want := fmt.Sprintf("%6d row", p.terminal.ScrollbackLen()-p.offset+1)
+	if !strings.HasPrefix(body, want) {
+		t.Fatalf("want %q, got %q", want, body)
 	}
 }

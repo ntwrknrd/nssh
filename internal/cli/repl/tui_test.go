@@ -83,11 +83,17 @@ func TestTUISelectionCopiesOnlyChosenDevice(t *testing.T) {
 	if got := m.selectedText(); got != "left one\nleft two" {
 		t.Fatalf("cross-pane selection: %q", got)
 	}
+	if !strings.Contains(ansi.Strip(m.tuiView()), "2 lines selected | batch") {
+		t.Fatal("missing selection count")
+	}
 	// Header and gutter clicks cannot copy neighboring output.
 	next, _ = m.handleMouse(tea.MouseMsg{X: 2, Y: start + 1 - m.bodyOffset(), Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	m = next.(model)
 	if m.selectedText() != "" {
 		t.Fatal("line number gutter selected output")
+	}
+	if strings.Contains(ansi.Strip(m.tuiView()), "lines selected") {
+		t.Fatal("stale selection count")
 	}
 }
 func TestTUIPickerPreservesCommandAndUsername(t *testing.T) {

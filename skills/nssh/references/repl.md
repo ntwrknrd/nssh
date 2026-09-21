@@ -117,6 +117,11 @@ Only the active tab receives keyboard input. Background tabs keep receiving
 output. From batch, use Ctrl-P then `:interactive` to resume the tabs. Remote shells own interactive
 history; nssh saves only complete batch requests in its history file.
 
+Both modes show the number of selected lines in the footer, including a selected
+header. Interactive panes have line-number gutters for retained terminal output;
+the numbers stay out of clipboard copies. The interactive footer counts connected,
+connecting, and disconnected panes in the current tab.
+
 The mouse wheel scrolls all panes in the tab together by default, with each pane
 stopping at its own scrollback limit. Disable scroll lock to scroll only the
 pane under the pointer. Drag selects the device header and output lines from one pane. The header

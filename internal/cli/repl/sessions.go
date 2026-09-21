@@ -270,7 +270,7 @@ func (m *model) resizePanes() {
 		cols = 2
 	}
 	rows := (n + cols - 1) / cols
-	w, h := max(8, width/cols-2), max(2, (height-2)/rows-3)
+	w, h := max(8, width/cols-2-terminalGutter), max(2, (height-2)/rows-3)
 	for _, p := range m.panes {
 		p.selected = false
 		p.selecting = false
@@ -607,7 +607,7 @@ func (m model) paneAt(x, y int) int {
 	if len(m.panes) == 0 || y < 1 {
 		return -1
 	}
-	w, h := m.panes[0].terminal.Width()+2, m.panes[0].terminal.Height()+3
+	w, h := m.panes[0].terminal.Width()+terminalGutter+2, m.panes[0].terminal.Height()+3
 	cols := 1
 	if m.width >= 120 && len(m.panes) > 1 {
 		cols = 2
@@ -667,12 +667,22 @@ func (p *terminalPane) captureSelection() {
 	}
 	p.selectionText = strings.Join(selected, "\n")
 }
+
+const terminalGutter = 7
+
 func (p *terminalPane) paneBody() string {
 	lines := strings.Split(p.plainBody(), "\n")
 	if p.selected {
 		for i := max(0, min(p.selectionStart, p.selectionEnd)); i <= max(p.selectionStart, p.selectionEnd) && i < len(lines); i++ {
 			lines[i] = lipgloss.NewStyle().Reverse(true).Render(padCells(ansi.Strip(lines[i]), p.terminal.Width()))
 		}
+	}
+	for i := range lines {
+		gutter := strings.Repeat(" ", terminalGutter)
+		if strings.TrimSpace(ansi.Strip(lines[i])) != "" {
+			gutter = tuiDim.Render(fmt.Sprintf("%6d ", p.terminal.ScrollbackLen()-p.offset+i+1))
+		}
+		lines[i] = gutter + lines[i]
 	}
 	return strings.Join(lines, "\n")
 }
@@ -703,13 +713,13 @@ func (m model) interactiveView() string {
 		p := m.panes[i]
 		title := p.paneTitle(i + 1)
 		if p.selected && min(p.selectionStart, p.selectionEnd) == -1 {
-			title = lipgloss.NewStyle().Reverse(true).Render(padCells(title, p.terminal.Width()))
+			title = lipgloss.NewStyle().Reverse(true).Render(padCells(title, p.terminal.Width()+terminalGutter))
 		}
 		color := lipgloss.Color("8")
 		if m.target < 0 || m.target == i {
 			color = lipgloss.Color("10")
 		}
-		pane := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(color).Width(p.terminal.Width()).Render(ansi.Truncate(title, p.terminal.Width(), "...") + "\n" + p.paneBody())
+		pane := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(color).Width(p.terminal.Width() + terminalGutter).Render(ansi.Truncate(title, p.terminal.Width()+terminalGutter, "...") + "\n" + p.paneBody())
 		current = append(current, pane)
 		if len(current) == cols || i == min(len(m.panes), m.page*4+4)-1 {
 			rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, current...))
@@ -718,13 +728,26 @@ func (m model) interactiveView() string {
 	}
 	body := strings.Join(rows, "\n")
 	body = lipgloss.NewStyle().Height(max(1, height-1)).MaxHeight(max(1, height-1)).Render(body)
-	status := m.broadcastLabel()
-	if status != "Disconnected" && m.message != "" && m.message != status {
-		if strings.HasPrefix(m.message, status) {
-			status = m.message
-		} else {
-			status += " | " + m.message
+	connected, connecting, disconnected, selected := 0, 0, 0, 0
+	for _, p := range m.panes {
+		switch {
+		case p.state == "open":
+			connected++
+		case strings.HasPrefix(p.state, "closed"):
+			disconnected++
+		default:
+			connecting++
 		}
+		if p.selected {
+			selected += max(p.selectionStart, p.selectionEnd) - min(p.selectionStart, p.selectionEnd) + 1
+		}
+	}
+	status := fmt.Sprintf("interactive | connected %d  connecting %d  disconnected %d | %s", connected, connecting, disconnected, m.broadcastLabel())
+	if selected > 0 {
+		status = fmt.Sprintf("%d lines selected | %s", selected, status)
+	}
+	if label := m.broadcastLabel(); label != "Disconnected" && m.message != "" && m.message != label {
+		status += " | " + m.message
 	}
 	if m.independentScroll {
 		status += " | scroll: independent"
@@ -734,7 +757,7 @@ func (m model) interactiveView() string {
 	if len(m.panes) > 4 {
 		status += fmt.Sprintf(" | page %d/%d", m.page+1, (len(m.panes)+3)/4)
 	}
-	status = padCells(ansi.Truncate(status, max(1, width-17), ""), width-16) + "Ctrl+P: controls"
+	status = statusLine(status, width)
 	view := body + "\n" + status
 	if m.controlOpen {
 		view = m.terminalControlView(view)
@@ -835,7 +858,7 @@ func (p *terminalPane) paneTitle(index int) string {
 		label, color = "disconnected", lipgloss.Color("9")
 	}
 	badge := "[" + label + "]"
-	width := p.terminal.Width()
+	width := p.terminal.Width() + terminalGutter
 	room := max(0, width-ansi.StringWidth(badge)-1)
 	identity := ansi.Truncate(fmt.Sprintf("%d %s", index, p.heading()), room, "")
 	return ansi.Truncate(padCells(identity, room)+" "+lipgloss.NewStyle().Foreground(color).Render(badge), width, "")
