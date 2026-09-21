@@ -279,13 +279,13 @@ func TestReconnectSkipsOpenPanes(t *testing.T) {
 	}
 }
 
-func TestPaneStatusBadgeIsIndependentFromCopiedHeader(t *testing.T) {
+func TestPaneConnectionColorKeepsHeaderStable(t *testing.T) {
 	m := terminalModel(t, 160)
 	p := m.panes[0]
-	for _, tc := range []struct{ state, label string }{{"opening", "[connecting]"}, {"open", "[connected]"}, {"closed (exit status 255)", "[disconnected]"}} {
+	for _, tc := range []struct{ state, color string }{{"opening", "11"}, {"open", "10"}, {"closed (exit status 255)", "#F2A6A6"}} {
 		p.state = tc.state
 		title := ansi.Strip(p.paneTitle(1))
-		if !strings.Contains(title, tc.label) || strings.Contains(title, "255") || ansi.StringWidth(title) > p.terminal.Width()+terminalGutter {
+		if title != "1 [alice@eos]" || string(p.borderColor()) != tc.color || ansi.StringWidth(title) > p.terminal.Width()+terminalGutter {
 			t.Fatal(title)
 		}
 		p.selectionStart, p.selectionEnd = -1, -1
@@ -349,5 +349,23 @@ func TestInteractiveLineNumbersFollowScrollback(t *testing.T) {
 	want := fmt.Sprintf("%6d row", p.terminal.ScrollbackLen()-p.offset+1)
 	if !strings.HasPrefix(body, want) {
 		t.Fatalf("want %q, got %q", want, body)
+	}
+}
+
+func TestTabTitlesUseShortDeviceNames(t *testing.T) {
+	m := terminalModel(t, 160)
+	m.panes[0].name = "alice@151-agg-sw1.custcbb.local"
+	m.panes[1].name = "alice@151-agg-sw2.custcbb.local"
+	if got := m.tabBar(); got != "[*1 151-agg-sw1, 151-agg-sw2] " {
+		t.Fatal(got)
+	}
+	m.panes[0].state = "closed"
+	if strings.Contains(m.tabBar(), "Tab") || !strings.Contains(m.tabBar(), "151-agg-sw1") {
+		t.Fatal("disconnected tab lost identity")
+	}
+	for _, tc := range []struct{ in, want string }{{"user@10.1.2.3", "10.1.2.3"}, {"user@2001:db8::1", "2001:db8::1"}, {"user@edge.example.net", "edge"}, {"edge", "edge"}} {
+		if got := shortDeviceName(tc.in); got != tc.want {
+			t.Fatalf("%q: %q", tc.in, got)
+		}
 	}
 }

@@ -715,10 +715,7 @@ func (m model) interactiveView() string {
 		if p.selected && min(p.selectionStart, p.selectionEnd) == -1 {
 			title = lipgloss.NewStyle().Reverse(true).Render(padCells(title, p.terminal.Width()+terminalGutter))
 		}
-		color := lipgloss.Color("8")
-		if m.target < 0 || m.target == i {
-			color = lipgloss.Color("10")
-		}
+		color := p.borderColor()
 		pane := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(color).Width(p.terminal.Width() + terminalGutter).Render(ansi.Truncate(title, p.terminal.Width()+terminalGutter, "...") + "\n" + p.paneBody())
 		current = append(current, pane)
 		if len(current) == cols || i == min(len(m.panes), m.page*4+4)-1 {
@@ -850,18 +847,17 @@ func (m *model) scrollPanes(index, delta int) {
 }
 
 func (p *terminalPane) paneTitle(index int) string {
-	label, color := "connecting", lipgloss.Color("11")
+	return ansi.Truncate(fmt.Sprintf("%d %s", index, p.heading()), p.terminal.Width()+terminalGutter, "...")
+}
+
+func (p *terminalPane) borderColor() lipgloss.Color {
 	if p.state == "open" {
-		label, color = "connected", lipgloss.Color("10")
+		return lipgloss.Color("10")
 	}
 	if strings.HasPrefix(p.state, "closed") {
-		label, color = "disconnected", lipgloss.Color("9")
+		return lipgloss.Color("#F2A6A6")
 	}
-	badge := "[" + label + "]"
-	width := p.terminal.Width() + terminalGutter
-	room := max(0, width-ansi.StringWidth(badge)-1)
-	identity := ansi.Truncate(fmt.Sprintf("%d %s", index, p.heading()), room, "")
-	return ansi.Truncate(padCells(identity, room)+" "+lipgloss.NewStyle().Foreground(color).Render(badge), width, "")
+	return lipgloss.Color("11")
 }
 
 // A wake key starts only closed targets and is never delivered or replayed.

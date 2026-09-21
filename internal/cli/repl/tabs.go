@@ -2,6 +2,7 @@ package repl
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -109,7 +110,16 @@ func (m model) tabTitles() []string {
 		if tab.group == m.group {
 			marker = "*"
 		}
-		labels = append(labels, fmt.Sprintf("[%sTab %d] ", marker, i+1))
+		names := make([]string, 0, len(tab.panes))
+		for _, pane := range tab.panes {
+			names = append(names, shortDeviceName(pane.name))
+		}
+		name := strings.Join(names, ", ")
+		if name == "" {
+			name = "Connecting"
+		}
+		name = ansi.Truncate(name, max(8, m.width/max(1, len(tabs))-7), "...")
+		labels = append(labels, fmt.Sprintf("[%s%d %s] ", marker, i+1, name))
 	}
 	return labels
 }
@@ -306,4 +316,14 @@ func (m *model) cycleTab(delta int) {
 		}
 	}
 	m.switchTab((index + delta + len(m.tabs)) % len(m.tabs))
+}
+
+func shortDeviceName(name string) string {
+	if at := strings.LastIndex(name, "@"); at >= 0 {
+		name = name[at+1:]
+	}
+	if net.ParseIP(name) == nil {
+		name, _, _ = strings.Cut(name, ".")
+	}
+	return displayLabel(name)
 }
