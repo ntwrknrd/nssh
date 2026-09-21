@@ -81,7 +81,7 @@ Each terminal keeps its working directory, variables, CLI hierarchy, and output.
 
 Wait for each device's prompt before sending input. Click a pane top border to target
 only that device. Output selection does not change targets. A disconnected
-session pauses broadcast. Pane borders are green when connected, yellow while connecting,
+session pauses broadcast. Pane borders are green when connected, orange while connecting or unknown,
 and pastel red when disconnected.
 
 An input key aimed at a disconnected pane reconnects it. With broadcast selected,
@@ -130,7 +130,9 @@ Right-click copies and clears selection after a successful write. Clipboard
 copies use OSC 52 and are limited to 64 KiB. New output or resize clears selection.
 
 Tab labels show device names without usernames or DNS suffixes. IP addresses
-remain intact, and disconnected tabs retain their device names.
+remain intact, and disconnected tabs retain their device names. Tabs use the same
+colors: red if any device is disconnected, orange if any remaining state is
+unknown or connecting, and green when all devices are connected.
 
 Interactive mode supports eight tabs with 1-16 devices each, up to four panes per page, and 1000
 scrollback rows per pane. Terminal dimensions follow pane size. Rendered terminal

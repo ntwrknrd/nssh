@@ -282,7 +282,7 @@ func TestReconnectSkipsOpenPanes(t *testing.T) {
 func TestPaneConnectionColorKeepsHeaderStable(t *testing.T) {
 	m := terminalModel(t, 160)
 	p := m.panes[0]
-	for _, tc := range []struct{ state, color string }{{"opening", "11"}, {"open", "10"}, {"closed (exit status 255)", "#F2A6A6"}} {
+	for _, tc := range []struct{ state, color string }{{"opening", "#F2AF6B"}, {"", "#F2AF6B"}, {"open", "10"}, {"closed (exit status 255)", "#F2A6A6"}} {
 		p.state = tc.state
 		title := ansi.Strip(p.paneTitle(1))
 		if title != "1 [alice@eos]" || string(p.borderColor()) != tc.color || ansi.StringWidth(title) > p.terminal.Width()+terminalGutter {
@@ -356,7 +356,7 @@ func TestTabTitlesUseShortDeviceNames(t *testing.T) {
 	m := terminalModel(t, 160)
 	m.panes[0].name = "alice@151-agg-sw1.custcbb.local"
 	m.panes[1].name = "alice@151-agg-sw2.custcbb.local"
-	if got := m.tabBar(); got != "[*1 151-agg-sw1, 151-agg-sw2] " {
+	if got := ansi.Strip(m.tabBar()); got != "[*1 151-agg-sw1, 151-agg-sw2] " {
 		t.Fatal(got)
 	}
 	m.panes[0].state = "closed"
@@ -366,6 +366,28 @@ func TestTabTitlesUseShortDeviceNames(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{{"user@10.1.2.3", "10.1.2.3"}, {"user@2001:db8::1", "2001:db8::1"}, {"user@edge.example.net", "edge"}, {"edge", "edge"}} {
 		if got := shortDeviceName(tc.in); got != tc.want {
 			t.Fatalf("%q: %q", tc.in, got)
+		}
+	}
+}
+
+func TestTabStatusColorAggregatesPaneStates(t *testing.T) {
+	for _, tc := range []struct {
+		states []string
+		want   lipgloss.Color
+	}{
+		{nil, connectingColor},
+		{[]string{"open", "open"}, connectedColor},
+		{[]string{"open", "opening"}, connectingColor},
+		{[]string{"unknown", "open"}, connectingColor},
+		{[]string{"opening", "closed"}, disconnectedColor},
+		{[]string{"closed", "opening"}, disconnectedColor},
+	} {
+		g := terminalGroup{}
+		for _, state := range tc.states {
+			g.panes = append(g.panes, &terminalPane{state: state})
+		}
+		if got := g.statusColor(); got != tc.want {
+			t.Fatalf("%v: got %s, want %s", tc.states, got, tc.want)
 		}
 	}
 }

@@ -119,7 +119,7 @@ func (m model) tabTitles() []string {
 			name = "Connecting"
 		}
 		name = ansi.Truncate(name, max(8, m.width/max(1, len(tabs))-7), "...")
-		labels = append(labels, fmt.Sprintf("[%s%d %s] ", marker, i+1, name))
+		labels = append(labels, lipgloss.NewStyle().Foreground(tab.statusColor()).Render(fmt.Sprintf("[%s%d %s] ", marker, i+1, name)))
 	}
 	return labels
 }
@@ -326,4 +326,21 @@ func shortDeviceName(name string) string {
 		name, _, _ = strings.Cut(name, ".")
 	}
 	return displayLabel(name)
+}
+
+// A disconnected device takes priority; green requires every device to be open.
+func (g terminalGroup) statusColor() lipgloss.Color {
+	color := connectedColor
+	if len(g.panes) == 0 {
+		return connectingColor
+	}
+	for _, p := range g.panes {
+		switch p.borderColor() {
+		case disconnectedColor:
+			return disconnectedColor
+		case connectingColor:
+			color = connectingColor
+		}
+	}
+	return color
 }

@@ -850,14 +850,20 @@ func (p *terminalPane) paneTitle(index int) string {
 	return ansi.Truncate(fmt.Sprintf("%d %s", index, p.heading()), p.terminal.Width()+terminalGutter, "...")
 }
 
+const (
+	connectedColor    = lipgloss.Color("10")
+	disconnectedColor = lipgloss.Color("#F2A6A6")
+	connectingColor   = lipgloss.Color("#F2AF6B")
+)
+
 func (p *terminalPane) borderColor() lipgloss.Color {
 	if p.state == "open" {
-		return lipgloss.Color("10")
+		return connectedColor
 	}
 	if strings.HasPrefix(p.state, "closed") {
-		return lipgloss.Color("#F2A6A6")
+		return disconnectedColor
 	}
-	return lipgloss.Color("11")
+	return connectingColor
 }
 
 // A wake key starts only closed targets and is never delivered or replayed.
