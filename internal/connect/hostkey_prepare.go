@@ -234,7 +234,7 @@ func scanHostKeyThroughSSH(ctx context.Context, probeArgs []string, algorithm, f
 		return scannedHostKey{}, fmt.Errorf("create host-key scan file: %w", err)
 	}
 	path := file.Name()
-	defer os.Remove(path)
+	defer func() { _ = os.Remove(path) }()
 	if err := file.Close(); err != nil {
 		return scannedHostKey{}, fmt.Errorf("close host-key scan file: %w", err)
 	}
