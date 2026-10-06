@@ -9,12 +9,107 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 	"golang.org/x/crypto/ssh"
 )
+
+func TestScanHostKeyUsesProxyWithoutTrustingOrAuthenticatingTarget(t *testing.T) {
+	const line = "edge01 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBcLcMSBE8+TJuxrHFujWBrOCcXrl+/sTqONstg2Jcg7"
+	publicKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := ssh.FingerprintSHA256(publicKey)
+	tests := []struct {
+		name        string
+		sshArgs     []string
+		options     config.SSHOptions
+		fingerprint string
+		wantError   bool
+	}{
+		{"managed proxy command", nil, config.SSHOptions{"ProxyCommand": config.NewSSHOptionString("ssh -W %h:%p jump")}, fingerprint, false},
+		{"inventory proxy jump", nil, config.SSHOptions{"ProxyJump": config.NewSSHOptionString("jump")}, fingerprint, false},
+		{"runtime proxy jump", []string{"-J", "jump"}, nil, fingerprint, false},
+		{"changed key between probes", nil, config.SSHOptions{"ProxyJump": config.NewSSHOptionString("jump")}, "SHA256:otherKey", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			argsPath := filepath.Join(dir, "args")
+			scanPath := filepath.Join(dir, "scan-path")
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("NSSH_TEST_KEY_LINE", line)
+			t.Setenv("NSSH_TEST_FINGERPRINT", tt.fingerprint)
+			t.Setenv("NSSH_TEST_ARGS", argsPath)
+			t.Setenv("NSSH_TEST_SCAN_PATH", scanPath)
+			t.Setenv("SSH_ASKPASS", "/must-not-resolve-target-password")
+			sshScript := `#!/bin/sh
+test -z "${SSH_ASKPASS:-}" || exit 98
+printf 'debug1: Server host key: ssh-ed25519 %s\n' "$NSSH_TEST_FINGERPRINT" >&2
+scan_file=
+for arg do
+  case "$arg" in
+    UserKnownHostsFile=*)
+      if test -z "$scan_file"; then scan_file=${arg#UserKnownHostsFile=}; fi ;;
+  esac
+done
+if test -n "$scan_file"; then
+  printf '%s\n' "$NSSH_TEST_KEY_LINE" > "$scan_file"
+  printf '%s\n' "$@" > "$NSSH_TEST_ARGS"
+  printf '%s' "$scan_file" > "$NSSH_TEST_SCAN_PATH"
+fi
+exit 255
+`
+			if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(sshScript), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "ssh-keyscan"), []byte("#!/bin/sh\nexit 99\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			resolved := &ResolvedHost{Hostname: "edge01", Username: "netops", Port: 2200, SSH: config.SSHHostConfig{Options: tt.options}}
+			key, err := scanHostKey(context.Background(), resolved, tt.sshArgs, config.DefaultConfig(), Options{}, nil)
+			if tt.wantError {
+				if err == nil || !strings.Contains(err.Error(), "did not return the host key negotiated") {
+					t.Fatalf("key mismatch error = %v", err)
+				}
+			} else if err != nil || key.Fingerprint != fingerprint || key.Line != line {
+				t.Fatalf("scanHostKey = %+v, %v", key, err)
+			}
+			data, err := os.ReadFile(argsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := strings.Split(strings.TrimSpace(string(data)), "\n")
+			for option, want := range map[string]string{
+				"StrictHostKeyChecking": "accept-new", "GlobalKnownHostsFile": "/dev/null",
+				"UpdateHostKeys": "no", "VerifyHostKeyDNS": "no", "KnownHostsCommand": "none",
+				"PreferredAuthentications": "none", "PubkeyAuthentication": "no", "PasswordAuthentication": "no",
+				"ControlPath": "none", "ControlMaster": "no", "ControlPersist": "no", "Port": "2200",
+			} {
+				if got := connector.EffectiveSSHOption(args, option); got != want {
+					t.Errorf("%s = %q, want %q", option, got, want)
+				}
+			}
+			if !slices.Contains(args, "netops@edge01") {
+				t.Fatal("scan lost target identity")
+			}
+			if !slices.Contains(args, "ProxyCommand=ssh -W %h:%p jump") && connector.EffectiveSSHOption(args, "ProxyJump") != "jump" {
+				t.Fatal("scan lost proxy transport")
+			}
+			path, err := os.ReadFile(scanPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(string(path)); !os.IsNotExist(err) {
+				t.Fatalf("temporary trust file was not removed: %v", err)
+			}
+		})
+	}
+}
 
 func TestParseNegotiatedHostKey(t *testing.T) {
 	algorithm, fingerprint, err := parseNegotiatedHostKey([]byte("debug1: Server host key: ssh-rsa SHA256:acceptedRSA123\n"))
