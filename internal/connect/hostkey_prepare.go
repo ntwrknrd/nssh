@@ -192,6 +192,12 @@ func scanHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string, 
 	if err != nil {
 		return scannedHostKey{}, err
 	}
+	if proxy := connector.EffectiveSSHOption(probeArgs, "ProxyCommand"); proxy != "" && proxy != "none" {
+		return scanHostKeyThroughSSH(ctx, probeArgs, algorithm, fingerprint, opts, proxyEnv)
+	}
+	if proxy := connector.EffectiveSSHOption(probeArgs, "ProxyJump"); proxy != "" && proxy != "none" {
+		return scanHostKeyThroughSSH(ctx, probeArgs, algorithm, fingerprint, opts, proxyEnv)
+	}
 
 	host := resolved.Hostname
 	port := fmt.Sprintf("%d", resolved.Port)
@@ -211,6 +217,57 @@ func scanHostKey(ctx context.Context, resolved *ResolvedHost, sshArgs []string, 
 	output, err := collectPreparationOutput(exec.CommandContext(ctx, "ssh-keyscan", args...), opts)
 	if err != nil {
 		return scannedHostKey{}, fmt.Errorf("ssh-keyscan failed: %w (%s)", err, strings.TrimSpace(string(output)))
+	}
+	key, err := scannedHostKeyByFingerprint(output, fingerprint)
+	if err != nil {
+		return scannedHostKey{}, err
+	}
+	key.Algorithm = algorithm
+	return key, nil
+}
+
+// OpenSSH can collect a proxied key into an isolated trust file without using
+// target credentials. Match it to the first probe before requesting approval.
+func scanHostKeyThroughSSH(ctx context.Context, probeArgs []string, algorithm, fingerprint string, opts Options, proxyEnv []string) (scannedHostKey, error) {
+	file, err := os.CreateTemp("", "nssh-keyscan-*")
+	if err != nil {
+		return scannedHostKey{}, fmt.Errorf("create host-key scan file: %w", err)
+	}
+	path := file.Name()
+	defer func() { _ = os.Remove(path) }()
+	if err := file.Close(); err != nil {
+		return scannedHostKey{}, fmt.Errorf("close host-key scan file: %w", err)
+	}
+	args := []string{
+		"-o", "UserKnownHostsFile=" + path,
+		"-o", "GlobalKnownHostsFile=/dev/null",
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "UpdateHostKeys=no",
+		"-o", "VerifyHostKeyDNS=no",
+		"-o", "KnownHostsCommand=none",
+		"-o", "PreferredAuthentications=none",
+		"-o", "PubkeyAuthentication=no",
+		"-o", "PasswordAuthentication=no",
+		"-o", "ControlPath=none",
+		"-o", "ControlMaster=no",
+		"-o", "ControlPersist=no",
+	}
+	args = append(args, probeArgs...)
+	if timeout := effectiveHostKeyProbeTimeout(args); timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	probe := exec.CommandContext(ctx, "ssh", args...)
+	probe.Env = append(withoutAskpassEnv(os.Environ()), proxyEnv...)
+	// Authentication is deliberately disabled, so a nonzero exit is expected.
+	_, _ = collectPreparationOutput(probe, opts)
+	if err := ctx.Err(); err != nil {
+		return scannedHostKey{}, err
+	}
+	output, err := os.ReadFile(path)
+	if err != nil {
+		return scannedHostKey{}, fmt.Errorf("read proxied host-key scan: %w", err)
 	}
 	key, err := scannedHostKeyByFingerprint(output, fingerprint)
 	if err != nil {
