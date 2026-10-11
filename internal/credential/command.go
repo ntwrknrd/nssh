@@ -32,7 +32,12 @@ func NewCommandRegistry(ctx context.Context, cfg *config.Config) (*Registry, err
 type commandProviderTransport struct{ inner providerTransport }
 
 func commandTransport(ctx context.Context, transport providerTransport) providerTransport {
+	if command, ok := transport.(commandProviderTransport); ok {
+		transport = command.inner
+	}
 	switch t := transport.(type) {
+	case nil:
+		transport = agentProviderTransport{autoStart: true, ctx: ctx}
 	case directProviderTransport:
 		t.ctx = ctx
 		transport = t

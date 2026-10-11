@@ -56,6 +56,12 @@ func (c *Connector) buildSSHArgs() ([]string, error) {
 		)
 	}
 	enforcedOptions = append(enforcedOptions, pinnedOptions...)
+	if hasAskpassEnv(c.env) {
+		// The second prompt reports rejection to the request controller; it
+		// never receives a second automatic password. Manual retry uses the
+		// operator's original prompt limit after askpass is removed.
+		enforcedOptions = append(enforcedOptions, "-o", "NumberOfPasswordPrompts=2")
+	}
 	args = append(args, ComposeSSHOptions(SSHOptionPlan{
 		Enforced:     enforcedOptions,
 		Runtime:      options,
@@ -72,10 +78,6 @@ func (c *Connector) buildSSHArgs() ([]string, error) {
 
 	if c.resolvedPort != "" && c.resolvedPort != "22" && EffectiveSSHOption(args, "Port") == "" {
 		args = append(args, "-p", c.resolvedPort)
-	}
-
-	if hasAskpassEnv(c.env) && EffectiveSSHOption(args, "NumberOfPasswordPrompts") == "" {
-		args = append(args, "-o", "NumberOfPasswordPrompts=1")
 	}
 
 	// Terminate OpenSSH option parsing before the generated target.

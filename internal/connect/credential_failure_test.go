@@ -109,3 +109,16 @@ func TestExternalAskpassCredentialFailureCancelsConsumer(t *testing.T) {
 		t.Fatal("external consumer lost credential error")
 	}
 }
+
+func TestCapturedRemoteExit255IsNotReclassifiedAsAuthenticationFailure(t *testing.T) {
+	oldRun := runCapturedCommandFunc
+	t.Cleanup(func() { runCapturedCommandFunc = oldRun })
+	failure := &exit.ExitError{Code: 255, Message: "remote command exited with code 255"}
+	runCapturedCommandFunc = func(context.Context, captured.Request) (captured.Result, error) {
+		return captured.Result{ExitCode: 255, Stderr: []byte("Permission denied in application\n"), Err: failure}, failure
+	}
+	result, err := captureResolvedRemoteCommand(context.Background(), &ResolvedHost{Hostname: "edge", Port: 22}, nil, []string{"application"}, config.DefaultConfig(), Options{})
+	if !errors.Is(err, failure) || result.ExitCode != 255 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}

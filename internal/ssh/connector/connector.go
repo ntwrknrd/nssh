@@ -32,6 +32,7 @@ type Connector struct {
 	sshVerbosity     int
 	acceptOnceMode   string
 	env              []string
+	authRetry        func(error) (context.Context, error)
 
 	passwordMu sync.Mutex
 
@@ -101,6 +102,10 @@ func (c *Connector) SetSSHVerbosity(level int) {
 func (c *Connector) SetEnv(env []string) {
 	c.env = append([]string(nil), env...)
 }
+
+// SetAuthRetry permits a bounded authentication-only retry with new askpass policy.
+// A nil context ends the attempt; the handler must not retry a running session.
+func (c *Connector) SetAuthRetry(fn func(error) (context.Context, error)) { c.authRetry = fn }
 
 func (c *Connector) LastOutput() string {
 	c.mu.RLock()

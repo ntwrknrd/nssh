@@ -103,6 +103,20 @@ func (c *Connector) Run(ctx context.Context) error {
 			continue
 		}
 
+		if ctx.Err() != nil {
+			c.terminateChild()
+			err = context.Cause(ctx)
+		}
+		if c.authRetry != nil && err != nil && !c.hostKeyPrepareOnly {
+			retryCtx, retryErr := c.authRetry(err)
+			if retryCtx != nil {
+				c.closeSession()
+				c.resetForRetry()
+				ctx = retryCtx
+				continue
+			}
+			err = retryErr
+		}
 		c.closeSession()
 		if !errors.Is(err, errHostKeyPrepared) || !c.preserveTempKnownHosts {
 			c.cleanupTempFiles()
@@ -121,6 +135,15 @@ func (c *Connector) start(ctx context.Context) error {
 	}
 	logOpenSSHCommand(args)
 	c.sshCmd = exec.CommandContext(ctx, "ssh", args...)
+	// pty.Start creates a separate session/process group. Cancel all its
+	// authentication children, including managed proxy SSH and askpass helpers.
+	c.sshCmd.Cancel = func() error {
+		err := syscall.Kill(-c.sshCmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return err
+	}
 	if len(c.env) > 0 {
 		c.sshCmd.Env = append(os.Environ(), c.env...)
 	}
@@ -213,7 +236,7 @@ func (c *Connector) terminateChild() {
 	if err := c.sshCmd.Process.Kill(); err != nil {
 		slog.Debug("failed to kill ssh child", "err", err)
 	}
-	if _, err := c.sshCmd.Process.Wait(); err != nil {
+	if err := c.sshCmd.Wait(); err != nil {
 		slog.Debug("failed to wait for killed ssh child", "err", err)
 	}
 }

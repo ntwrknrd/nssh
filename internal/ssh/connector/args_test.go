@@ -100,7 +100,7 @@ func TestBuildSSHArgsAddsDefaultTTYForInteractiveSession(t *testing.T) {
 	}
 }
 
-func TestBuildSSHArgsLimitsAskpassToOnePrompt(t *testing.T) {
+func TestBuildSSHArgsAskpassReservesRejectionPrompt(t *testing.T) {
 	conn := NewConnector("edge01", "netops", nil, nil)
 	conn.SetEnv([]string{"SSH_ASKPASS=/tmp/nssh-askpass"})
 
@@ -109,14 +109,14 @@ func TestBuildSSHArgsLimitsAskpassToOnePrompt(t *testing.T) {
 		t.Fatalf("buildSSHArgs() error = %v", err)
 	}
 
-	want := []string{"-tt", "-F", "none", "-o", "NumberOfPasswordPrompts=1", "--", "netops@edge01"}
+	want := []string{"-tt", "-o", "NumberOfPasswordPrompts=2", "-F", "none", "--", "netops@edge01"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
 	}
 }
 
-func TestBuildSSHArgsKeepsExplicitAskpassPromptLimit(t *testing.T) {
-	conn := NewConnector("edge01", "netops", nil, []string{"-o", "NumberOfPasswordPrompts=2"})
+func TestBuildSSHArgsRestoresOperatorPromptLimitForManualFallback(t *testing.T) {
+	conn := NewConnector("edge01", "netops", nil, []string{"-o", "NumberOfPasswordPrompts=1"})
 	conn.SetEnv([]string{"SSH_ASKPASS=/tmp/nssh-askpass"})
 
 	got, err := conn.buildSSHArgs()
@@ -124,9 +124,16 @@ func TestBuildSSHArgsKeepsExplicitAskpassPromptLimit(t *testing.T) {
 		t.Fatalf("buildSSHArgs() error = %v", err)
 	}
 
-	want := []string{"-tt", "-F", "none", "-o", "NumberOfPasswordPrompts=2", "--", "netops@edge01"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("buildSSHArgs() = %#v, want %#v", got, want)
+	if EffectiveSSHOption(got, "NumberOfPasswordPrompts") != "2" {
+		t.Fatalf("automatic argv=%q", got)
+	}
+	conn.SetEnv([]string{"SSH_ASKPASS_REQUIRE=never"})
+	manual, err := conn.buildSSHArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if EffectiveSSHOption(manual, "NumberOfPasswordPrompts") != "1" {
+		t.Fatalf("manual argv=%q", manual)
 	}
 }
 
