@@ -70,6 +70,9 @@ preserve.
   and managed-proxy credentials have separate channels.
 - Username conflicts between inventory intent and provider data must not inject
   a credential for the wrong account.
+- A failed credential lookup aborts the consuming SSH/SCP request with an
+  authentication error, preserving a safe provider diagnostic without exposing
+  provider output or leaving another password prompt waiting.
 
 ## Connection And Trust
 

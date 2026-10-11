@@ -103,3 +103,22 @@ func TestSOPSDecryptDoesNotLogSecretPayload(t *testing.T) {
 		t.Fatalf("error leaked secret payload: %q", err)
 	}
 }
+
+func TestSOPSDecryptMissingKeyGivesSafeActionableError(t *testing.T) {
+	runner := &fakeRunner{
+		out: []byte("Failed to get the data key required to decrypt the SOPS file.\nidentity-command-secret"),
+		err: errors.New("exit status 128"),
+	}
+	_, err := Decrypt(context.Background(), runner, "/tmp/credentials.sops.json", "")
+	if err == nil {
+		t.Fatal("expected missing-key error")
+	}
+	for _, want := range []string{"decryption key unavailable", "age identity", "SOPS_AGE_KEY_CMD"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "identity-command-secret") {
+		t.Fatal("error exposed identity command output")
+	}
+}

@@ -83,7 +83,7 @@ func TestRunCpUsesSharedResolvePath(t *testing.T) {
 	}
 	var scpArgs []string
 	var gotEnv []string
-	runScp = func(args, env []string) error {
+	runScp = func(_ context.Context, args, env []string) error {
 		scpArgs = append([]string(nil), args...)
 		gotEnv = append([]string(nil), env...)
 		return nil

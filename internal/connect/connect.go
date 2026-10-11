@@ -239,7 +239,7 @@ func runResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshAr
 	return err
 }
 
-func captureResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshArgs, command []string, cfg *config.Config, opts Options) (captured.Result, error) {
+func captureResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, sshArgs, command []string, cfg *config.Config, opts Options) (result captured.Result, runErr error) {
 	if resolved == nil {
 		return captured.Result{}, fmt.Errorf("resolved host is required")
 	}
@@ -288,6 +288,8 @@ func captureResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, s
 			return diagnostics.result(), err
 		}
 		defer askpassHandle.cleanup()
+		ctx = askpassHandle.ctx
+		defer func() { runErr = askpassHandle.operationError(runErr) }()
 	}
 	var hostKeyPrep *connector.HostKeyPreparation
 	if passwordResolvers.any() || opts.capture != nil {
@@ -467,6 +469,8 @@ type runningAskpassServer struct {
 type connectionAskpassHandle struct {
 	env     []string
 	servers []runningAskpassServer
+	ctx     context.Context
+	cancel  context.CancelCauseFunc
 }
 
 // AskpassEnvironment contains the target and managed-proxy askpass variables
@@ -475,6 +479,22 @@ type AskpassEnvironment struct {
 	Env      []string
 	ProxyEnv []string
 	handle   *connectionAskpassHandle
+}
+
+// Context cancels the consuming process when credential resolution fails.
+func (e *AskpassEnvironment) Context(fallback context.Context) context.Context {
+	if e == nil || e.handle == nil {
+		return fallback
+	}
+	return e.handle.ctx
+}
+
+// OperationError preserves the credential error instead of an SSH kill error.
+func (e *AskpassEnvironment) OperationError(err error) error {
+	if e == nil || e.handle == nil {
+		return err
+	}
+	return e.handle.operationError(err)
 }
 
 // Cleanup stops the request-scoped askpass servers.
@@ -518,9 +538,18 @@ func (h *connectionAskpassHandle) cleanup() {
 	if h == nil {
 		return
 	}
+	h.cancel(nil)
 	for _, running := range h.servers {
 		stopAskpassServer(running.server, running.cancel, running.done)
 	}
+}
+
+func (h *connectionAskpassHandle) operationError(err error) error {
+	var authErr *exit.ExitError
+	if errors.As(context.Cause(h.ctx), &authErr) && authErr.Code == exit.ExitAuthFailed {
+		return authErr
+	}
+	return err
 }
 
 func proxyAskpassEnv(handle *connectionAskpassHandle) []string {
@@ -542,19 +571,32 @@ func startConnectionAskpass(ctx context.Context, resolvers passwordResolvers) (*
 	if !resolvers.any() {
 		return nil, nil
 	}
-	handle := &connectionAskpassHandle{}
+	operationCtx, cancel := context.WithCancelCause(ctx)
+	handle := &connectionAskpassHandle{ctx: operationCtx, cancel: cancel}
 
 	for _, role := range []struct {
 		resolve func(context.Context) (*secret.Secret, error)
 		proxy   bool
+		name    string
 	}{
-		{resolve: resolvers.target},
-		{resolve: resolvers.proxy, proxy: true},
+		{resolve: resolvers.target, name: "target"},
+		{resolve: resolvers.proxy, proxy: true, name: "proxy"},
 	} {
 		if role.resolve == nil {
 			continue
 		}
-		server, cancel, done, env, err := startAskpassServerEnvForRole(ctx, role.resolve, role.proxy)
+		resolve := func(ctx context.Context) (*secret.Secret, error) {
+			password, err := role.resolve(ctx)
+			if err != nil && ctx.Err() == nil {
+				handle.cancel(&exit.ExitError{
+					Code:    exit.ExitAuthFailed,
+					Message: fmt.Sprintf("resolve %s credential: %s", role.name, err),
+					Cause:   err,
+				})
+			}
+			return password, err
+		}
+		server, cancel, done, env, err := startAskpassServerEnvForRole(operationCtx, resolve, role.proxy)
 		if err != nil {
 			handle.cleanup()
 			return nil, err
@@ -719,7 +761,7 @@ func newConnectAudit(cfg *config.Config) *audit.Logger {
 	return logger
 }
 
-func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger, opts Options) connectionResult {
+func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger, opts Options) (result connectionResult) {
 	if err := applyRuntimePort(resolved, sshArgs); err != nil {
 		destroyImmediateResolvedPasswords(resolved)
 		return connectionResult{Err: err}
@@ -747,6 +789,8 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 			return connectionResult{Err: err}
 		}
 		defer askpassHandle.cleanup()
+		ctx = askpassHandle.ctx
+		defer func() { result.Err = askpassHandle.operationError(result.Err) }()
 	}
 	var hostKeyPrep *connector.HostKeyPreparation
 	if interactiveAskpassEnabled() && passwordResolvers.any() && !muxHot {
@@ -765,7 +809,10 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 		conn.SetEnv(askpassHandle.env)
 	}
 	connErr := conn.Run(ctx)
-	result := connectionResult{Err: connErr, Output: conn.LastOutput()}
+	if askpassHandle != nil {
+		connErr = askpassHandle.operationError(connErr)
+	}
+	result = connectionResult{Err: connErr, Output: conn.LastOutput()}
 
 	if audit != nil {
 		if connErr == nil {

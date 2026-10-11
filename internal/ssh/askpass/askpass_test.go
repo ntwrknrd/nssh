@@ -3,6 +3,8 @@ package askpass
 import (
 	"bytes"
 	"context"
+	"errors"
+	"net"
 	"os"
 	"strings"
 	"testing"
@@ -10,6 +12,35 @@ import (
 
 	"github.com/ntwrknrd/nssh/internal/secret"
 )
+
+func TestResolverFailureClosesListenerForFurtherPrompts(t *testing.T) {
+	failure := errors.New("decryption key unavailable")
+	server, err := NewServerWithResolver(func(context.Context) (*secret.Secret, error) {
+		return nil, failure
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = server.Close() }()
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(context.Background()) }()
+	if _, err := RequestPassword(context.Background(), server.SocketPath(), server.Nonce()); err == nil {
+		t.Fatal("failed resolver returned a password")
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, failure) {
+			t.Fatalf("Serve error = %v, want resolver error", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("resolver failure did not stop server")
+	}
+	conn, err := net.DialTimeout("unix", server.SocketPath(), time.Second)
+	if err == nil {
+		_ = conn.Close()
+		t.Fatal("another password prompt connected to failed server")
+	}
+}
 
 func TestServerEnvDoesNotExposePasswordAndUsesPrivateDirectory(t *testing.T) {
 	password := secret.NewFromString("super-secret")

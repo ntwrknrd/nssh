@@ -39,6 +39,11 @@ func Decrypt(ctx context.Context, runner Runner, file, ageKeyFile string) (*Docu
 	}
 	out, err := runner.Run(ctx, env, "--decrypt", "--output-type", "json", file)
 	if err != nil {
+		// Recognize SOPS' missing-key diagnostic without exposing provider output,
+		// which can contain secret material from an identity command.
+		if bytes.Contains(out, []byte("Failed to get the data key required to decrypt")) {
+			return nil, fmt.Errorf("decrypt SOPS file %s: decryption key unavailable; check the age identity or SOPS_AGE_KEY_CMD: %w", file, err)
+		}
 		return nil, fmt.Errorf("decrypt SOPS file %s: %w", file, err)
 	}
 	doc, err := Parse(out)
