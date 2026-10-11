@@ -289,7 +289,13 @@ func captureResolvedRemoteCommand(ctx context.Context, resolved *ResolvedHost, s
 		}
 		defer askpassHandle.cleanup()
 		ctx = askpassHandle.ctx
-		defer func() { runErr = askpassHandle.operationError(runErr) }()
+		defer func() {
+			if authErr := askpassHandle.operationError(nil); authErr != nil {
+				runErr = authErr
+				result.Err = authErr
+				result.ExitCode = exit.ExitAuthFailed
+			}
+		}()
 	}
 	var hostKeyPrep *connector.HostKeyPreparation
 	if passwordResolvers.any() || opts.capture != nil {

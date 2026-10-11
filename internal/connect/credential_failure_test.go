@@ -62,17 +62,20 @@ func TestCapturedCredentialFailureCancelsSSHAndPreservesAuthError(t *testing.T) 
 			runCapturedCommandFunc = func(ctx context.Context, req captured.Request) (captured.Result, error) {
 				requestAskpassFailure(t, req.Env, role == "proxy")
 				<-ctx.Done()
-				return captured.Result{}, ctx.Err()
+				return captured.Result{ExitCode: -1, Err: ctx.Err()}, ctx.Err()
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			err := runResolvedRemoteCommand(ctx, resolved, nil, []string{"show"}, config.DefaultConfig(), Options{})
+			result, err := captureResolvedRemoteCommand(ctx, resolved, nil, []string{"show"}, config.DefaultConfig(), Options{})
 			var authErr *exit.ExitError
 			if !errors.As(err, &authErr) || authErr.Code != exit.ExitAuthFailed || !errors.Is(err, failure) {
 				t.Fatalf("error = %v, want original authentication failure", err)
 			}
 			if !strings.Contains(err.Error(), "resolve "+role+" credential") {
 				t.Fatalf("missing credential role in error: %v", err)
+			}
+			if result.ExitCode != exit.ExitAuthFailed || !errors.Is(result.Err, failure) {
+				t.Fatalf("captured result = %+v, want original auth failure and exit 3", result)
 			}
 			if ctx.Err() != nil {
 				t.Fatal("SSH waited for the outer deadline")
