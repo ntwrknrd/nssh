@@ -10,11 +10,11 @@ For nssh usage and operations questions, use
 
 ## Commands
 
-We recommend running nssh builds and executable tests in a Linux environment:
-native Linux, a VM, or a container. On macOS, use whichever tooling is already
-installed, such as Lima, Colima, OrbStack, Docker, or an equivalent. Keep the
-checkout, binaries, caches, and temporary test files on Linux storage, outside
-macOS shared mounts. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and commands.
+We recommend running nssh builds and executable tests in a Linux environment.
+On macOS, use a Linux container through an installed container runtime, such as
+Docker, Podman, or containerd. Keep the checkout, binaries, caches, and temporary
+test files on Linux storage, outside macOS shared mounts. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for setup and commands.
 
 ```bash
 make build

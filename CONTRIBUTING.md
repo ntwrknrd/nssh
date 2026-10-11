@@ -20,16 +20,15 @@ Optional runtime tools depend on what you are testing: `sops`, `age`, `op`, `bw`
 
 ## Build and test environment
 
-We recommend running nssh builds and executable tests in a Linux environment:
-native Linux, a VM, or a container.
+We recommend running nssh builds and executable tests in a Linux environment.
 
-On macOS, use whichever tooling is already installed, such as Lima, Colima,
-OrbStack, Docker, or an equivalent, to provide the Linux environment.
+On macOS, use a Linux container through an installed container runtime, such as
+Docker, Podman, or containerd.
 
 Keep the checkout, generated binaries, Go cache, and temporary test files on
-Linux storage, outside macOS shared mounts. For a VM, use its local filesystem.
-For a container, copy or clone the checkout into its filesystem or a named volume
-instead of bind-mounting the macOS checkout. The environment needs Go at the
+Linux storage, outside macOS shared mounts. In a container, copy or clone the
+checkout into its filesystem or a named volume instead of bind-mounting the macOS
+checkout. The environment needs Go at the
 version required by `go.mod`, Git, Make, OpenSSH client tools, and local PTY and
 Unix socket support.
 
