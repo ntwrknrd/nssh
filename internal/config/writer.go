@@ -565,6 +565,10 @@ func authTable(cfg InventoryAuthConfig) map[string]any {
 	addString(table, "username", cfg.Username)
 	addString(table, "username_ref", cfg.UsernameRef)
 	addString(table, "mode", cfg.Mode)
+	addString(table, "fallback", cfg.Fallback)
+	if cfg.LookupTimeout != 0 {
+		table["lookup_timeout"] = cfg.LookupTimeout.Duration().String()
+	}
 	return table
 }
 

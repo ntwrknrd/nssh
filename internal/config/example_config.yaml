@@ -54,6 +54,12 @@ agent:
 #   nssh self init --inv containerlab
 #
 # inventory:
+#   auth:
+#     # Terminal SSH falls back to native manual entry after automated failure.
+#     # Use fail to disable fallback. Remote commands/SCP never prompt manually.
+#     fallback: manual
+#     # Bounds credential retrieval; 0 inherits the default (10s).
+#     lookup_timeout: 10s
 #   providers:
 #     local:
 #       type: local
@@ -132,6 +138,10 @@ agent:
 #           aliases:
 #             - legacy-switch
 #           group: corp
+#           auth:
+#             # Override global fallback for this host only.
+#             fallback: fail
+#             lookup_timeout: 5s
 #           ssh:
 #             compatibility:
 #               kex: diffie-hellman-group14-sha1

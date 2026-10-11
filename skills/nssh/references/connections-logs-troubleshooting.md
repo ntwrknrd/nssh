@@ -108,6 +108,16 @@ managed proxy command and maintains separate target and proxy askpass channels.
 Password autofill is disabled for arbitrary `ProxyCommand`, unresolved
 `ProxyJump`, comma-separated jumps, and nested proxy chains.
 
+An automated lookup failure, lookup deadline or rejected automatic password
+produces a clear authentication diagnostic. Terminal SSH defaults to a bounded
+authentication restart with the failed role's autofill disabled, so OpenSSH can
+ask for a manually entered password. The other role retains its own credential
+channel and policy. Global and per-host `auth.fallback: fail` disable this
+handoff; `auth.lookup_timeout` controls retrieval time. Remote commands,
+REPL/host lists and SCP never request manual passwords, even when invoked from
+a terminal. `BatchMode=yes` also prohibits fallback. No remote command or
+authenticated session is repeated.
+
 ## Agent Runtime
 
 Commands:

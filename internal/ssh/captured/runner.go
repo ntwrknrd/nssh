@@ -280,7 +280,7 @@ func buildOpenSSHArgs(req Request) []string {
 	})
 	if hasAskpassEnv(req.Env) {
 		if connector.EffectiveSSHOption(args, "NumberOfPasswordPrompts") == "" {
-			args = append(args, "-o", "NumberOfPasswordPrompts=1")
+			args = append(args, "-o", "NumberOfPasswordPrompts=2")
 		}
 	} else if connector.EffectiveSSHOption(args, "BatchMode") == "" {
 		args = append(args, "-o", "BatchMode=yes")

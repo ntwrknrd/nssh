@@ -19,8 +19,11 @@ const (
 )
 
 const (
-	AuthModePassword = "password"
-	AuthModeKey      = "key"
+	AuthModePassword         = "password"
+	AuthModeKey              = "key"
+	AuthFallbackManual       = "manual"
+	AuthFallbackFail         = "fail"
+	DefaultAuthLookupTimeout = 10 * time.Second
 )
 
 // Provider name constants.
@@ -121,11 +124,13 @@ type InventoryHostConfig struct {
 
 // InventoryAuthConfig maps an inventory host or group to a credential item.
 type InventoryAuthConfig struct {
-	Mode               string `yaml:"mode,omitempty"`
-	CredentialProvider string `yaml:"credential_provider,omitempty"`
-	PasswordRef        string `yaml:"password_ref,omitempty"`
-	Username           string `yaml:"username,omitempty"`
-	UsernameRef        string `yaml:"username_ref,omitempty"`
+	Fallback           string   `yaml:"fallback,omitempty"`
+	LookupTimeout      Duration `yaml:"lookup_timeout,omitempty"`
+	Mode               string   `yaml:"mode,omitempty"`
+	CredentialProvider string   `yaml:"credential_provider,omitempty"`
+	PasswordRef        string   `yaml:"password_ref,omitempty"`
+	Username           string   `yaml:"username,omitempty"`
+	UsernameRef        string   `yaml:"username_ref,omitempty"`
 }
 
 // InventoryProviderConfig configures one named external inventory provider.
@@ -213,6 +218,8 @@ type InventoryAuthContext struct {
 }
 
 type InventoryAuthResolution struct {
+	Fallback           string
+	LookupTimeout      Duration
 	CredentialProvider string
 	PasswordRef        string
 	Username           string
@@ -504,6 +511,12 @@ func (c *InventoryConfig) Validate() error {
 // Validate checks one inventory auth mapping.
 func (c *InventoryAuthConfig) Validate(scope string) error {
 	c.Normalize()
+	if c.Fallback != "" && c.Fallback != AuthFallbackManual && c.Fallback != AuthFallbackFail {
+		return fmt.Errorf("%s.fallback must be manual or fail", scope)
+	}
+	if c.LookupTimeout < 0 {
+		return fmt.Errorf("%s.lookup_timeout must be positive", scope)
+	}
 	if c.Mode != "" && c.Mode != AuthModePassword && c.Mode != AuthModeKey {
 		return fmt.Errorf("%s.mode has invalid value %q", scope, c.Mode)
 	}
@@ -526,6 +539,7 @@ func (c *InventoryAuthConfig) Validate(scope string) error {
 
 func (c *InventoryAuthConfig) Normalize() {
 	c.Mode = strings.ToLower(strings.TrimSpace(c.Mode))
+	c.Fallback = strings.ToLower(strings.TrimSpace(c.Fallback))
 	c.CredentialProvider = strings.TrimSpace(c.CredentialProvider)
 	c.PasswordRef = strings.TrimSpace(c.PasswordRef)
 	c.Username = strings.TrimSpace(c.Username)
@@ -538,7 +552,7 @@ func (c InventoryAuthConfig) IsSet() bool {
 		strings.TrimSpace(c.PasswordRef) != "" ||
 		strings.TrimSpace(c.Username) != "" ||
 		strings.TrimSpace(c.UsernameRef) != "" ||
-		strings.TrimSpace(c.Mode) != ""
+		strings.TrimSpace(c.Mode) != "" || strings.TrimSpace(c.Fallback) != "" || c.LookupTimeout != 0
 }
 
 // CredentialRef converts inventory auth metadata into provider ref metadata.
@@ -704,7 +718,7 @@ func (c *Config) ResolveInventoryAuth(ctx InventoryAuthContext) InventoryAuthRes
 	inventory.Provider = maps.Clone(inventory.Provider)
 	inventory.Providers = maps.Clone(inventory.Providers)
 	inventory.syncAliasFields()
-	var res InventoryAuthResolution
+	res := InventoryAuthResolution{Fallback: AuthFallbackManual, LookupTimeout: Duration(DefaultAuthLookupTimeout)}
 	applyAuth(&res, inventory.Auth, "inventory default")
 	providerName := ctx.Provider
 	groupName := ctx.Group
@@ -747,6 +761,12 @@ func (c *Config) ResolveInventoryAuth(ctx InventoryAuthContext) InventoryAuthRes
 
 func applyAuth(res *InventoryAuthResolution, auth InventoryAuthConfig, source string) {
 	auth.Normalize()
+	if auth.Fallback != "" {
+		res.Fallback = auth.Fallback
+	}
+	if auth.LookupTimeout != 0 {
+		res.LookupTimeout = auth.LookupTimeout
+	}
 	if auth.CredentialProvider != "" {
 		res.CredentialProvider = auth.CredentialProvider
 		res.PasswordSource = source

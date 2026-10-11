@@ -24,6 +24,7 @@ import (
 	sshhighlight "github.com/ntwrknrd/nssh/internal/ssh/highlight"
 	sshpassword "github.com/ntwrknrd/nssh/internal/ssh/password"
 	"github.com/ntwrknrd/nssh/internal/ui"
+	"golang.org/x/term"
 )
 
 const maxCompatibilityFixIterations = 5
@@ -551,6 +552,9 @@ func (h *connectionAskpassHandle) cleanup() {
 }
 
 func (h *connectionAskpassHandle) operationError(err error) error {
+	if h == nil {
+		return err
+	}
 	var authErr *exit.ExitError
 	if errors.As(context.Cause(h.ctx), &authErr) && authErr.Code == exit.ExitAuthFailed {
 		return authErr
@@ -591,14 +595,22 @@ func startConnectionAskpass(ctx context.Context, resolvers passwordResolvers) (*
 		if role.resolve == nil {
 			continue
 		}
+		attempts := make(map[int]int)
 		resolve := func(ctx context.Context) (*secret.Secret, error) {
-			password, err := role.resolve(ctx)
+			process := askpass.RequestProcess(ctx)
+			attempts[process]++
+			var password *secret.Secret
+			var err error
+			if attempts[process] > 1 {
+				err = errors.New("automated password rejected or additional authentication challenge requested")
+			} else {
+				password, err = role.resolve(ctx)
+				if err == nil && password == nil {
+					err = errors.New("credential provider returned no matching password")
+				}
+			}
 			if err != nil && ctx.Err() == nil {
-				handle.cancel(&exit.ExitError{
-					Code:    exit.ExitAuthFailed,
-					Message: fmt.Sprintf("resolve %s credential: %s", role.name, err),
-					Cause:   err,
-				})
+				handle.cancel(authFailure(role.name, err))
 			}
 			return password, err
 		}
@@ -768,6 +780,8 @@ func newConnectAudit(cfg *config.Config) *audit.Logger {
 }
 
 func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger, opts Options) (result connectionResult) {
+	parentCtx := ctx
+	terminal := term.IsTerminal(int(os.Stdin.Fd()))
 	if err := applyRuntimePort(resolved, sshArgs); err != nil {
 		destroyImmediateResolvedPasswords(resolved)
 		return connectionResult{Err: err}
@@ -794,16 +808,43 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 		if err != nil {
 			return connectionResult{Err: err}
 		}
-		defer askpassHandle.cleanup()
 		ctx = askpassHandle.ctx
-		defer func() { result.Err = askpassHandle.operationError(result.Err) }()
+	}
+	defer func() { askpassHandle.cleanup() }()
+	retryAuth := func(err error) (context.Context, error) {
+		err = askpassHandle.operationError(err)
+		if parentCtx.Err() != nil {
+			return nil, parentCtx.Err()
+		}
+		if !disableFailedResolver(err, resolved, &passwordResolvers, terminal, sshArgs) {
+			return nil, err
+		}
+		ui.Warning("%s; falling back to manual password entry", err)
+		askpassHandle.cleanup()
+		var setupErr error
+		askpassHandle, setupErr = startConnectionAskpass(parentCtx, passwordResolvers)
+		if setupErr != nil {
+			return nil, setupErr
+		}
+		if askpassHandle != nil {
+			return askpassHandle.ctx, nil
+		}
+		return parentCtx, nil
 	}
 	var hostKeyPrep *connector.HostKeyPreparation
 	if interactiveAskpassEnabled() && passwordResolvers.any() && !muxHot {
-		var err error
-		hostKeyPrep, err = prepareInteractiveHostKey(ctx, resolved, sshArgs, cfg, opts, proxyAskpassEnv(askpassHandle))
-		if err != nil {
-			return connectionResult{Err: err}
+		for {
+			var err error
+			hostKeyPrep, err = prepareInteractiveHostKey(ctx, resolved, sshArgs, cfg, opts, proxyAskpassEnv(askpassHandle))
+			err = askpassHandle.operationError(err)
+			if err == nil {
+				break
+			}
+			retryCtx, retryErr := retryAuth(err)
+			if retryCtx == nil {
+				return connectionResult{Err: retryErr}
+			}
+			ctx = retryCtx
 		}
 		if hostKeyPrep != nil {
 			defer hostKeyPrep.Cleanup()
@@ -811,9 +852,14 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 		}
 	}
 	conn := newConnector(resolved, sshArgs, cfg, opts)
-	if askpassHandle != nil {
-		conn.SetEnv(askpassHandle.env)
-	}
+	conn.SetEnv(connectionAuthEnv(askpassHandle))
+	conn.SetAuthRetry(func(err error) (context.Context, error) {
+		retryCtx, retryErr := retryAuth(err)
+		if retryCtx != nil {
+			conn.SetEnv(connectionAuthEnv(askpassHandle))
+		}
+		return retryCtx, retryErr
+	})
 	connErr := conn.Run(ctx)
 	if askpassHandle != nil {
 		connErr = askpassHandle.operationError(connErr)
@@ -852,6 +898,10 @@ func interactiveAskpassResolvers(resolved *ResolvedHost, passwordFuture, proxyPa
 	}
 	if resolved.Proxy != nil {
 		resolvers.proxy = credentialPasswordResolver(resolved.Proxy.AuthMode, resolved.Proxy.Credential, proxyPasswordFuture)
+	}
+	resolvers.target = boundedPasswordResolver(resolvers.target, resolved.AuthLookupTimeout)
+	if resolved.Proxy != nil {
+		resolvers.proxy = boundedPasswordResolver(resolvers.proxy, resolved.Proxy.AuthLookupTimeout)
 	}
 	return resolvers
 }

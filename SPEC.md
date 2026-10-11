@@ -70,15 +70,22 @@ preserve.
   and managed-proxy credentials have separate channels.
 - Username conflicts between inventory intent and provider data must not inject
   a credential for the wrong account.
-- A failed credential lookup aborts the consuming SSH/SCP request with an
-  authentication error, preserving a safe provider diagnostic without exposing
-  provider output or leaving another password prompt waiting.
+- Failed or timed-out credential lookup and rejected automated passwords follow
+  inherited global/provider/group/host auth policy. Terminal SSH defaults to
+  native manual password entry; policy can disable it. Unattended requests,
+  remote commands, REPL/host lists and SCP fail promptly with a safe authentication
+  error. BatchMode prohibits manual fallback. Provider output remains private.
+- Each OpenSSH process receives at most one automatic password per target/proxy
+  role. A failed role can restart authentication once with autofill disabled;
+  authenticated sessions and remote commands are never retried for fallback.
 
 ## Connection And Trust
 
 - OpenSSH owns transport, negotiation, and authentication behavior.
 - Interactive SSH uses a PTY for terminal I/O, signals, and resize behavior;
-  askpass is the normal password transport.
+  askpass is the automatic password transport. Manual fallback uses native SSH
+  prompts and retains a single owner of terminal input through authentication
+  restart. Target and managed-proxy fallback use their own host policies.
 - A single inventory-resolved proxy may be managed by nssh. Arbitrary, nested,
   or multi-hop proxy configurations remain OpenSSH-owned and do not receive
   nssh password autofill.

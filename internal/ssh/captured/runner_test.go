@@ -110,7 +110,7 @@ func TestBuildOpenSSHArgsAllowsAskpassPasswordPrompt(t *testing.T) {
 
 	got := buildOpenSSHArgs(req)
 
-	want := []string{"-F", "none", "-o", "NumberOfPasswordPrompts=1", "--", "edge01", "show"}
+	want := []string{"-F", "none", "-o", "NumberOfPasswordPrompts=2", "--", "edge01", "show"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("buildOpenSSHArgs() = %#v, want %#v", got, want)
 	}

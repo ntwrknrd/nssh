@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -171,9 +172,15 @@ func (s *Server) serveConn(ctx context.Context, conn *net.UnixConn) error {
 	if err != nil {
 		return fmt.Errorf("read askpass nonce: %w", err)
 	}
-	if strings.TrimSuffix(nonce, "\n") != s.nonce {
+	fields := strings.Fields(nonce)
+	if len(fields) != 2 || fields[0] != s.nonce {
 		return fmt.Errorf("askpass nonce mismatch")
 	}
+	process, err := strconv.Atoi(fields[1])
+	if err != nil || process <= 0 {
+		return fmt.Errorf("invalid askpass process")
+	}
+	ctx = context.WithValue(ctx, processKey{}, process)
 	password, err := s.resolve(ctx)
 	if err != nil {
 		return err
@@ -204,6 +211,19 @@ func (s *Server) Close() error {
 }
 
 func RequestPassword(ctx context.Context, socketPath, nonce string) ([]byte, error) {
+	return RequestPasswordForProcess(ctx, socketPath, nonce, os.Getppid())
+}
+
+type processKey struct{}
+
+// RequestProcess identifies the OpenSSH process requesting this prompt. Probes,
+// host-key preparation and the actual connection have independent attempts.
+func RequestProcess(ctx context.Context) int {
+	process, _ := ctx.Value(processKey{}).(int)
+	return process
+}
+
+func RequestPasswordForProcess(ctx context.Context, socketPath, nonce string, process int) ([]byte, error) {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", socketPath)
 	if err != nil {
@@ -211,7 +231,7 @@ func RequestPassword(ctx context.Context, socketPath, nonce string) ([]byte, err
 	}
 	defer func() { _ = conn.Close() }()
 
-	if _, err := io.WriteString(conn, nonce+"\n"); err != nil {
+	if _, err := io.WriteString(conn, nonce+" "+strconv.Itoa(process)+"\n"); err != nil {
 		return nil, fmt.Errorf("write askpass nonce: %w", err)
 	}
 	password, err := io.ReadAll(conn)

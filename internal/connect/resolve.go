@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/credential"
@@ -33,32 +34,36 @@ type ResolvedCredential struct {
 // ResolvedHost holds the result of host resolution: everything needed to
 // connect or run a remote command.
 type ResolvedHost struct {
-	Query       string
-	Canonical   string
-	Hostname    string
-	Port        int
-	Username    string
-	AuthMode    string
-	Provider    string
-	Group       string
-	Aliases     []string
-	SSH         config.SSHHostConfig
-	Highlight   config.HighlightConfig
-	IncludeFile string
-	HostEntry   *sshconfig.HostEntry
-	Credential  *ResolvedCredential
-	Proxy       *ResolvedProxy
-	Config      *config.Config
+	Query             string
+	Canonical         string
+	Hostname          string
+	Port              int
+	Username          string
+	AuthMode          string
+	AuthFallback      string
+	AuthLookupTimeout time.Duration
+	Provider          string
+	Group             string
+	Aliases           []string
+	SSH               config.SSHHostConfig
+	Highlight         config.HighlightConfig
+	IncludeFile       string
+	HostEntry         *sshconfig.HostEntry
+	Credential        *ResolvedCredential
+	Proxy             *ResolvedProxy
+	Config            *config.Config
 }
 
 type ResolvedProxy struct {
-	ssh        config.SSHHostConfig
-	Canonical  string
-	Hostname   string
-	Port       int
-	Username   string
-	AuthMode   string
-	Credential *ResolvedCredential
+	ssh               config.SSHHostConfig
+	Canonical         string
+	Hostname          string
+	Port              int
+	Username          string
+	AuthMode          string
+	AuthFallback      string
+	AuthLookupTimeout time.Duration
+	Credential        *ResolvedCredential
 }
 
 // ResolveHostForConnect performs host lookup, include-file discovery, and
@@ -151,19 +156,21 @@ func resolveCatalogHostWithRegistry(query, explicitUser string, c *config.Config
 	}
 
 	resolved := &ResolvedHost{
-		Query:      query,
-		Canonical:  hostData.Canonical,
-		Hostname:   hostData.Hostname,
-		Port:       hostData.Port,
-		Username:   username,
-		AuthMode:   auth.AuthMode,
-		Provider:   hostData.Provider,
-		Group:      hostData.Group,
-		Aliases:    hostData.Aliases,
-		SSH:        config.MergeSSH(config.SSHHostConfig{}, hostData.SSH),
-		Highlight:  hostData.Highlight,
-		Credential: cred,
-		Config:     c,
+		Query:             query,
+		Canonical:         hostData.Canonical,
+		Hostname:          hostData.Hostname,
+		Port:              hostData.Port,
+		Username:          username,
+		AuthMode:          auth.AuthMode,
+		AuthFallback:      auth.Fallback,
+		AuthLookupTimeout: auth.LookupTimeout.Duration(),
+		Provider:          hostData.Provider,
+		Group:             hostData.Group,
+		Aliases:           hostData.Aliases,
+		SSH:               config.MergeSSH(config.SSHHostConfig{}, hostData.SSH),
+		Highlight:         hostData.Highlight,
+		Credential:        cred,
+		Config:            c,
 	}
 	if hostData.ManagedProxy != nil {
 		proxyAuth, proxyCredential, proxyUsername, err := resolveCatalogAuthCredential(c, registry, hostData.ManagedProxy, hostData.ManagedProxy.Username, strict)
@@ -172,13 +179,15 @@ func resolveCatalogHostWithRegistry(query, explicitUser string, c *config.Config
 			return nil, fmt.Errorf("resolve proxy credential: %w", err)
 		}
 		resolved.Proxy = &ResolvedProxy{
-			ssh:        hostData.ManagedProxy.SSH,
-			Canonical:  hostData.ManagedProxy.Canonical,
-			Hostname:   hostData.ManagedProxy.Hostname,
-			Port:       hostData.ManagedProxy.Port,
-			Username:   proxyUsername,
-			AuthMode:   proxyAuth.AuthMode,
-			Credential: proxyCredential,
+			ssh:               hostData.ManagedProxy.SSH,
+			Canonical:         hostData.ManagedProxy.Canonical,
+			Hostname:          hostData.ManagedProxy.Hostname,
+			Port:              hostData.ManagedProxy.Port,
+			Username:          proxyUsername,
+			AuthMode:          proxyAuth.AuthMode,
+			AuthFallback:      proxyAuth.Fallback,
+			AuthLookupTimeout: proxyAuth.LookupTimeout.Duration(),
+			Credential:        proxyCredential,
 		}
 		proxyData := *hostData.ManagedProxy
 		proxyData.Username = proxyUsername
@@ -226,6 +235,9 @@ func resolveCatalogAuthCredential(c *config.Config, registry providerRegistry, h
 			if !strict {
 				slog.Warn("credential resolution failed", "host", host.Hostname, "err", err)
 			}
+			// Preserve early username/provider errors for the same configured
+			// fallback policy and unattended failure path as lazy password errors.
+			cred = &ResolvedCredential{PasswordResolver: func(context.Context) (*secret.Secret, error) { return nil, lookupErr }}
 		} else if cred != nil && credentialUser == "" {
 			credentialUser = cred.Username
 		}
@@ -420,7 +432,7 @@ func resolveInventoryCredential(registry providerRegistry, auth config.Inventory
 					return nil, ctx.Err()
 				default:
 				}
-				record, err := provider.GetRef(ref)
+				record, err := credential.GetRefContext(ctx, provider, ref)
 				if err != nil || record == nil {
 					return nil, err
 				}
@@ -435,7 +447,13 @@ func resolveInventoryCredential(registry providerRegistry, auth config.Inventory
 		}, nil
 	}
 
-	record, err := provider.GetRef(ref)
+	timeout := auth.LookupTimeout.Duration()
+	if timeout <= 0 {
+		timeout = config.DefaultAuthLookupTimeout
+	}
+	lookupCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	record, err := credential.GetRefContext(lookupCtx, provider, ref)
 	if err != nil || record == nil {
 		return nil, err
 	}

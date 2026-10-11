@@ -175,6 +175,15 @@ overriding only the fields it sets:
 5. A provider-scoped `inventory.providers.<provider>.hosts.<host>.auth`
    override.
 
+`inventory.auth.fallback` defaults to `manual`; set it to `fail` to disable
+native manual password fallback for terminal SSH. Each host's `auth.fallback`
+overrides that default through the same inheritance, including managed proxy
+hosts independently. `auth.lookup_timeout` bounds credential lookup and defaults
+to `10s`; a positive duration overrides it and zero inherits. Remote commands,
+REPL/host lists, SCP, non-terminal SSH and `BatchMode=yes` always fail without
+manual prompting. Automatic lookups use existing provider sessions rather than
+opening provider sign-in/unlock prompts.
+
 Either host layer can set `auth_disabled: true` to suppress credential
 resolution. A resolved `mode: key` also clears inherited password-provider
 fields. With no resolved password mapping, OpenSSH key or agent authentication
