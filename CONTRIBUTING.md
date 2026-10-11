@@ -6,7 +6,8 @@ then inspect current source for implementation details.
 
 ## Setup
 
-On macOS, run the build and test commands in an OrbStack Linux machine.
+We recommend running builds and executable tests in a Linux environment. See
+[Build and test environment](#build-and-test-environment) for setup.
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/nssh.git
@@ -17,16 +18,45 @@ make build
 Optional runtime tools depend on what you are testing: `sops`, `age`, `op`, `bw`,
 `fzf`, `asciinema`, Docker, and VHS.
 
-## macOS test environment
+## Build and test environment
 
-Run nssh builds and executable tests inside an OrbStack Linux machine. Keep the
-checkout, generated binaries, Go cache, and temporary test files in the machine's
-Linux filesystem. Use `orb list` to select the machine, then run the commands
-below from its checkout.
+We recommend running nssh builds and executable tests in a Linux environment.
+
+On macOS, use a Linux container through an installed container runtime, such as
+Docker, Podman, or containerd.
+
+Use the repository's [test image](test/docker/test-runner/Dockerfile):
 
 ```bash
-orb -m alma -w /path/to/linux/checkout make test
-orb -m alma -w /path/to/linux/checkout go test ./cmd/nssh -run TestREPLProcess -v
+make container-test
+```
+
+The target defaults to Docker. For Podman or containerd's `nerdctl` client, use
+`make container-test CONTAINER_RUNTIME=podman` or
+`make container-test CONTAINER_RUNTIME=nerdctl`.
+
+Linux CI runs the same command and image. The image provides the Go compiler from
+`.go-version`, the pinned golangci-lint version from `Makefile`, Git, Make, and
+OpenSSH. The compiler pin is separate from the minimum Go version in `go.mod`.
+It runs as a non-root user with a private `XDG_RUNTIME_DIR` and `CGO_ENABLED=0`.
+The current checkout is copied into the image, keeping source, binaries, caches,
+and temporary test files on Linux storage without macOS bind mounts.
+
+The image runs `make verify`: read-only dependency and formatting checks, vet,
+tests, both binaries, the build feature check, lint configuration validation,
+lint, and cross-compilation for all
+four release platforms. Native macOS CI runs `make check` with the same Go version
+and core checks. CI additionally verifies the pushed revision and native macOS
+behavior. Tagged releases also pass the shared Linux verification before
+packaging and publishing; demo recording generation remains a separate job.
+
+For native Linux or an existing Linux checkout, run:
+
+```bash
+make build
+make test
+make verify
+go test ./cmd/nssh -run TestREPLProcess -v
 ```
 
 The process tests use fake SSH executables and local PTYs, covering separate
@@ -44,7 +74,12 @@ make linux-amd64
 make linux-arm64
 ```
 
-`make test` runs `go vet ./...`, `gofmt -w .`, and `go test ./...`.
+`make test` checks the Go version, module tidiness, and formatting before vet and
+tests. These checks report failures without rewriting source or module files.
+`make check` adds builds and the feature check; `make verify` also requires the
+pinned golangci-lint version and cross-compiles all release platforms. The
+container image supplies that linter automatically.
+Its matching configuration schema is included in the image for offline checks.
 
 Useful focused commands:
 
@@ -125,7 +160,8 @@ local PTY. These checks require no production targets or real credentials.
 ## Opening a PR
 
 1. Run the relevant focused tests.
-2. Run `make test` before asking for review.
+2. Run `make container-test` (or `make verify` in the configured Linux environment)
+   before asking for review.
 3. Use `gh` for GitHub actions, for example `gh pr create`.
 4. Call out command-surface, config, credential, inventory, and docs changes in
    the PR body.

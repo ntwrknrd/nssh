@@ -1,7 +1,8 @@
 # VHS-based demo runner for generating gif recordings
 # Uses official VHS image which includes all dependencies (ttyd, ffmpeg, chromium)
 
-FROM golang:1.25.5-bookworm AS builder
+ARG GO_VERSION
+FROM golang:${GO_VERSION}-bookworm AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends git

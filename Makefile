@@ -1,4 +1,5 @@
-.PHONY: build test \
+.PHONY: build test check verify check-go check-deps check-format lint cross-build \
+        container-build container-test \
         package-macos-arm64 \
         darwin-arm64 darwin-amd64 linux-amd64 linux-arm64 \
         recordings recordings-up recordings-down recordings-clean
@@ -8,10 +9,18 @@ OUTPUT_DIR ?= ./
 # Output directory for copyable packages (customize with: make package-macos-arm64 PACKAGE_DIR=/some/path)
 PACKAGE_DIR ?= $(HOME)/Downloads
 
+# Docker-compatible CLI: docker, podman, or nerdctl (for containerd)
+CONTAINER_RUNTIME ?= docker
+CONTAINER_IMAGE ?= nssh-test
+export GO_VERSION := $(shell cat .go-version)
+GOLANGCI_LINT_VERSION := 2.6.2
+GOLANGCI_LINT_SCHEMA ?= https://raw.githubusercontent.com/golangci/golangci-lint/v$(GOLANGCI_LINT_VERSION)/jsonschema/golangci.jsonschema.json
+export CGO_ENABLED ?= 0
+
 # Version from git tags or "dev" fallback
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
-BUILDFLAGS := -trimpath -buildvcs=false
+BUILDFLAGS ?= -trimpath -buildvcs=false
 
 # Native build (current platform)
 build:
@@ -38,11 +47,44 @@ linux-arm64:
 package-macos-arm64:
 	scripts/package-macos-arm64.sh --output-dir $(PACKAGE_DIR) --version $(VERSION)
 
-# Test targets
-test:
+# Read-only checks shared by local verification and CI.
+check-go:
+	@test "$$(go env GOVERSION)" = "go$(GO_VERSION)" || { printf 'Expected Go %s\n' '$(GO_VERSION)'; exit 1; }
+
+check-deps: check-go
+	go mod tidy -diff
+
+check-format:
+	@files="$$(gofmt -l .)" || exit $$?; \
+	if [ -n "$$files" ]; then printf 'Unformatted Go files:\n%s\n' "$$files"; exit 1; fi
+
+test: check-deps check-format
 	go vet ./...
-	gofmt -w .
 	go test ./...
+
+check: test build
+	@version="$$("$(OUTPUT_DIR)/nssh" -V)" || exit $$?; \
+	printf '%s\n' "$$version"; \
+	case "$$version" in *'['*) printf 'Unexpected optional features\n'; exit 1;; esac
+
+lint:
+	@golangci-lint version | grep -F 'version $(GOLANGCI_LINT_VERSION) '
+	golangci-lint config verify --schema $(GOLANGCI_LINT_SCHEMA)
+	golangci-lint run
+
+cross-build:
+	mkdir -p bin/check
+	$(MAKE) darwin-arm64 darwin-amd64 linux-amd64 linux-arm64 OUTPUT_DIR=bin/check
+
+verify: check lint cross-build
+
+container-build:
+	$(CONTAINER_RUNTIME) build -f test/docker/test-runner/Dockerfile \
+		--build-arg GO_VERSION=$(GO_VERSION) --build-arg GOLANGCI_LINT_VERSION=$(GOLANGCI_LINT_VERSION) \
+		-t $(CONTAINER_IMAGE) .
+
+container-test: container-build
+	$(CONTAINER_RUNTIME) run --rm $(CONTAINER_IMAGE)
 
 # Recording targets (VHS-based) - generates gif recordings
 recordings: recordings-up

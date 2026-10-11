@@ -16,41 +16,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.25"
-
-      - name: Verify dependencies
-        run: |
-          go mod tidy
-          git diff --exit-code go.mod go.sum
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Format check
-        run: test -z "$(gofmt -l .)"
-
-      - name: Run tests (pure Go)
-        env:
-          CGO_ENABLED: "0"
-        run: go test ./... -v
-
-      - name: Build (pure Go)
-        env:
-          CGO_ENABLED: "0"
-        run: go build -o nssh ./cmd/nssh
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
+      - name: Verify Linux in the shared container
+        if: runner.os == 'Linux'
+        run: make container-test
 
       - uses: actions/setup-go@v6
+        if: runner.os == 'macOS'
         with:
-          go-version: "1.25"
+          go-version-file: .go-version
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: v2.6.2
+      - name: Verify native macOS
+        if: runner.os == 'macOS'
+        run: make check
