@@ -3,11 +3,12 @@ package providerexec
 import (
 	"context"
 	"errors"
-	"github.com/ntwrknrd/nssh/internal/config"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ntwrknrd/nssh/internal/config"
 )
 
 type fakeOnePasswordRunner struct {
