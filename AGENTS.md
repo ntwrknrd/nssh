@@ -10,9 +10,11 @@ For nssh usage and operations questions, use
 
 ## Commands
 
-On macOS, run nssh builds and executable tests inside an OrbStack Linux machine.
-Keep the checkout, binaries, caches, and temporary test files on its Linux
-filesystem. See [CONTRIBUTING.md](CONTRIBUTING.md) for the commands.
+On macOS, run nssh builds and executable tests in a Linux VM or container. Look
+for Lima, Colima, OrbStack, Docker, or equivalent tooling already installed on
+that machine. Keep the checkout, binaries, caches, and temporary test files on
+Linux storage (a VM filesystem or container volume), outside macOS shared mounts.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and commands.
 
 ```bash
 make build

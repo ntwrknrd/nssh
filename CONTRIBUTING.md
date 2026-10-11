@@ -6,7 +6,8 @@ then inspect current source for implementation details.
 
 ## Setup
 
-On macOS, run the build and test commands in an OrbStack Linux machine.
+On macOS, run the build and test commands in a Linux VM or container, as described
+in [macOS test environment](#macos-test-environment).
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/nssh.git
@@ -19,14 +20,28 @@ Optional runtime tools depend on what you are testing: `sops`, `age`, `op`, `bw`
 
 ## macOS test environment
 
-Run nssh builds and executable tests inside an OrbStack Linux machine. Keep the
-checkout, generated binaries, Go cache, and temporary test files in the machine's
-Linux filesystem. Use `orb list` to select the machine, then run the commands
-below from its checkout.
+Run nssh builds and executable tests in a Linux environment. Look for Lima,
+Colima, OrbStack, Docker, or equivalent tooling already installed on that machine;
+use an available Linux VM or container rather than requiring a particular tool.
+
+Keep the checkout, generated binaries, Go cache, and temporary test files on
+Linux storage, outside macOS shared mounts. For a VM, use its local filesystem.
+For a container, copy or clone the checkout into its filesystem or a named volume
+instead of bind-mounting the macOS checkout. The environment needs Go at the
+version required by `go.mod`, Git, Make, OpenSSH client tools, and local PTY and
+Unix socket support.
+
+Run tests as an unprivileged user so permission checks behave correctly. Set
+`XDG_RUNTIME_DIR` to a private, writable directory with mode `0700`; minimal
+containers may not provide one automatically.
+
+Enter the VM or container using the installed tool, then run these commands from
+its Linux checkout:
 
 ```bash
-orb -m alma -w /path/to/linux/checkout make test
-orb -m alma -w /path/to/linux/checkout go test ./cmd/nssh -run TestREPLProcess -v
+make build
+make test
+go test ./cmd/nssh -run TestREPLProcess -v
 ```
 
 The process tests use fake SSH executables and local PTYs, covering separate
