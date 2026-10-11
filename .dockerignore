@@ -1,0 +1,10 @@
+.git
+.DS_Store
+nssh
+nssh-askpass
+bin
+*.test
+*.out
+*.prof
+benchmarks
+import

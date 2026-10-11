@@ -25,18 +25,24 @@ We recommend running nssh builds and executable tests in a Linux environment.
 On macOS, use a Linux container through an installed container runtime, such as
 Docker, Podman, or containerd.
 
-Keep the checkout, generated binaries, Go cache, and temporary test files on
-Linux storage, outside macOS shared mounts. In a container, copy or clone the
-checkout into its filesystem or a named volume instead of bind-mounting the macOS
-checkout. The environment needs Go at the
-version required by `go.mod`, Git, Make, OpenSSH client tools, and local PTY and
-Unix socket support.
+Use the repository's [test image](test/docker/test-runner/Dockerfile):
 
-Run tests as an unprivileged user so permission checks behave correctly. Set
-`XDG_RUNTIME_DIR` to a private, writable directory with mode `0700`; minimal
-containers may not provide one automatically.
+```bash
+make container-test
+```
 
-From the Linux checkout, run:
+The target defaults to Docker. For Podman or containerd's `nerdctl` client, use
+`make container-test CONTAINER_RUNTIME=podman` or
+`make container-test CONTAINER_RUNTIME=nerdctl`.
+
+The image provides Go, Git, Make, and OpenSSH, runs as a non-root user, and sets a
+private `XDG_RUNTIME_DIR`. It uses `CGO_ENABLED=0`, matching CI's build and test
+setting. The current checkout is copied into the image, keeping source, binaries,
+caches, and temporary test files on Linux storage without macOS bind mounts. Each
+run builds both binaries and runs `make test`; changes and generated files inside
+the disposable container are not copied back to the host checkout.
+
+For native Linux or an existing Linux checkout, run:
 
 ```bash
 make build

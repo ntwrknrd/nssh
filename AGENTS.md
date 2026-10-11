@@ -16,6 +16,9 @@ Docker, Podman, or containerd. Keep the checkout, binaries, caches, and temporar
 test files on Linux storage, outside macOS shared mounts. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for setup and commands.
 
+Use `make container-test` for the repository's configured Linux build/test image.
+Set `CONTAINER_RUNTIME=podman` or `CONTAINER_RUNTIME=nerdctl` when appropriate.
+
 ```bash
 make build
 make test

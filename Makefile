@@ -1,4 +1,4 @@
-.PHONY: build test \
+.PHONY: build test container-test \
         package-macos-arm64 \
         darwin-arm64 darwin-amd64 linux-amd64 linux-arm64 \
         recordings recordings-up recordings-down recordings-clean
@@ -7,6 +7,10 @@
 OUTPUT_DIR ?= ./
 # Output directory for copyable packages (customize with: make package-macos-arm64 PACKAGE_DIR=/some/path)
 PACKAGE_DIR ?= $(HOME)/Downloads
+
+# Docker-compatible CLI: docker, podman, or nerdctl (for containerd)
+CONTAINER_RUNTIME ?= docker
+CONTAINER_IMAGE ?= nssh-test
 
 # Version from git tags or "dev" fallback
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -43,6 +47,10 @@ test:
 	go vet ./...
 	gofmt -w .
 	go test ./...
+
+container-test:
+	$(CONTAINER_RUNTIME) build -f test/docker/test-runner/Dockerfile -t $(CONTAINER_IMAGE) .
+	$(CONTAINER_RUNTIME) run --rm $(CONTAINER_IMAGE)
 
 # Recording targets (VHS-based) - generates gif recordings
 recordings: recordings-up
