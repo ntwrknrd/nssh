@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"syscall"
 
 	"github.com/ntwrknrd/nssh/internal/connect"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
@@ -162,7 +163,7 @@ func detectDirection(source, dest string) (user, host, remotePath, localPath, di
 	return user, host, remotePath, localPath, direction, nil
 }
 
-func runCp(ctx context.Context, source, dest string, recursive, preserve, quiet, verbose bool) error {
+func runCp(ctx context.Context, source, dest string, recursive, preserve, quiet, verbose bool) (runErr error) {
 	// Parse direction and paths
 	user, hostSearch, remotePath, localPath, direction, err := detectDirection(source, dest)
 	if err != nil {
@@ -184,6 +185,8 @@ func runCp(ctx context.Context, source, dest string, recursive, preserve, quiet,
 	}
 	if askpassEnv != nil {
 		defer askpassEnv.Cleanup()
+		ctx = askpassEnv.Context(ctx)
+		defer func() { runErr = askpassEnv.OperationError(runErr) }()
 	}
 
 	// Build remote spec using the resolved endpoint; nssh renders SSH options
@@ -244,7 +247,7 @@ func runCp(ctx context.Context, source, dest string, recursive, preserve, quiet,
 	if askpassEnv != nil {
 		env = askpassEnv.Env
 	}
-	return runScp(args, env)
+	return runScp(ctx, args, env)
 }
 
 var resolveHostForConnect = connect.ResolveHostForConnect
@@ -253,8 +256,18 @@ var prepareResolvedHostKey = connect.PrepareResolvedHostKey
 
 var runScp = runScpCommand
 
-func runScpCommand(args, env []string) error {
-	cmd := exec.Command("scp", args...)
+func runScpCommand(ctx context.Context, args, env []string) error {
+	cmd := exec.CommandContext(ctx, "scp", args...)
+	// scp launches ssh and askpass children. Cancel the whole request instead of
+	// leaving those processes retrying after the credential failure is reported.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if err == syscall.ESRCH {
+			return os.ErrProcessDone
+		}
+		return err
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

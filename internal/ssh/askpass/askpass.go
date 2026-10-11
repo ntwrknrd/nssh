@@ -126,6 +126,9 @@ func (s *Server) Serve(ctx context.Context) error {
 	if s == nil || s.listener == nil {
 		return fmt.Errorf("askpass server is closed")
 	}
+	// Do not leave a listening socket behind after a resolver failure: another
+	// OpenSSH prompt could connect and wait forever for a response.
+	defer func() { _ = s.listener.Close() }()
 	for {
 		conn, err := s.accept(ctx)
 		if err != nil {
