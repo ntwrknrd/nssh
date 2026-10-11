@@ -106,7 +106,7 @@ printf '\nmanual-authenticated\n'
 						out = append(out, buf[:n]...)
 						if !wrote && strings.Contains(string(out), "native-password:") {
 							wrote = true
-							_, _ = terminal.Write([]byte("manual-dummy\n"))
+							_, _ = terminal.WriteString("manual-dummy\n")
 						}
 						if readErr != nil {
 							break
