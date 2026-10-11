@@ -6,8 +6,8 @@ then inspect current source for implementation details.
 
 ## Setup
 
-On macOS, run the build and test commands in a Linux VM or container, as described
-in [macOS test environment](#macos-test-environment).
+We recommend running builds and executable tests in a Linux environment. See
+[Build and test environment](#build-and-test-environment) for setup.
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/nssh.git
@@ -18,11 +18,13 @@ make build
 Optional runtime tools depend on what you are testing: `sops`, `age`, `op`, `bw`,
 `fzf`, `asciinema`, Docker, and VHS.
 
-## macOS test environment
+## Build and test environment
 
-Run nssh builds and executable tests in a Linux environment. Look for Lima,
-Colima, OrbStack, Docker, or equivalent tooling already installed on that machine;
-use an available Linux VM or container rather than requiring a particular tool.
+We recommend running nssh builds and executable tests in a Linux environment:
+native Linux, a VM, or a container.
+
+On macOS, use whichever tooling is already installed, such as Lima, Colima,
+OrbStack, Docker, or an equivalent, to provide the Linux environment.
 
 Keep the checkout, generated binaries, Go cache, and temporary test files on
 Linux storage, outside macOS shared mounts. For a VM, use its local filesystem.
@@ -35,8 +37,7 @@ Run tests as an unprivileged user so permission checks behave correctly. Set
 `XDG_RUNTIME_DIR` to a private, writable directory with mode `0700`; minimal
 containers may not provide one automatically.
 
-Enter the VM or container using the installed tool, then run these commands from
-its Linux checkout:
+From the Linux checkout, run:
 
 ```bash
 make build
