@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -770,3 +772,24 @@ func TestAgentStatusReportsRuntimeAndResourceState(t *testing.T) {
 }
 
 var _ sopsdoc.Runner = (*fakeSOPSAgeRunner)(nil)
+
+func TestConfiguredRuntimeProviderUsesEachAgeKeyCommand(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "sops"), []byte("#!/bin/sh\nprintf '{\"password\":\"%s\"}\\n' \"$SOPS_AGE_KEY_CMD\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("SOPS_AGE_KEY_CMD", "/keys/inherited")
+	cfg := config.DefaultConfig()
+	cfg.Credential.Provider = map[string]config.CredentialProviderConfig{
+		"personal": {Type: config.CredentialProviderSOPSAge, File: "personal.sops", AgeKeyCommand: "/keys/personal"},
+		"work":     {Type: config.CredentialProviderSOPSAge, Config: config.CredentialProviderDetailConfig{File: "work.sops", AgeKeyCommand: "/keys/work"}},
+	}
+	provider := NewConfiguredRuntimeProvider(cfg)
+	for _, name := range []string{"personal", "work", "personal"} {
+		response, err := provider.HandleProviderRequest(context.Background(), ProviderRequest{Provider: name, Action: "get_noninteractive", Ref: "password"})
+		if err != nil || !response.Found || string(response.Secret) != "/keys/"+name {
+			t.Fatalf("%s provider command not selected: %v", name, err)
+		}
+	}
+}

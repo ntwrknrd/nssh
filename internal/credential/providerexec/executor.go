@@ -59,9 +59,10 @@ type OnePasswordRunner interface {
 }
 
 type SOPSAgeProviderConfig struct {
-	File       string
-	AgeKeyFile string
-	Runner     sopsdoc.Runner
+	File          string
+	AgeKeyFile    string
+	AgeKeyCommand string
+	Runner        sopsdoc.Runner
 }
 
 type BitwardenProviderConfig struct {
@@ -119,9 +120,10 @@ func NewConfiguredExecutor(cfg *config.Config) *Executor {
 			})
 		case config.CredentialProviderSOPSAge:
 			executor.RegisterSOPSAge(name, SOPSAgeProviderConfig{
-				File:       firstNonEmpty(providerCfg.File, providerCfg.Config.File),
-				AgeKeyFile: firstNonEmpty(providerCfg.AgeKeyFile, providerCfg.Config.AgeKeyFile),
-				Runner:     sopsdoc.CLIRunner{Command: "sops"},
+				File:          firstNonEmpty(providerCfg.File, providerCfg.Config.File),
+				AgeKeyFile:    firstNonEmpty(providerCfg.AgeKeyFile, providerCfg.Config.AgeKeyFile),
+				AgeKeyCommand: firstNonEmpty(providerCfg.AgeKeyCommand, providerCfg.Config.AgeKeyCommand),
+				Runner:        sopsdoc.CLIRunner{Command: "sops"},
 			})
 		case config.CredentialProviderBitwarden:
 			executor.RegisterBitwarden(name, BitwardenProviderConfig{
@@ -303,7 +305,7 @@ func (e *Executor) handleSOPSAgeGet(ctx context.Context, cfg *SOPSAgeProviderCon
 			runner = cli
 		}
 	}
-	doc, err := sopsdoc.Decrypt(ctx, runner, cfg.File, cfg.AgeKeyFile)
+	doc, err := sopsdoc.Decrypt(ctx, runner, cfg.File, cfg.AgeKeyFile, cfg.AgeKeyCommand)
 	if err != nil {
 		return ProviderResponse{}, err
 	}

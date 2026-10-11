@@ -62,6 +62,9 @@ preserve.
   external providers.
 - Configuration stores provider names and item references, never resolved
   passwords.
+- A SOPS provider may select its own external age identity retrieval command.
+  Apply identity-source overrides only to that provider's child process; never
+  store the retrieved identity in configuration or change the caller's environment.
 - Resolved passwords use protected secret values and are exposed as bytes only
   for the bounded operation that consumes them.
 - Passwords must not appear in argv, environment values, logs, recordings,

@@ -108,9 +108,10 @@ func NewConfiguredRuntimeProvider(cfg *config.Config) *RuntimeProvider {
 			})
 		case config.CredentialProviderSOPSAge:
 			provider.RegisterSOPSAge(name, SOPSAgeProviderConfig{
-				File:       firstNonEmpty(providerCfg.File, providerCfg.Config.File),
-				AgeKeyFile: firstNonEmpty(providerCfg.AgeKeyFile, providerCfg.Config.AgeKeyFile),
-				Runner:     sopsdoc.CLIRunner{Command: "sops"},
+				File:          firstNonEmpty(providerCfg.File, providerCfg.Config.File),
+				AgeKeyFile:    firstNonEmpty(providerCfg.AgeKeyFile, providerCfg.Config.AgeKeyFile),
+				AgeKeyCommand: firstNonEmpty(providerCfg.AgeKeyCommand, providerCfg.Config.AgeKeyCommand),
+				Runner:        sopsdoc.CLIRunner{Command: "sops"},
 			})
 		case config.CredentialProviderBitwarden:
 			provider.RegisterBitwarden(name, BitwardenProviderConfig{

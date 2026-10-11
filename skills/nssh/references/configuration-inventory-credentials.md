@@ -106,6 +106,32 @@ Supported providers:
 - `bitwarden`: `bw` CLI, with lazy unlock. `BW_SESSION` is request-scoped unless
   `warm_session: true` requires the runtime agent to retain it in memory.
 
+SOPS providers can set `age_key_command` to a nonsecret lookup command, such as
+an OS Keychain lookup. SOPS executes the command and consumes the returned age
+identity internally; do not put the identity itself in the command or YAML.
+`age_key_command` and `age_key_file` are mutually exclusive. The command may
+also be placed under the provider's `config` table; the flat field takes
+precedence.
+
+```yaml
+credential:
+  provider:
+    sops-personal:
+      type: sops-age
+      file: ~/.local/share/nssh/personal.sops.json
+      age_key_command: /usr/bin/security find-generic-password -s com.example.sops.age -a alice -w
+```
+
+The setting overrides `SOPS_AGE_KEY_CMD` only in that provider's SOPS process,
+clearing inherited `SOPS_AGE_KEY` and `SOPS_AGE_KEY_FILE` there. Other providers
+and the parent shell are unchanged. Without this setting, existing SOPS
+identity/environment behavior is preserved. SOPS still owns its default
+identity-file behavior. Commands that fail retain the usual bounded lookup,
+safe error and manual/unattended fallback policy; private command output is
+never included in nssh diagnostics. This does not unlock Keychain or provision
+an identity. A command-backed provider needs an existing encrypted file and
+externally managed identity; setup must not generate a plaintext key file.
+
 1Password keepalive is explicit per provider and disabled by default:
 
 ```yaml
