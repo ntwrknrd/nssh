@@ -655,3 +655,57 @@ inventory:
 		t.Fatalf("unexpected default group retained: %+v", cfg.Inventory.Providers["local"].Groups["default"])
 	}
 }
+
+func TestSOPSAgeKeyCommandConfigRoundtrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeConfigFile(t, path, `
+credential:
+  provider:
+    personal:
+      type: sops-age
+      file: personal.sops.json
+      age_key_command: /keys/personal
+      config:
+        age_key_command: /keys/overridden
+    work:
+      type: sops-age
+      config:
+        file: work.sops.json
+        age_key_command: /keys/work
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, command := range map[string]string{"personal": "/keys/personal", "work": "/keys/work"} {
+		provider := cfg.Credential.Provider[name]
+		if provider.AgeKeyCommand != command || provider.Config.AgeKeyCommand != command {
+			t.Fatalf("%s command lost: %+v", name, provider)
+		}
+	}
+	if err := SaveSparse(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, command := range map[string]string{"personal": "/keys/personal", "work": "/keys/work"} {
+		if loaded.Credential.Provider[name].AgeKeyCommand != command {
+			t.Fatalf("%s command lost on save", name)
+		}
+	}
+}
+
+func TestSOPSAgeKeyCommandRejectsAmbiguousOrWrongProvider(t *testing.T) {
+	for _, provider := range []CredentialProviderConfig{
+		{Type: CredentialProviderSOPSAge, File: "fixture.sops", AgeKeyFile: "identity.txt", AgeKeyCommand: "/keys/personal"},
+		{Type: CredentialProviderSOPSAge, File: "fixture.sops", AgeKeyFile: "identity.txt", Config: CredentialProviderDetailConfig{AgeKeyCommand: "/keys/personal"}},
+		{Type: CredentialProvider1Password, Vault: "work", AgeKeyCommand: "/keys/personal"},
+		{Type: CredentialProviderBitwarden, AgeKeyCommand: "/keys/personal"},
+	} {
+		if err := provider.Validate("test"); err == nil {
+			t.Fatal("invalid key command config accepted")
+		}
+	}
+}

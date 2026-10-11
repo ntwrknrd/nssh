@@ -61,8 +61,9 @@ type CredentialProviderConfig struct {
 	Prefix  string `yaml:"prefix,omitempty"`
 	File    string `yaml:"file,omitempty"`
 
-	AgeKeyFile  string `yaml:"age_key_file,omitempty"`
-	WarmSession bool   `yaml:"warm_session,omitempty"`
+	AgeKeyFile    string `yaml:"age_key_file,omitempty"`
+	AgeKeyCommand string `yaml:"age_key_command,omitempty"`
+	WarmSession   bool   `yaml:"warm_session,omitempty"`
 
 	Keepalive         bool     `yaml:"keepalive,omitempty"`
 	KeepaliveInterval Duration `yaml:"keepalive_interval,omitempty"`
@@ -80,8 +81,9 @@ type CredentialProviderDetailConfig struct {
 	Prefix  string `yaml:"prefix,omitempty"`
 	File    string `yaml:"file,omitempty"`
 
-	AgeKeyFile  string `yaml:"age_key_file,omitempty"`
-	WarmSession bool   `yaml:"warm_session,omitempty"`
+	AgeKeyFile    string `yaml:"age_key_file,omitempty"`
+	AgeKeyCommand string `yaml:"age_key_command,omitempty"`
+	WarmSession   bool   `yaml:"warm_session,omitempty"`
 
 	Keepalive         bool     `yaml:"keepalive,omitempty"`
 	KeepaliveInterval Duration `yaml:"keepalive_interval,omitempty"`
@@ -282,8 +284,15 @@ func (c *CredentialConfig) Validate() error {
 func (c *CredentialProviderConfig) Validate(name string) error {
 	c.syncDetailFields()
 	c.Type = strings.ToLower(strings.TrimSpace(c.Type))
+	c.AgeKeyCommand = strings.TrimSpace(c.AgeKeyCommand)
+	if c.AgeKeyCommand != "" && c.Type != CredentialProviderSOPSAge {
+		return fmt.Errorf("credential.provider.%s.age_key_command is only supported for %q", name, CredentialProviderSOPSAge)
+	}
 	switch c.Type {
 	case CredentialProviderSOPSAge:
+		if c.AgeKeyCommand != "" && strings.TrimSpace(c.AgeKeyFile) != "" {
+			return fmt.Errorf("credential.provider.%s: age_key_file and age_key_command are mutually exclusive", name)
+		}
 		if c.WarmSession {
 			return fmt.Errorf("credential.provider.%s.warm_session is only supported for %q", name, CredentialProviderBitwarden)
 		}
@@ -345,6 +354,9 @@ func (c *CredentialProviderConfig) syncDetailFields() {
 	if c.AgeKeyFile == "" {
 		c.AgeKeyFile = c.Config.AgeKeyFile
 	}
+	if c.AgeKeyCommand == "" {
+		c.AgeKeyCommand = c.Config.AgeKeyCommand
+	}
 	if !c.WarmSession {
 		c.WarmSession = c.Config.WarmSession
 	}
@@ -366,6 +378,7 @@ func (c *CredentialProviderConfig) syncConfigFields() {
 	c.Config.Prefix = c.Prefix
 	c.Config.File = c.File
 	c.Config.AgeKeyFile = c.AgeKeyFile
+	c.Config.AgeKeyCommand = c.AgeKeyCommand
 	c.Config.WarmSession = c.WarmSession
 	c.Config.Keepalive = c.Keepalive
 	c.Config.KeepaliveInterval = c.KeepaliveInterval

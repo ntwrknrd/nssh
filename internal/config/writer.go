@@ -483,6 +483,7 @@ func credentialProviderTable(cfg CredentialProviderConfig) map[string]any {
 	addString(table, "prefix", cfg.Prefix)
 	addString(table, "file", cfg.File)
 	addString(table, "age_key_file", cfg.AgeKeyFile)
+	addString(table, "age_key_command", cfg.AgeKeyCommand)
 	if cfg.WarmSession {
 		table["warm_session"] = cfg.WarmSession
 	}

@@ -29,16 +29,17 @@ type initPlanRequest struct {
 }
 
 type initCredentialProviderRequest struct {
-	Name       string
-	Type       string
-	Command    string
-	Prefix     string
-	Account    string
-	Vault      string
-	File       string
-	AgeKeyFile string
-	AuthToken  string
-	BWSession  string
+	Name          string
+	Type          string
+	Command       string
+	Prefix        string
+	Account       string
+	Vault         string
+	File          string
+	AgeKeyFile    string
+	AgeKeyCommand string
+	AuthToken     string
+	BWSession     string
 }
 
 type initPlan struct {
@@ -239,18 +240,20 @@ func applyCredentialProvider(cfg *config.Config, provider initCredentialProvider
 		return fmt.Errorf("credential provider name is required")
 	}
 	detail := config.CredentialProviderDetailConfig{
-		Command:    provider.Command,
-		Prefix:     provider.Prefix,
-		Account:    provider.Account,
-		Vault:      provider.Vault,
-		File:       provider.File,
-		AgeKeyFile: provider.AgeKeyFile,
+		Command:       provider.Command,
+		Prefix:        provider.Prefix,
+		Account:       provider.Account,
+		Vault:         provider.Vault,
+		File:          provider.File,
+		AgeKeyFile:    provider.AgeKeyFile,
+		AgeKeyCommand: provider.AgeKeyCommand,
 	}
 	cfg.Credential.Provider[provider.Name] = config.CredentialProviderConfig{
-		Type:       provider.Type,
-		File:       provider.File,
-		AgeKeyFile: provider.AgeKeyFile,
-		Config:     detail,
+		Type:          provider.Type,
+		File:          provider.File,
+		AgeKeyFile:    provider.AgeKeyFile,
+		AgeKeyCommand: provider.AgeKeyCommand,
+		Config:        detail,
 	}
 	return nil
 }
@@ -639,6 +642,7 @@ func credentialProviderConfigText(provider initCredentialProviderRequest) (strin
 	addProviderString(providerTable, "prefix", provider.Prefix)
 	addProviderString(providerTable, "file", provider.File)
 	addProviderString(providerTable, "age_key_file", provider.AgeKeyFile)
+	addProviderString(providerTable, "age_key_command", provider.AgeKeyCommand)
 	table := map[string]any{
 		"credential": map[string]any{
 			"provider": map[string]any{
@@ -1018,6 +1022,11 @@ func prepareCredentialProviderSetup(provider *initCredentialProviderRequest, pro
 	if prompter == nil {
 		prompter = uiInitPrompter{}
 	}
+	if strings.TrimSpace(provider.AgeKeyCommand) != "" {
+		// Command-backed providers use their existing external identity and
+		// encrypted file; never create a plaintext identity file for them.
+		return nil
+	}
 	identityPath := strings.TrimSpace(provider.AgeKeyFile)
 	if identityPath == "" {
 		identityPath = defaultSOPSAgeIdentityPath()
@@ -1271,14 +1280,15 @@ func credentialProviderRequestFromConfig(name string, provider config.Credential
 	file := firstNonEmpty(provider.File, provider.Config.File)
 	ageKeyFile := firstNonEmpty(provider.AgeKeyFile, provider.Config.AgeKeyFile)
 	return initCredentialProviderRequest{
-		Name:       name,
-		Type:       provider.Type,
-		Command:    command,
-		Prefix:     prefix,
-		Account:    account,
-		Vault:      vault,
-		File:       file,
-		AgeKeyFile: ageKeyFile,
+		Name:          name,
+		Type:          provider.Type,
+		Command:       command,
+		Prefix:        prefix,
+		Account:       account,
+		Vault:         vault,
+		File:          file,
+		AgeKeyFile:    ageKeyFile,
+		AgeKeyCommand: firstNonEmpty(provider.AgeKeyCommand, provider.Config.AgeKeyCommand),
 	}
 }
 

@@ -32,6 +32,11 @@ agent:
 #       type: sops-age
 #       file: ~/.local/share/nssh/credentials.sops.yaml
 #       age_key_file: ~/.config/sops/age/keys.txt
+#     sops-keychain:
+#       type: sops-age
+#       file: ~/.local/share/nssh/personal.sops.json
+#       # Nonsecret lookup command; mutually exclusive with age_key_file.
+#       age_key_command: /usr/bin/security find-generic-password -s com.example.sops.age -a alice -w
 #     op-work:
 #       type: 1password
 #       account: account-user-id

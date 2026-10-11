@@ -1353,3 +1353,36 @@ func (p *fakeInitPrompter) saw(title string) bool {
 	}
 	return false
 }
+
+func TestInitPreservesCommandBackedSOPSProviderWithoutCreatingKeyFile(t *testing.T) {
+	provider := config.CredentialProviderConfig{Type: config.CredentialProviderSOPSAge, File: "personal.sops.json", AgeKeyCommand: "/keys/personal"}
+	req := credentialProviderRequestFromConfig("personal", provider)
+	text, err := credentialProviderConfigText(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(text), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Credential.Provider["personal"].AgeKeyCommand != "/keys/personal" {
+		t.Fatal("init serialization lost key command")
+	}
+	before := runSelfInitCommand
+	t.Cleanup(func() { runSelfInitCommand = before })
+	runSelfInitCommand = func(string, []byte, ...string) ([]byte, error) {
+		t.Fatal("command-backed setup invoked key/file provisioning")
+		return nil, nil
+	}
+	prompter := &fakeInitPrompter{}
+	if err := prepareCredentialProviderSetup(&req, prompter, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(prompter.prompts) != 0 {
+		t.Fatalf("command-backed setup prompted: %v", prompter.prompts)
+	}
+}

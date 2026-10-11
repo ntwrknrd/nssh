@@ -25,7 +25,7 @@ type Document struct {
 	data map[string]any
 }
 
-func Decrypt(ctx context.Context, runner Runner, file, ageKeyFile string) (*Document, error) {
+func Decrypt(ctx context.Context, runner Runner, file, ageKeyFile, ageKeyCommand string) (*Document, error) {
 	file = expandPath(strings.TrimSpace(file))
 	if file == "" {
 		return nil, fmt.Errorf("sops-age file is required")
@@ -37,12 +37,18 @@ func Decrypt(ctx context.Context, runner Runner, file, ageKeyFile string) (*Docu
 	if strings.TrimSpace(ageKeyFile) != "" {
 		env = append(env, "SOPS_AGE_KEY_FILE="+expandPath(ageKeyFile))
 	}
+	if command := strings.TrimSpace(ageKeyCommand); command != "" {
+		// A configured command owns this provider's explicit identity source.
+		// Clear inherited private identities and key-file references only in
+		// the SOPS child, never in the caller's process environment.
+		env = append(env, "SOPS_AGE_KEY=", "SOPS_AGE_KEY_FILE=", "SOPS_AGE_KEY_CMD="+command)
+	}
 	out, err := runner.Run(ctx, env, "--decrypt", "--output-type", "json", file)
 	if err != nil {
 		// Recognize SOPS' missing-key diagnostic without exposing provider output,
 		// which can contain secret material from an identity command.
 		if bytes.Contains(out, []byte("Failed to get the data key required to decrypt")) {
-			return nil, fmt.Errorf("decrypt SOPS file %s: decryption key unavailable; check the age identity or SOPS_AGE_KEY_CMD: %w", file, err)
+			return nil, fmt.Errorf("decrypt SOPS file %s: decryption key unavailable; check the age identity via age_key_file, age_key_command or SOPS_AGE_KEY_CMD: %w", file, err)
 		}
 		return nil, fmt.Errorf("decrypt SOPS file %s: %w", file, err)
 	}
