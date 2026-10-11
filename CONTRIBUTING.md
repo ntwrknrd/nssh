@@ -35,18 +35,27 @@ The target defaults to Docker. For Podman or containerd's `nerdctl` client, use
 `make container-test CONTAINER_RUNTIME=podman` or
 `make container-test CONTAINER_RUNTIME=nerdctl`.
 
-The image provides Go, Git, Make, and OpenSSH, runs as a non-root user, and sets a
-private `XDG_RUNTIME_DIR`. It uses `CGO_ENABLED=0`, matching CI's build and test
-setting. The current checkout is copied into the image, keeping source, binaries,
-caches, and temporary test files on Linux storage without macOS bind mounts. Each
-run builds both binaries and runs `make test`; changes and generated files inside
-the disposable container are not copied back to the host checkout.
+Linux CI runs the same command and image. The image provides the Go compiler from
+`.go-version`, the pinned golangci-lint version from `Makefile`, Git, Make, and
+OpenSSH. The compiler pin is separate from the minimum Go version in `go.mod`.
+It runs as a non-root user with a private `XDG_RUNTIME_DIR` and `CGO_ENABLED=0`.
+The current checkout is copied into the image, keeping source, binaries, caches,
+and temporary test files on Linux storage without macOS bind mounts.
+
+The image runs `make verify`: read-only dependency and formatting checks, vet,
+tests, both binaries, the build feature check, lint configuration validation,
+lint, and cross-compilation for all
+four release platforms. Native macOS CI runs `make check` with the same Go version
+and core checks. CI additionally verifies the pushed revision and native macOS
+behavior. Tagged releases also pass the shared Linux verification before
+packaging and publishing; demo recording generation remains a separate job.
 
 For native Linux or an existing Linux checkout, run:
 
 ```bash
 make build
 make test
+make verify
 go test ./cmd/nssh -run TestREPLProcess -v
 ```
 
@@ -65,7 +74,12 @@ make linux-amd64
 make linux-arm64
 ```
 
-`make test` runs `go vet ./...`, `gofmt -w .`, and `go test ./...`.
+`make test` checks the Go version, module tidiness, and formatting before vet and
+tests. These checks report failures without rewriting source or module files.
+`make check` adds builds and the feature check; `make verify` also requires the
+pinned golangci-lint version and cross-compiles all release platforms. The
+container image supplies that linter automatically.
+Its matching configuration schema is included in the image for offline checks.
 
 Useful focused commands:
 
@@ -146,7 +160,8 @@ local PTY. These checks require no production targets or real credentials.
 ## Opening a PR
 
 1. Run the relevant focused tests.
-2. Run `make test` before asking for review.
+2. Run `make container-test` (or `make verify` in the configured Linux environment)
+   before asking for review.
 3. Use `gh` for GitHub actions, for example `gh pr create`.
 4. Call out command-surface, config, credential, inventory, and docs changes in
    the PR body.

@@ -45,6 +45,7 @@ services:
       context: ../..
       dockerfile: test/docker/vhs-runner/Dockerfile
       args:
+        GO_VERSION: ${GO_VERSION:?Use make recordings to supply the Go compiler version}
         VERSION: ${VERSION:-dev}
     hostname: vhs-runner
     domainname: demo.local
