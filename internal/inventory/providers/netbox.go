@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -95,13 +96,13 @@ func (p *NetBoxProvider) Discover(ctx context.Context, providerName string, cfg 
 		if urlEnv == "" {
 			urlEnv = defaultNetBoxURLEnv
 		}
-		baseURL, err = loadEnvValue(urlEnv, envFile)
+		baseURL, err = loadEnvValue(ctx, urlEnv, envFile)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	token, err := loadEnvValue(tokenEnv, envFile)
+	token, err := loadEnvValue(ctx, tokenEnv, envFile)
 	if err != nil {
 		return nil, err
 	}
@@ -453,8 +454,24 @@ func queryNetBoxReferenceSlug(ctx context.Context, client *http.Client, baseURL,
 	return "", false
 }
 
-func loadEnvValue(name, envFile string) (string, error) {
+func loadEnvValue(ctx context.Context, name, envFile string) (string, error) {
 	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value, nil
+	}
+	if command := strings.TrimSpace(os.Getenv(name + "_CMD")); command != "" {
+		lookupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(lookupCtx, "/bin/sh", "-c", command)
+		cmd.WaitDelay = time.Second
+		output, err := cmd.Output()
+		if err != nil {
+			// Neither command text nor output is safe to include in diagnostics.
+			return "", fmt.Errorf("credential command for %q failed or timed out", name)
+		}
+		value := strings.TrimSpace(string(output))
+		if value == "" {
+			return "", fmt.Errorf("credential command for %q returned an empty value", name)
+		}
 		return value, nil
 	}
 
