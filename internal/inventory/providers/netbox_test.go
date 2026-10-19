@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 )
@@ -271,6 +272,8 @@ func TestNetBoxProviderDiscoverUsesDefaultEnvFileAndTokenName(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("NETBOX_URL", "")
 	t.Setenv("NETBOX_TOKEN", "")
+	t.Setenv("NETBOX_URL_CMD", "")
+	t.Setenv("NETBOX_TOKEN_CMD", "")
 	if err := os.WriteFile(filepath.Join(tmpHome, ".env"), []byte("NETBOX_URL="+server.URL+"\nNETBOX_TOKEN=default-token\n"), 0600); err != nil {
 		t.Fatalf("write default env file: %v", err)
 	}
@@ -287,6 +290,59 @@ func TestNetBoxProviderDiscoverUsesDefaultEnvFileAndTokenName(t *testing.T) {
 	}
 	if len(objects) != 1 {
 		t.Fatalf("objects = %d", len(objects))
+	}
+}
+
+func TestLoadEnvValueCommand(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		env     string
+		command string
+		want    string
+		wantErr string
+	}{
+		{name: "environment wins", env: "direct", command: "exit 1", want: "direct"},
+		{name: "command wins over file", command: "printf '  command-value\\n'", want: "command-value"},
+		{name: "file fallback", want: "file-value"},
+		{name: "empty command output", command: "printf '  '", wantErr: "empty value"},
+		{name: "failure hides output", command: "printf secret-value; printf secret-value >&2; exit 1", wantErr: "failed or timed out"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("NB_COMMAND_TEST", tc.env)
+			t.Setenv("NB_COMMAND_TEST_CMD", tc.command)
+			envFile := filepath.Join(t.TempDir(), ".env")
+			if err := os.WriteFile(envFile, []byte("NB_COMMAND_TEST=file-value\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := loadEnvValue(context.Background(), "NB_COMMAND_TEST", envFile)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) || strings.Contains(err.Error(), "secret-value") {
+					t.Fatalf("expected sanitized %q error, got %v", tc.wantErr, err)
+				}
+				if got != "" {
+					t.Fatal("failed lookup returned a value")
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("got %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadEnvValueCommandCancellation(t *testing.T) {
+	t.Setenv("NB_COMMAND_TEST", "")
+	t.Setenv("NB_COMMAND_TEST_CMD", "exec sleep 30")
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := loadEnvValue(ctx, "NB_COMMAND_TEST", filepath.Join(t.TempDir(), ".env"))
+	if err == nil || !strings.Contains(err.Error(), "failed or timed out") {
+		t.Fatalf("expected command timeout, got %v", err)
+	}
+	if time.Since(started) > 3*time.Second {
+		t.Fatal("command did not respect cancellation")
 	}
 }
 

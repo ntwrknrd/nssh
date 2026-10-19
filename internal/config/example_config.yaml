@@ -114,6 +114,8 @@ agent:
 #     netbox-prod:
 #       type: netbox
 #       config:
+#         # Values resolve from the environment, then <name>_CMD, then env_file.
+#         # Commands run via /bin/sh with a 10-second timeout; output stays private.
 #         url_env: NETBOX_URL
 #         token_env: NETBOX_TOKEN
 #       groups:
