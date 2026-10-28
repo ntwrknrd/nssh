@@ -4,8 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/connect"
@@ -1856,5 +1858,206 @@ func TestImportedIdentityIsUsedByProbeAndSavedHost(t *testing.T) {
 	opts := saved.Inventory.Providers["local"].Hosts[patch.Host].SSH.Options
 	if len(opts["IdentityFile"].Items) != 2 || opts["IdentityAgent"].StringValue() != "/tmp/agent socket" {
 		t.Fatalf("identity lost: %+v", opts)
+	}
+}
+
+func TestUpsertLocalHostWritesOwningIncludeWhenRootShadowsLocalProvider(t *testing.T) {
+	tmp := t.TempDir()
+	configDir := filepath.Join(tmp, "nssh")
+	paths := &config.Paths{ConfigDir: configDir, ConfigFile: filepath.Join(configDir, "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
+	localPath := filepath.Join(configDir, "inventory", "local.yaml")
+	writeInvTestFile(t, paths.ConfigFile, `
+include:
+  - inventory/*.yaml
+inventory:
+  providers:
+    local:
+      type: local
+      hosts:
+        old01.lab.local:
+          group: lab
+`)
+	writeInvTestFile(t, localPath, `
+inventory:
+  providers:
+    local:
+      type: local
+      groups:
+        lab: {}
+`)
+	cfg, err := config.Load(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if err := upsertLocalHost(cfg, paths, hostPatch{Host: "new01.lab.local", Group: "local/lab"}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	localText, err := os.ReadFile(localPath)
+	if err != nil {
+		t.Fatalf("read local: %v", err)
+	}
+	if !strings.Contains(string(localText), "new01.lab.local:") {
+		t.Fatalf("new host missing from owning include:\n%s", localText)
+	}
+	rootText, err := os.ReadFile(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("read root: %v", err)
+	}
+	if strings.Contains(string(rootText), "new01.lab.local") {
+		t.Fatalf("new host written to root config:\n%s", rootText)
+	}
+}
+
+func TestUpsertLocalHostSkipsShortAliasClaimedByAnotherHost(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Providers: map[string]config.InventoryProviderConfig{
+			config.ProviderLocal: {
+				Type:   config.ProviderLocal,
+				Groups: map[string]config.GroupConfig{"lab": {}},
+				Hosts: map[string]config.InventoryHostConfig{
+					"clab01.lab.local": {Group: "lab", Aliases: []string{"clab01"}},
+				},
+			},
+		},
+	}}
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
+
+	if err := upsertLocalHost(cfg, paths, hostPatch{Host: "clab01.ldap.lab.local", Group: "local/lab"}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if got := cfg.Inventory.Providers[config.ProviderLocal].Hosts["clab01.ldap.lab.local"].Aliases; len(got) != 0 {
+		t.Fatalf("aliases = %v, want none", got)
+	}
+}
+
+func TestUpsertLocalHostRejectsAliasClaimedByAnotherHost(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Providers: map[string]config.InventoryProviderConfig{
+			config.ProviderLocal: {
+				Type:   config.ProviderLocal,
+				Groups: map[string]config.GroupConfig{"lab": {}},
+				Hosts: map[string]config.InventoryHostConfig{
+					"edge01.lab.local": {Group: "lab", Aliases: []string{"edge"}},
+				},
+			},
+		},
+	}}
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
+
+	err := upsertLocalHost(cfg, paths, hostPatch{Host: "edge02.lab.local", Group: "local/lab", Aliases: []string{"edge"}})
+	if err == nil || !strings.Contains(err.Error(), `alias "edge" already identifies host "edge01.lab.local"`) {
+		t.Fatalf("err = %v, want alias collision", err)
+	}
+}
+
+func TestFindInventoryHostPrefersLocalDefinition(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Providers: map[string]config.InventoryProviderConfig{
+			config.ProviderLocal: {
+				Type:   config.ProviderLocal,
+				Groups: map[string]config.GroupConfig{"lab": {}},
+				Hosts:  map[string]config.InventoryHostConfig{"sw1.lab.local": {Group: "lab"}},
+			},
+			"netbox-prod": {
+				Type:   config.ProviderNetBox,
+				Groups: map[string]config.GroupConfig{"lab": {}},
+				Hosts:  map[string]config.InventoryHostConfig{"sw1.lab.local": {Group: "lab"}},
+			},
+		},
+	}}
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), BackupDir: filepath.Join(tmp, "backups")}
+
+	for range 20 {
+		host, err := findInventoryHost(cfg, paths, "sw1.lab.local")
+		if err != nil {
+			t.Fatalf("find: %v", err)
+		}
+		if owner := metadataForHost(host, cfg, paths, nil).Owner; owner != config.ProviderLocal {
+			t.Fatalf("owner = %q, want local", owner)
+		}
+	}
+}
+
+func writeInvTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(content)+"\n"), 0600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func TestInventoryHostsListsEachProviderHostOnce(t *testing.T) {
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	tmp := t.TempDir()
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), StateDir: config.DefaultPaths().StateDir}
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Providers: map[string]config.InventoryProviderConfig{
+			config.ProviderLocal: {
+				Type:   config.ProviderLocal,
+				Groups: map[string]config.GroupConfig{"lab": {}},
+				Hosts:  map[string]config.InventoryHostConfig{"edge01.example.com": {Group: "lab"}},
+			},
+			"netbox-prod": {
+				Type:   config.ProviderNetBox,
+				Groups: map[string]config.GroupConfig{"cbb": {Auth: config.InventoryAuthConfig{Username: "netops"}}},
+				Hosts: map[string]config.InventoryHostConfig{
+					"edge02.example.com": {Group: "cbb", Port: 2202, Aliases: []string{"e2"}},
+					"gone.example.com":   {Group: "cbb"},
+				},
+			},
+		},
+	}}
+	if err := inventory.SaveProviderState(&inventory.ProviderState{
+		Version:  inventory.StateVersion,
+		Provider: "netbox-prod",
+		Type:     config.ProviderNetBox,
+		Objects: map[string]*inventory.ProviderHost{
+			"1": {ObjectID: "1", Host: "edge01.example.com", HostName: "edge01.example.com", Group: "netbox-prod/cbb"},
+			"2": {ObjectID: "2", Host: "edge02.example.com", HostName: "edge02.example.com", Group: "netbox-prod/cbb"},
+		},
+	}); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	hosts, err := inventoryHosts(cfg, paths)
+	if err != nil {
+		t.Fatalf("inventoryHosts: %v", err)
+	}
+	rows := make(map[string][]*sshconfig.HostEntry)
+	for _, host := range hosts {
+		rows[host.Host] = append(rows[host.Host], host)
+	}
+	for _, name := range []string{"edge01.example.com", "edge02.example.com", "gone.example.com"} {
+		if len(rows[name]) != 1 {
+			t.Fatalf("%s rows = %d, want 1 (all: %v)", name, len(rows[name]), hosts)
+		}
+	}
+	if owner := metadataForHost(rows["edge01.example.com"][0], cfg, paths, nil).Owner; owner != config.ProviderLocal {
+		t.Fatalf("edge01 owner = %q, want local", owner)
+	}
+	edge02 := rows["edge02.example.com"][0]
+	if edge02.Port() != "2202" || edge02.User() != "netops" || !slices.Contains(edge02.Patterns, "e2") {
+		t.Fatalf("edge02 missing overlay: port=%s user=%s patterns=%v", edge02.Port(), edge02.User(), edge02.Patterns)
+	}
+
+	text, err := renderStatusTree(cfg, paths, "netbox-prod", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("renderStatusTree: %v", err)
+	}
+	for _, want := range []string{
+		"edge01.example.com: shadowed by local host edge01.example.com",
+		"gone.example.com: override matches no netbox-prod object",
+	} {
+		if !strings.Contains(ui.StripANSI(text), want) {
+			t.Fatalf("status missing %q:\n%s", want, text)
+		}
 	}
 }

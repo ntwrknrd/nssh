@@ -1011,3 +1011,85 @@ func TestKeyModeOverridesInheritedPasswordPolicyInOpenSSH(t *testing.T) {
 		}
 	}
 }
+
+func TestCatalogResolvesSharedLookupNamesDeterministically(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type: config.ProviderLocal,
+			Hosts: map[string]config.InventoryHostConfig{
+				"clab01.ldap.lab.local": {},
+				"clab01.lab.local":      {Aliases: []string{"clab01"}},
+				"node.b.local":          {},
+				"node.a.local":          {},
+				"node":                  {Aliases: []string{"bare"}},
+			},
+		},
+	}
+
+	for range 20 {
+		cat := buildCatalogForTest(t, cfg, nil)
+		for query, want := range map[string]string{
+			"clab01": "clab01.lab.local", // explicit alias beats derived short name
+			"node":   "node",             // full host name beats derived short names
+			"bare":   "node",
+		} {
+			host, ok := cat.Find(query)
+			if !ok || host.Canonical != want {
+				t.Fatalf("Find(%q) = %v, want %s", query, host, want)
+			}
+		}
+	}
+
+	delete(cfg.Inventory.Providers[config.ProviderLocal].Hosts, "node")
+	for range 20 {
+		host, ok := buildCatalogForTest(t, cfg, nil).Find("node")
+		if !ok || host.Canonical != "node.a.local" {
+			t.Fatalf("Find(node) = %v, want node.a.local", host)
+		}
+	}
+}
+
+func TestCatalogLocalHostShadowsProviderObject(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type:  config.ProviderLocal,
+			Hosts: map[string]config.InventoryHostConfig{"edge01.example.com": {Port: 2201}},
+		},
+		"netbox-prod": {
+			Type:   config.ProviderNetBox,
+			Groups: map[string]config.GroupConfig{"cbb": {}},
+			Hosts: map[string]config.InventoryHostConfig{
+				"edge02.example.com": {Group: "cbb", Port: 2202},
+				"gone.example.com":   {Group: "cbb"},
+			},
+		},
+	}
+	state := &inventory.ProviderState{
+		Provider: "netbox-prod",
+		Type:     config.ProviderNetBox,
+		Objects: map[string]*inventory.ProviderHost{
+			"1": {ObjectID: "1", Host: "edge01.example.com", HostName: "edge01.example.com", Group: "netbox-prod/cbb"},
+			"2": {ObjectID: "2", Host: "edge02.example.com", HostName: "edge02.example.com", Group: "netbox-prod/cbb"},
+		},
+	}
+
+	cat := buildCatalogForTest(t, cfg, []*inventory.ProviderState{state})
+	if host, ok := cat.Find("edge01"); !ok || host.Provider != config.ProviderLocal || host.Port != 2201 {
+		t.Fatalf("Find(edge01) = %#v, want local host", host)
+	}
+	if host, ok := cat.Find("edge02"); !ok || host.Provider != "netbox-prod" || host.Port != 2202 {
+		t.Fatalf("Find(edge02) = %#v, want overlaid provider host", host)
+	}
+
+	want := []ProviderHostFinding{
+		{Provider: "netbox-prod", Host: "edge01.example.com", ShadowedBy: "edge01.example.com"},
+		{Provider: "netbox-prod", Host: "gone.example.com", Orphaned: true},
+	}
+	if got := ProviderHostFindings(cfg, []*inventory.ProviderState{state}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("findings = %#v, want %#v", got, want)
+	}
+}

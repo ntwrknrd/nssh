@@ -159,3 +159,102 @@ func TestMarshalSparseWritesProviderRequestTimeout(t *testing.T) {
 		t.Fatalf("sparse config missing provider_request_timeout:\n%s", got)
 	}
 }
+
+func TestSaveInventoryProviderHostIgnoresRootShadowAndPrunesIt(t *testing.T) {
+	tmp := t.TempDir()
+	rootPath := filepath.Join(tmp, "config.yaml")
+	providerPath := filepath.Join(tmp, "inventory", "netbox-prod.yaml")
+	writeConfigFile(t, rootPath, `
+include:
+  - inventory/*.yaml
+logging:
+  audit:
+    enabled: true
+inventory:
+  providers:
+    netbox-prod:
+      hosts:
+        sw1.example.com:
+          group: cbb
+`)
+	writeConfigFile(t, providerPath, `
+inventory:
+  providers:
+    netbox-prod:
+      type: netbox
+      groups:
+        cbb:
+          match:
+            domain_suffix: [.example.com]
+`)
+	cfg, err := Load(rootPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.InventoryProviderSource("netbox-prod"); !sameConfigPath(got, providerPath) {
+		t.Fatalf("InventoryProviderSource = %q, want %q", got, providerPath)
+	}
+	provider := cfg.Inventory.Providers["netbox-prod"]
+	host := provider.Hosts["sw1.example.com"]
+	host.SSH.Compatibility.Kex = "diffie-hellman-group14-sha1"
+	provider.Hosts["sw1.example.com"] = host
+	cfg.Inventory.Providers["netbox-prod"] = provider
+	cfg.Inventory.Provider["netbox-prod"] = provider
+
+	if err := SaveInventoryProviderHost(rootPath, cfg, "netbox-prod", "sw1.example.com"); err != nil {
+		t.Fatalf("SaveInventoryProviderHost: %v", err)
+	}
+	providerText, err := os.ReadFile(providerPath)
+	if err != nil {
+		t.Fatalf("read provider: %v", err)
+	}
+	for _, want := range []string{"sw1.example.com:", "group: cbb", "kex: diffie-hellman-group14-sha1"} {
+		if !strings.Contains(string(providerText), want) {
+			t.Fatalf("provider file missing %q:\n%s", want, providerText)
+		}
+	}
+	rootText, err := os.ReadFile(rootPath)
+	if err != nil {
+		t.Fatalf("read root: %v", err)
+	}
+	if strings.Contains(string(rootText), "inventory:") || !strings.Contains(string(rootText), "audit:") {
+		t.Fatalf("root config should drop only the shadowed inventory:\n%s", rootText)
+	}
+	reloaded, err := Load(rootPath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got := reloaded.Inventory.Providers["netbox-prod"].Hosts["sw1.example.com"].SSH.Compatibility.Kex; got != "diffie-hellman-group14-sha1" {
+		t.Fatalf("reloaded kex = %q", got)
+	}
+}
+
+func TestInventoryProviderSourceKeepsRootOwnedProvider(t *testing.T) {
+	tmp := t.TempDir()
+	rootPath := filepath.Join(tmp, "config.yaml")
+	writeConfigFile(t, rootPath, `
+inventory:
+  providers:
+    local:
+      type: local
+      groups:
+        lab: {}
+`)
+	cfg, err := Load(rootPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.InventoryProviderSource(ProviderLocal); !sameConfigPath(got, rootPath) {
+		t.Fatalf("InventoryProviderSource = %q, want root %q", got, rootPath)
+	}
+	if err := PruneRootInventoryProviderShadow(rootPath, cfg, ProviderLocal); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	text, err := os.ReadFile(rootPath)
+	if err != nil {
+		t.Fatalf("read root: %v", err)
+	}
+	if !strings.Contains(string(text), "lab:") {
+		t.Fatalf("root-owned provider was pruned:\n%s", text)
+	}
+}

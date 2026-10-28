@@ -51,6 +51,25 @@ The host `group` key is optional. Ungrouped local hosts are valid and inherit
 inventory/provider defaults plus host-level auth, SSH, and highlight settings,
 but they do not inherit any group settings.
 
+nssh writes a provider's hosts and groups to the included file that declares
+that provider's `type`, even when the root config also has a block for the
+provider. After a write, it removes the root config's now-redundant copy of
+that host, group, or provider so the root cannot shadow the included file.
+
+Host lookup names rank in this order: full host names, explicit aliases, and
+then derived short names (the first DNS label). When hosts share a name of
+equal rank, the lexically first host wins. `nssh inv set` skips a derived
+short alias that already identifies another host and rejects an explicit
+`--alias` collision.
+
+A host under `inventory.providers.<provider>.hosts` overlays the provider
+object with that name; `nssh inv` commands and connections show it as one
+host. A local inventory host shadows a provider object with the same name, so
+local settings win without a refresh. To keep a device provider-managed while
+changing its settings, use a provider host override instead of a local host.
+`nssh inv status <provider>` lists shadowed objects and overrides that match
+no provider object, and `nssh inv get` shows what a local host shadows.
+
 External inventory providers write non-secret state under
 `~/.local/state/nssh/inventory/providers/<name>.json`. Provider groups,
 auth mappings, SSH options, and host overrides live in provider-scoped YAML

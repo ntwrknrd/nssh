@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/connect"
 	"github.com/ntwrknrd/nssh/internal/inventory"
 	"github.com/ntwrknrd/nssh/internal/ui"
 	"github.com/spf13/cobra"
@@ -47,14 +48,39 @@ func runGet(hostName string) error {
 	}
 	meta := metadataForHost(host, cfg, config.DefaultPaths(), index)
 	auth := effectiveInventoryAuth(cfg, host.Host, meta.Group)
+	nsshRows := []inventoryDisplayRow{
+		{Label: "Provider", Value: meta.Owner},
+		{Label: "Group", Value: valueOrDash(meta.Group)},
+	}
+	shadowRows, err := shadowedProviderRows(cfg, config.DefaultPaths(), host.Host)
+	if err != nil {
+		return err
+	}
+	nsshRows = append(nsshRows, shadowRows...)
 	printInventoryDisplaySections(inventoryDisplaySections(
 		inventoryHostSSHDisplayRows(host.Host, host.HostName, valueOrDash(host.User()), host.Port()),
-		append([]inventoryDisplayRow{
-			{Label: "Provider", Value: meta.Owner},
-			{Label: "Group", Value: valueOrDash(meta.Group)},
-		}, inventoryAuthDisplayRows(auth)...),
+		append(nsshRows, inventoryAuthDisplayRows(auth)...),
 	))
 	return nil
+}
+
+// shadowedProviderRows names provider objects that this local host replaces.
+func shadowedProviderRows(cfg *config.Config, paths *config.Paths, host string) ([]inventoryDisplayRow, error) {
+	states, err := inventoryProviderStates(paths)
+	if err != nil {
+		return nil, err
+	}
+	var rows []inventoryDisplayRow
+	for _, finding := range connect.ProviderHostFindings(cfg, states) {
+		if finding.ShadowedBy != host {
+			continue
+		}
+		rows = append(rows, inventoryDisplayRow{
+			Label: "Shadows",
+			Value: fmt.Sprintf("%s %s (move local settings to inventory.providers.%s.hosts)", finding.Provider, finding.Host, finding.Provider),
+		})
+	}
+	return rows, nil
 }
 
 func valueOrDash(v string) string {

@@ -39,7 +39,14 @@ func SaveInventoryGroup(path string, cfg *Config, groupID string) error {
 	if err := setInventoryGroupInRoot(root, cfg, groupID); err != nil {
 		return err
 	}
-	return saveInventoryProviderTable(targetPath, root)
+	if err := saveInventoryProviderTable(targetPath, root); err != nil {
+		return err
+	}
+	providerName, groupName, err := ParseInventoryGroupID(groupID)
+	if err != nil {
+		return err
+	}
+	return PruneRootInventoryProviderShadow(path, cfg, providerName, "groups", groupName)
 }
 
 func SaveInventoryGroupAndHostAuth(path string, cfg *Config, groupID, host string) error {
@@ -85,7 +92,78 @@ func SaveInventoryProviderHost(path string, cfg *Config, providerName, host stri
 	if err := setInventoryProviderHostInRoot(root, cfg, providerName, host); err != nil {
 		return err
 	}
-	return saveInventoryProviderTable(targetPath, root)
+	if err := saveInventoryProviderTable(targetPath, root); err != nil {
+		return err
+	}
+	return PruneRootInventoryProviderShadow(path, cfg, providerName, "hosts", host)
+}
+
+// PruneRootInventoryProviderShadow removes a root-config entry under
+// inventory.providers.<provider> after the merged value was written to the
+// provider's owning include file, so the stale root copy cannot override it.
+// With no key, it removes the root config's whole block for the provider.
+func PruneRootInventoryProviderShadow(rootPath string, cfg *Config, providerName string, key ...string) error {
+	targetPath := cfg.InventoryProviderSource(providerName)
+	if rootPath == "" || targetPath == "" || sameConfigPath(rootPath, targetPath) {
+		return nil
+	}
+	if _, err := os.Stat(rootPath); os.IsNotExist(err) {
+		return nil
+	}
+	root, err := readYAMLMap(rootPath)
+	if err != nil {
+		return err
+	}
+	pruned := false
+	for _, providers := range []string{"providers", "provider"} {
+		for _, parts := range shadowKeyVariants(key) {
+			path := append([]string{"inventory", providers, providerName}, parts...)
+			if !tablePathDefined(root, path...) {
+				continue
+			}
+			deleteMapPath(root, path)
+			pruneEmptyMapPath(root, path[:len(path)-1])
+			pruned = true
+		}
+	}
+	if !pruned {
+		return nil
+	}
+	return saveRootTable(rootPath, root)
+}
+
+func shadowKeyVariants(key []string) [][]string {
+	if len(key) == 0 {
+		return [][]string{nil}
+	}
+	variants := [][]string{key}
+	alias := map[string]string{"hosts": "host", "groups": "group"}[key[0]]
+	if alias != "" {
+		variants = append(variants, append([]string{alias}, key[1:]...))
+	}
+	return variants
+}
+
+// pruneEmptyMapPath deletes each table along parts, deepest first, while empty.
+func pruneEmptyMapPath(root map[string]any, parts []string) {
+	for i := len(parts); i > 0; i-- {
+		if table, ok := mapAtPath(root, parts[:i]); !ok || len(table) > 0 {
+			return
+		}
+		deleteMapPath(root, parts[:i])
+	}
+}
+
+func mapAtPath(root map[string]any, parts []string) (map[string]any, bool) {
+	current := root
+	for _, part := range parts {
+		next, ok := asMap(current[part])
+		if !ok {
+			return nil, false
+		}
+		current = next
+	}
+	return current, true
 }
 
 func inventoryGroupSavePath(rootPath string, cfg *Config, groupID string) (string, error) {
