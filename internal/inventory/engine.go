@@ -37,14 +37,11 @@ func Reconcile(objects []Object, selectors []config.InventoryGroupSelector, prov
 			plan.Unmatched = append(plan.Unmatched, *obj)
 			continue
 		case 1:
-			selector := matches[0]
-			host := objectToProviderHost(obj, selector.Group)
-			host.AuthMode = groupAuthMode(selector.Group, groups)
+			host := groupProviderHost(obj, matches[0].Group, groups)
 			desired[host.ObjectID] = host
 		default:
 			if selector, ok := BestGroupSelectorMatch(obj, matches); ok {
-				host := objectToProviderHost(obj, selector.Group)
-				host.AuthMode = groupAuthMode(selector.Group, groups)
+				host := groupProviderHost(obj, selector.Group, groups)
 				desired[host.ObjectID] = host
 				continue
 			}
@@ -91,13 +88,49 @@ func selectorGroups(selectors []config.InventoryGroupSelector) []string {
 	return groups
 }
 
+func groupProviderHost(obj *Object, group string, groups map[string]config.GroupConfig) *ProviderHost {
+	groupCfg := groupConfig(group, groups)
+	qualified := qualifyShortObject(*obj, groupCfg.DomainSuffix)
+	host := objectToProviderHost(&qualified, group)
+	host.AuthMode = groupAuthMode(group, groups)
+	return host
+}
+
+func groupConfig(group string, groups map[string]config.GroupConfig) config.GroupConfig {
+	_, shortGroup, err := config.ParseInventoryGroupID(group)
+	if err != nil {
+		shortGroup = group
+	}
+	return groups[shortGroup]
+}
+
+// qualifyShortObject appends a group's single domain suffix to an object whose
+// name has no domain and whose provider supplied no other address, so short
+// provider names become resolvable FQDN hosts.
+func qualifyShortObject(obj Object, suffixes []string) Object {
+	if len(suffixes) != 1 {
+		return obj
+	}
+	suffix := strings.TrimSpace(suffixes[0])
+	name := strings.TrimSpace(obj.Name)
+	if suffix == "" || name == "" || strings.Contains(name, ".") {
+		return obj
+	}
+	if host := strings.TrimSpace(obj.HostName); host != "" && host != name {
+		return obj
+	}
+	if !strings.HasPrefix(suffix, ".") {
+		suffix = "." + suffix
+	}
+	obj.Name = name + suffix
+	obj.FQDN = obj.Name
+	obj.HostName = obj.Name
+	return obj
+}
+
 func groupAuthMode(group string, groups map[string]config.GroupConfig) string {
 	if groups != nil {
-		_, shortGroup, err := config.ParseInventoryGroupID(group)
-		if err != nil {
-			shortGroup = group
-		}
-		auth := groups[shortGroup].Auth
+		auth := groupConfig(group, groups).Auth
 		auth.Normalize()
 		if auth.Mode != "" {
 			return auth.Mode
