@@ -247,3 +247,28 @@ func TestReconcileLeavesShortNamesWithoutSingleGroupDomainSuffix(t *testing.T) {
 		}
 	}
 }
+
+func TestReconcileDropsShortPatternsSharedByHosts(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{{Group: "netbox-prod/cbb", Provider: "netbox-prod"}}
+	objects := []Object{
+		{ObjectID: "1", Name: "rtr1.richmond.example.com", HostName: "rtr1.richmond.example.com"},
+		{ObjectID: "2", Name: "rtr1.roanoke.example.com", HostName: "rtr1.roanoke.example.com"},
+		{ObjectID: "3", Name: "edge1.richmond.example.com", HostName: "edge1.richmond.example.com"},
+	}
+
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, nil)
+	got := make(map[string][]string)
+	for _, host := range plan.Adds {
+		got[host.ObjectID] = host.Patterns
+	}
+	want := map[string][]string{
+		"1": {"rtr1.richmond.example.com"},
+		"2": {"rtr1.roanoke.example.com"},
+		"3": {"edge1.richmond.example.com", "edge1"},
+	}
+	for id, patterns := range want {
+		if !slices.Equal(got[id], patterns) {
+			t.Fatalf("object %s patterns = %#v, want %#v", id, got[id], patterns)
+		}
+	}
+}

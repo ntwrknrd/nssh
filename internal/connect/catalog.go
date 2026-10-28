@@ -15,10 +15,12 @@ type HostCatalog struct {
 	hosts     map[string]*ResolvedHostData
 	aliases   map[string]string
 	aliasRank map[string]int
+	ambiguous map[string]struct{}
 }
 
 // Lookup-name precedence: a full host name beats an explicit alias, which beats
-// a derived short name. Equal-rank names shared by different hosts resolve to
+// a derived short name. A derived short name shared by different hosts resolves
+// to none of them. Other equal-rank names shared by different hosts resolve to
 // the lexically first canonical host so lookup never depends on map order.
 const (
 	aliasRankShort = iota + 1
@@ -532,6 +534,9 @@ func (c *HostCatalog) addAlias(name, canonical string, rank int) {
 	if c.aliasRank == nil {
 		c.aliasRank = make(map[string]int)
 	}
+	if _, ok := c.ambiguous[name]; ok && rank == aliasRankShort {
+		return
+	}
 	current, exists := c.aliases[name]
 	currentRank := c.aliasRank[name]
 	if current == canonical {
@@ -540,6 +545,15 @@ func (c *HostCatalog) addAlias(name, canonical string, rank int) {
 	}
 	if exists && rank == currentRank {
 		slog.Debug("inventory lookup name is shared by hosts", "name", name, "hosts", []string{current, canonical})
+	}
+	if exists && rank == aliasRankShort && currentRank == aliasRankShort {
+		if c.ambiguous == nil {
+			c.ambiguous = make(map[string]struct{})
+		}
+		c.ambiguous[name] = struct{}{}
+		delete(c.aliases, name)
+		delete(c.aliasRank, name)
+		return
 	}
 	if exists && (rank < currentRank || (rank == currentRank && current < canonical)) {
 		return
