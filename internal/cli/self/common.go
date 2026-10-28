@@ -22,8 +22,7 @@ func FindBinary() string {
 		filepath.Join(home, ".local", "bin", "nssh"),
 		filepath.Join(home, "bin", "nssh"),
 		filepath.Join(home, "go", "bin", "nssh"),
-		"/opt/homebrew/bin/nssh", // Homebrew on Apple Silicon
-		"/usr/local/bin/nssh",    // Homebrew on Intel Mac / manual install
+		"/usr/local/bin/nssh", // manual install
 	}
 
 	for _, loc := range locations {
