@@ -57,8 +57,10 @@ provider. After a write, it removes the root config's now-redundant copy of
 that host, group, or provider so the root cannot shadow the included file.
 
 Host lookup names rank in this order: full host names, explicit aliases, and
-then derived short names (the first DNS label). When hosts share a name of
-equal rank, the lexically first host wins. `nssh inv set` skips a derived
+then derived short names (the first DNS label). A derived short name that
+several hosts share identifies none of them; use the full name or give one host
+an explicit alias. When hosts share a full name or explicit alias, the
+lexically first host wins. `nssh inv set` skips a derived
 short alias that already identifies another host and rejects an explicit
 `--alias` collision.
 

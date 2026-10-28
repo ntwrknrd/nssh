@@ -1044,9 +1044,14 @@ func TestCatalogResolvesSharedLookupNamesDeterministically(t *testing.T) {
 
 	delete(cfg.Inventory.Providers[config.ProviderLocal].Hosts, "node")
 	for range 20 {
-		host, ok := buildCatalogForTest(t, cfg, nil).Find("node")
-		if !ok || host.Canonical != "node.a.local" {
-			t.Fatalf("Find(node) = %v, want node.a.local", host)
+		cat := buildCatalogForTest(t, cfg, nil)
+		if host, ok := cat.Find("node"); ok {
+			t.Fatalf("Find(node) = %s, want no match for a shared short name", host.Canonical)
+		}
+		for _, full := range []string{"node.a.local", "node.b.local"} {
+			if host, ok := cat.Find(full); !ok || host.Canonical != full {
+				t.Fatalf("Find(%q) = %v", full, host)
+			}
 		}
 	}
 }

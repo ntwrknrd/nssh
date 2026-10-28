@@ -50,6 +50,8 @@ func Reconcile(objects []Object, selectors []config.InventoryGroupSelector, prov
 		}
 	}
 
+	dropSharedShortPatterns(desired)
+
 	var currentObjects map[string]*ProviderHost
 	if current != nil {
 		currentObjects = current.Objects
@@ -151,6 +153,28 @@ func objectToProviderHost(obj *Object, group string) *ProviderHost {
 		HostName:  obj.HostName,
 		Port:      obj.Port,
 		ProxyJump: obj.ProxyJump,
+	}
+}
+
+// dropSharedShortPatterns removes derived short names that more than one host
+// would claim, so an ambiguous short name never silently selects one device.
+func dropSharedShortPatterns(hosts map[string]*ProviderHost) {
+	owners := make(map[string]map[string]struct{})
+	for _, host := range hosts {
+		for _, pattern := range host.Patterns {
+			if pattern == host.Host || pattern == host.HostName {
+				continue
+			}
+			if owners[pattern] == nil {
+				owners[pattern] = make(map[string]struct{})
+			}
+			owners[pattern][host.Host] = struct{}{}
+		}
+	}
+	for _, host := range hosts {
+		host.Patterns = slices.DeleteFunc(host.Patterns, func(pattern string) bool {
+			return pattern != host.Host && pattern != host.HostName && len(owners[pattern]) > 1
+		})
 	}
 }
 
