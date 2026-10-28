@@ -434,3 +434,42 @@ func TestRunHostKeyPreparationRejectsHostKey(t *testing.T) {
 		t.Fatalf("prep = %+v, want nil", prep)
 	}
 }
+
+func TestRunHostKeyPreparationTOFUTrustsNewKeyWithoutPrompt(t *testing.T) {
+	oldPrompt := hostKeyPromptFunc
+	oldScan := scanHostKeyFunc
+	defer func() {
+		hostKeyPromptFunc = oldPrompt
+		scanHostKeyFunc = oldScan
+	}()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	line := "edge01 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBcLcMSBE8+TJuxrHFujWBrOCcXrl+/sTqONstg2Jcg7"
+	prompted := false
+	hostKeyPromptFunc = func() connector.HostKeyPromptFunc {
+		return func(connector.HostKeyPrompt) connector.HostKeyAction {
+			prompted = true
+			return connector.HostKeyReject
+		}
+	}
+	scanHostKeyFunc = func(context.Context, *ResolvedHost, []string, *config.Config, Options, []string) (scannedHostKey, error) {
+		return scannedHostKey{KeyType: "ssh-ed25519", Algorithm: "ssh-ed25519", Fingerprint: "SHA256:test", Line: line}, nil
+	}
+	cfg := config.DefaultConfig()
+	cfg.SSH.Security.HostKeyPolicy = "tofu"
+	resolved := &ResolvedHost{Hostname: "edge01", Port: 22}
+
+	prep, err := runHostKeyPreparation(context.Background(), resolved, nil, cfg, Options{}, false, nil)
+	if err != nil || prep != nil || prompted {
+		t.Fatalf("new key: prep=%v err=%v prompted=%v", prep, err, prompted)
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".ssh", "known_hosts"))
+	if err != nil || string(data) != line+"\n" {
+		t.Fatalf("known_hosts = %q, err %v", data, err)
+	}
+
+	if _, err := runHostKeyPreparation(context.Background(), resolved, nil, cfg, Options{}, true, nil); err == nil || !prompted {
+		t.Fatalf("changed key: err=%v prompted=%v, want prompt and reject", err, prompted)
+	}
+}

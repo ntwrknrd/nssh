@@ -23,11 +23,11 @@ func promptNewHostKey(prompt connector.HostKeyPrompt) connector.HostKeyAction {
 	fmt.Print(renderNewHostKeyPromptText(prompt))
 
 	options := []string{
-		"Reject (disconnect)",
-		"Accept once (this session only)",
-		"Accept always (add to known_hosts)",
+		"Reject (disconnect) [enter]",
+		"Accept once (this session only) [o]",
+		"Accept always (add to known_hosts) [a]",
 	}
-	idx, err := ui.SelectIndex("Host key verification", options, prompt.Stdin)
+	idx, err := ui.SelectIndexWithShortcuts("Host key verification", options, map[rune]int{'o': 1, 'a': 2}, prompt.Stdin)
 	if err != nil || idx < 0 {
 		return connector.HostKeyReject
 	}

@@ -170,9 +170,15 @@ ssh:
 OpenSSH trust-on-first-use behavior. Password-backed setup scans the presented
 key before using the target credential; a managed password-backed proxy may use
 its own credential to reach the target during that scan. New-key prompts offer
-reject, accept once, or accept always. Changed-key prompts label both acceptance
-choices dangerous; accept-always removes the stale entry and writes the verified
-replacement only after explicit confirmation.
+reject, accept once, or accept always; Enter rejects, `o` accepts once, and `a`
+accepts always. Changed-key prompts have no single-key shortcuts and label both
+acceptance choices dangerous; accept-always removes the stale entry and writes
+the verified replacement only after explicit confirmation.
+
+`host_key_policy = "tofu"` trusts a host's first key without prompting: nssh
+adds the scanned key to `~/.ssh/known_hosts` and prints its fingerprint. A
+changed key still prompts. The preset also sets `accept_once_mode` to
+`accept-new` and persists compatibility probes.
 
 On recognized legacy SSH algorithm failures, nssh can select supported
 algorithm floors and persist them under the owning provider YAML host

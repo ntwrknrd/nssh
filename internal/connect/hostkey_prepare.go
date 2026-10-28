@@ -31,7 +31,9 @@ type scannedHostKey struct {
 var negotiatedHostKeyRE = regexp.MustCompile(`(?m)Server host key: ([^\s]+) (SHA256:[A-Za-z0-9+/=]+)`)
 
 func runHostKeyPreparation(ctx context.Context, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, opts Options, changed bool, proxyEnv []string) (*connector.HostKeyPreparation, error) {
-	if opts.capture != nil && opts.capture.HostKeyPrompt == nil {
+	// TOFU trusts a host's first key without asking; a changed key still prompts.
+	tofu := !changed && hostKeyPolicyTOFU(cfg)
+	if opts.capture != nil && opts.capture.HostKeyPrompt == nil && !tofu {
 		return nil, fmt.Errorf("host %s requires interactive host-key verification", resolved.Hostname)
 	}
 	slog.Debug("preparing host key", "host", resolved.Hostname)
@@ -41,6 +43,13 @@ func runHostKeyPreparation(ctx context.Context, resolved *ResolvedHost, sshArgs 
 	}
 	slog.Debug("host key scanned", "host", resolved.Hostname, "key_type", key.KeyType, "fingerprint", key.Fingerprint)
 	decision := func() (*connector.HostKeyPreparation, error) {
+		if tofu {
+			if err := appendKnownHosts(key.Line); err != nil {
+				return nil, err
+			}
+			fmt.Fprintf(os.Stderr, "nssh: trusted new host key for %s (%s %s)\n", resolved.Hostname, key.KeyType, key.Fingerprint)
+			return nil, nil
+		}
 		promptFn := hostKeyPromptFunc()
 		if opts.capture != nil {
 			promptFn = opts.capture.HostKeyPrompt
@@ -85,6 +94,10 @@ func runHostKeyPreparation(ctx context.Context, resolved *ResolvedHost, sshArgs 
 		return nil, ctx.Err()
 	}
 	return decision()
+}
+
+func hostKeyPolicyTOFU(cfg *config.Config) bool {
+	return cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.SSH.Security.HostKeyPolicy), "tofu")
 }
 
 func writeTemporaryKnownHosts(line, algorithm string) (*connector.HostKeyPreparation, error) {
