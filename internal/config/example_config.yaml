@@ -220,6 +220,8 @@ ssh:
     # 0s disables idle disconnects.
     idle_timeout: 0s
   security:
+    # pin prompts for every new host key; tofu trusts first-seen keys and
+    # still prompts when a known key changes.
     host_key_policy: pin
     accept_once_mode: pin
     compat_persist_probes: false

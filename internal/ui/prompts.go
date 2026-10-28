@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"unicode"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -141,6 +143,77 @@ func SelectIndex(title string, options []string, input io.Reader) (int, error) {
 	}
 
 	return selected, nil
+}
+
+// SelectIndexWithShortcuts shows a selection list whose options can also be
+// chosen with a single key. Enter selects the highlighted option, which starts
+// on the first one. Filtering is disabled so letter keys stay shortcuts.
+func SelectIndexWithShortcuts(title string, options []string, shortcuts map[rune]int, input io.Reader) (int, error) {
+	if len(options) == 0 {
+		return -1, nil
+	}
+
+	var selected int
+	huhOpts := make([]huh.Option[int], len(options))
+	for i, opt := range options {
+		huhOpts[i] = huh.NewOption(opt, i)
+	}
+	sel := huh.NewSelect[int]().
+		Title(title).
+		Options(huhOpts...).
+		Filtering(false).
+		Value(&selected)
+	form := huh.NewForm(huh.NewGroup(sel)).WithTheme(huhTheme())
+	form.SubmitCmd = tea.Quit
+	form.CancelCmd = tea.Interrupt
+
+	model := &shortcutSelect{form: form, shortcuts: shortcuts, chosen: -1}
+	teaOpts := []tea.ProgramOption{}
+	if input != nil {
+		teaOpts = append(teaOpts, tea.WithInput(input))
+	}
+	if _, err := tea.NewProgram(model, teaOpts...).Run(); err != nil {
+		if errors.Is(err, tea.ErrInterrupted) {
+			return -1, huh.ErrUserAborted
+		}
+		return -1, err
+	}
+	if model.chosen >= 0 {
+		return model.chosen, nil
+	}
+	if form.State != huh.StateCompleted {
+		return -1, huh.ErrUserAborted
+	}
+	return selected, nil
+}
+
+type shortcutSelect struct {
+	form      *huh.Form
+	shortcuts map[rune]int
+	chosen    int
+}
+
+func (m *shortcutSelect) Init() tea.Cmd { return m.form.Init() }
+
+func (m *shortcutSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok && key.Type == tea.KeyRunes && len(key.Runes) == 1 {
+		if idx, ok := m.shortcuts[unicode.ToLower(key.Runes[0])]; ok {
+			m.chosen = idx
+			return m, tea.Quit
+		}
+	}
+	model, cmd := m.form.Update(msg)
+	if form, ok := model.(*huh.Form); ok {
+		m.form = form
+	}
+	return m, cmd
+}
+
+func (m *shortcutSelect) View() string {
+	if m.chosen >= 0 || m.form.State != huh.StateNormal {
+		return ""
+	}
+	return m.form.View()
 }
 
 // Confirm shows a yes/no confirmation prompt.
