@@ -88,6 +88,11 @@ Current external providers:
   `jump_host`.
 
 Provider-owned group selectors assign discovered objects to canonical groups.
+A provider group's top-level `domain_suffix` qualifies short object names:
+when it lists exactly one suffix, an object assigned to that group whose name
+has no domain and no separate address becomes `<name><suffix>`, with the short
+name kept as a lookup name. Selection still uses the object's original name, so
+match such groups on fields other than `match.domain_suffix`.
 When resolved inventory auth mode is `password`, nssh renders OpenSSH options
 that force password-style authentication:
 `PreferredAuthentications=keyboard-interactive,password` and

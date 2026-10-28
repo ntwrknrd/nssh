@@ -140,6 +140,23 @@ agent:
 #               WarnWeakCrypto: no-pq-kex
 #               IdentityFile:
 #                 - ~/.ssh/work-ssh-key.pub
+#         firewall-nodes:
+#           # Devices whose NetBox name has no domain, such as fw01, become
+#           # fw01.fw.example.net. Applies only when one suffix is listed.
+#           domain_suffix:
+#             - .fw.example.net
+#           auth:
+#             mode: password
+#             credential_provider: op-work
+#             password_ref: op://Work/network-admin/password
+#             username: netops
+#           match:
+#             manufacturer:
+#               - Palo Alto
+#             role:
+#               - Firewall Cluster Node
+#             status:
+#               - active
 #       hosts:
 #         legacy-switch.example.net:
 #           aliases:

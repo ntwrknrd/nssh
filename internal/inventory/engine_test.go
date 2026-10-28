@@ -204,3 +204,46 @@ func TestReconcileChoosesMostSpecificWildcardDomainSuffixSelector(t *testing.T) 
 		t.Fatalf("group = %q, want netbox-prod/ldap", plan.Adds[0].Group)
 	}
 }
+
+func TestReconcileQualifiesShortNamesWithGroupDomainSuffix(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{{
+		Group:    "netbox-prod/vpan",
+		Provider: "netbox-prod",
+		Match:    config.InventoryMatch{"manufacturer": {"Palo Alto"}},
+	}}
+	groups := map[string]config.GroupConfig{"vpan": {DomainSuffix: []string{".custcbb.local"}}}
+	attrs := map[string][]string{"manufacturer": {"Palo Alto"}}
+	objects := []Object{
+		{ObjectID: "1", Name: "ACME-vPAN01", HostName: "ACME-vPAN01", Attributes: attrs},
+		{ObjectID: "2", Name: "acme-vpan.expedient.com", HostName: "acme-vpan.expedient.com", Attributes: attrs},
+		{ObjectID: "3", Name: "lab-vpan", HostName: "10.0.0.5", Attributes: attrs},
+	}
+
+	plan := Reconcile(objects, selectors, "netbox-prod", nil, groups)
+	got := make(map[string]*ProviderHost)
+	for _, host := range plan.Adds {
+		got[host.ObjectID] = host
+	}
+	if host := got["1"]; host.Host != "ACME-vPAN01.custcbb.local" || host.HostName != "ACME-vPAN01.custcbb.local" ||
+		!slices.Equal(host.Patterns, []string{"ACME-vPAN01.custcbb.local", "ACME-vPAN01"}) {
+		t.Fatalf("short host = %+v", host)
+	}
+	if host := got["2"]; host.HostName != "acme-vpan.expedient.com" {
+		t.Fatalf("dotted host changed: %+v", host)
+	}
+	if host := got["3"]; host.Host != "lab-vpan" || host.HostName != "10.0.0.5" {
+		t.Fatalf("addressed host changed: %+v", host)
+	}
+}
+
+func TestReconcileLeavesShortNamesWithoutSingleGroupDomainSuffix(t *testing.T) {
+	selectors := []config.InventoryGroupSelector{{Group: "netbox-prod/fw", Provider: "netbox-prod"}}
+	objects := []Object{{ObjectID: "1", Name: "fw01", HostName: "fw01"}}
+	for _, suffixes := range [][]string{nil, {".a.local", ".b.local"}} {
+		groups := map[string]config.GroupConfig{"fw": {DomainSuffix: suffixes}}
+		plan := Reconcile(objects, selectors, "netbox-prod", nil, groups)
+		if len(plan.Adds) != 1 || plan.Adds[0].HostName != "fw01" {
+			t.Fatalf("suffixes %v: adds = %+v", suffixes, plan.Adds)
+		}
+	}
+}
