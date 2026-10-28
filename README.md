@@ -4,7 +4,6 @@
 [![Build](https://github.com/ntwrknrd/nssh/actions/workflows/build.yml/badge.svg)](https://github.com/ntwrknrd/nssh/actions/workflows/build.yml)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/ntwrknrd/nssh)](go.mod)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ntwrknrd/nssh)](https://goreportcard.com/report/github.com/ntwrknrd/nssh)
-[![Homebrew](https://img.shields.io/badge/homebrew-available-orange)](https://github.com/ntwrknrd/homebrew-nssh)
 ![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue)
 
 `nssh` is an SSH wrapper for operators who manage many hosts. It keeps host
@@ -73,12 +72,11 @@ finishes; commands cannot read interactive input. See the
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ntwrknrd/nssh/main/scripts/install.sh | sh
 
-# or
-brew install ntwrknrd/nssh/nssh
-
 nssh self init
 nssh self status
 ```
+
+To update, run `nssh self reinstall`; it installs the latest GitHub release.
 
 On first run, `nssh self init` creates the commented root config template and
 offers credential and inventory provider setup. If `config.yaml` already exists,
