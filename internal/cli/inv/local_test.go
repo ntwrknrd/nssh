@@ -4,8 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/connect"
@@ -1988,5 +1990,74 @@ func writeInvTestFile(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(strings.TrimSpace(content)+"\n"), 0600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func TestInventoryHostsListsEachProviderHostOnce(t *testing.T) {
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	tmp := t.TempDir()
+	paths := &config.Paths{ConfigDir: filepath.Join(tmp, "nssh"), ConfigFile: filepath.Join(tmp, "nssh", "config.yaml"), StateDir: config.DefaultPaths().StateDir}
+	cfg := &config.Config{Inventory: config.InventoryConfig{
+		Providers: map[string]config.InventoryProviderConfig{
+			config.ProviderLocal: {
+				Type:   config.ProviderLocal,
+				Groups: map[string]config.GroupConfig{"lab": {}},
+				Hosts:  map[string]config.InventoryHostConfig{"edge01.example.com": {Group: "lab"}},
+			},
+			"netbox-prod": {
+				Type:   config.ProviderNetBox,
+				Groups: map[string]config.GroupConfig{"cbb": {Auth: config.InventoryAuthConfig{Username: "netops"}}},
+				Hosts: map[string]config.InventoryHostConfig{
+					"edge02.example.com": {Group: "cbb", Port: 2202, Aliases: []string{"e2"}},
+					"gone.example.com":   {Group: "cbb"},
+				},
+			},
+		},
+	}}
+	if err := inventory.SaveProviderState(&inventory.ProviderState{
+		Version:  inventory.StateVersion,
+		Provider: "netbox-prod",
+		Type:     config.ProviderNetBox,
+		Objects: map[string]*inventory.ProviderHost{
+			"1": {ObjectID: "1", Host: "edge01.example.com", HostName: "edge01.example.com", Group: "netbox-prod/cbb"},
+			"2": {ObjectID: "2", Host: "edge02.example.com", HostName: "edge02.example.com", Group: "netbox-prod/cbb"},
+		},
+	}); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	hosts, err := inventoryHosts(cfg, paths)
+	if err != nil {
+		t.Fatalf("inventoryHosts: %v", err)
+	}
+	rows := make(map[string][]*sshconfig.HostEntry)
+	for _, host := range hosts {
+		rows[host.Host] = append(rows[host.Host], host)
+	}
+	for _, name := range []string{"edge01.example.com", "edge02.example.com", "gone.example.com"} {
+		if len(rows[name]) != 1 {
+			t.Fatalf("%s rows = %d, want 1 (all: %v)", name, len(rows[name]), hosts)
+		}
+	}
+	if owner := metadataForHost(rows["edge01.example.com"][0], cfg, paths, nil).Owner; owner != config.ProviderLocal {
+		t.Fatalf("edge01 owner = %q, want local", owner)
+	}
+	edge02 := rows["edge02.example.com"][0]
+	if edge02.Port() != "2202" || edge02.User() != "netops" || !slices.Contains(edge02.Patterns, "e2") {
+		t.Fatalf("edge02 missing overlay: port=%s user=%s patterns=%v", edge02.Port(), edge02.User(), edge02.Patterns)
+	}
+
+	text, err := renderStatusTree(cfg, paths, "netbox-prod", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("renderStatusTree: %v", err)
+	}
+	for _, want := range []string{
+		"edge01.example.com: shadowed by local host edge01.example.com",
+		"gone.example.com: override matches no netbox-prod object",
+	} {
+		if !strings.Contains(ui.StripANSI(text), want) {
+			t.Fatalf("status missing %q:\n%s", want, text)
+		}
 	}
 }

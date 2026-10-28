@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ntwrknrd/nssh/internal/config"
+	"github.com/ntwrknrd/nssh/internal/connect"
 	"github.com/ntwrknrd/nssh/internal/inventory"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshconfig"
 	"github.com/ntwrknrd/nssh/internal/ui"
@@ -164,6 +165,7 @@ func writeStatusProvider(b *strings.Builder, snapshot statusProviderSnapshot, de
 		fmt.Fprintf(b, "  %s %s\n", statusLabel("last error:"), statusMaybeError(snapshot.LastError))
 	}
 	fmt.Fprintf(b, "  %s %s\n", statusLabel("hosts:"), pluralizeHosts(snapshot.Hosts))
+	writeStatusProviderFindings(b, snapshot, detailed)
 	fmt.Fprintf(b, "  %s\n", statusSection("groups:"))
 	if len(snapshot.Groups) == 0 {
 		fmt.Fprintf(b, "    %s\n", statusDash("-"))
@@ -171,6 +173,34 @@ func writeStatusProvider(b *strings.Builder, snapshot statusProviderSnapshot, de
 	}
 	for _, group := range snapshot.Groups {
 		writeStatusGroup(b, group, detailed)
+	}
+}
+
+// writeStatusProviderFindings reports provider objects hidden by local hosts
+// and provider host overrides that match no provider object.
+func writeStatusProviderFindings(b *strings.Builder, snapshot statusProviderSnapshot, detailed bool) {
+	if len(snapshot.Findings) == 0 {
+		return
+	}
+	if !detailed {
+		shadowed, orphaned := 0, 0
+		for _, finding := range snapshot.Findings {
+			if finding.Orphaned {
+				orphaned++
+			} else {
+				shadowed++
+			}
+		}
+		fmt.Fprintf(b, "  %s %d shadowed by local, %d unmatched overrides\n", statusLabel("findings:"), shadowed, orphaned)
+		return
+	}
+	fmt.Fprintf(b, "  %s\n", statusSection("findings:"))
+	for _, finding := range snapshot.Findings {
+		if finding.Orphaned {
+			fmt.Fprintf(b, "    %s: override matches no %s object\n", finding.Host, snapshot.Name)
+			continue
+		}
+		fmt.Fprintf(b, "    %s: shadowed by local host %s; move its settings to inventory.providers.%s.hosts\n", finding.Host, finding.ShadowedBy, snapshot.Name)
 	}
 }
 
@@ -276,6 +306,7 @@ type statusProviderSnapshot struct {
 	OutputFile string
 	Hosts      int
 	Groups     []statusProviderGroup
+	Findings   []connect.ProviderHostFinding
 }
 
 func localStatusSnapshot(cfg *config.Config, paths *config.Paths) (statusProviderSnapshot, bool, error) {
@@ -314,6 +345,7 @@ func externalStatusSnapshot(
 	cache := "missing"
 	lastError := "-"
 	var groupCounts map[string]int
+	var findings []connect.ProviderHostFinding
 	hosts := 0
 	if err != nil {
 		if inventory.IsUnsupportedStateVersion(err) {
@@ -332,6 +364,7 @@ func externalStatusSnapshot(
 			lastError = state.LastError
 		}
 		groupCounts = providerGroupCounts(state)
+		findings = connect.ProviderHostFindings(cfg, []*inventory.ProviderState{state})
 	}
 	return statusProviderSnapshot{
 		Name:       name,
@@ -341,6 +374,7 @@ func externalStatusSnapshot(
 		OutputFile: localFilePath(paths, inventory.ProviderIncludeFile(name)),
 		Hosts:      hosts,
 		Groups:     statusProviderGroups(cfg, paths, name, groupCounts),
+		Findings:   findings,
 	}
 }
 

@@ -83,10 +83,8 @@ func buildHostCatalog(cfg *config.Config, states []*inventory.ProviderState) (*H
 		cfg = config.DefaultConfig()
 	}
 	cat := &HostCatalog{hosts: make(map[string]*ResolvedHostData), aliases: make(map[string]string)}
-	providers := cfg.Inventory.Providers
-	if len(providers) == 0 {
-		providers = cfg.Inventory.Provider
-	}
+	providers := catalogProviders(cfg)
+	local := localHostNames(cfg)
 	localTimer := connector.StartTiming(connector.TimingCatalogLocalHosts)
 	for providerName, provider := range providers {
 		provider = normalizeCatalogProvider(provider)
@@ -114,6 +112,9 @@ func buildHostCatalog(cfg *config.Config, states []*inventory.ProviderState) (*H
 				continue
 			}
 			data := resolvedHostFromState(cfg, state, provider, host)
+			if _, shadowed := shadowingLocalHost(local, data); shadowed {
+				continue
+			}
 			cat.add(data)
 		}
 	}
@@ -162,11 +163,9 @@ func resolvedHostFromState(cfg *config.Config, state *inventory.ProviderState, p
 		providerName = state.Provider
 	}
 	group := shortGroup(host.Group)
-	overlay := provider.Hosts[host.HostName]
-	if overlay.Group == "" {
-		if byHost, ok := provider.Hosts[host.Host]; ok {
-			overlay = byHost
-		}
+	var overlay config.InventoryHostConfig
+	if key, ok := providerOverlayKey(provider, host); ok {
+		overlay = provider.Hosts[key]
 	}
 	if overlay.Group != "" {
 		group = overlay.Group

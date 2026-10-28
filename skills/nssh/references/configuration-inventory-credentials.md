@@ -62,6 +62,14 @@ equal rank, the lexically first host wins. `nssh inv set` skips a derived
 short alias that already identifies another host and rejects an explicit
 `--alias` collision.
 
+A host under `inventory.providers.<provider>.hosts` overlays the provider
+object with that name; `nssh inv` commands and connections show it as one
+host. A local inventory host shadows a provider object with the same name, so
+local settings win without a refresh. To keep a device provider-managed while
+changing its settings, use a provider host override instead of a local host.
+`nssh inv status <provider>` lists shadowed objects and overrides that match
+no provider object, and `nssh inv get` shows what a local host shadows.
+
 External inventory providers write non-secret state under
 `~/.local/state/nssh/inventory/providers/<name>.json`. Provider groups,
 auth mappings, SSH options, and host overrides live in provider-scoped YAML

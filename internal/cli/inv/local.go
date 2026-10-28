@@ -1373,34 +1373,70 @@ func inventoryHosts(cfg *config.Config, paths *config.Paths) ([]*sshconfig.HostE
 	if err := cfg.Inventory.Validate(); err != nil {
 		return nil, err
 	}
+	states, err := inventoryProviderStates(paths)
+	if err != nil {
+		return nil, err
+	}
+	// Provider YAML hosts overlay their provider objects; list them on their
+	// own only when no provider object matches, so each host appears once.
+	orphaned := make(map[string]map[string]bool)
+	for _, finding := range connect.ProviderHostFindings(cfg, states) {
+		if finding.Orphaned {
+			if orphaned[finding.Provider] == nil {
+				orphaned[finding.Provider] = make(map[string]bool)
+			}
+			orphaned[finding.Provider][finding.Host] = true
+		}
+	}
+	stateProviders := make(map[string]bool, len(states))
+	for _, state := range states {
+		stateProviders[state.Provider] = true
+	}
 	for providerName, provider := range cfg.Inventory.Providers {
 		for name, hostCfg := range provider.Hosts {
+			if provider.Type != config.ProviderLocal && stateProviders[providerName] && !orphaned[providerName][name] {
+				continue
+			}
 			hosts = append(hosts, hostEntryFromInventoryHost(cfg, paths, providerName, name, hostCfg))
 		}
 	}
-	if paths.StateDir != "" && samePath(paths.StateDir, config.DefaultPaths().StateDir) {
-		stateNames, err := inventory.ListProviderStates()
-		if err != nil {
-			return nil, err
-		}
-		for _, providerName := range stateNames {
-			state, err := inventory.LoadProviderState(providerName)
-			if err != nil {
-				return nil, err
-			}
-			if state == nil {
-				continue
-			}
-			for _, host := range state.Objects {
-				entry := hostEntryFromProviderState(paths, state.Provider, host)
-				if entry != nil {
-					hosts = append(hosts, entry)
-				}
+	for _, state := range states {
+		for _, host := range state.Objects {
+			if entry := hostEntryFromProviderState(cfg, paths, state, host); entry != nil {
+				hosts = append(hosts, entry)
 			}
 		}
 	}
-	sort.Slice(hosts, func(i, j int) bool { return hosts[i].Host < hosts[j].Host })
+	sort.SliceStable(hosts, func(i, j int) bool {
+		if hosts[i].Host != hosts[j].Host {
+			return hosts[i].Host < hosts[j].Host
+		}
+		return hosts[i].SourceFile < hosts[j].SourceFile
+	})
 	return hosts, nil
+}
+
+// inventoryProviderStates loads cached provider objects for the default state
+// directory; other state directories (tests) have no provider cache.
+func inventoryProviderStates(paths *config.Paths) ([]*inventory.ProviderState, error) {
+	if paths.StateDir == "" || !samePath(paths.StateDir, config.DefaultPaths().StateDir) {
+		return nil, nil
+	}
+	names, err := inventory.ListProviderStates()
+	if err != nil {
+		return nil, err
+	}
+	states := make([]*inventory.ProviderState, 0, len(names))
+	for _, name := range names {
+		state, err := inventory.LoadProviderState(name)
+		if err != nil {
+			return nil, err
+		}
+		if state != nil {
+			states = append(states, state)
+		}
+	}
+	return states, nil
 }
 
 func inventoryProxyHostNames(cfg *config.Config, paths *config.Paths, exclude string) ([]string, error) {
@@ -1478,24 +1514,20 @@ func inventoryHostSSHHostName(name string, hostCfg config.InventoryHostConfig) s
 	return strings.TrimSpace(name)
 }
 
-func hostEntryFromProviderState(paths *config.Paths, providerName string, host *inventory.ProviderHost) *sshconfig.HostEntry {
-	if host == nil {
+func hostEntryFromProviderState(cfg *config.Config, paths *config.Paths, state *inventory.ProviderState, host *inventory.ProviderHost) *sshconfig.HostEntry {
+	data := connect.ResolveProviderStateHost(cfg, state, host)
+	if data == nil {
 		return nil
 	}
-	name := host.HostName
-	if name == "" {
-		name = host.Host
-	}
-	port := host.Port
+	port := data.Port
 	if port == 0 {
 		port = 22
 	}
-	entry := sshconfig.CreateHostEntry(name, host.HostName, host.Username, port, host.AuthMode == config.AuthModePassword, localFilePath(paths, inventory.ProviderIncludeFile(providerName)))
-	if len(host.Patterns) > 0 {
-		entry.Patterns = slices.Clone(host.Patterns)
-		entry.Host = entry.Patterns[0]
-	}
-	inventory.SetLocalHostGroup(entry, host.Group)
+	groupID := inventoryHostGroupID(state.Provider, data.Group)
+	auth := cfg.ResolveInventoryAuth(config.InventoryAuthContext{Host: data.Hostname, Provider: state.Provider, Group: groupID})
+	entry := sshconfig.CreateHostEntry(data.Canonical, data.Hostname, data.Username, port, auth.AuthMode == config.AuthModePassword, localFilePath(paths, inventory.ProviderIncludeFile(state.Provider)))
+	entry.Patterns = mergeHostAliases("", []string{data.Canonical}, data.Aliases)
+	inventory.SetLocalHostGroup(entry, groupID)
 	return entry
 }
 
