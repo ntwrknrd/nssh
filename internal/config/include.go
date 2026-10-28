@@ -279,12 +279,39 @@ func (c *Config) InventoryGroupSource(provider, group string) string {
 	return source
 }
 
+// InventoryProviderSource returns the file that owns a provider's inventory.
+// An included file that declares the provider type owns it even when the root
+// config also has a block for that provider; otherwise the root block would
+// capture every later write and shadow the included file.
 func (c *Config) InventoryProviderSource(provider string) string {
+	if owner := c.inventoryProviderTypeInclude(provider); owner != "" {
+		return owner
+	}
 	source := c.sourceFor("inventory", "providers", provider)
 	if source == "" {
 		source = c.sourceFor("inventory", "provider", provider)
 	}
 	return source
+}
+
+func (c *Config) inventoryProviderTypeInclude(provider string) string {
+	if c == nil || c.document == nil {
+		return ""
+	}
+	for _, file := range c.document.files {
+		if sameConfigPath(file, c.document.path) {
+			continue
+		}
+		table, err := readYAMLMap(file)
+		if err != nil {
+			continue
+		}
+		if tablePathDefined(table, "inventory", "providers", provider, "type") ||
+			tablePathDefined(table, "inventory", "provider", provider, "type") {
+			return file
+		}
+	}
+	return ""
 }
 
 func (c *Config) CredentialProviderSource(provider string) string {

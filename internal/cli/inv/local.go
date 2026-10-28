@@ -181,7 +181,24 @@ func upsertLocalHostYAML(cfg *config.Config, paths *config.Paths, patch hostPatc
 		host.SSH.Options["ProxyJump"] = config.NewSSHOptionString(strings.TrimSpace(patch.ProxyJump))
 	}
 	host.SSH = config.MergeSSH(host.SSH, config.SSHHostConfig{Options: patch.Identity})
-	host.Aliases = mergeHostAliases(hostName, host.Aliases, autoLocalHostAliases(hostName), patch.Aliases)
+	claimed, err := inventoryNameOwners(cfg, paths, hostName)
+	if err != nil {
+		return err
+	}
+	for _, alias := range patch.Aliases {
+		if owner := claimed[strings.TrimSpace(alias)]; owner != "" {
+			return fmt.Errorf("alias %q already identifies host %q", strings.TrimSpace(alias), owner)
+		}
+	}
+	autoAliases := make([]string, 0, 1)
+	for _, alias := range autoLocalHostAliases(hostName) {
+		if owner := claimed[alias]; owner != "" {
+			ui.Warning("Skipped alias %q: it already identifies %s", alias, owner)
+			continue
+		}
+		autoAliases = append(autoAliases, alias)
+	}
+	host.Aliases = mergeHostAliases(hostName, host.Aliases, autoAliases, patch.Aliases)
 	if patch.PortSet {
 		host.Port = patch.Port
 	}
@@ -245,6 +262,29 @@ func autoLocalHostAliases(host string) []string {
 		return nil
 	}
 	return []string{short}
+}
+
+// inventoryNameOwners maps every name that resolves to another inventory host
+// (its name, aliases, and short name) to that host.
+func inventoryNameOwners(cfg *config.Config, paths *config.Paths, exclude string) (map[string]string, error) {
+	hosts, err := inventoryHosts(cfg, paths)
+	if err != nil {
+		return nil, err
+	}
+	owners := make(map[string]string)
+	for _, entry := range hosts {
+		if entry == nil || entry.Host == exclude {
+			continue
+		}
+		names := append([]string{entry.Host}, entry.Patterns...)
+		names = append(names, autoLocalHostAliases(entry.Host)...)
+		for _, name := range names {
+			if name = strings.TrimSpace(name); name != "" && name != exclude && owners[name] == "" {
+				owners[name] = entry.Host
+			}
+		}
+	}
+	return owners, nil
 }
 
 func mergeHostAliases(host string, aliasSets ...[]string) []string {
@@ -1394,7 +1434,15 @@ func findInventoryHost(cfg *config.Config, paths *config.Paths, pattern string) 
 	if err != nil {
 		return nil, err
 	}
-	return sshconfig.FindHostByPattern(hosts, pattern), nil
+	host := sshconfig.FindHostByPattern(hosts, pattern)
+	// A host defined in local inventory is local-owned even when a provider
+	// cache lists the same name; otherwise edits would land in the wrong file.
+	if host != nil && cfg != nil {
+		if hostCfg, ok := cfg.Inventory.Providers[config.ProviderLocal].Hosts[host.Host]; ok {
+			return hostEntryFromInventoryHost(cfg, paths, config.ProviderLocal, host.Host, hostCfg), nil
+		}
+	}
+	return host, nil
 }
 
 func hostEntryFromInventoryHost(cfg *config.Config, paths *config.Paths, providerName, name string, hostCfg config.InventoryHostConfig) *sshconfig.HostEntry {
@@ -1491,7 +1539,17 @@ func saveLocalProviderInventory(cfg *config.Config, paths *config.Paths) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return fmt.Errorf("create inventory dir: %w", err)
 	}
-	return os.WriteFile(target, []byte(text), 0600)
+	if err := os.WriteFile(target, []byte(text), 0600); err != nil {
+		return err
+	}
+	return config.PruneRootInventoryProviderShadow(localRootConfigPath(paths), cfg, config.ProviderLocal)
+}
+
+func localRootConfigPath(paths *config.Paths) string {
+	if paths == nil {
+		paths = config.DefaultPaths()
+	}
+	return paths.ConfigFile
 }
 
 func saveLocalProviderHostInventory(cfg *config.Config, paths *config.Paths, hostName string) error {
@@ -1509,7 +1567,7 @@ func saveLocalProviderHostInventory(cfg *config.Config, paths *config.Paths, hos
 		return err
 	}
 	if patched {
-		return nil
+		return config.PruneRootInventoryProviderShadow(localRootConfigPath(paths), cfg, config.ProviderLocal, "hosts", hostName)
 	}
 	return saveLocalProviderInventory(cfg, paths)
 }

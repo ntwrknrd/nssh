@@ -2,6 +2,7 @@ package connect
 
 import (
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -11,9 +12,19 @@ import (
 )
 
 type HostCatalog struct {
-	hosts   map[string]*ResolvedHostData
-	aliases map[string]string
+	hosts     map[string]*ResolvedHostData
+	aliases   map[string]string
+	aliasRank map[string]int
 }
+
+// Lookup-name precedence: a full host name beats an explicit alias, which beats
+// a derived short name. Equal-rank names shared by different hosts resolve to
+// the lexically first canonical host so lookup never depends on map order.
+const (
+	aliasRankShort = iota + 1
+	aliasRankExplicit
+	aliasRankFull
+)
 
 type ResolvedHostData struct {
 	Query        string
@@ -502,22 +513,40 @@ func (c *HostCatalog) add(host *ResolvedHostData) {
 	canonical := strings.TrimSpace(host.Canonical)
 	host.Canonical = canonical
 	c.hosts[canonical] = host
-	c.aliases[canonical] = canonical
-	if short := shortName(canonical); short != "" {
-		c.aliases[short] = canonical
-	}
-	if short := shortName(host.Hostname); short != "" {
-		c.aliases[short] = canonical
-	}
-	if hostname := strings.TrimSpace(host.Hostname); hostname != "" {
-		c.aliases[hostname] = canonical
-	}
+	c.addAlias(canonical, canonical, aliasRankFull)
+	c.addAlias(shortName(canonical), canonical, aliasRankShort)
+	c.addAlias(shortName(host.Hostname), canonical, aliasRankShort)
+	c.addAlias(host.Hostname, canonical, aliasRankFull)
 	for _, alias := range host.Aliases {
-		alias = strings.TrimSpace(alias)
-		if alias != "" {
-			c.aliases[alias] = canonical
-		}
+		c.addAlias(alias, canonical, aliasRankExplicit)
 	}
+}
+
+func (c *HostCatalog) addAlias(name, canonical string, rank int) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	if c.aliases == nil {
+		c.aliases = make(map[string]string)
+	}
+	if c.aliasRank == nil {
+		c.aliasRank = make(map[string]int)
+	}
+	current, exists := c.aliases[name]
+	currentRank := c.aliasRank[name]
+	if current == canonical {
+		c.aliasRank[name] = max(rank, currentRank)
+		return
+	}
+	if exists && rank == currentRank {
+		slog.Debug("inventory lookup name is shared by hosts", "name", name, "hosts", []string{current, canonical})
+	}
+	if exists && (rank < currentRank || (rank == currentRank && current < canonical)) {
+		return
+	}
+	c.aliases[name] = canonical
+	c.aliasRank[name] = rank
 }
 
 func (c *HostCatalog) Find(query string) (*ResolvedHostData, bool) {

@@ -1011,3 +1011,42 @@ func TestKeyModeOverridesInheritedPasswordPolicyInOpenSSH(t *testing.T) {
 		}
 	}
 }
+
+func TestCatalogResolvesSharedLookupNamesDeterministically(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Inventory.Provider = nil
+	cfg.Inventory.Providers = map[string]config.InventoryProviderConfig{
+		config.ProviderLocal: {
+			Type: config.ProviderLocal,
+			Hosts: map[string]config.InventoryHostConfig{
+				"clab01.ldap.lab.local": {},
+				"clab01.lab.local":      {Aliases: []string{"clab01"}},
+				"node.b.local":          {},
+				"node.a.local":          {},
+				"node":                  {Aliases: []string{"bare"}},
+			},
+		},
+	}
+
+	for range 20 {
+		cat := buildCatalogForTest(t, cfg, nil)
+		for query, want := range map[string]string{
+			"clab01": "clab01.lab.local", // explicit alias beats derived short name
+			"node":   "node",             // full host name beats derived short names
+			"bare":   "node",
+		} {
+			host, ok := cat.Find(query)
+			if !ok || host.Canonical != want {
+				t.Fatalf("Find(%q) = %v, want %s", query, host, want)
+			}
+		}
+	}
+
+	delete(cfg.Inventory.Providers[config.ProviderLocal].Hosts, "node")
+	for range 20 {
+		host, ok := buildCatalogForTest(t, cfg, nil).Find("node")
+		if !ok || host.Canonical != "node.a.local" {
+			t.Fatalf("Find(node) = %v, want node.a.local", host)
+		}
+	}
+}
