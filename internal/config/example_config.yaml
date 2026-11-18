@@ -225,6 +225,9 @@ ssh:
     host_key_policy: pin
     accept_once_mode: pin
     compat_persist_probes: false
+  # Name the terminal tab after the target during interactive sessions and
+  # restore the previous title on exit where the terminal keeps a title stack.
+  terminal_title: true
   # defaults:
   #   options:
   #     ServerAliveInterval: 30

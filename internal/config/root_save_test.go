@@ -258,3 +258,34 @@ inventory:
 		t.Fatalf("root-owned provider was pruned:\n%s", text)
 	}
 }
+
+func TestTerminalTitleDefaultsOnAndSparseKeepsOptOut(t *testing.T) {
+	cfg := DefaultConfig()
+	if !cfg.SSH.TerminalTitle {
+		t.Fatal("terminal_title should default to true")
+	}
+	got, err := MarshalSparse(cfg)
+	if err != nil {
+		t.Fatalf("MarshalSparse: %v", err)
+	}
+	if strings.Contains(got, "terminal_title") {
+		t.Fatalf("default terminal_title should stay sparse:\n%s", got)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeConfigFile(t, path, "ssh:\n  terminal_title: false\n")
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.SSH.TerminalTitle {
+		t.Fatal("terminal_title: false should disable titles")
+	}
+	got, err = MarshalSparse(loaded)
+	if err != nil {
+		t.Fatalf("MarshalSparse: %v", err)
+	}
+	if !strings.Contains(got, "terminal_title: false") {
+		t.Fatalf("sparse config lost terminal_title opt-out:\n%s", got)
+	}
+}

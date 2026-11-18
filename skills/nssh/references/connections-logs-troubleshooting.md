@@ -9,6 +9,21 @@ Use `nssh --select` for the smart picker and `nssh --target HOST` for literal
 destinations that collide with nssh command names or should bypass fuzzy
 resolution.
 
+### Terminal title
+
+Interactive sessions set the terminal title to the resolved inventory name,
+for example `acm-core1`, including targets chosen with `nssh --select`. nssh
+writes `CSI 22;2 t` (push), `OSC 2`, and on exit `CSI 23;2 t` (pop). Terminals
+without a title stack ignore the push and pop; the shell's next prompt then
+redraws its own title. nssh skips the title unless stdin and stdout are
+terminals, and for remote commands, SCP, and `-N`, `-W`, `-f`, `-G`, `-Q`,
+`-s`, or `-T` modes. Disable it with:
+
+```yaml
+ssh:
+  terminal_title: false
+```
+
 ### Root SSH syntax
 
 Root invocation is `nssh [ssh-options] HOST [command]`. In 0.3, recognized SSH

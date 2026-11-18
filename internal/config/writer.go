@@ -823,6 +823,9 @@ func sshTable(cfg SSHConfig) map[string]any {
 	if len(security) > 0 {
 		table["security"] = security
 	}
+	if !cfg.TerminalTitle {
+		table["terminal_title"] = false
+	}
 	defaults := sshHostTable(cfg.Defaults)
 	if len(defaults) > 0 {
 		table["defaults"] = defaults
