@@ -36,6 +36,10 @@ prompts, and can record sessions.
 - Connection behavior: OpenSSH still owns transport; nssh wraps it with a PTY
   connector for prompt detection, password injection, host-key handling, timing,
   and typed SSH option rendering.
+- Terminal title: interactive sessions, including `nssh --select`, name the
+  terminal tab after the resolved target with OSC 2 and pop the previous title
+  on exit where the terminal keeps an xterm title stack. Otherwise the shell's
+  next prompt redraws it. Set `ssh.terminal_title: false` to disable it.
 - Recordings: optional asciinema session capture is managed with `nssh log`.
 - SCP: `nssh cp` uses the same host and credential resolution path as connect.
 - Multi-host commands: `nssh repl` provides an interactive terminal prompt or

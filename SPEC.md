@@ -156,6 +156,10 @@ preserve.
   apply only to exports.
 - Interactive PTY bytes pass through without syntax highlighting or rendering
   delays.
+- Interactive sessions with terminal stdin and stdout may set the terminal
+  title to the sanitized inventory name, bracketed by an xterm title-stack push
+  and pop. Remote commands, SCP, and `-N`, `-W`, `-f`, `-G`, `-Q`, `-s`, or
+  `-T` modes never write title sequences.
 - Highlighting is allowed only where nssh owns complete output, currently
   remote-command stdout or future managed renderers.
 - Root command output preserves existing ANSI and control data. The REPL keeps

@@ -851,6 +851,7 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 			sshArgs = appendHostKeyPreparationSSHArgs(sshArgs, hostKeyPrep)
 		}
 	}
+	defer setTerminalTitle(resolved, sshArgs, cfg)()
 	conn := newConnector(resolved, sshArgs, cfg, opts)
 	conn.SetEnv(connectionAuthEnv(askpassHandle))
 	conn.SetAuthRetry(func(err error) (context.Context, error) {

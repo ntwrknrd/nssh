@@ -194,6 +194,8 @@ type SSHConfig struct {
 	Connection SSHConnectionConfig `yaml:"connection,omitempty"`
 	Security   SSHSecurityConfig   `yaml:"security,omitempty"`
 	Defaults   SSHHostConfig       `yaml:"defaults,omitempty"`
+	// TerminalTitle names the terminal tab after the target during interactive sessions (default true)
+	TerminalTitle bool `yaml:"terminal_title"`
 }
 
 // SSHConnectionConfig holds timeout settings for SSH connections.
@@ -318,6 +320,7 @@ func DefaultConfig() *Config {
 				CompatPersistProbes: false,
 				HostKeyPolicy:       "pin",
 			},
+			TerminalTitle: true,
 		},
 	}
 }
