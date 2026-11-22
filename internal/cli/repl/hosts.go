@@ -16,6 +16,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshargs"
+	"golang.org/x/term"
 )
 
 // RunHosts executes a root host list using the shared scheduler and capture path.
@@ -96,12 +97,14 @@ func RunHosts(ctx context.Context, req connect.Request) (handled bool, err error
 		sub.Targets = append(sub.Targets, core.Target{Value: part})
 	}
 	output := hostListOutput{out: os.Stdout, errOut: os.Stderr}
+	status := newRexHostStatus(os.Stdout, term.IsTerminal(int(os.Stdout.Fd())), label)
 	executor := core.Executor{Concurrency: core.DefaultConcurrency, Resolve: resolve, Run: run,
-		OnTargets: func(targets []core.ResolvedTarget) { output.start(label, targets) },
-		OnEvent:   output.event,
+		OnTargets: func(targets []core.ResolvedTarget) { output.start(label, targets); status.start(targets) },
+		OnEvent:   func(event core.Event) { output.event(event); status.event(event) },
 	}
 	events, err := executor.Execute(ctx, sub)
 	output.recap(events)
+	status.finish()
 	if ctx.Err() != nil {
 		return true, &exit.ExitError{Code: 130}
 	}

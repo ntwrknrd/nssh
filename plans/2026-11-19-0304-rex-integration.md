@@ -1,6 +1,7 @@
 # Rex terminal integration for nssh
 
-Status: proposed design. Nothing here is implemented.
+Status: in progress. Slice 1 (OSC 7501 status) is implemented for testing;
+later slices are proposed.
 
 ## Summary
 

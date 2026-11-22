@@ -133,6 +133,15 @@ preserve.
 - Go/Charm is the maintained frontend. Rust is a documented evaluated alternative,
   with no shipped bridge or ongoing frontend parity requirement.
 
+## Rex Integration
+
+- Rex integration is optional and detected from `REX_SESSION` and `REX_BLOCK`;
+  `NSSH_REX=0` disables it. Outside Rex, behavior is unchanged, and a Rex
+  failure never fails an nssh operation.
+- Interactive sessions and root host lists report OSC 7501 program status
+  under `app=nssh`, with the terminal-title mode exclusions. Reports carry only
+  sanitized names, states, and counts, never remote output.
+
 ## Runtime Boundaries
 
 - Configuration owns parsing, validation, includes, paths, and inheritance.

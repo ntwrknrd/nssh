@@ -852,7 +852,13 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 		}
 	}
 	defer setTerminalTitle(resolved, sshArgs, cfg)()
+	status := newSessionStatus(resolved, sshArgs)
+	status.connecting()
 	conn := newConnector(resolved, sshArgs, cfg, opts)
+	if status != nil {
+		conn.SetHostKeyPromptFunc(status.hostKeyPrompt(newHostKeyPromptFunc()))
+		conn.SetRelayStartFunc(status.established)
+	}
 	conn.SetEnv(connectionAuthEnv(askpassHandle))
 	conn.SetAuthRetry(func(err error) (context.Context, error) {
 		retryCtx, retryErr := retryAuth(err)
@@ -866,6 +872,7 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 		connErr = askpassHandle.operationError(connErr)
 	}
 	result = connectionResult{Err: connErr, Output: conn.LastOutput()}
+	status.finished(connErr)
 
 	if audit != nil {
 		if connErr == nil {

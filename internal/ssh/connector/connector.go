@@ -33,6 +33,7 @@ type Connector struct {
 	acceptOnceMode   string
 	env              []string
 	authRetry        func(error) (context.Context, error)
+	onRelayStart     func()
 
 	passwordMu sync.Mutex
 
@@ -106,6 +107,12 @@ func (c *Connector) SetEnv(env []string) {
 // SetAuthRetry permits a bounded authentication-only retry with new askpass policy.
 // A nil context ends the attempt; the handler must not retry a running session.
 func (c *Connector) SetAuthRetry(fn func(error) (context.Context, error)) { c.authRetry = fn }
+
+// SetRelayStartFunc registers a callback run when keyboard input is first
+// relayed to the session, after any host-key prompt. It runs on the goroutine
+// that writes session output, so it may write to the terminal without
+// interleaving with passthrough bytes. It runs once per SSH process.
+func (c *Connector) SetRelayStartFunc(fn func()) { c.onRelayStart = fn }
 
 func (c *Connector) LastOutput() string {
 	c.mu.RLock()
