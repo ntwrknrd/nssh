@@ -19,9 +19,9 @@ the existing root invocation, and Rex placement is decided automatically.
 ## Goals
 
 - Open several inventory hosts as interactive sessions from the root command,
-  placed in a Rex session, tab, and pane layout chosen for them.
-- Reuse an existing session, tab, or pane for the same work instead of
-  duplicating it.
+  placed by simple, configurable rules: one nssh session, at most two panes
+  per tab by default.
+- Focus an existing live connection instead of duplicating it.
 - Report connection and multi-host progress through Rex program status.
 - Offer a Rex command-palette picker for connecting and running commands.
 - Degrade silently, with no behavior change, outside Rex.
@@ -114,42 +114,41 @@ how [workspace reuse](#5-workspace-placement-and-reuse) finds panes.
 
 ### 3. Multi-host targets at the root
 
-Three existing or small extensions to target resolution can name several
-hosts. All of them are resolved before Rex is involved.
+Three forms name several hosts. All of them are resolved before Rex is
+involved.
 
-| Form | Example | Status |
-| --- | --- | --- |
-| Comma list | `nssh 'acm-core1, acm-core2'` | Exists at the root today |
-| Suffix expansion | `nssh 'acm-core(1,2)'`, `nssh 'acm-core(1-4)'` | Exists in REPL; ranges are new |
-| Named host set | `nssh acm-cores` | New YAML concept |
-| Multi-select from smart lookup | `nssh acm-core`, then select several matches | New picker behavior |
+| Form | Use | Example | Status |
+| --- | --- | --- | --- |
+| Comma list | Explicit hosts | `nssh 'acm-core1, acm-core2'` | Exists at the root today |
+| Suffix expansion | Quick one-liner | `nssh 'acm-core(1,2)'`, `nssh 'acm-core(1-4)'` | Exists in REPL; ranges are new |
+| Picker multi-select | Many hosts, such as every core | `nssh core`, then select several matches | New picker behavior |
 
-Notes:
+Decisions:
 
-- Decided: `prefix(...)` reuses the REPL grammar instead of inventing a
-  second one. Ranges such as `(1-4)` are added to both REPL and root resolution.
-  Parentheses need quoting in fish and zsh, the same as REPL targets today.
-- A trailing-number shorthand such as `acm-core1-2` is rejected as a range
-  syntax. It collides with real names that contain hyphens and digits, and an
-  unmatched literal host would silently change meaning.
-- Plural guessing (`acm-cores` meaning every `acm-core*`) is rejected. It is
-  unpredictable and has no inventory authority.
-- A named host set is an inventory-owned entry that resolves to several hosts
-  by explicit list or by an `nssh inv list` selector. It also supplies the tab
-  name, and optionally the session name and layout. An exact host or alias
-  match takes precedence over a set with the same name.
+- Suffix expansion reuses the REPL `prefix(...)` grammar instead of inventing
+  a second one. Ranges such as `(1-4)` are added to both REPL and root
+  resolution.
+- The target must be quoted. Unquoted, fish runs `(1,2)` as a command
+  substitution and zsh treats it as a glob qualifier, so neither shell passes
+  the text to nssh. This matches REPL targets today.
+- A trailing-number shorthand such as `acm-core1-2` is rejected. It collides
+  with real names that contain hyphens and digits.
+- Plural guessing (`acm-cores` meaning every `acm-core*`) is rejected. Picker
+  multi-select covers that case.
+- Named host sets are deferred; expansion and multi-select cover the known
+  cases.
 
-  ```yaml
-  inventory:
-    sets:
-      acm-cores:
-        hosts: [acm-core1, acm-core2]
-        # Or: select: "host:acm-core group:corp"
-  ```
+Picker multi-select:
 
 - Smart lookup with several fuzzy matches already offers selection. Inside
   Rex, the picker allows multi-select; selecting several hosts takes the
   multi-host open path. Outside Rex, selection stays single.
+- The picker already has a multi-select mode, `FuzzySelectMulti` in
+  `internal/ui/fzf.go`. With fzf it toggles with Tab; the huh fallback toggles
+  with Space.
+- Keep Tab in fzf. Space is part of fzf's query syntax, where it separates
+  search terms, so binding it to selection would break searches such as
+  `pit2 core`.
 
 ### 4. Multi-host open without a command
 
@@ -180,50 +179,54 @@ launched by Rex with `--shell=none` and an argv list. Properties:
 
 ### 5. Workspace placement and reuse
 
-nssh derives a desired workspace (session, tab, and panes) and reconciles Rex
-toward it. It never closes or moves panes it did not create in this
-invocation.
+Placement follows a few fixed rules with configurable defaults. It never
+closes or moves panes, and it never adds panes to an existing tab.
 
-**Session name.** In order of preference:
+```yaml
+rex:
+  session: nssh          # a session label, "current", or "site"
+  panes_per_tab: 2       # 1, 2, or 4
+  split: auto            # auto, side-by-side, or stacked
+  replace_exited: false
+```
 
-1. The host set's configured session.
-2. The shared site of every host, such as `PIT2`.
-3. The current session, when hosts span several sites or have no site.
+**Session.** By default every multi-host open goes to one session labeled
+`nssh`, found case-insensitively or created. `current` uses the invoking
+session. `site` uses the hosts' shared site, such as `PIT2`, and falls back to
+the `nssh` session when hosts span sites or have none. `site` needs new
+non-secret metadata: NetBox discovery reads the device site for filtering but
+does not cache it, so provider state must cache it and local inventory needs an
+optional `site` field. That work is needed only for this mode.
 
-Site needs new non-secret metadata: NetBox discovery already reads the device
-site for filtering but does not cache it. Cache the site name in provider
-state, and allow an optional `site` on local inventory groups and hosts.
+**Tabs.** Hosts are taken in the requested order and grouped into tabs of
+`panes_per_tab`:
 
-**Tab name.** In order of preference:
+| Hosts | Default result (`panes_per_tab: 2`) |
+| --- | --- |
+| 2 | One tab, split in two |
+| 3 | One split tab and one single tab |
+| 4 | Two split tabs |
+| 5 or more | Split tabs, with a single tab for an odd host |
 
-1. The host set name, such as `acm-cores`.
-2. The expansion as written, such as `acm-core(1,2)`.
-3. The hosts' longest common name prefix, such as `acm-core`.
-4. The first host plus a count, such as `acm-core1 +1`.
+`panes_per_tab: 4` gives an even 2x2 grid for the rare case that wants one.
+`1` gives one tab per host. No other layouts are offered.
 
-**Reconciliation.**
+**Split direction.** `auto` places two panes side by side when the invoking
+window is at least 160 columns wide, and stacks them otherwise.
 
-1. Find the session by label, case-insensitively, or create it.
-2. Find the tab in that session by label, or create it with the full layout.
-3. In an existing tab, match panes by label to hosts. Keep a pane whose
-   process is a live nssh. Add a split for each host without a live pane.
-   Leave other panes alone, including exited ones, unless the operator
-   enabled replacing exited panes.
-4. Focus the tab and ask the app to show it with `session.select`.
+**Tab names.** A tab is named after its hosts, using the expansion grammar
+when they share a prefix: `acm-core(1,2)` for a split tab, `acm-core3` for a
+single tab, and `edge1 + core2` when names share no prefix.
 
-Running the same command twice therefore focuses the existing tab instead of
-opening duplicates, and reconnects only the hosts whose sessions dropped.
+**Reuse.** Before placing hosts, nssh looks in the target session for panes
+labeled with each host whose process is a live nssh. Those hosts are not
+opened again. If every host already has a live pane, nssh focuses the first
+one. Otherwise only the remaining hosts are placed in new tabs. With
+`replace_exited: true`, an exited pane for a host is closed and its host
+placed again; this is the one exception to never closing panes.
 
-**Layout.** The layout is computed, not configured per host count:
-
-- Measure the window from the invoking pane's terminal size.
-- Fit panes to a minimum usable size, defaulting to 80 by 24 cells.
-- Two hosts split side by side when the width fits, otherwise stacked.
-- Three or more form a near-square grid.
-- Hosts beyond one window's capacity overflow into additional tabs named
-  `<tab> 2`, `<tab> 3`, and so on.
-- A host set may override the layout. A global minimum pane size is the only
-  other setting.
+**Focus.** nssh focuses the first new tab and asks the app to show it with
+`session.select`.
 
 ### 6. Palette picker
 
@@ -233,7 +236,7 @@ installer command.
 
 | Action | Behavior |
 | --- | --- |
-| `nssh_connect` | Pick one or more hosts or sets, then open them as in multi-host open |
+| `nssh_connect` | Pick one or more hosts, then open them as in multi-host open |
 | `nssh_run` | Pick hosts, prompt for a command, run it as a root host list in a new pane |
 
 The picker calls `rex.exec{"nssh", "inv", "list", "--json"}` and passes the
@@ -259,9 +262,9 @@ same placement and reuse rules. This is an explicit prompt, never automatic.
 | Need | Available today | Gap or caveat |
 | --- | --- | --- |
 | Create labeled sessions, tabs, and layouts | Yes | None found |
-| Find sessions, tabs, and panes by label | Yes, through `session.list` and `session.view` | Labels are operator-editable; a renamed pane is not reused |
+| Find sessions and panes by label | Yes, through `session.list` and `session.view` | Labels are operator-editable; a renamed pane is not reused |
 | Check whether a pane is live | Yes, through the terminal `process` method | Confirm it exposes the command line for matching nssh |
-| Measure window size | Yes, through the terminal `size` method | The new window may differ from the invoking pane's window |
+| Choose split direction | Yes, through the terminal `size` method | The target session's window may differ from the invoking pane's window |
 | Show the target session in the app | Yes, through `client.perform` with `session.select` | The app accepts CLI actions only with Remote Control enabled; otherwise print where the panes opened |
 | Per-host status | Yes, through OSC 7501 | Display is Rex-defined and may change |
 | Palette multi-select | Yes, through `rex.ui.pick` | 2,000-item limit |
@@ -271,12 +274,11 @@ Before implementation, verify the `process` and `size` outputs and the
 
 ## Package boundaries
 
-- A new `internal/rex` package holds detection, the CLI adapter, workspace
-  reconciliation, and OSC 7501 encoding. It has no dependency on
-  `internal/ssh`.
-- Target expansion and host sets live in inventory and the shared resolution
-  path, so REPL, root lists, and multi-host open resolve identically.
-- Site caching lives in inventory provider state.
+- A new `internal/rex` package holds detection, the CLI adapter, placement,
+  reuse, and OSC 7501 encoding. It has no dependency on `internal/ssh`.
+- Target expansion lives in the shared resolution path, so REPL, root lists,
+  and multi-host open resolve identically.
+- Site caching, if `session: site` is built, lives in inventory provider state.
 - `internal/connect` calls the status and label hooks alongside the existing
   title handling.
 - CLI presentation owns the multi-host open decision, the multi-select picker,
@@ -290,34 +292,35 @@ Before implementation, verify the `process` and `size` outputs and the
 - Amend "Root lists require a command": inside Rex, a multi-host target
   without a command opens interactive sessions; outside Rex the requirement
   stands.
-- Add host sets and root suffix expansion to the destination grammar, with
+- Add root suffix expansion, with ranges, to the destination grammar, with
   exact host or alias precedence.
+- Allow multi-select in smart lookup inside Rex.
 - Add the Rex integration contract: optional, detected, silent fallback,
-  argv-only launches, no new credential or trust paths, and reconciliation
-  that never closes panes it did not create.
+  argv-only launches, no new credential or trust paths, and placement that
+  never closes panes except exited ones under `replace_exited`.
 
 ## Delivery order
 
 1. OSC 7501 status for interactive sessions and root host lists.
 2. Pane labels.
-3. Multi-host open for comma lists, creating a new tab in the current session.
-4. Workspace reuse and computed layout.
-5. Suffix expansion with ranges at the root, and host sets.
-6. Site caching and session placement by site.
-7. Multi-select in smart lookup.
-8. `inv list --json`, then the palette picker.
-9. Batch follow-ups.
+3. Multi-host open for comma lists: `nssh` session, split tabs, reuse of live
+   panes.
+4. Suffix expansion with ranges at the root.
+5. Multi-select in smart lookup.
+6. `inv list --json`, then the palette picker.
+7. Batch follow-ups.
+8. `session: site`, with site caching, if wanted after use.
 
 Slices 1 and 2 are testable without Rex by asserting emitted bytes and adapter
-calls. Slices 3 and 4 need a fake `rex` executable that records calls and
-serves canned `session.view` output.
+calls. Slice 3 needs a fake `rex` executable that records calls and serves
+canned `session.view` output.
 
 ## Risks
 
 - Rex is new and closed source; its CLI and APIs may change. Keep the adapter
   thin, version-probe with `server.version`, and keep every feature optional.
-- Reconciliation by label can misfire if an operator reuses a label for
-  unrelated work. Matching also checks that the pane's process is nssh.
+- Reuse by label can misfire if an operator reuses a label for unrelated
+  work. Matching also checks that the pane's process is nssh.
 - Rex calls act on the local Rex server only. nssh on a remote host does not
   see the operator's Rex unless the operator uses `rex -S HOST` deliberately.
 - Status reports carry only sanitized names and states, never remote output.
@@ -328,10 +331,10 @@ serves canned `session.view` output.
   devices; if built, it needs an explicit, per-use confirmation.
 - Using `rex events` to reconnect dropped sessions or raise notifications.
 - Running nssh from a bastion's Rex server through `rex -S HOST`.
+- Named host sets in inventory YAML, such as `nssh acm-cores`.
 
 ## Open questions
 
-- Should host sets live under `inventory.sets` or reuse inventory groups with
-  an opt-in flag?
-- Should exited panes in a reused tab be replaced by default?
-- Is 80 by 24 the right minimum pane size for network device sessions?
+- Should a single-host `nssh HOST` stay in the current pane, or open in the
+  `nssh` session like multi-host opens? This design keeps the current pane.
+- Should `replace_exited` default to true?
