@@ -126,8 +126,8 @@ hosts. All of them are resolved before Rex is involved.
 
 Notes:
 
-- `prefix(...)` reuses the REPL grammar instead of inventing a second one.
-  Ranges such as `(1-4)` are added to both REPL and root resolution.
+- Decided: `prefix(...)` reuses the REPL grammar instead of inventing a
+  second one. Ranges such as `(1-4)` are added to both REPL and root resolution.
   Parentheses need quoting in fish and zsh, the same as REPL targets today.
 - A trailing-number shorthand such as `acm-core1-2` is rejected as a range
   syntax. It collides with real names that contain hyphens and digits, and an
