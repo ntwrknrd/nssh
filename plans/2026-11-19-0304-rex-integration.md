@@ -18,9 +18,9 @@ the existing root invocation, and Rex placement is decided automatically.
 
 ## Goals
 
-- Open several inventory hosts as interactive sessions from the root command,
-  placed by simple, configurable rules: one nssh session, at most two panes
-  per tab by default.
+- Open one or several inventory hosts as interactive sessions from the root
+  command, placed by simple, configurable rules: one nssh session, at most two
+  panes per tab by default, with the app switched to the new tab.
 - Focus an existing live connection instead of duplicating it.
 - Report connection and multi-host progress through Rex program status.
 - Offer a Rex command-palette picker for connecting and running commands.
@@ -32,8 +32,7 @@ the existing root invocation, and Rex placement is decided automatically.
 - Linking against or reimplementing the Rex server protocol. Its transport is
   not documented; the `rex` CLI with `--json` is the stable surface.
 - Making Rex a dependency of any existing behavior.
-- Changing single-host behavior. `nssh HOST` still connects in the current
-  pane.
+- Changing behavior outside Rex, or for single-host runs with a command.
 - Broadcasting keystrokes to several panes. See [Deferred](#deferred).
 - Replacing attributed batch output with one pane per host by default.
 
@@ -177,7 +176,25 @@ launched by Rex with `--shell=none` and an argv list. Properties:
 - The launcher passes `--target` with the resolved inventory name, so each
   pane skips fuzzy selection.
 
-### 5. Workspace placement and reuse
+### 5. Single host inside Rex
+
+An interactive `nssh HOST` inside Rex opens in the `nssh` session like a
+multi-host open: one new tab, labeled with the host, which the app switches
+to. If the host already has a live pane there, nssh switches to that pane
+instead of connecting again. The invoking pane returns to its prompt.
+
+nssh connects in the current pane, as it does today, when any of these hold:
+
+- A command is given, as in `nssh HOST show version`.
+- Standard input or output is not a terminal, as in scripts and agents.
+- The app cannot be switched to the new tab because Remote Control is off.
+  Opening a tab the operator cannot see would look like a hang, so nssh checks
+  before launching and falls back to the current pane.
+- `rex.single_host: here` is configured.
+- The process is the launched pane itself. Launches set `NSSH_REX_PANE=1` so a
+  pane never opens another pane.
+
+### 6. Workspace placement and reuse
 
 Placement follows a few fixed rules with configurable defaults. It never
 closes or moves panes, and it never adds panes to an existing tab.
@@ -187,10 +204,10 @@ rex:
   session: nssh          # a session label, "current", or "site"
   panes_per_tab: 2       # 1, 2, or 4
   split: auto            # auto, side-by-side, or stacked
-  replace_exited: false
+  single_host: tab       # tab, or here for the current pane
 ```
 
-**Session.** By default every multi-host open goes to one session labeled
+**Session.** By default every open goes to one session labeled
 `nssh`, found case-insensitively or created. `current` uses the invoking
 session. `site` uses the hosts' shared site, such as `PIT2`, and falls back to
 the `nssh` session when hosts span sites or have none. `site` needs new
@@ -221,14 +238,16 @@ single tab, and `edge1 + core2` when names share no prefix.
 **Reuse.** Before placing hosts, nssh looks in the target session for panes
 labeled with each host whose process is a live nssh. Those hosts are not
 opened again. If every host already has a live pane, nssh focuses the first
-one. Otherwise only the remaining hosts are placed in new tabs. With
-`replace_exited: true`, an exited pane for a host is closed and its host
-placed again; this is the one exception to never closing panes.
+one. Otherwise only the remaining hosts are placed in new tabs.
+
+Launches do not pass `rex run --keep-open`, so Rex closes a pane when its
+session ends. Dead panes never accumulate, and nssh has nothing to clean up.
 
 **Focus.** nssh focuses the first new tab and asks the app to show it with
-`session.select`.
+`session.select`. Without Remote Control, multi-host opens still place their
+panes and print where they opened.
 
-### 6. Palette picker
+### 7. Palette picker
 
 A Lua file in `contrib/rex/nssh.lua` defines Rex actions that call nssh. It
 installs with one documented `require` line in the Rex config; nssh gains no
@@ -251,7 +270,7 @@ Prerequisites and constraints:
 - `rex.ui.pick` accepts at most 2,000 items. Larger inventories use a
   two-stage pick: site or group first, then hosts.
 
-### 7. Batch follow-ups
+### 8. Batch follow-ups
 
 Root host lists keep attributed output in one pane. When Rex is present, the
 summary can offer to open interactive sessions to failed hosts, using the
@@ -265,12 +284,14 @@ same placement and reuse rules. This is an explicit prompt, never automatic.
 | Find sessions and panes by label | Yes, through `session.list` and `session.view` | Labels are operator-editable; a renamed pane is not reused |
 | Check whether a pane is live | Yes, through the terminal `process` method | Confirm it exposes the command line for matching nssh |
 | Choose split direction | Yes, through the terminal `size` method | The target session's window may differ from the invoking pane's window |
-| Show the target session in the app | Yes, through `client.perform` with `session.select` | The app accepts CLI actions only with Remote Control enabled; otherwise print where the panes opened |
+| Show the target session in the app | Yes, through `client.perform` with `session.select` | The app accepts CLI actions only with Remote Control enabled; single-host opens fall back to the current pane, multi-host opens print where the panes opened |
+| Close panes when sessions end | Yes, the `rex run` default | `--keep-open` would keep them |
 | Per-host status | Yes, through OSC 7501 | Display is Rex-defined and may change |
 | Palette multi-select | Yes, through `rex.ui.pick` | 2,000-item limit |
 
-Before implementation, verify the `process` and `size` outputs and the
-`session.select` behavior against the installed Rex version.
+Before implementation, verify the `process` and `size` outputs, the
+`session.select` behavior, and a way to check Remote Control before launching,
+against the installed Rex version.
 
 ## Package boundaries
 
@@ -289,6 +310,8 @@ Before implementation, verify the `process` and `size` outputs and the
 
 - Replace the statement that the Go/Charm interactive frontend is maintained:
   it is frozen, with fixes only.
+- Inside Rex, an interactive single-host `nssh HOST` opens in the `nssh`
+  session and switches to it, with the current-pane fallbacks above.
 - Amend "Root lists require a command": inside Rex, a multi-host target
   without a command opens interactive sessions; outside Rex the requirement
   stands.
@@ -297,14 +320,14 @@ Before implementation, verify the `process` and `size` outputs and the
 - Allow multi-select in smart lookup inside Rex.
 - Add the Rex integration contract: optional, detected, silent fallback,
   argv-only launches, no new credential or trust paths, and placement that
-  never closes panes except exited ones under `replace_exited`.
+  never closes or moves panes.
 
 ## Delivery order
 
 1. OSC 7501 status for interactive sessions and root host lists.
 2. Pane labels.
-3. Multi-host open for comma lists: `nssh` session, split tabs, reuse of live
-   panes.
+3. Opening in the `nssh` session for single hosts and comma lists: split
+   tabs, reuse of live panes, app focus, current-pane fallbacks.
 4. Suffix expansion with ranges at the root.
 5. Multi-select in smart lookup.
 6. `inv list --json`, then the palette picker.
@@ -332,9 +355,3 @@ canned `session.view` output.
 - Using `rex events` to reconnect dropped sessions or raise notifications.
 - Running nssh from a bastion's Rex server through `rex -S HOST`.
 - Named host sets in inventory YAML, such as `nssh acm-cores`.
-
-## Open questions
-
-- Should a single-host `nssh HOST` stay in the current pane, or open in the
-  `nssh` session like multi-host opens? This design keeps the current pane.
-- Should `replace_exited` default to true?
