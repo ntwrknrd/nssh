@@ -141,6 +141,10 @@ preserve.
 - Interactive sessions and root host lists report OSC 7501 program status
   under `app=nssh`, with the terminal-title mode exclusions. Reports carry only
   sanitized names, states, and counts, never remote output.
+- Interactive sessions label the Rex pane with the sanitized target name
+  through the `rex` CLI and restore the previous label on exit. The pane is
+  left unchanged when its label cannot be read, and an operator rename during
+  the session is kept.
 
 ## Runtime Boundaries
 

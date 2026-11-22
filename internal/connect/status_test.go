@@ -89,3 +89,22 @@ func TestSessionStatusGating(t *testing.T) {
 		t.Fatal("nil reporter wrapped a nil prompt")
 	}
 }
+
+func TestSessionStatusLabelsPane(t *testing.T) {
+	inRex(t)
+	withTitleTerminal(t, true)
+	var labeled []string
+	prev := labelPaneFunc
+	labelPaneFunc = func(name string) func() {
+		labeled = append(labeled, name)
+		return func() { labeled = append(labeled, "restored") }
+	}
+	t.Cleanup(func() { labelPaneFunc = prev })
+
+	newSessionStatus(&ResolvedHost{Canonical: "acm-core1"}, nil).labelPane()()
+	var nilStatus *sessionStatus
+	nilStatus.labelPane()()
+	if got := strings.Join(labeled, ","); got != "acm-core1,restored" {
+		t.Fatalf("labels = %q", got)
+	}
+}

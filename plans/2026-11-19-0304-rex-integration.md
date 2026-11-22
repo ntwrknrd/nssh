@@ -1,7 +1,7 @@
 # Rex terminal integration for nssh
 
-Status: in progress. Slice 1 (OSC 7501 status) is implemented for testing;
-later slices are proposed.
+Status: in progress. Slices 1 (OSC 7501 status) and 2 (pane labels) are
+implemented for testing; later slices are proposed.
 
 ## Summary
 

@@ -853,6 +853,7 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 	}
 	defer setTerminalTitle(resolved, sshArgs, cfg)()
 	status := newSessionStatus(resolved, sshArgs)
+	defer status.labelPane()()
 	status.connecting()
 	conn := newConnector(resolved, sshArgs, cfg, opts)
 	if status != nil {

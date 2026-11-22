@@ -41,7 +41,8 @@ prompts, and can record sessions.
   on exit where the terminal keeps an xterm title stack. Otherwise the shell's
   next prompt redraws it. Set `ssh.terminal_title: false` to disable it.
 - Rex terminal: inside Rex, interactive sessions and root host lists also
-  report OSC 7501 program status. Set `NSSH_REX=0` to disable it.
+  report OSC 7501 program status, and interactive sessions label the pane
+  after the target. Set `NSSH_REX=0` to disable it.
 - Recordings: optional asciinema session capture is managed with `nssh log`.
 - SCP: `nssh cp` uses the same host and credential resolution path as connect.
 - Multi-host commands: `nssh repl` provides an interactive terminal prompt or

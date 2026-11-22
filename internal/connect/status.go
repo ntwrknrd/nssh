@@ -9,6 +9,8 @@ import (
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 )
 
+var labelPaneFunc = rex.LabelPane
+
 // sessionStatus reports interactive session state to Rex as OSC 7501 program
 // status on the root record. A nil sessionStatus is a no-op.
 type sessionStatus struct {
@@ -35,6 +37,16 @@ func (s *sessionStatus) report(state, kind, msg string) {
 		return
 	}
 	s.w.Report(rex.Report{State: state, Kind: kind, Title: s.name, Msg: msg})
+}
+
+// labelPane labels the Rex pane after the target for the session and
+// returns a function that restores the previous label. It applies to the same
+// sessions as status reports.
+func (s *sessionStatus) labelPane() func() {
+	if s == nil {
+		return func() {}
+	}
+	return labelPaneFunc(s.name)
 }
 
 // connecting marks the session as working until input is relayed.
