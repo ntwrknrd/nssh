@@ -249,6 +249,26 @@ func TestTabName(t *testing.T) {
 	}
 }
 
+func TestNewClientFindsInstalledRex(t *testing.T) {
+	home := t.TempDir()
+	bin := filepath.Join(home, "Library", "Application Support", "com.superlogical.rex", "RexServer", "Versions", "Current", "Rex Server.app", "Contents", "MacOS")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "rex"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("REX_BIN_DIR", "")
+	t.Setenv("REX_SESSION", "session:me")
+	t.Setenv("REX_BLOCK", "block:me")
+	t.Setenv("NSSH_REX", "")
+	if c := NewClient(); c == nil || c.bin != filepath.Join(bin, "rex") {
+		t.Fatalf("client = %+v", c)
+	}
+}
+
 func TestInPaneAndArgv(t *testing.T) {
 	t.Setenv("NSSH_REX_PANE", "1")
 	if !InPane() {

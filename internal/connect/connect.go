@@ -117,6 +117,10 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ..
 	if OpenInRex(ctx, cfg, []string{rexTarget(hostname, explicitUser, resolved)}, sshArgs) {
 		return nil
 	}
+	if rex.ForceOpen() {
+		// A palette action has no terminal to connect in.
+		return fmt.Errorf("could not open %s in Rex; run nssh -v for details", hostname)
+	}
 
 	recorded, err := maybeWrapWithRecording(resolved.Canonical, sshArgs, options)
 	if err != nil {

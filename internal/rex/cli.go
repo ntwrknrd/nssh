@@ -24,7 +24,8 @@ type Client struct {
 }
 
 // NewClient returns a client for the invoking pane, or nil when Rex is not
-// detected or no rex executable resolves. $REX_BIN_DIR/rex is preferred.
+// detected or no rex executable resolves. $REX_BIN_DIR/rex is preferred, then
+// rex on PATH, then a standard macOS install.
 func NewClient() *Client {
 	if !Detected() {
 		return nil
@@ -37,13 +38,33 @@ func NewClient() *Client {
 		}
 	}
 	if bin == "" {
-		path, err := exec.LookPath("rex")
-		if err != nil {
-			return nil
+		if path, err := exec.LookPath("rex"); err == nil {
+			bin = path
 		}
-		bin = path
+	}
+	if bin == "" {
+		bin = installedRex()
+	}
+	if bin == "" {
+		return nil
 	}
 	return &Client{bin: bin, session: os.Getenv("REX_SESSION"), block: os.Getenv("REX_BLOCK")}
+}
+
+// installedRex returns the rex executable of a standard macOS install, which
+// Rex palette actions need: the server's environment has no REX_BIN_DIR and
+// may not have rex on PATH.
+func installedRex() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	path := filepath.Join(home, "Library", "Application Support", "com.superlogical.rex",
+		"RexServer", "Versions", "Current", "Rex Server.app", "Contents", "MacOS", "rex")
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		return path
+	}
+	return ""
 }
 
 // Call runs `rex api call -s SESSION METHOD ARGS` and returns its JSON output.

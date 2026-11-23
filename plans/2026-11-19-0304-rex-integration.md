@@ -1,8 +1,9 @@
 # Rex terminal integration for nssh
 
 Status: in progress. Slices 1 (OSC 7501 status), 2 (pane labels), 3
-(opening in the `nssh` session), 4 (root suffix expansion), and 5 (picker
-multi-select) are implemented for testing; later slices are proposed. `session: site` is rejected until slice 8.
+(opening in the `nssh` session), 4 (root suffix expansion), 5 (picker
+multi-select), and 6 (`inv list --json` and palette actions) are implemented
+for testing; later slices are proposed. `session: site` is rejected until slice 8.
 
 ## Summary
 
@@ -261,16 +262,23 @@ installer command.
 | `nssh_run` | Pick hosts, prompt for a command, run it as a root host list in a new pane |
 
 The picker calls `rex.exec{"nssh", "inv", "list", "--json"}` and passes the
-result to `rex.ui.pick` with `multiple = true`, `icon = "server"`, group and
-site as `subtitle`, and the address as `detail`. Actions accept arguments so
+result to `rex.ui.pick` with `multiple = true`, `icon = "server"`, the group
+as `subtitle`, and the address as `detail`. Actions accept arguments so
 they also run non-interactively through `rex do`.
 
 Prerequisites and constraints:
 
-- nssh needs a stable `--json` output for `inv list`. It does not exist today.
-  This is a flag on an existing command.
+- nssh provides a stable `--json` output for `inv list`, a flag on an
+  existing command.
 - `rex.ui.pick` accepts at most 2,000 items. Larger inventories use a
-  two-stage pick: site or group first, then hosts.
+  two-stage pick: group first, then hosts.
+- Actions run `rex.exec` in the Rex server's environment, which has no
+  `REX_SESSION`, `REX_BLOCK`, or `REX_BIN_DIR`. `nssh_connect` passes the
+  action's session and block, plus `NSSH_REX_OPEN=1` so a single host opens
+  in a tab without a terminal. nssh falls back to the standard macOS Rex
+  install for the `rex` executable.
+- `nssh_run` opens a tab with `session.new_window` that runs the root host
+  list directly and stays open after it finishes.
 
 ### 8. Batch follow-ups
 

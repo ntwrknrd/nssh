@@ -37,20 +37,23 @@ func newRexOpener() rexOpener {
 // could not carry them), the process is itself a launched pane, or Rex
 // cannot place the panes. A single host also needs terminal stdin and stdout
 // and an app that accepts actions, since a tab the operator cannot see
-// would look like a hang.
+// would look like a hang. A Rex palette action sets NSSH_REX_OPEN=1 to skip
+// the single-host checks, since it has no terminal and its operator expects
+// a tab.
 func OpenInRex(ctx context.Context, cfg *config.Config, targets, sshArgs []string) bool {
 	single := len(targets) == 1
 	if cfg == nil || !cfg.Rex.EnabledValue() || len(targets) == 0 || len(sshArgs) > 0 || rex.InPane() {
 		return false
 	}
-	if single && (cfg.Rex.SingleHostValue() != config.RexSingleHostTab || !titleTerminal()) {
+	forced := rex.ForceOpen()
+	if single && !forced && (cfg.Rex.SingleHostValue() != config.RexSingleHostTab || !titleTerminal()) {
 		return false
 	}
 	client := rexClientFunc()
 	if client == nil {
 		return false
 	}
-	if single && !client.CanSelect(ctx) {
+	if single && !forced && !client.CanSelect(ctx) {
 		slog.Debug("rex app does not accept actions; connecting in the current pane")
 		return false
 	}

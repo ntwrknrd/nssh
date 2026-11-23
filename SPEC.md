@@ -161,6 +161,11 @@ preserve.
   resolve their own credentials, so no credential or trust path is added.
   Placement never closes, moves, or adds panes to existing tabs; Rex closes a
   pane when its session ends.
+- `nssh inv list --json` is a stable machine interface: `{"hosts": [...]}`
+  with `host`, `hostname`, `user`, `port`, `provider`, and `group`. The Rex
+  palette actions in `contrib/rex/nssh.lua` use it, and run nssh with the
+  invoking pane's `REX_SESSION` and `REX_BLOCK` and `NSSH_REX_OPEN=1`, which
+  opens even a single host in a tab without a terminal.
 
 ## Runtime Boundaries
 

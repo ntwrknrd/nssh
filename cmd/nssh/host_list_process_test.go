@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -309,4 +310,25 @@ func TestHostListProcessExpandsSuffixRanges(t *testing.T) {
 		t.Fatalf("records=%q", records)
 	}
 	requireHosts(t, records, "c1@core1", "c2@core2", "c3@core3")
+}
+
+func TestInvListJSONProcess(t *testing.T) {
+	f := newHostListFixture(t, buildBinary(t))
+	output, err := f.command(t, "inv", "list", "--json", "-s", "beta").Output()
+	if err != nil {
+		t.Fatalf("inv list --json: %v", err)
+	}
+	var listed struct {
+		Hosts []struct {
+			Host string `json:"host"`
+			User string `json:"user"`
+			Port int    `json:"port"`
+		} `json:"hosts"`
+	}
+	if err := json.Unmarshal(output, &listed); err != nil {
+		t.Fatalf("decode %q: %v", output, err)
+	}
+	if len(listed.Hosts) != 1 || listed.Hosts[0].Host != "beta" || listed.Hosts[0].Port != 22 {
+		t.Fatalf("hosts = %+v", listed.Hosts)
+	}
 }

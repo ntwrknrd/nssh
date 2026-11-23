@@ -42,6 +42,10 @@ type Opened struct {
 	Selected bool     // the app switched to the result
 }
 
+// ForceOpen reports whether a Rex palette action asked nssh to open its
+// targets in Rex panes even without a terminal (NSSH_REX_OPEN=1).
+func ForceOpen() bool { return os.Getenv("NSSH_REX_OPEN") == "1" }
+
 // InPane reports whether this process runs in a pane nssh launched. Such a
 // pane never opens another pane.
 func InPane() bool { return os.Getenv(paneEnv) == "1" }

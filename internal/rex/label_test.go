@@ -115,6 +115,7 @@ func TestLabelPaneOutsideRex(t *testing.T) {
 	t.Setenv("NSSH_REX", "")
 	t.Setenv("REX_BIN_DIR", t.TempDir())
 	t.Setenv("PATH", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // hide a standard macOS Rex install
 	LabelPane("acm-core1")()
 	if calls := readFile(t, filepath.Join(dir, "calls")); calls != "" {
 		t.Fatalf("called rex outside Rex or without an executable: %s", calls)

@@ -34,6 +34,7 @@ func withRexOpener(t *testing.T, opener *fakeRexOpener) {
 	rexExecutableFunc = func() (string, error) { return "/bin/nssh", nil }
 	t.Cleanup(func() { rexClientFunc, rexExecutableFunc = prevClient, prevExe })
 	t.Setenv("NSSH_REX_PANE", "")
+	t.Setenv("NSSH_REX_OPEN", "")
 }
 
 func TestOpenInRexSingleHost(t *testing.T) {
@@ -196,5 +197,18 @@ func TestRexPickHostsDefersToNormalLookup(t *testing.T) {
 				t.Fatalf("query=%q handled=%v err=%v", query, handled, err)
 			}
 		})
+	}
+}
+
+func TestOpenInRexPaletteForcesSingleHost(t *testing.T) {
+	opener := &fakeRexOpener{}
+	withRexOpener(t, opener)
+	withTitleTerminal(t, false)
+	if OpenInRex(t.Context(), config.DefaultConfig(), []string{"acm-core1"}, nil) {
+		t.Fatal("opened a single host without a terminal")
+	}
+	t.Setenv("NSSH_REX_OPEN", "1")
+	if !OpenInRex(t.Context(), config.DefaultConfig(), []string{"acm-core1"}, nil) || len(opener.hosts) != 1 {
+		t.Fatalf("palette open declined: %+v", opener.hosts)
 	}
 }

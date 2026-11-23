@@ -1,8 +1,11 @@
 package inv
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/ntwrknrd/nssh/internal/cli/selection"
@@ -16,6 +19,7 @@ import (
 
 func newListCmd() *cobra.Command {
 	var selectPattern string
+	var asJSON bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -27,15 +31,23 @@ field:value matches a specific field exactly.
 
 Fields: host, hostname, id, user, port, provider, group.
 
+--json prints {"hosts": [...]} with host, hostname, user, port, provider,
+and group for each host, for scripts such as the Rex palette picker.
+
 Examples:
   nssh inv list -s corp
   nssh inv list -s group:corp
-  nssh inv list -s 'group:corp user:admin'`,
+  nssh inv list -s 'group:corp user:admin'
+  nssh inv list --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if asJSON {
+				return runListJSON(cmd.OutOrStdout(), selectPattern)
+			}
 			return runList(selectPattern)
 		},
 	}
 	cmd.Flags().StringVarP(&selectPattern, "select", "s", "", "filter by text or field:value")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print hosts as JSON")
 	return cmd
 }
 
@@ -88,6 +100,60 @@ func runList(selectPattern string) error {
 	table.Render()
 	ui.InfoWithMargin(table.LeftMargin(), "Total: %d hosts", count)
 	return nil
+}
+
+// listedHost is one host in `inv list --json`. Field names are a stable
+// contract; empty strings are omitted.
+type listedHost struct {
+	Host     string `json:"host"`
+	HostName string `json:"hostname,omitempty"`
+	User     string `json:"user,omitempty"`
+	Port     int    `json:"port,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Group    string `json:"group,omitempty"`
+}
+
+func runListJSON(out io.Writer, selectPattern string) error {
+	cfg, err := config.LoadDefault()
+	if err != nil {
+		return err
+	}
+	index, err := inventory.BuildProviderIndex()
+	if err != nil {
+		return err
+	}
+	hosts, err := inventoryHosts(cfg, config.DefaultPaths())
+	if err != nil {
+		return err
+	}
+	sort.Slice(hosts, func(i, j int) bool { return hosts[i].Host < hosts[j].Host })
+	metaForHost := func(host *sshconfig.HostEntry) hostMetadata {
+		return metadataForHost(host, cfg, config.DefaultPaths(), index)
+	}
+	if selectPattern != "" {
+		if hosts, err = filterInventoryHosts(hosts, selectPattern, metaForHost); err != nil {
+			return &exit.ExitError{Code: 1, Message: fmt.Sprintf("invalid regex pattern: %s", err)}
+		}
+	}
+	return writeListJSON(out, hosts, metaForHost)
+}
+
+func writeListJSON(out io.Writer, hosts []*sshconfig.HostEntry, metaForHost func(*sshconfig.HostEntry) hostMetadata) error {
+	listed := make([]listedHost, 0, len(hosts))
+	for _, host := range hosts {
+		meta := metaForHost(host)
+		entry := listedHost{Host: host.Host, User: host.User(), Provider: meta.Owner, Group: meta.Group}
+		if host.HostName != host.Host {
+			entry.HostName = host.HostName
+		}
+		entry.Port, _ = strconv.Atoi(host.Port())
+		listed = append(listed, entry)
+	}
+	encoder := json.NewEncoder(out)
+	encoder.SetEscapeHTML(false)
+	return encoder.Encode(struct {
+		Hosts []listedHost `json:"hosts"`
+	}{listed})
 }
 
 func filterInventoryHosts(
