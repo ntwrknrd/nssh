@@ -2,6 +2,7 @@ package connect
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -20,7 +21,6 @@ var (
 
 // rexOpener is the part of the Rex client that opening hosts needs.
 type rexOpener interface {
-	CanSelect(context.Context) error
 	Open(context.Context, rex.Placement, []rex.Host) (rex.Opened, error)
 }
 
@@ -53,16 +53,6 @@ func OpenInRex(ctx context.Context, cfg *config.Config, targets, sshArgs []strin
 	if client == nil {
 		return false
 	}
-	if single && !forced {
-		if err := client.CanSelect(ctx); err != nil {
-			if apps, several := rex.SeveralApps(err); several {
-				ui.Warning("%s; connecting here", severalAppsHint(apps))
-			} else {
-				slog.Debug("rex app does not accept actions; connecting in the current pane", "err", err)
-			}
-			return false
-		}
-	}
 	exe, err := rexExecutableFunc()
 	if err != nil {
 		slog.Debug("rex open skipped", "err", err)
@@ -76,9 +66,19 @@ func OpenInRex(ctx context.Context, cfg *config.Config, targets, sshArgs []strin
 		Session:     cfg.Rex.SessionValue(),
 		PanesPerTab: cfg.Rex.PanesPerTabValue(),
 		Split:       cfg.Rex.SplitValue(),
+		// The app must show a single host's tab, or it would look like a hang.
+		RequireSelect: single && !forced,
 	}
 	opened, err := client.Open(ctx, placement, hosts)
-	if err != nil {
+	switch {
+	case errors.Is(err, rex.ErrCannotSelect):
+		if apps, several := rex.SeveralApps(err); several {
+			ui.Warning("%s; connecting here", severalAppsHint(apps))
+		} else {
+			slog.Debug("rex app does not accept actions; connecting in the current pane", "err", err)
+		}
+		return false
+	case err != nil:
 		slog.Debug("rex open failed", "err", err)
 		return false
 	}
@@ -138,29 +138,30 @@ func rexTarget(hostname, explicitUser string, resolved *ResolvedHost) string {
 // hosts match query and Rex could open them as panes. Choosing several opens
 // them and reports handled. Choosing one returns it as the query to connect
 // to, so the caller's lookup resolves it exactly. Otherwise query is returned
-// unchanged and lookup proceeds as it does outside Rex.
-func rexPickHosts(ctx context.Context, query, explicitUser string, sshArgs []string, cfg *config.Config) (string, bool, error) {
+// unchanged and lookup proceeds as it does outside Rex. Any catalog it built
+// is returned so the caller's lookup can reuse it.
+func rexPickHosts(ctx context.Context, query, explicitUser string, sshArgs []string, cfg *config.Config) (string, bool, *HostCatalog, error) {
 	if cfg == nil || !cfg.Rex.EnabledValue() || len(sshArgs) > 0 || noRexOpen() || !titleTerminal() {
-		return query, false, nil
+		return query, false, nil, nil
 	}
 	hostname, user := splitConnectQuery(query, explicitUser)
 	catalog, err := BuildHostCatalog(cfg)
 	if err != nil {
-		return query, false, err
+		return query, false, nil, err
 	}
 	if _, ok := catalog.Find(hostname); ok {
-		return query, false, nil
+		return query, false, catalog, nil
 	}
 	suggestions := catalog.Suggestions(hostname)
 	if len(suggestions) < 2 || rexClientFunc() == nil {
-		return query, false, nil
+		return query, false, catalog, nil
 	}
 	selected, err := selectHostsFunc("Select hosts (Tab for several)", suggestions, hostname)
 	if err != nil {
-		return query, false, fmt.Errorf("fuzzy select: %w", err)
+		return query, false, nil, fmt.Errorf("fuzzy select: %w", err)
 	}
 	if len(selected) == 0 {
-		return query, false, fmt.Errorf("selection canceled")
+		return query, false, nil, fmt.Errorf("selection canceled")
 	}
 	targets := make([]string, len(selected))
 	for i, name := range selected {
@@ -170,10 +171,10 @@ func rexPickHosts(ctx context.Context, query, explicitUser string, sshArgs []str
 		}
 	}
 	if len(targets) == 1 {
-		return targets[0], false, nil
+		return targets[0], false, catalog, nil
 	}
 	if !OpenInRex(ctx, cfg, targets, nil) {
-		return query, true, fmt.Errorf("could not open %d hosts in Rex; run nssh -v for details", len(targets))
+		return query, true, nil, fmt.Errorf("could not open %d hosts in Rex; run nssh -v for details", len(targets))
 	}
-	return query, true, nil
+	return query, true, nil, nil
 }

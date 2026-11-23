@@ -100,17 +100,24 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ..
 	explicitUser := extractExplicitUser(hostname, sshArgs)
 	start := time.Now()
 	var rexCfg *config.Config
+	var catalog *HostCatalog
 	if rex.Detected() && !noRexOpen() {
 		var err error
 		if rexCfg, err = loadConnectConfig(); err != nil {
 			return err
 		}
 		var handled bool
-		if hostname, handled, err = rexPickHosts(ctx, hostname, explicitUser, sshArgs, rexCfg); handled || err != nil {
+		if hostname, handled, catalog, err = rexPickHosts(ctx, hostname, explicitUser, sshArgs, rexCfg); handled || err != nil {
 			return err
 		}
 	}
-	resolved, err := ResolveSmartHostForConnect(hostname, explicitUser, rexCfg)
+	var resolved *ResolvedHost
+	var err error
+	if catalog != nil {
+		resolved, err = resolveSmartHostFromCatalog(hostname, explicitUser, rexCfg, catalog)
+	} else {
+		resolved, err = ResolveSmartHostForConnect(hostname, explicitUser, rexCfg)
+	}
 	if err != nil {
 		return fmt.Errorf("resolve host: %w", err)
 	}

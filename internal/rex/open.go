@@ -3,6 +3,7 @@ package rex
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -27,7 +28,14 @@ type Placement struct {
 	Session     string // session label, or SessionCurrent
 	PanesPerTab int    // 1, 2, or 4
 	Split       string // SplitAuto, SplitSideBySide, or SplitStacked
+	// RequireSelect makes Open fail with ErrCannotSelect, before placing
+	// anything, when the app does not accept actions.
+	RequireSelect bool
 }
+
+// ErrCannotSelect reports that the app does not accept actions from the CLI.
+// The error also carries the rex CLI's reason; see SeveralApps.
+var ErrCannotSelect = errors.New("rex app does not accept actions")
 
 // Host is one host to open: its pane label and the argv its pane runs.
 type Host struct {
@@ -120,6 +128,13 @@ func (c *Client) Open(ctx context.Context, p Placement, hosts []Host) (Opened, e
 		label = App
 	}
 	result := Opened{Session: label}
+	// The app check runs while the session is examined.
+	selectable := make(chan error, 1)
+	if p.RequireSelect {
+		go func() { selectable <- c.CanSelect(ctx) }()
+	} else {
+		selectable <- nil
+	}
 	session := ""
 	if label == SessionCurrent {
 		session = c.session
@@ -146,6 +161,9 @@ func (c *Client) Open(ctx context.Context, p Placement, hosts []Host) (Opened, e
 			remaining = append(remaining, host)
 		}
 		focus = live.best(hosts)
+	}
+	if err := <-selectable; err != nil {
+		return result, fmt.Errorf("%w: %w", ErrCannotSelect, err)
 	}
 
 	var windows []map[string]any

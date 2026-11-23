@@ -2,6 +2,7 @@ package rex
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -280,6 +281,24 @@ func TestCanSelect(t *testing.T) {
 	apps, several := SeveralApps(c.CanSelect(t.Context()))
 	if !several || strings.Join(apps, ",") != "EXP16234,Studio" {
 		t.Fatalf("SeveralApps = %v, %v", apps, several)
+	}
+}
+
+func TestOpenRequireSelect(t *testing.T) {
+	dir := fakeServer(t, map[string]string{
+		"session.list": `{"sessions":[{"session_id":"session:nssh","label":"nssh"}]}`,
+	})
+	if err := os.WriteFile(filepath.Join(dir, "fail-select"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewClient().Open(t.Context(), Placement{RequireSelect: true}, hostsNamed("acm-core1"))
+	if !errors.Is(err, ErrCannotSelect) {
+		t.Fatalf("err = %v, want ErrCannotSelect", err)
+	}
+	for _, line := range calls(t, dir) {
+		if strings.Contains(line, "new_window") || strings.Contains(line, "focus_block") {
+			t.Fatalf("placed a pane without a selectable app: %s", line)
+		}
 	}
 }
 
