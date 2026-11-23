@@ -98,6 +98,7 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ..
 		options = opts[0]
 	}
 	explicitUser := extractExplicitUser(hostname, sshArgs)
+	start := time.Now()
 	var rexCfg *config.Config
 	if rex.Detected() && !noRexOpen() {
 		var err error
@@ -114,7 +115,9 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ..
 		return fmt.Errorf("resolve host: %w", err)
 	}
 	cfg := resolved.Config
+	slog.Debug("resolved before rex open", "elapsed", time.Since(start).Round(time.Millisecond))
 	if OpenInRex(ctx, cfg, []string{rexTarget(hostname, explicitUser, resolved)}, sshArgs) {
+		slog.Debug("rex open done", "elapsed", time.Since(start).Round(time.Millisecond))
 		return nil
 	}
 	if rex.ForceOpen() {

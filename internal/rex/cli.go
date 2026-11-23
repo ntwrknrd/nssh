@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,8 +92,14 @@ func (c *Client) run(ctx context.Context, argv ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, c.bin, argv...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		name := strings.Join(argv[:min(len(argv), 3)], " ")
+	start := time.Now()
+	err := cmd.Run()
+	name := strings.Join(argv[:min(len(argv), 3)], " ")
+	if len(argv) > 3 && argv[2] == "-s" {
+		name = "api call " + argv[4]
+	}
+	slog.Debug("rex call", "call", name, "elapsed", time.Since(start).Round(time.Millisecond), "ok", err == nil)
+	if err != nil {
 		return nil, fmt.Errorf("rex %s: %w: %s", name, err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
