@@ -103,10 +103,14 @@ type CredentialRefConfig struct {
 
 // InventoryConfig holds inventory defaults, host overrides, and provider config.
 type InventoryConfig struct {
-	Auth      InventoryAuthConfig                `yaml:"auth,omitempty"`
-	Groups    map[string]GroupConfig             `yaml:"groups,omitempty"`
-	Hosts     map[string]InventoryHostConfig     `yaml:"hosts,omitempty"`
-	Providers map[string]InventoryProviderConfig `yaml:"providers,omitempty"`
+	Auth InventoryAuthConfig `yaml:"auth,omitempty"`
+	// PreferredDomains ranks DNS domains for short-name lookup: when hosts
+	// share a short name, the host in the earliest listed domain answers to
+	// it. Hosts in unlisted domains rank last.
+	PreferredDomains []string                           `yaml:"preferred_domains,omitempty"`
+	Groups           map[string]GroupConfig             `yaml:"groups,omitempty"`
+	Hosts            map[string]InventoryHostConfig     `yaml:"hosts,omitempty"`
+	Providers        map[string]InventoryProviderConfig `yaml:"providers,omitempty"`
 
 	Group    map[string]GroupConfig             `yaml:"group,omitempty"`
 	Host     map[string]InventoryHostConfig     `yaml:"host,omitempty"`
@@ -444,6 +448,13 @@ func (c *InventoryConfig) Validate() error {
 	c.Auth.Normalize()
 	if err := c.Auth.Validate("inventory.auth"); err != nil {
 		return err
+	}
+	for i, domain := range c.PreferredDomains {
+		domain = strings.Trim(strings.ToLower(strings.TrimSpace(domain)), ".")
+		if domain == "" {
+			return fmt.Errorf("inventory.preferred_domains[%d] is empty", i)
+		}
+		c.PreferredDomains[i] = domain
 	}
 	if len(c.Group) > 0 {
 		if c.Provider == nil {

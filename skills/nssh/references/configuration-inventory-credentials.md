@@ -57,9 +57,21 @@ provider. After a write, it removes the root config's now-redundant copy of
 that host, group, or provider so the root cannot shadow the included file.
 
 Host lookup names rank in this order: full host names, explicit aliases, and
-then derived short names (the first DNS label). A derived short name that
-several hosts share identifies none of them; use the full name or give one host
-an explicit alias. When hosts share a full name or explicit alias, the
+then derived short names (the first DNS label; IP addresses have none). A
+derived short name that several hosts share identifies none of them; use the
+full name or give one host an explicit alias. To let one domain win shared
+short names, list domains in order under `inventory.preferred_domains`:
+
+```yaml
+inventory:
+  preferred_domains:
+    - custcbb.local
+```
+
+The host in the earliest listed domain then answers to the short name, and
+hosts in unlisted domains rank last. Hosts that tie stay ambiguous, and the
+others remain reachable by full name. The smart-lookup picker lists preferred
+domains first. When hosts share a full name or explicit alias, the
 lexically first host wins. `nssh inv set` skips a derived
 short alias that already identifies another host and rejects an explicit
 `--alias` collision.
