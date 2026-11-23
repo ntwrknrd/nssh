@@ -99,7 +99,7 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ..
 	}
 	explicitUser := extractExplicitUser(hostname, sshArgs)
 	var rexCfg *config.Config
-	if rex.Detected() && !rex.InPane() {
+	if rex.Detected() && !noRexOpen() {
 		var err error
 		if rexCfg, err = loadConnectConfig(); err != nil {
 			return err

@@ -42,7 +42,7 @@ func newRexOpener() rexOpener {
 // a tab.
 func OpenInRex(ctx context.Context, cfg *config.Config, targets, sshArgs []string) bool {
 	single := len(targets) == 1
-	if cfg == nil || !cfg.Rex.EnabledValue() || len(targets) == 0 || len(sshArgs) > 0 || rex.InPane() {
+	if cfg == nil || !cfg.Rex.EnabledValue() || len(targets) == 0 || len(sshArgs) > 0 || noRexOpen() {
 		return false
 	}
 	forced := rex.ForceOpen()
@@ -95,6 +95,13 @@ func reportRexOpen(opened rex.Opened) {
 	ui.Info("%s", msg)
 }
 
+// noRexOpen reports whether this process must connect where it runs: it is
+// a pane nssh launched, or the inner process of a session recording, whose
+// parent already decided not to open the host in Rex.
+func noRexOpen() bool {
+	return rex.InPane() || os.Getenv("NSSH_RECORDING_INNER") == "1"
+}
+
 // rexTarget is the literal target a launched pane connects to: the inventory
 // name when the host resolved to one, with any explicit user kept.
 func rexTarget(hostname, explicitUser string, resolved *ResolvedHost) string {
@@ -113,7 +120,7 @@ func rexTarget(hostname, explicitUser string, resolved *ResolvedHost) string {
 // to, so the caller's lookup resolves it exactly. Otherwise query is returned
 // unchanged and lookup proceeds as it does outside Rex.
 func rexPickHosts(ctx context.Context, query, explicitUser string, sshArgs []string, cfg *config.Config) (string, bool, error) {
-	if cfg == nil || !cfg.Rex.EnabledValue() || len(sshArgs) > 0 || rex.InPane() || !titleTerminal() {
+	if cfg == nil || !cfg.Rex.EnabledValue() || len(sshArgs) > 0 || noRexOpen() || !titleTerminal() {
 		return query, false, nil
 	}
 	hostname, user := splitConnectQuery(query, explicitUser)

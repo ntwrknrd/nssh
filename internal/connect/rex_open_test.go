@@ -35,6 +35,7 @@ func withRexOpener(t *testing.T, opener *fakeRexOpener) {
 	t.Cleanup(func() { rexClientFunc, rexExecutableFunc = prevClient, prevExe })
 	t.Setenv("NSSH_REX_PANE", "")
 	t.Setenv("NSSH_REX_OPEN", "")
+	t.Setenv("NSSH_RECORDING_INNER", "")
 }
 
 func TestOpenInRexSingleHost(t *testing.T) {
@@ -68,6 +69,7 @@ func TestOpenInRexFallsBack(t *testing.T) {
 		targets  []string
 		sshArgs  []string
 		inPane   bool
+		inner    bool
 	}{
 		{name: "nil config", opener: &fakeRexOpener{canSelect: true}, terminal: true, targets: []string{"a"}},
 		{name: "disabled", cfg: disabled, opener: &fakeRexOpener{canSelect: true}, terminal: true, targets: []string{"a"}},
@@ -75,6 +77,7 @@ func TestOpenInRexFallsBack(t *testing.T) {
 		{name: "not a terminal", opener: &fakeRexOpener{canSelect: true}, targets: []string{"a"}},
 		{name: "ssh options", opener: &fakeRexOpener{canSelect: true}, terminal: true, targets: []string{"a"}, sshArgs: []string{"-p", "2222"}},
 		{name: "launched pane", opener: &fakeRexOpener{canSelect: true}, terminal: true, targets: []string{"a", "b"}, inPane: true},
+		{name: "recording child", opener: &fakeRexOpener{canSelect: true}, terminal: true, targets: []string{"a", "b"}, inner: true},
 		{name: "no rex", terminal: true, targets: []string{"a", "b"}},
 		{name: "remote control off", opener: &fakeRexOpener{}, terminal: true, targets: []string{"a"}},
 		{name: "open fails", opener: &fakeRexOpener{canSelect: true, err: context.DeadlineExceeded}, terminal: true, targets: []string{"a", "b"}},
@@ -85,6 +88,9 @@ func TestOpenInRexFallsBack(t *testing.T) {
 			withTitleTerminal(t, tt.terminal)
 			if tt.inPane {
 				t.Setenv("NSSH_REX_PANE", "1")
+			}
+			if tt.inner {
+				t.Setenv("NSSH_RECORDING_INNER", "1")
 			}
 			cfg := tt.cfg
 			if cfg == nil && tt.name != "nil config" {

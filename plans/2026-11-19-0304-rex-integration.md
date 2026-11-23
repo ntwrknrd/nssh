@@ -236,7 +236,9 @@ window is at least 160 columns wide, and stacks them otherwise.
 
 **Tab names.** A tab is named after its hosts, using the expansion grammar
 when they share a prefix: `acm-core(1,2)` for a split tab, `acm-core3` for a
-single tab, and `edge1 + core2` when names share no prefix.
+single tab, and `edge1 + core2` when names share no prefix. A domain every
+host shares is left out, so `acm-core1.lab.local` and `acm-core2.lab.local`
+also give `acm-core(1,2)`.
 
 **Reuse.** Before placing hosts, nssh looks in the target session for panes
 labeled with each host whose process is a live nssh. Those hosts are not

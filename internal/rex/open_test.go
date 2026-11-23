@@ -241,6 +241,11 @@ func TestTabName(t *testing.T) {
 		"edge1,core2":         "edge1 + core2",
 		"core,core2":          "core + core2",
 		"pit2-a1,pit2-b1":     "pit2-(a1,b1)",
+		"acm-lab-core1.custcbb.local,acm-lab-core2.custcbb.local": "acm-lab-core(1,2)",
+		"core1.a.example.com,core2.b.example.com":                 "core(1.a,2.b)",
+		"edge1.lab.local,core2.lab.local":                         "edge1 + core2",
+		"a.lab.local,b.lab.local,c.lab.local,d.lab.local":         "a + b + c + d",
+		"core1.example.com,core1.example.net":                     "core1.example.(com,net)",
 	}
 	for in, want := range tests {
 		if got := TabName(hostsNamed(strings.Split(in, ",")...)); got != want {

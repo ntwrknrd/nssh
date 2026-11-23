@@ -305,8 +305,9 @@ func split(direction string, before, after map[string]any) map[string]any {
 }
 
 // TabName names a tab after its hosts, using the REPL suffix grammar when
-// they share a prefix: acm-core(1,2). Names with no shared prefix are joined
-// with " + ".
+// they share a prefix: acm-core(1,2). A domain every name shares is dropped,
+// so acm-core1.lab.local and acm-core2.lab.local also give acm-core(1,2).
+// Names with no shared prefix are joined with " + ".
 func TabName(group []Host) string {
 	names := make([]string, len(group))
 	for i, host := range group {
@@ -315,6 +316,7 @@ func TabName(group []Host) string {
 	if len(names) == 1 {
 		return names[0]
 	}
+	names = trimSharedDomain(names)
 	prefix := names[0]
 	for _, name := range names[1:] {
 		for !strings.HasPrefix(name, prefix) {
@@ -336,6 +338,30 @@ func TabName(group []Host) string {
 		return clean(strings.Join(names, " + "), maxLabelBytes)
 	}
 	return clean(fmt.Sprintf("%s(%s)", prefix, strings.Join(suffixes, ",")), maxLabelBytes)
+}
+
+// trimSharedDomain drops the trailing dot-separated labels that every name
+// shares, keeping at least one label of each name.
+func trimSharedDomain(names []string) []string {
+	suffix := names[0]
+	for _, name := range names[1:] {
+		for !strings.HasSuffix(name, suffix) {
+			suffix = suffix[1:]
+		}
+	}
+	dot := strings.IndexByte(suffix, '.')
+	if dot < 0 {
+		return names
+	}
+	suffix = suffix[dot:]
+	trimmed := make([]string, len(names))
+	for i, name := range names {
+		trimmed[i] = strings.TrimSuffix(name, suffix)
+		if trimmed[i] == "" || strings.HasSuffix(trimmed[i], ".") {
+			return names
+		}
+	}
+	return trimmed
 }
 
 func isDigit(b byte) bool { return b >= '0' && b <= '9' }
