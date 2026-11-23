@@ -23,7 +23,9 @@ preserve.
 - nssh owns inventory and SSH configuration. A supplied `-F` does not load an
   OpenSSH configuration file; use nssh YAML configuration for host policy.
 - Smart lookup resolves managed inventory and may offer selection or local host
-  creation. Literal targeting bypasses fuzzy selection without discarding known
+  creation. A short name (first DNS label, never an IP octet) shared by hosts
+  is ambiguous unless `inventory.preferred_domains` ranks exactly one host's
+  domain highest. Literal targeting bypasses fuzzy selection without discarding known
   inventory metadata. `--target HOST` changes only resolution to literal;
   it shares the root option grammar. Public command names retain their existing
   routing and literal-target escape.

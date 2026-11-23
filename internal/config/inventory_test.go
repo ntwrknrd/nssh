@@ -709,3 +709,17 @@ func TestSOPSAgeKeyCommandRejectsAmbiguousOrWrongProvider(t *testing.T) {
 		}
 	}
 }
+
+func TestInventoryPreferredDomainsValidate(t *testing.T) {
+	cfg := InventoryConfig{PreferredDomains: []string{" .CustCBB.local. ", "expedient.com"}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(cfg.PreferredDomains, ","); got != "custcbb.local,expedient.com" {
+		t.Fatalf("PreferredDomains = %q", got)
+	}
+	bad := InventoryConfig{PreferredDomains: []string{"a.net", " . "}}
+	if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "preferred_domains[1]") {
+		t.Fatalf("err = %v", err)
+	}
+}

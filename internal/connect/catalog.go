@@ -3,6 +3,7 @@ package connect
 import (
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"slices"
 	"strings"
 
@@ -16,11 +17,16 @@ type HostCatalog struct {
 	aliases   map[string]string
 	aliasRank map[string]int
 	ambiguous map[string]struct{}
+	// shortClaims lists the hosts sharing each ambiguous short name.
+	shortClaims map[string][]string
+	// preferred is inventory.preferred_domains, most preferred first.
+	preferred []string
 }
 
 // Lookup-name precedence: a full host name beats an explicit alias, which beats
 // a derived short name. A derived short name shared by different hosts resolves
-// to none of them. Other equal-rank names shared by different hosts resolve to
+// to none of them, unless inventory.preferred_domains ranks one host's domain
+// above the others'. Other equal-rank names shared by different hosts resolve to
 // the lexically first canonical host so lookup never depends on map order.
 const (
 	aliasRankShort = iota + 1
@@ -84,7 +90,11 @@ func buildHostCatalog(cfg *config.Config, states []*inventory.ProviderState) (*H
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	cat := &HostCatalog{hosts: make(map[string]*ResolvedHostData), aliases: make(map[string]string)}
+	cat := &HostCatalog{
+		hosts:     make(map[string]*ResolvedHostData),
+		aliases:   make(map[string]string),
+		preferred: cfg.Inventory.PreferredDomains,
+	}
 	providers := catalogProviders(cfg)
 	local := localHostNames(cfg)
 	localTimer := connector.StartTiming(connector.TimingCatalogLocalHosts)
@@ -121,8 +131,57 @@ func buildHostCatalog(cfg *config.Config, states []*inventory.ProviderState) (*H
 		}
 	}
 	providerTimer.Emit()
+	cat.preferShortNames()
 	cat.resolveManagedProxies()
 	return cat, nil
+}
+
+// preferShortNames gives each ambiguous short name to the one host whose
+// domain inventory.preferred_domains ranks highest, when exactly one host has
+// that rank and no explicit alias or full name already uses the name.
+func (c *HostCatalog) preferShortNames() {
+	if len(c.preferred) == 0 {
+		return
+	}
+	for name, claims := range c.shortClaims {
+		if _, taken := c.aliases[name]; taken {
+			continue
+		}
+		best, winner, tied := len(c.preferred), "", false
+		for _, canonical := range claims {
+			switch rank := c.domainRank(c.hosts[canonical]); {
+			case rank < best:
+				best, winner, tied = rank, canonical, false
+			case rank == best:
+				tied = true
+			}
+		}
+		if winner == "" || tied {
+			continue
+		}
+		slog.Debug("inventory short name resolved by preferred domain", "name", name, "host", winner)
+		c.aliases[name] = winner
+		c.aliasRank[name] = aliasRankShort
+		delete(c.ambiguous, name)
+	}
+}
+
+// domainRank is the index in preferred of the first domain that host's
+// canonical name or hostname belongs to, or len(preferred) for none.
+func (c *HostCatalog) domainRank(host *ResolvedHostData) int {
+	if host == nil {
+		return len(c.preferred)
+	}
+	names := []string{strings.ToLower(host.Canonical), strings.ToLower(host.Hostname)}
+	for i, domain := range c.preferred {
+		suffix := "." + strings.Trim(strings.ToLower(domain), ".")
+		for _, name := range names {
+			if strings.HasSuffix(strings.TrimSuffix(name, "."), suffix) {
+				return i
+			}
+		}
+	}
+	return len(c.preferred)
 }
 
 func (c *HostCatalog) addLocalHosts(cfg *config.Config, providerName string, provider config.InventoryProviderConfig) error {
@@ -535,6 +594,7 @@ func (c *HostCatalog) addAlias(name, canonical string, rank int) {
 		c.aliasRank = make(map[string]int)
 	}
 	if _, ok := c.ambiguous[name]; ok && rank == aliasRankShort {
+		c.claimShortName(name, canonical)
 		return
 	}
 	current, exists := c.aliases[name]
@@ -551,6 +611,8 @@ func (c *HostCatalog) addAlias(name, canonical string, rank int) {
 			c.ambiguous = make(map[string]struct{})
 		}
 		c.ambiguous[name] = struct{}{}
+		c.claimShortName(name, current)
+		c.claimShortName(name, canonical)
 		delete(c.aliases, name)
 		delete(c.aliasRank, name)
 		return
@@ -560,6 +622,15 @@ func (c *HostCatalog) addAlias(name, canonical string, rank int) {
 	}
 	c.aliases[name] = canonical
 	c.aliasRank[name] = rank
+}
+
+func (c *HostCatalog) claimShortName(name, canonical string) {
+	if c.shortClaims == nil {
+		c.shortClaims = make(map[string][]string)
+	}
+	if !slices.Contains(c.shortClaims[name], canonical) {
+		c.shortClaims[name] = append(c.shortClaims[name], canonical)
+	}
 }
 
 func (c *HostCatalog) Find(query string) (*ResolvedHostData, bool) {
@@ -598,9 +669,14 @@ func shortGroup(group string) string {
 	return strings.TrimSpace(group)
 }
 
+// shortName returns the first label of a dotted host name, or "" for a
+// single label or an IP address, whose first octet is not a name.
 func shortName(host string) string {
 	host = strings.TrimSuffix(strings.TrimSpace(host), ".")
 	if host == "" || !strings.Contains(host, ".") {
+		return ""
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
 		return ""
 	}
 	short, _, _ := strings.Cut(host, ".")
@@ -675,7 +751,12 @@ func (c *HostCatalog) Suggestions(query string) []string {
 			}
 		}
 	}
-	slices.Sort(out)
+	slices.SortFunc(out, func(a, b string) int {
+		if d := c.domainRank(c.hosts[a]) - c.domainRank(c.hosts[b]); d != 0 {
+			return d
+		}
+		return strings.Compare(a, b)
+	})
 	return out
 }
 

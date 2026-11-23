@@ -521,6 +521,9 @@ func sparseConfigTable(cfg *Config) map[string]any {
 	if len(auth) > 0 {
 		inventory["auth"] = auth
 	}
+	if len(cfg.Inventory.PreferredDomains) > 0 {
+		inventory["preferred_domains"] = cfg.Inventory.PreferredDomains
+	}
 	if len(cfg.Inventory.Providers) > 0 {
 		providers := make(map[string]any)
 		for _, name := range sortedInventoryProviders(cfg.Inventory.Providers) {

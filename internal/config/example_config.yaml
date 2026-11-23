@@ -65,6 +65,10 @@ agent:
 #     fallback: manual
 #     # Bounds credential retrieval; 0 inherits the default (10s).
 #     lookup_timeout: 10s
+#   # When hosts share a short name, the one in the earliest listed domain
+#   # answers to it; the others stay reachable by full name.
+#   preferred_domains:
+#     - example.net
 #   providers:
 #     local:
 #       type: local
