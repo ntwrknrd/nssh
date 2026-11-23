@@ -138,15 +138,13 @@ func (c *Client) Open(ctx context.Context, p Placement, hosts []Host) (Opened, e
 		}
 		remaining = nil
 		for _, host := range hosts {
-			if block, ok := live[strings.ToLower(host.Name)]; ok {
+			if len(live.blocks[strings.ToLower(host.Name)]) > 0 {
 				result.Reused = append(result.Reused, host.Name)
-				if focus.BlockID == "" {
-					focus = block
-				}
 				continue
 			}
 			remaining = append(remaining, host)
 		}
+		focus = live.best(hosts)
 	}
 
 	var windows []map[string]any
@@ -223,9 +221,55 @@ func (c *Client) findSession(ctx context.Context, label string) (string, error) 
 	return "", nil
 }
 
-// liveHosts maps lowercased host names to placed panes in session that carry
-// the host's label and still run nssh.
-func (c *Client) liveHosts(ctx context.Context, session string, hosts []Host) (map[string]viewBlock, error) {
+// livePanes holds the live nssh panes for requested hosts, by lowercased
+// host name in session order, and how many placed blocks each window holds.
+type livePanes struct {
+	blocks  map[string][]viewBlock
+	windows map[string]int
+}
+
+// best returns the live pane to focus: in the window holding the most of
+// hosts, preferring the window with the fewest other panes, then the
+// earliest, the pane of the first host it holds. With no live pane it
+// returns the zero block.
+func (l livePanes) best(hosts []Host) viewBlock {
+	type candidate struct {
+		block   viewBlock
+		matched int
+	}
+	var order []string
+	found := map[string]*candidate{}
+	for _, host := range hosts {
+		seen := map[string]bool{}
+		for _, block := range l.blocks[strings.ToLower(host.Name)] {
+			if seen[block.WindowID] {
+				continue
+			}
+			seen[block.WindowID] = true
+			if found[block.WindowID] == nil {
+				found[block.WindowID] = &candidate{block: block}
+				order = append(order, block.WindowID)
+			}
+			found[block.WindowID].matched++
+		}
+	}
+	var best *candidate
+	for _, window := range order {
+		c := found[window]
+		if best == nil || c.matched > best.matched ||
+			c.matched == best.matched && l.windows[window]-c.matched < l.windows[best.block.WindowID]-best.matched {
+			best = c
+		}
+	}
+	if best == nil {
+		return viewBlock{}
+	}
+	return best.block
+}
+
+// liveHosts finds the placed panes in session that carry a requested host's
+// label and still run nssh.
+func (c *Client) liveHosts(ctx context.Context, session string, hosts []Host) (livePanes, error) {
 	wanted := map[string]bool{}
 	for _, host := range hosts {
 		wanted[strings.ToLower(host.Name)] = true
@@ -233,17 +277,18 @@ func (c *Client) liveHosts(ctx context.Context, session string, hosts []Host) (m
 	var list struct {
 		Blocks []viewBlock `json:"blocks"`
 	}
+	live := livePanes{blocks: map[string][]viewBlock{}, windows: map[string]int{}}
 	if err := c.callJSON(ctx, session, "session.list_blocks", nil, &list); err != nil {
-		return nil, err
+		return live, err
 	}
-	live := map[string]viewBlock{}
 	for _, block := range list.Blocks {
-		name := strings.ToLower(block.Label)
-		if !wanted[name] || block.Placement != "placed" || live[name].BlockID != "" {
+		if block.Placement != "placed" {
 			continue
 		}
-		if c.runsNSSH(ctx, session, block.BlockID) {
-			live[name] = block
+		live.windows[block.WindowID]++
+		name := strings.ToLower(block.Label)
+		if wanted[name] && c.runsNSSH(ctx, session, block.BlockID) {
+			live.blocks[name] = append(live.blocks[name], block)
 		}
 	}
 	return live, nil

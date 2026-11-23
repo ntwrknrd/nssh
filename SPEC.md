@@ -152,7 +152,9 @@ preserve.
 - Inside Rex, an interactive single host with no SSH options, and a root list
   with no command, open in the configured session (`nssh` by default), grouped
   into tabs of `rex.panes_per_tab` panes. A host with a live nssh pane there is
-  focused instead of opened again. The app switches to the result.
+  focused instead of opened again; with several live panes, the tab holding
+  the most requested hosts and fewest others wins. The app switches to the
+  result.
 - A single host connects in the current pane when stdin or stdout is not a
   terminal, SSH options are given, the app does not accept actions (Remote
   Control is off), `rex.single_host: here` is set, or the process is itself a

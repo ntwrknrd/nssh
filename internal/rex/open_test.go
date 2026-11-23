@@ -181,6 +181,36 @@ func TestOpenReusesPaneByProgramStatus(t *testing.T) {
 	}
 }
 
+func TestOpenFocusesBestMatchingTab(t *testing.T) {
+	blocks := `{"blocks":[` +
+		`{"block_id":"block:1","label":"core1","placement":"placed","window_id":"window:single1"},` +
+		`{"block_id":"block:2","label":"core2","placement":"placed","window_id":"window:single2"},` +
+		`{"block_id":"block:s1","label":"core1","placement":"placed","window_id":"window:split"},` +
+		`{"block_id":"block:s2","label":"core2","placement":"placed","window_id":"window:split"}]}`
+	tests := map[string]string{
+		"core1,core2": "block:s1",
+		"core2,core1": "block:s2",
+		"core1":       "block:1",
+		"core2":       "block:2",
+	}
+	for in, want := range tests {
+		t.Run(in, func(t *testing.T) {
+			dir := fakeServer(t, map[string]string{
+				"session.list":                      `{"sessions":[{"session_id":"session:nssh","label":"nssh"}]}`,
+				"session.list_blocks":               blocks,
+				"com.superlogical.terminal.process": `{"child":{"name":"nssh","pid":1,"user_id":501},"last_exit":null}`,
+			})
+			opened, err := NewClient().Open(t.Context(), Placement{}, hostsNamed(strings.Split(in, ",")...))
+			if err != nil || len(opened.Tabs) != 0 {
+				t.Fatalf("opened = %+v, %v", opened, err)
+			}
+			if got := callArgs(t, dir, "session.focus_block")["block_id"]; got != want {
+				t.Fatalf("focused %v, want %s", got, want)
+			}
+		})
+	}
+}
+
 func TestOpenIgnoresPanesNotRunningNSSH(t *testing.T) {
 	for name, process := range map[string]string{
 		"shell":            `{"child":{"name":"zsh","pid":1,"user_id":501},"last_exit":null}`,

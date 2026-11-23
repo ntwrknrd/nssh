@@ -242,8 +242,10 @@ also give `acm-core(1,2)`.
 
 **Reuse.** Before placing hosts, nssh looks in the target session for panes
 labeled with each host whose process is a live nssh. Those hosts are not
-opened again. If every host already has a live pane, nssh focuses the first
-one. Otherwise only the remaining hosts are placed in new tabs.
+opened again. If every host already has a live pane, nssh focuses the tab
+holding the most of them, preferring the tab with the fewest other panes, so
+`acm-core(1,2)` returns to its split tab and `acm-core1` to its own.
+Otherwise only the remaining hosts are placed in new tabs.
 
 Launches do not pass `rex run --keep-open`, so Rex closes a pane when its
 session ends. Dead panes never accumulate, and nssh has nothing to clean up.
