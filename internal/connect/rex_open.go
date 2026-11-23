@@ -2,6 +2,7 @@ package connect
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -14,6 +15,7 @@ import (
 var (
 	rexClientFunc     = newRexOpener
 	rexExecutableFunc = os.Executable
+	selectHostsFunc   = ui.FuzzySelectStrings
 )
 
 // rexOpener is the part of the Rex client that opening hosts needs.
@@ -100,4 +102,48 @@ func rexTarget(hostname, explicitUser string, resolved *ResolvedHost) string {
 		return explicitUser + "@" + resolved.Canonical
 	}
 	return resolved.Canonical
+}
+
+// rexPickHosts runs smart lookup with multi-select when several inventory
+// hosts match query and Rex could open them as panes. Choosing several opens
+// them and reports handled. Choosing one returns it as the query to connect
+// to, so the caller's lookup resolves it exactly. Otherwise query is returned
+// unchanged and lookup proceeds as it does outside Rex.
+func rexPickHosts(ctx context.Context, query, explicitUser string, sshArgs []string, cfg *config.Config) (string, bool, error) {
+	if cfg == nil || !cfg.Rex.EnabledValue() || len(sshArgs) > 0 || rex.InPane() || !titleTerminal() {
+		return query, false, nil
+	}
+	hostname, user := splitConnectQuery(query, explicitUser)
+	catalog, err := BuildHostCatalog(cfg)
+	if err != nil {
+		return query, false, err
+	}
+	if _, ok := catalog.Find(hostname); ok {
+		return query, false, nil
+	}
+	suggestions := catalog.Suggestions(hostname)
+	if len(suggestions) < 2 || rexClientFunc() == nil {
+		return query, false, nil
+	}
+	selected, err := selectHostsFunc("Select hosts (Tab for several)", suggestions, hostname)
+	if err != nil {
+		return query, false, fmt.Errorf("fuzzy select: %w", err)
+	}
+	if len(selected) == 0 {
+		return query, false, fmt.Errorf("selection canceled")
+	}
+	targets := make([]string, len(selected))
+	for i, name := range selected {
+		targets[i] = name
+		if user != "" {
+			targets[i] = user + "@" + name
+		}
+	}
+	if len(targets) == 1 {
+		return targets[0], false, nil
+	}
+	if !OpenInRex(ctx, cfg, targets, nil) {
+		return query, true, fmt.Errorf("could not open %d hosts in Rex; run nssh -v for details", len(targets))
+	}
+	return query, true, nil
 }

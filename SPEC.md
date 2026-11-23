@@ -25,10 +25,11 @@ preserve.
 - Smart lookup resolves managed inventory and may offer selection or local host
   creation. A short name (first DNS label, never an IP octet) shared by hosts
   is ambiguous unless `inventory.preferred_domains` ranks exactly one host's
-  domain highest. Literal targeting bypasses fuzzy selection without discarding known
-  inventory metadata. `--target HOST` changes only resolution to literal;
-  it shares the root option grammar. Public command names retain their existing
-  routing and literal-target escape.
+  domain highest. Literal targeting bypasses fuzzy selection without
+  discarding known inventory metadata. Inside Rex, selection allows several
+  hosts, which open as Rex panes. `--target HOST` changes only resolution to
+  literal; it shares the root option grammar. Public command names retain
+  their existing routing and literal-target escape.
 - A bare comma-separated destination, such as `'host1, host2'`, is a root host
   list when it has a remote command. Members may use the REPL suffix expansion,
   `prefix(1,2)` or the numeric range `prefix(1-4)`. Members are trimmed. An

@@ -1,8 +1,8 @@
 # Rex terminal integration for nssh
 
 Status: in progress. Slices 1 (OSC 7501 status), 2 (pane labels), 3
-(opening in the `nssh` session), and 4 (root suffix expansion) are implemented
-for testing; later slices are proposed. `session: site` is rejected until slice 8.
+(opening in the `nssh` session), 4 (root suffix expansion), and 5 (picker
+multi-select) are implemented for testing; later slices are proposed. `session: site` is rejected until slice 8.
 
 ## Summary
 

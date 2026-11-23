@@ -154,6 +154,33 @@ func FuzzySelectString(prompt string, options []string, initialQuery ...string) 
 	return huhFilteredSelectString(prompt, options)
 }
 
+// FuzzySelectStrings presents a fuzzy finder for selecting one or more
+// strings, with the search prefilled. With fzf, Tab toggles a selection and
+// Enter confirms; Enter alone picks the highlighted entry. Space stays part of
+// fzf's query syntax. Returns nil if canceled. Falls back to huh's
+// multi-select without a prefilled query.
+func FuzzySelectStrings(prompt string, options []string, initialQuery string) ([]string, error) {
+	if len(options) == 0 {
+		return nil, fmt.Errorf("no options provided")
+	}
+	if FzfAvailable() {
+		return fzfSelect(prompt, options, true, initialQuery)
+	}
+	labeled := make([]FuzzySelectOption, len(options))
+	for i, option := range options {
+		labeled[i] = FuzzySelectOption{Label: option}
+	}
+	indices, err := FuzzySelectMulti(prompt, labeled)
+	if err != nil {
+		return nil, err
+	}
+	selected := make([]string, 0, len(indices))
+	for _, i := range indices {
+		selected = append(selected, options[i])
+	}
+	return selected, nil
+}
+
 // FuzzySelectMulti presents a fuzzy finder for multi-selection.
 // Returns indices of selected options, or empty slice if canceled.
 // Falls back to huh's multi-select if fzf is unavailable.

@@ -116,3 +116,85 @@ func TestRexTarget(t *testing.T) {
 		t.Fatalf("ad hoc = %q", got)
 	}
 }
+
+func withSelectHosts(t *testing.T, pick func(options []string) []string) *[]string {
+	t.Helper()
+	var offered []string
+	prev := selectHostsFunc
+	selectHostsFunc = func(_ string, options []string, _ string) ([]string, error) {
+		offered = options
+		return pick(options), nil
+	}
+	t.Cleanup(func() { selectHostsFunc = prev })
+	return &offered
+}
+
+func TestRexPickHostsOpensSeveral(t *testing.T) {
+	opener := &fakeRexOpener{}
+	withRexOpener(t, opener)
+	withTitleTerminal(t, true)
+	offered := withSelectHosts(t, func(options []string) []string { return options })
+	query, handled, err := rexPickHosts(t.Context(), "ops@dfz-core", "", nil, testSmartResolveConfig())
+	if err != nil || !handled || query != "ops@dfz-core" {
+		t.Fatalf("query=%q handled=%v err=%v", query, handled, err)
+	}
+	if len(*offered) != 2 || len(opener.hosts) != 2 || opener.hosts[0].Name != "ops@clab-dfz-core01" {
+		t.Fatalf("offered=%q hosts=%+v", *offered, opener.hosts)
+	}
+}
+
+func TestRexPickHostsSinglePickConnects(t *testing.T) {
+	opener := &fakeRexOpener{}
+	withRexOpener(t, opener)
+	withTitleTerminal(t, true)
+	withSelectHosts(t, func(options []string) []string { return options[1:] })
+	query, handled, err := rexPickHosts(t.Context(), "dfz-core", "", nil, testSmartResolveConfig())
+	if err != nil || handled || query != "clab-dfz-core02" || opener.hosts != nil {
+		t.Fatalf("query=%q handled=%v err=%v hosts=%v", query, handled, err, opener.hosts)
+	}
+}
+
+func TestRexPickHostsCanceled(t *testing.T) {
+	withRexOpener(t, &fakeRexOpener{})
+	withTitleTerminal(t, true)
+	withSelectHosts(t, func([]string) []string { return nil })
+	if _, _, err := rexPickHosts(t.Context(), "dfz-core", "", nil, testSmartResolveConfig()); err == nil {
+		t.Fatal("canceled selection did not error")
+	}
+}
+
+func TestRexPickHostsDefersToNormalLookup(t *testing.T) {
+	cfg := testSmartResolveConfig()
+	off := false
+	disabled := testSmartResolveConfig()
+	disabled.Rex.Enabled = &off
+	tests := []struct {
+		name     string
+		query    string
+		cfg      *config.Config
+		sshArgs  []string
+		terminal bool
+		opener   *fakeRexOpener
+	}{
+		{name: "exact host", query: "dfz-core01", cfg: cfg, terminal: true, opener: &fakeRexOpener{}},
+		{name: "one match", query: "cacti", cfg: cfg, terminal: true, opener: &fakeRexOpener{}},
+		{name: "ssh options", query: "dfz-core", cfg: cfg, sshArgs: []string{"-p", "22"}, terminal: true, opener: &fakeRexOpener{}},
+		{name: "no terminal", query: "dfz-core", cfg: cfg, opener: &fakeRexOpener{}},
+		{name: "disabled", query: "dfz-core", cfg: disabled, terminal: true, opener: &fakeRexOpener{}},
+		{name: "no rex client", query: "dfz-core", cfg: cfg, terminal: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			withRexOpener(t, tt.opener)
+			withTitleTerminal(t, tt.terminal)
+			withSelectHosts(t, func([]string) []string {
+				t.Fatal("multi-select opened")
+				return nil
+			})
+			query, handled, err := rexPickHosts(t.Context(), tt.query, "", tt.sshArgs, tt.cfg)
+			if err != nil || handled || query != tt.query {
+				t.Fatalf("query=%q handled=%v err=%v", query, handled, err)
+			}
+		})
+	}
+}

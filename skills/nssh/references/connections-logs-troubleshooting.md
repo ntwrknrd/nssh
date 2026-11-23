@@ -101,7 +101,10 @@ Smart lookup behavior:
 
 1. Check the nssh host catalog for an exact host.
 2. If one partial match exists, use it.
-3. If multiple partial matches exist, open `fzf` selection.
+3. If multiple partial matches exist, open `fzf` selection. Inside Rex, when
+   panes can be opened, the picker allows several hosts: Tab toggles a host
+   and Enter confirms. Several selections open as Rex panes; one connects as
+   usual. Space stays part of the fzf query.
 4. If lookup misses, offer local inventory creation with `nssh inv set`.
 
 Smart lookup does not refresh external inventory providers automatically on a

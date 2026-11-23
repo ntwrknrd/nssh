@@ -16,6 +16,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/audit"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
+	"github.com/ntwrknrd/nssh/internal/rex"
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/askpass"
 	"github.com/ntwrknrd/nssh/internal/ssh/captured"
@@ -97,7 +98,18 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ..
 		options = opts[0]
 	}
 	explicitUser := extractExplicitUser(hostname, sshArgs)
-	resolved, err := ResolveSmartHostForConnect(hostname, explicitUser)
+	var rexCfg *config.Config
+	if rex.Detected() && !rex.InPane() {
+		var err error
+		if rexCfg, err = loadConnectConfig(); err != nil {
+			return err
+		}
+		var handled bool
+		if hostname, handled, err = rexPickHosts(ctx, hostname, explicitUser, sshArgs, rexCfg); handled || err != nil {
+			return err
+		}
+	}
+	resolved, err := ResolveSmartHostForConnect(hostname, explicitUser, rexCfg)
 	if err != nil {
 		return fmt.Errorf("resolve host: %w", err)
 	}
