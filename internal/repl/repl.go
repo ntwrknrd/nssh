@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -163,7 +164,17 @@ func quotedList(s string) ([]string, error) {
 	return out, nil
 }
 
-var suffixExpansion = regexp.MustCompile(`^(.*)\(([^(),]+(?:,[^(),]+)*)\)$`)
+var (
+	suffixExpansion = regexp.MustCompile(`^(.*)\(([^(),]+(?:,[^(),]+)*)\)$`)
+	suffixRange     = regexp.MustCompile(`^([0-9]+)-([0-9]+)$`)
+)
+
+// ExpandTarget expands one prefix(suffix,...) target within the submission
+// limits. A suffix written as a numeric range such as 1-4 expands to each
+// number in it, keeping the start's zero padding: 01-03 gives 01, 02, 03.
+func ExpandTarget(value string) ([]string, error) {
+	return expandTarget(value, MaxSubmissionTargets, MaxSubmissionBytes)
+}
 
 func expandTarget(value string, maxTargets, maxBytes int) ([]string, error) {
 	if maxTargets < 1 {
@@ -185,24 +196,56 @@ func expandTarget(value string, maxTargets, maxBytes int) ([]string, error) {
 	if strings.Count(m[2], ",")+1 > maxTargets {
 		return nil, fmt.Errorf("submission exceeds target limit")
 	}
-	parts := strings.Split(m[2], ",")
-	// Check expansion size before duplicating the prefix into each target.
+	// Check expansion size and count before duplicating the prefix into each
+	// target, so a large range cannot allocate past the limits.
+	var suffixes []string
 	size := 0
-	for i, part := range parts {
+	add := func(suffix string) error {
+		if len(suffixes) >= maxTargets {
+			return fmt.Errorf("submission exceeds target limit")
+		}
+		size += len(m[1]) + len(suffix)
+		if size > maxBytes {
+			return fmt.Errorf("expanded submission exceeds %d bytes", MaxSubmissionBytes)
+		}
+		suffixes = append(suffixes, suffix)
+		return nil
+	}
+	for _, part := range strings.Split(m[2], ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			return nil, fmt.Errorf("empty target suffix")
 		}
-		size += len(m[1]) + len(part)
-		if size > maxBytes {
-			return nil, fmt.Errorf("expanded submission exceeds %d bytes", MaxSubmissionBytes)
+		r := suffixRange.FindStringSubmatch(part)
+		if r == nil {
+			if err := add(part); err != nil {
+				return nil, err
+			}
+			continue
 		}
-		parts[i] = part
+		first, err1 := strconv.Atoi(r[1])
+		last, err2 := strconv.Atoi(r[2])
+		if err1 != nil || err2 != nil || first > last {
+			return nil, fmt.Errorf("invalid target range %q", part)
+		}
+		if last-first >= maxTargets {
+			return nil, fmt.Errorf("submission exceeds target limit")
+		}
+		width := 0
+		if len(r[1]) > 1 && r[1][0] == '0' {
+			width = len(r[1])
+		}
+		for n := first; n <= last; n++ {
+			if err := add(fmt.Sprintf("%0*d", width, n)); err != nil {
+				return nil, err
+			}
+		}
 	}
-	for i, part := range parts {
-		parts[i] = m[1] + part
+	out := make([]string, len(suffixes))
+	for i, suffix := range suffixes {
+		out[i] = m[1] + suffix
 	}
-	return parts, nil
+	return out, nil
 }
 
 type ResolvedTarget struct {

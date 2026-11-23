@@ -285,3 +285,28 @@ esac
 		t.Fatal("host list without a command succeeded outside Rex")
 	}
 }
+
+func TestHostListProcessExpandsSuffixRanges(t *testing.T) {
+	f := newHostListFixture(t, buildBinary(t))
+	if _, err := f.run(t, "-l", "ops", "alpha,(x)", "show"); err == nil {
+		t.Fatal("invalid expansion accepted")
+	}
+	f = newHostListFixture(t, buildBinary(t))
+	cfg := filepath.Join(f.dir, "config", "nssh", "config.yaml")
+	data, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := "        core1: {auth: {mode: key, username: c1}}\n        core2: {auth: {mode: key, username: c2}}\n        core3: {auth: {mode: key, username: c3}}\n"
+	if err := os.WriteFile(cfg, append(data, extra...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.run(t, "core(1-3)", "show"); err != nil {
+		t.Fatal(err)
+	}
+	records := commandRecords(f.records(t), []string{"show"})
+	if len(records) != 3 {
+		t.Fatalf("records=%q", records)
+	}
+	requireHosts(t, records, "c1@core1", "c2@core2", "c3@core3")
+}

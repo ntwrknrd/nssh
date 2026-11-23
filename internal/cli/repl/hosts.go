@@ -23,7 +23,7 @@ import (
 // Callers identify bare list candidates before normalizing user@host or URIs.
 // An exact whole-token alias retains the ordinary single-target path.
 func RunHosts(ctx context.Context, req connect.Request) (handled bool, err error) {
-	if req.LiteralTarget || !strings.Contains(req.Host, ",") {
+	if req.LiteralTarget || !strings.ContainsAny(req.Host, ",(") {
 		return false, nil
 	}
 	cfg, err := config.LoadDefault()
@@ -130,34 +130,79 @@ func RunHosts(ctx context.Context, req connect.Request) (handled bool, err error
 	return true, nil
 }
 
+// splitHostList splits a root host list on commas outside suffix
+// expansions, expands prefix(suffix,...) members with the REPL grammar, and
+// validates each resulting bare host name.
 func splitHostList(value string) ([]string, error) {
-	if strings.Count(value, ",")+1 > core.MaxSubmissionTargets {
+	var members []string
+	depth, start := 0, 0
+	for i, ch := range value {
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				members = append(members, value[start:i])
+				start = i + 1
+			}
+		}
+		if depth < 0 || depth > 1 {
+			return nil, fmt.Errorf("invalid host-list expansion %q", value)
+		}
+	}
+	if depth != 0 {
+		return nil, fmt.Errorf("invalid host-list expansion %q", value)
+	}
+	members = append(members, value[start:])
+	if len(members) > core.MaxSubmissionTargets {
 		return nil, fmt.Errorf("host list exceeds %d targets", core.MaxSubmissionTargets)
 	}
-	parts := strings.Split(value, ",")
-	for i, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
+	var parts []string
+	for _, member := range members {
+		member = strings.TrimSpace(member)
+		if member == "" {
 			return nil, fmt.Errorf("host list contains an empty member")
 		}
-		address := part
-		if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
-			address = part[1 : len(part)-1]
-		}
-		if _, err := netip.ParseAddr(address); err != nil {
-			for _, ch := range part {
-				valid := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.'
-				if !valid {
-					return nil, fmt.Errorf("invalid bare host-list member %q", part)
-				}
-			}
-			if strings.HasPrefix(part, "-") {
-				return nil, fmt.Errorf("invalid bare host-list member %q", part)
+		expanded := []string{member}
+		if strings.Contains(member, "(") {
+			var err error
+			if expanded, err = core.ExpandTarget(member); err != nil {
+				return nil, err
 			}
 		}
-		parts[i] = part
+		for _, part := range expanded {
+			if err := validateHostListMember(part); err != nil {
+				return nil, err
+			}
+		}
+		parts = append(parts, expanded...)
+		if len(parts) > core.MaxSubmissionTargets {
+			return nil, fmt.Errorf("host list exceeds %d targets", core.MaxSubmissionTargets)
+		}
 	}
 	return parts, nil
+}
+
+func validateHostListMember(part string) error {
+	address := part
+	if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
+		address = part[1 : len(part)-1]
+	}
+	if _, err := netip.ParseAddr(address); err == nil {
+		return nil
+	}
+	for _, ch := range part {
+		valid := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.'
+		if !valid {
+			return fmt.Errorf("invalid bare host-list member %q", part)
+		}
+	}
+	if strings.HasPrefix(part, "-") {
+		return fmt.Errorf("invalid bare host-list member %q", part)
+	}
+	return nil
 }
 
 // Restrict the new list surface to foreground commands with captured output.

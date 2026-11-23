@@ -30,9 +30,10 @@ preserve.
   it shares the root option grammar. Public command names retain their existing
   routing and literal-target escape.
 - A bare comma-separated destination, such as `'host1, host2'`, is a root host
-  list when it has a remote command. Members are trimmed. An exact managed alias
-  equal to the whole comma-containing token remains one destination. `--target`,
-  `user@host`, and `ssh://` destinations are always single destinations.
+  list when it has a remote command. Members may use the REPL suffix expansion,
+  `prefix(1,2)` or the numeric range `prefix(1-4)`. Members are trimmed. An
+  exact managed alias equal to the whole token remains one destination.
+  `--target`, `user@host`, and `ssh://` destinations are always single.
 - A root host list applies an explicit `-l` user to every member; otherwise each
   member uses its resolved inventory username. It preserves the one remote argv
   and shared SSH-option tokens for every host. Root lists require a command,
@@ -105,7 +106,8 @@ preserve.
 ## Multi-host Commands
 
 - REPL takes one config/catalog snapshot per submission and resolves explicit
-  targets literally. Selectors use the inventory list's matching rules.
+  targets literally. A trailing `prefix(...)` expands listed suffixes and
+  numeric ranges, keeping the range start's zero padding. Selectors use the inventory list's matching rules.
 - Root host lists use the same scheduler limits as REPL: four workers by default
   and the same size, target, output, and concurrency caps. One remote command
   runs per host. Per-host output remains attributed and a final summary reports

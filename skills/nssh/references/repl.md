@@ -17,8 +17,9 @@ Enter one submission per line:
 
 Targets and commands must be single quoted and separated with commas. `\'`
 escapes a quote; other backslashes are preserved. A trailing `prefix(1,2)` expands
-suffixes. Empty values, trailing commas, ranges, and nested expansions are not
-supported. Commands pass unchanged to the remote command mechanism; this is not
+suffixes, and a numeric range such as `prefix(1-4)` or `prefix(01-04)` expands
+to each number, keeping the start's zero padding. Empty values, trailing
+commas, and nested expansions are not supported. Commands pass unchanged to the remote command mechanism; this is not
 a persistent remote shell.
 
 One `select:` expression may replace the target list. It uses `nssh inv list`

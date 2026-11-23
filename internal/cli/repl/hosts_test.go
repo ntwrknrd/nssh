@@ -16,7 +16,14 @@ func TestSplitHostList(t *testing.T) {
 	if strings.Join(got, "|") != "edge-a|edge-b|2001:db8::1|[::1]" {
 		t.Fatalf("hosts=%q", got)
 	}
-	for _, input := range []string{"edge,,other", ",edge", "edge,", "edge,(other)", "edge,ssh://other", "edge,user@other", "edge,-other", "edge,space host", "edge,é"} {
+	got, err = splitHostList("acm-core(1-3), edge(a,b),solo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, "|") != "acm-core1|acm-core2|acm-core3|edgea|edgeb|solo" {
+		t.Fatalf("expanded hosts=%q", got)
+	}
+	for _, input := range []string{"edge(1,2", "edge(1))", "edge((1))", "edge(1)x", "(1,2)", "edge(1 2)", "edge(4-1)", "edge,,other", ",edge", "edge,", "edge,(other)", "edge,ssh://other", "edge,user@other", "edge,-other", "edge,space host", "edge,é"} {
 		if _, err := splitHostList(input); err == nil {
 			t.Errorf("%q accepted", input)
 		}

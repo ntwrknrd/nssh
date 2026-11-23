@@ -54,6 +54,7 @@ and record sessions.
 
 Run one remote command across a bare comma-separated host list:
   nssh 'host1,host2' 'show version'
+  nssh 'core(1-4)' 'show version'
 Lists use four workers, require a command, and close remote stdin.
 Inside Rex, a list without a command opens each host in its own pane.
 Use --target to force a literal destination.`,

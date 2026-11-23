@@ -167,6 +167,10 @@ func TestRootHostListRoutingPreservesSSHForms(t *testing.T) {
 	}{
 		{[]string{"a,b", "show env power"}, true},
 		{[]string{"a, b", "show env power"}, true},
+		{[]string{"acm-core(1-4)", "show"}, true},
+		{[]string{"acm-core(1,2)"}, true},
+		{[]string{"--target", "acm-core(1,2)"}, false},
+		{[]string{"ops@core(1,2)", "show"}, false},
 		{[]string{"-vJ", "jump1,jump2", "a,b", "show"}, true},
 		{[]string{"--", "a,b", "-p22"}, true},
 		{[]string{"--target", "a,b", "show"}, false},

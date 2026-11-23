@@ -65,7 +65,12 @@ argument:
 ```fish
 nssh 'irn-border-sw1,irn-border-sw2,irn-agg-sw1,irn-agg-sw2' 'show env power'
 nssh 'irn-border-sw1, irn-border-sw2, irn-agg-sw1, irn-agg-sw2' 'show env power'
+nssh 'irn-border-sw(1,2), irn-agg-sw(1-2)' 'show env power'
 ```
+
+Members may use the REPL suffix expansion, including numeric ranges. Quote the
+destination: fish runs an unquoted `(1,2)` as a command substitution and zsh
+treats it as a glob qualifier.
 
 An exact inventory alias containing the whole comma token remains one host.
 `--target`, `user@host`, and `ssh://` forms are always single targets. An explicit

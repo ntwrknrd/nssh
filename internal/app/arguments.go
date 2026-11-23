@@ -99,9 +99,10 @@ func parseRootArgs(args []string) (rootInvocation, error) {
 				return rootInvocation{commandArgs: args}, nil
 			}
 			var err error
-			// Classify before normalizing userinfo or URI destinations. Commas in
-			// those SSH forms never become a list. --target is always literal.
-			listCandidate = strings.Contains(arg, ",") && !strings.Contains(arg, "@") && !strings.HasPrefix(arg, "ssh://")
+			// Classify before normalizing userinfo or URI destinations. Commas and
+			// suffix expansions in those SSH forms never become a list. --target
+			// is always literal.
+			listCandidate = strings.ContainsAny(arg, ",(") && !strings.Contains(arg, "@") && !strings.HasPrefix(arg, "ssh://")
 			request, err = destinationRequest(arg, options)
 			if err != nil {
 				return rootInvocation{}, err
