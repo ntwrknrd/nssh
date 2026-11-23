@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // Placement setting values.
@@ -148,7 +149,10 @@ func (c *Client) Open(ctx context.Context, p Placement, hosts []Host) (Opened, e
 	}
 
 	var windows []map[string]any
-	direction := c.splitDirection(ctx, p.Split)
+	direction := ""
+	if len(remaining) > 1 {
+		direction = c.splitDirection(ctx, p.Split)
+	}
 	for _, group := range groupHosts(remaining, p.PanesPerTab) {
 		name := TabName(group)
 		result.Tabs = append(result.Tabs, name)
@@ -281,24 +285,40 @@ func (c *Client) liveHosts(ctx context.Context, session string, hosts []Host) (l
 	if err := c.callJSON(ctx, session, "session.list_blocks", nil, &list); err != nil {
 		return live, err
 	}
+	// Candidates are checked concurrently; results keep session order.
+	var candidates []viewBlock
 	for _, block := range list.Blocks {
 		if block.Placement != "placed" {
 			continue
 		}
 		live.windows[block.WindowID]++
-		name := strings.ToLower(block.Label)
-		if wanted[name] && c.runsNSSH(ctx, session, block.BlockID) {
+		if wanted[strings.ToLower(block.Label)] {
+			candidates = append(candidates, block)
+		}
+	}
+	running := make([]bool, len(candidates))
+	var wg sync.WaitGroup
+	for i, block := range candidates {
+		wg.Go(func() { running[i] = c.runsNSSH(ctx, session, block.BlockID) })
+	}
+	wg.Wait()
+	for i, block := range candidates {
+		if running[i] {
+			name := strings.ToLower(block.Label)
 			live.blocks[name] = append(live.blocks[name], block)
 		}
 	}
 	return live, nil
 }
 
-// runsNSSH reports whether a terminal block's program is a running nssh. On
-// macOS Rex starts every program under login and may report login as the
-// foreground too, so a block whose processes do not name nssh still counts
-// when its root OSC 7501 status record was reported by nssh.
+// runsNSSH reports whether a terminal block's program is a running nssh: its
+// root OSC 7501 status record was reported by nssh, or, without one, its
+// processes name nssh. The status comes first because on macOS Rex starts
+// every program under login and may report login as the foreground too.
 func (c *Client) runsNSSH(ctx context.Context, session, block string) bool {
+	if c.reportsNSSHStatus(ctx, session, block) {
+		return true
+	}
 	type proc struct {
 		Name string `json:"name"`
 		Path string `json:"path"`
@@ -327,7 +347,7 @@ func (c *Client) runsNSSH(ctx context.Context, session, block string) bool {
 			return true
 		}
 	}
-	return c.reportsNSSHStatus(ctx, session, block)
+	return false
 }
 
 // reportsNSSHStatus reports whether a terminal block holds a root program
