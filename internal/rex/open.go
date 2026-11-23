@@ -250,8 +250,9 @@ func (c *Client) liveHosts(ctx context.Context, session string, hosts []Host) (m
 }
 
 // runsNSSH reports whether a terminal block's program is a running nssh. On
-// macOS Rex starts every program under login, so child is login and nssh is
-// found in foreground or its ancestors instead.
+// macOS Rex starts every program under login and may report login as the
+// foreground too, so a block whose processes do not name nssh still counts
+// when its root OSC 7501 status record was reported by nssh.
 func (c *Client) runsNSSH(ctx context.Context, session, block string) bool {
 	type proc struct {
 		Name string `json:"name"`
@@ -277,7 +278,28 @@ func (c *Client) runsNSSH(ctx context.Context, session, block string) bool {
 		}
 	}
 	for _, p := range procs {
-		if p.Name == "nssh" || filepath.Base(p.Path) == "nssh" {
+		if p.Name == App || filepath.Base(p.Path) == App {
+			return true
+		}
+	}
+	return c.reportsNSSHStatus(ctx, session, block)
+}
+
+// reportsNSSHStatus reports whether a terminal block holds a root program
+// status record from nssh.
+func (c *Client) reportsNSSHStatus(ctx context.Context, session, block string) bool {
+	var status struct {
+		Records []struct {
+			ID  string `json:"id"`
+			App string `json:"app"`
+		} `json:"records"`
+	}
+	args := map[string]any{"block_id": block, "args": map[string]any{}}
+	if err := c.callJSON(ctx, session, "com.superlogical.terminal.program_status", args, &status); err != nil {
+		return false
+	}
+	for _, record := range status.Records {
+		if record.ID == "" && record.App == App {
 			return true
 		}
 	}

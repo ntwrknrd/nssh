@@ -305,8 +305,10 @@ same placement and reuse rules. This is an explicit prompt, never automatic.
 
 Verified against Rex 0.1.0 (2061) with `rex api describe`: the `process`
 method returns `child` (with `name` and `path`, never other arguments),
-`foreground`, `ancestors`, and `last_exit`. On macOS `child` is always
-`login`, so a live nssh pane is found by `foreground` or `ancestors`; `size` returns `columns` and `rows`; `session.select` is an app
+`foreground`, `ancestors`, and `last_exit`. On macOS Rex runs panes under
+`login` and can report it as both `child` and `foreground`, so a live nssh
+pane is also recognized by its root `program_status` record with
+`app=nssh`; `size` returns `columns` and `rows`; `session.select` is an app
 client action taking `session_id` and an optional `window_id`. No method
 reports Remote Control, so nssh probes it by selecting the invoking session
 with `rex do session.select` before a single-host launch. Panes are created

@@ -160,18 +160,41 @@ func TestOpenFocusesExistingWhenAllLive(t *testing.T) {
 	}
 }
 
+// On macOS Rex can report login as both child and foreground, hiding nssh;
+// the pane's OSC 7501 root record identifies it instead.
+func TestOpenReusesPaneByProgramStatus(t *testing.T) {
+	dir := fakeServer(t, map[string]string{
+		"session.list":                             `{"sessions":[{"session_id":"session:nssh","label":"nssh"}]}`,
+		"session.list_blocks":                      `{"blocks":[{"block_id":"block:a","label":"acm-core1.lab.local","placement":"placed","window_id":"window:a"}]}`,
+		"com.superlogical.terminal.process":        `{"last_exit":null,"child":{"pid":1,"user_id":0,"name":"login","path":"/usr/bin/login"},"foreground":{"pid":1,"user_id":0,"name":"login","path":"/usr/bin/login"}}`,
+		"com.superlogical.terminal.program_status": `{"records":[{"state":"idle","app":"nssh","effective_app":"nssh"}]}`,
+	})
+	opened, err := NewClient().Open(t.Context(), Placement{}, hostsNamed("acm-core1.lab.local"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opened.Tabs) != 0 || strings.Join(opened.Reused, ",") != "acm-core1.lab.local" {
+		t.Fatalf("opened = %+v", opened)
+	}
+	if got := callArgs(t, dir, "session.focus_block")["block_id"]; got != "block:a" {
+		t.Fatalf("focused %v, want block:a", got)
+	}
+}
+
 func TestOpenIgnoresPanesNotRunningNSSH(t *testing.T) {
 	for name, process := range map[string]string{
-		"shell":  `{"child":{"name":"zsh","pid":1,"user_id":501},"last_exit":null}`,
-		"login":  `{"child":{"name":"login","pid":1,"user_id":0},"foreground":{"name":"zsh","pid":2,"user_id":501},"ancestors":[{"name":"login","pid":1,"user_id":0}],"last_exit":null}`,
-		"exited": `{"child":{"name":"nssh","pid":1,"user_id":501},"last_exit":{"exit_code":0}}`,
+		"shell":            `{"child":{"name":"zsh","pid":1,"user_id":501},"last_exit":null}`,
+		"login":            `{"child":{"name":"login","pid":1,"user_id":0},"foreground":{"name":"zsh","pid":2,"user_id":501},"ancestors":[{"name":"login","pid":1,"user_id":0}],"last_exit":null}`,
+		"exited":           `{"child":{"name":"nssh","pid":1,"user_id":501},"last_exit":{"exit_code":0}}`,
+		"other app status": `{"child":{"name":"login","pid":1,"user_id":0},"foreground":{"name":"login","pid":1,"user_id":0},"last_exit":null}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := fakeServer(t, map[string]string{
-				"session.list":                      `{"sessions":[{"session_id":"session:nssh","label":"nssh"}]}`,
-				"session.list_blocks":               `{"blocks":[{"block_id":"block:a","label":"acm-core1","placement":"placed","window_id":"window:a"}]}`,
-				"com.superlogical.terminal.process": process,
-				"session.new_window":                `{"window_id":"window:b","block_ids":["block:b"]}`,
+				"session.list":                             `{"sessions":[{"session_id":"session:nssh","label":"nssh"}]}`,
+				"session.list_blocks":                      `{"blocks":[{"block_id":"block:a","label":"acm-core1","placement":"placed","window_id":"window:a"}]}`,
+				"com.superlogical.terminal.process":        process,
+				"com.superlogical.terminal.program_status": `{"records":[{"state":"idle","app":"cargo"},{"id":"hosts","app":"nssh"}]}`,
+				"session.new_window":                       `{"window_id":"window:b","block_ids":["block:b"]}`,
 			})
 			opened, err := NewClient().Open(t.Context(), Placement{}, hostsNamed("acm-core1"))
 			if err != nil || len(opened.Reused) != 0 || len(opened.Tabs) != 1 {
