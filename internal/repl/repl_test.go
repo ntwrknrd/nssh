@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -274,5 +275,40 @@ func TestExecutorOrdersResultsAndWaitsBetweenCommands(t *testing.T) {
 	want := []string{"one:a", "one:b", "one:c", "two:a", "two:b", "two:c"}
 	if !reflect.DeepEqual(printed, want) {
 		t.Fatalf("printed=%v want=%v", printed, want)
+	}
+}
+
+func TestExpandTargetRanges(t *testing.T) {
+	tests := map[string]string{
+		"core(1-3)":      "core1|core2|core3",
+		"core(01-03)":    "core01|core02|core03",
+		"core(1,3-4,b)":  "core1|core3|core4|coreb",
+		"core(9-10)":     "core9|core10",
+		"core(a-b)":      "corea-b",
+		"core(5-5)":      "core5",
+		"acm-core(1, 2)": "acm-core1|acm-core2",
+		"plain-host":     "plain-host",
+	}
+	for in, want := range tests {
+		got, err := ExpandTarget(in)
+		if err != nil {
+			t.Errorf("ExpandTarget(%q) error: %v", in, err)
+			continue
+		}
+		if strings.Join(got, "|") != want {
+			t.Errorf("ExpandTarget(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for _, in := range []string{"core(4-1)", "core(1-" + strconv.Itoa(MaxSubmissionTargets+1) + ")", "core(1-99999999999999999999)", "(1-2)"} {
+		if _, err := ExpandTarget(in); err == nil {
+			t.Errorf("ExpandTarget(%q) accepted", in)
+		}
+	}
+	if got, err := ExpandTarget("core(1-" + strconv.Itoa(MaxSubmissionTargets) + ")"); err != nil || len(got) != MaxSubmissionTargets {
+		t.Fatalf("range at the target limit = %d, %v", len(got), err)
+	}
+	s, err := Parse("[ 'edge(1-2)' ] ( 'show version' )")
+	if err != nil || len(s.Targets) != 2 || s.Targets[1].Value != "edge2" {
+		t.Fatalf("REPL range = %+v, %v", s, err)
 	}
 }

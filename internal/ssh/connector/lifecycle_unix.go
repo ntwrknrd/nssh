@@ -197,7 +197,7 @@ func (c *Connector) waitChild() error {
 		case 5:
 			return &exit.ExitError{Code: exit.ExitAuthFailed, Message: "authentication failed", Cause: err}
 		default:
-			return &exit.ExitError{Code: code, Message: fmt.Sprintf("ssh exited with code %d", code), Cause: err}
+			return &exit.ExitError{Code: code, Message: fmt.Sprintf("ssh exited with code %d", code), Cause: err, Remote: true}
 		}
 	}
 

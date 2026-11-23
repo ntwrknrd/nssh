@@ -65,13 +65,19 @@ argument:
 ```fish
 nssh 'irn-border-sw1,irn-border-sw2,irn-agg-sw1,irn-agg-sw2' 'show env power'
 nssh 'irn-border-sw1, irn-border-sw2, irn-agg-sw1, irn-agg-sw2' 'show env power'
+nssh 'irn-border-sw(1,2), irn-agg-sw(1-2)' 'show env power'
 ```
+
+Members may use the REPL suffix expansion, including numeric ranges. Quote the
+destination: fish runs an unquoted `(1,2)` as a command substitution and zsh
+treats it as a glob qualifier.
 
 An exact inventory alias containing the whole comma token remains one host.
 `--target`, `user@host`, and `ssh://` forms are always single targets. An explicit
 `-l` applies to all members; otherwise each member uses its inventory username.
 The SSH-option tokens are shared unchanged. Lists use four workers by default,
-require a remote command, and send EOF on remote stdin. Output uses a command
+require a remote command (inside Rex, a list without one opens each host in
+its own pane), and send EOF on remote stdin. Output uses a command
 heading, device headings with status, blank lines between device outputs, and
 a compact results summary.
 Both blocks and summary follow the requested host order. Labels use the supplied
@@ -95,7 +101,10 @@ Smart lookup behavior:
 
 1. Check the nssh host catalog for an exact host.
 2. If one partial match exists, use it.
-3. If multiple partial matches exist, open `fzf` selection.
+3. If multiple partial matches exist, open `fzf` selection. Inside Rex, when
+   panes can be opened, the picker allows several hosts: Tab toggles a host
+   and Enter confirms. Several selections open as Rex panes; one connects as
+   usual. Space stays part of the fzf query.
 4. If lookup misses, offer local inventory creation with `nssh inv set`.
 
 Smart lookup does not refresh external inventory providers automatically on a

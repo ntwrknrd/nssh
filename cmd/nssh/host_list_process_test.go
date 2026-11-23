@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -244,5 +245,90 @@ func TestHostListProcessCtrlCCleansChild(t *testing.T) {
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
+	}
+}
+
+func TestHostListProcessWithoutCommandOpensRexPanes(t *testing.T) {
+	f := newHostListFixture(t, buildBinary(t))
+	rexDir := filepath.Join(f.dir, "rex")
+	if err := os.MkdirAll(rexDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	fake := `#!/bin/sh
+printf '%s\n' "$*" >> "$(dirname "$0")/calls"
+case "$*" in
+*session.create*) echo '{"session_id":"session:n","initial_windows":[{"window_id":"window:1","block_ids":["block:1","block:2"]}]}' ;;
+*session.list*) echo '{"sessions":[]}' ;;
+*) echo '{}' ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(rexDir, "rex"), []byte(fake), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := f.command(t, "alpha-alias,beta")
+	cmd.Env = append(cmd.Env, "REX_SESSION=session:me", "REX_BLOCK=block:me", "REX_BIN_DIR="+rexDir)
+	if output, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(output), "opened alpha + beta in Rex session nssh") {
+		t.Fatalf("err=%v output=%s", err, output)
+	}
+	data, err := os.ReadFile(filepath.Join(rexDir, "calls"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls := string(data); !strings.Contains(calls, `"label":"alpha"`) || !strings.Contains(calls, `"--target","beta"`) {
+		t.Fatalf("rex calls = %s", calls)
+	}
+	if log := f.readLog(t); log != "" {
+		t.Fatalf("ssh ran in the invoking pane: %q", log)
+	}
+
+	// Outside Rex the command is still required.
+	if _, err := f.run(t, "alpha,beta"); err == nil {
+		t.Fatal("host list without a command succeeded outside Rex")
+	}
+}
+
+func TestHostListProcessExpandsSuffixRanges(t *testing.T) {
+	f := newHostListFixture(t, buildBinary(t))
+	if _, err := f.run(t, "-l", "ops", "alpha,(x)", "show"); err == nil {
+		t.Fatal("invalid expansion accepted")
+	}
+	f = newHostListFixture(t, buildBinary(t))
+	cfg := filepath.Join(f.dir, "config", "nssh", "config.yaml")
+	data, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := "        core1: {auth: {mode: key, username: c1}}\n        core2: {auth: {mode: key, username: c2}}\n        core3: {auth: {mode: key, username: c3}}\n"
+	if err := os.WriteFile(cfg, append(data, extra...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.run(t, "core(1-3)", "show"); err != nil {
+		t.Fatal(err)
+	}
+	records := commandRecords(f.records(t), []string{"show"})
+	if len(records) != 3 {
+		t.Fatalf("records=%q", records)
+	}
+	requireHosts(t, records, "c1@core1", "c2@core2", "c3@core3")
+}
+
+func TestInvListJSONProcess(t *testing.T) {
+	f := newHostListFixture(t, buildBinary(t))
+	output, err := f.command(t, "inv", "list", "--json", "-s", "beta").Output()
+	if err != nil {
+		t.Fatalf("inv list --json: %v", err)
+	}
+	var listed struct {
+		Hosts []struct {
+			Host string `json:"host"`
+			User string `json:"user"`
+			Port int    `json:"port"`
+		} `json:"hosts"`
+	}
+	if err := json.Unmarshal(output, &listed); err != nil {
+		t.Fatalf("decode %q: %v", output, err)
+	}
+	if len(listed.Hosts) != 1 || listed.Hosts[0].Host != "beta" || listed.Hosts[0].Port != 22 {
+		t.Fatalf("hosts = %+v", listed.Hosts)
 	}
 }

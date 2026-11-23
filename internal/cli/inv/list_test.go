@@ -1,6 +1,7 @@
 package inv
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -132,5 +133,30 @@ func assertGroupSummary(t *testing.T, row inventoryGroupSummary, name, domainSuf
 		if row.Sources[i] != sources[i] {
 			t.Fatalf("sources = %+v, want %+v", row.Sources, sources)
 		}
+	}
+}
+
+func TestWriteListJSON(t *testing.T) {
+	hosts := []*sshconfig.HostEntry{
+		{Host: "acm-core1", HostName: "10.0.0.1", Properties: map[string]string{"user": "ops", "port": "2222"}},
+		{Host: "edge1", HostName: "edge1", Properties: map[string]string{}},
+	}
+	meta := func(host *sshconfig.HostEntry) hostMetadata {
+		if host.Host == "edge1" {
+			return hostMetadata{}
+		}
+		return hostMetadata{Owner: "netbox", Group: "netbox/core"}
+	}
+	var out bytes.Buffer
+	if err := writeListJSON(&out, hosts, meta); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"hosts":[{"host":"acm-core1","hostname":"10.0.0.1","user":"ops","port":2222,"provider":"netbox","group":"netbox/core"},{"host":"edge1","port":22}]}` + "\n"
+	if out.String() != want {
+		t.Fatalf("json =\n%s\nwant\n%s", out.String(), want)
+	}
+	out.Reset()
+	if err := writeListJSON(&out, nil, meta); err != nil || out.String() != "{\"hosts\":[]}\n" {
+		t.Fatalf("empty json = %q, %v", out.String(), err)
 	}
 }

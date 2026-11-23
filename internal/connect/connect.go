@@ -16,6 +16,7 @@ import (
 	"github.com/ntwrknrd/nssh/internal/audit"
 	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
+	"github.com/ntwrknrd/nssh/internal/rex"
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/askpass"
 	"github.com/ntwrknrd/nssh/internal/ssh/captured"
@@ -97,11 +98,39 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ..
 		options = opts[0]
 	}
 	explicitUser := extractExplicitUser(hostname, sshArgs)
-	resolved, err := ResolveSmartHostForConnect(hostname, explicitUser)
+	start := time.Now()
+	var rexCfg *config.Config
+	var catalog *HostCatalog
+	if rex.Detected() && !noRexOpen() {
+		var err error
+		if rexCfg, err = loadConnectConfig(); err != nil {
+			return err
+		}
+		var handled bool
+		if hostname, handled, catalog, err = rexPickHosts(ctx, hostname, explicitUser, sshArgs, rexCfg); handled || err != nil {
+			return err
+		}
+	}
+	var resolved *ResolvedHost
+	var err error
+	if catalog != nil {
+		resolved, err = resolveSmartHostFromCatalog(hostname, explicitUser, rexCfg, catalog)
+	} else {
+		resolved, err = ResolveSmartHostForConnect(hostname, explicitUser, rexCfg)
+	}
 	if err != nil {
 		return fmt.Errorf("resolve host: %w", err)
 	}
 	cfg := resolved.Config
+	slog.Debug("resolved before rex open", "elapsed", time.Since(start).Round(time.Millisecond))
+	if OpenInRex(ctx, cfg, []string{rexTarget(hostname, explicitUser, resolved)}, sshArgs) {
+		slog.Debug("rex open done", "elapsed", time.Since(start).Round(time.Millisecond))
+		return nil
+	}
+	if rex.ForceOpen() {
+		// A palette action has no terminal to connect in.
+		return fmt.Errorf("could not open %s in Rex; run nssh -v for details", hostname)
+	}
 
 	recorded, err := maybeWrapWithRecording(resolved.Canonical, sshArgs, options)
 	if err != nil {
@@ -852,7 +881,14 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 		}
 	}
 	defer setTerminalTitle(resolved, sshArgs, cfg)()
+	status := newSessionStatus(resolved, sshArgs, cfg)
+	defer status.labelPane()()
+	status.connecting()
 	conn := newConnector(resolved, sshArgs, cfg, opts)
+	if status != nil {
+		conn.SetHostKeyPromptFunc(status.hostKeyPrompt(newHostKeyPromptFunc()))
+		conn.SetRelayStartFunc(status.established)
+	}
 	conn.SetEnv(connectionAuthEnv(askpassHandle))
 	conn.SetAuthRetry(func(err error) (context.Context, error) {
 		retryCtx, retryErr := retryAuth(err)
@@ -866,6 +902,7 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 		connErr = askpassHandle.operationError(connErr)
 	}
 	result = connectionResult{Err: connErr, Output: conn.LastOutput()}
+	status.finished(connErr)
 
 	if audit != nil {
 		if connErr == nil {
@@ -986,6 +1023,10 @@ func appendHostKeyPreparationSSHArgs(sshArgs []string, prep *connector.HostKeyPr
 }
 
 func handleCompatibilityFixes(ctx context.Context, query, explicitUser string, smart bool, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger, opts Options, result connectionResult) (connectionResult, error) {
+	// A host name that does not resolve is not an algorithm mismatch.
+	if hostUnresolved(result.Output) {
+		return result, nil
+	}
 	for iteration := 1; iteration <= maxCompatibilityFixIterations; iteration++ {
 		fixes := discoverCompatibilityFixes(ctx, resolved, cfg, result.Output)
 		if len(fixes) == 0 {
@@ -1187,6 +1228,12 @@ func newConnector(resolved *ResolvedHost, sshArgs []string, cfg *config.Config, 
 	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 	conn.SetTimeouts(&cfg.SSH.Connection)
 	return conn
+}
+
+// hostUnresolved reports whether ssh output shows the host name did not
+// resolve.
+func hostUnresolved(output string) bool {
+	return strings.Contains(output, "Could not resolve hostname")
 }
 
 func isCompatibilityError(err error) bool {

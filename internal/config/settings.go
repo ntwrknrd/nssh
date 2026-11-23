@@ -16,6 +16,7 @@ type Config struct {
 	Logging   LoggingConfig   `yaml:"logging,omitempty"`
 	SSH       SSHConfig       `yaml:"ssh,omitempty"`
 	Highlight HighlightConfig `yaml:"highlight,omitempty"`
+	Rex       RexConfig       `yaml:"rex,omitempty"`
 
 	Credential CredentialConfig `yaml:"credential,omitempty"`
 	Host       HostConfig       `yaml:"host,omitempty"`
@@ -126,6 +127,96 @@ type SessionArchiveConfig struct {
 	MinAge Duration `yaml:"min_age,omitempty"`
 	// Timeout caps a manual archive maintenance pass (default: 30s)
 	Timeout Duration `yaml:"timeout,omitempty"`
+}
+
+// ============================================================================
+// Rex Configuration
+// ============================================================================
+
+// Rex placement values.
+const (
+	RexSessionCurrent  = "current"
+	RexSplitAuto       = "auto"
+	RexSplitSideBySide = "side-by-side"
+	RexSplitStacked    = "stacked"
+	RexSingleHostTab   = "tab"
+	RexSingleHostHere  = "here"
+)
+
+// RexConfig controls the optional Rex terminal integration. Zero values mean
+// the defaults, so sparse saves stay sparse.
+type RexConfig struct {
+	// Enabled turns the integration on inside Rex (default true)
+	Enabled *bool `yaml:"enabled,omitempty"`
+	// Session is the session label hosts open in, or "current" (default nssh)
+	Session string `yaml:"session,omitempty"`
+	// PanesPerTab is 1, 2, or 4 (default 2)
+	PanesPerTab int `yaml:"panes_per_tab,omitempty"`
+	// Split is auto, side-by-side, or stacked (default auto)
+	Split string `yaml:"split,omitempty"`
+	// SingleHost is tab, or here to connect in the current pane (default tab)
+	SingleHost string `yaml:"single_host,omitempty"`
+}
+
+// EnabledValue reports whether the integration is enabled.
+func (c RexConfig) EnabledValue() bool { return c.Enabled == nil || *c.Enabled }
+
+// SessionValue returns the configured session label or "current".
+func (c RexConfig) SessionValue() string {
+	if s := strings.TrimSpace(c.Session); s != "" {
+		return s
+	}
+	return "nssh"
+}
+
+// PanesPerTabValue returns the configured panes per tab.
+func (c RexConfig) PanesPerTabValue() int {
+	if c.PanesPerTab == 0 {
+		return 2
+	}
+	return c.PanesPerTab
+}
+
+// SplitValue returns the configured split direction.
+func (c RexConfig) SplitValue() string {
+	if c.Split == "" {
+		return RexSplitAuto
+	}
+	return c.Split
+}
+
+// SingleHostValue returns where a single interactive host opens.
+func (c RexConfig) SingleHostValue() string {
+	if c.SingleHost == "" {
+		return RexSingleHostTab
+	}
+	return c.SingleHost
+}
+
+// Validate checks Rex placement settings.
+func (c RexConfig) Validate() error {
+	switch c.PanesPerTab {
+	case 0, 1, 2, 4:
+	default:
+		return fmt.Errorf("rex.panes_per_tab must be 1, 2, or 4")
+	}
+	switch c.Split {
+	case "", RexSplitAuto, RexSplitSideBySide, RexSplitStacked:
+	default:
+		return fmt.Errorf("rex.split must be auto, side-by-side, or stacked")
+	}
+	switch c.SingleHost {
+	case "", RexSingleHostTab, RexSingleHostHere:
+	default:
+		return fmt.Errorf("rex.single_host must be tab or here")
+	}
+	if strings.EqualFold(strings.TrimSpace(c.Session), "site") {
+		return fmt.Errorf("rex.session: site is not implemented yet")
+	}
+	if len(c.Session) > 128 {
+		return fmt.Errorf("rex.session must be at most 128 characters")
+	}
+	return nil
 }
 
 // ============================================================================
@@ -481,6 +572,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := c.SSH.Security.Validate(); err != nil {
+		return err
+	}
+	if err := c.Rex.Validate(); err != nil {
 		return err
 	}
 	return nil

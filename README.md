@@ -40,6 +40,14 @@ prompts, and can record sessions.
   terminal tab after the resolved target with OSC 2 and pop the previous title
   on exit where the terminal keeps an xterm title stack. Otherwise the shell's
   next prompt redraws it. Set `ssh.terminal_title: false` to disable it.
+- Rex terminal: inside Rex, `nssh HOST` and `nssh 'host1,host2'` without a
+  command open in an `nssh` session, two panes per tab, and reuse a live pane
+  for the same host. The smart-lookup picker accepts several hosts with Tab.
+  Sessions report OSC 7501 program status and label their pane. Tune it
+  under `rex:` in the config, or set `NSSH_REX=0` to disable it. When
+  several Rex apps share a server, set `REX_CLIENT` to the app you use.
+  [`contrib/rex/nssh.lua`](contrib/rex/nssh.lua) adds Rex command-palette
+  actions to connect to hosts or run a command across them.
 - Recordings: optional asciinema session capture is managed with `nssh log`.
 - SCP: `nssh cp` uses the same host and credential resolution path as connect.
 - Multi-host commands: `nssh repl` provides an interactive terminal prompt or

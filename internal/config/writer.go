@@ -548,7 +548,25 @@ func sparseConfigTable(cfg *Config) map[string]any {
 	if len(highlight) > 0 {
 		table["highlight"] = highlight
 	}
+	rex := rexTable(cfg.Rex)
+	if len(rex) > 0 {
+		table["rex"] = rex
+	}
 
+	return table
+}
+
+func rexTable(cfg RexConfig) map[string]any {
+	table := make(map[string]any)
+	if cfg.Enabled != nil {
+		table["enabled"] = *cfg.Enabled
+	}
+	addString(table, "session", cfg.Session)
+	if cfg.PanesPerTab != 0 {
+		table["panes_per_tab"] = cfg.PanesPerTab
+	}
+	addString(table, "split", cfg.Split)
+	addString(table, "single_host", cfg.SingleHost)
 	return table
 }
 

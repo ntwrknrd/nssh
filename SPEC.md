@@ -25,17 +25,20 @@ preserve.
 - Smart lookup resolves managed inventory and may offer selection or local host
   creation. A short name (first DNS label, never an IP octet) shared by hosts
   is ambiguous unless `inventory.preferred_domains` ranks exactly one host's
-  domain highest. Literal targeting bypasses fuzzy selection without discarding known
-  inventory metadata. `--target HOST` changes only resolution to literal;
-  it shares the root option grammar. Public command names retain their existing
-  routing and literal-target escape.
+  domain highest. Literal targeting bypasses fuzzy selection without
+  discarding known inventory metadata. Inside Rex, selection allows several
+  hosts, which open as Rex panes. `--target HOST` changes only resolution to
+  literal; it shares the root option grammar. Public command names retain
+  their existing routing and literal-target escape.
 - A bare comma-separated destination, such as `'host1, host2'`, is a root host
-  list when it has a remote command. Members are trimmed. An exact managed alias
-  equal to the whole comma-containing token remains one destination. `--target`,
-  `user@host`, and `ssh://` destinations are always single destinations.
+  list when it has a remote command. Members may use the REPL suffix expansion,
+  `prefix(1,2)` or the numeric range `prefix(1-4)`. Members are trimmed. An
+  exact managed alias equal to the whole token remains one destination.
+  `--target`, `user@host`, and `ssh://` destinations are always single.
 - A root host list applies an explicit `-l` user to every member; otherwise each
   member uses its resolved inventory username. It preserves the one remote argv
-  and shared SSH-option tokens for every host. Root lists require a command.
+  and shared SSH-option tokens for every host. Root lists require a command,
+  except inside Rex, where a list without one opens interactive panes.
 - Interactive connections preserve terminal semantics. Remote commands preserve
   distinct stdout, stderr, and remote exit status.
 - SCP uses the same host, SSH policy, proxy, credential, and host-key resolution
@@ -104,7 +107,8 @@ preserve.
 ## Multi-host Commands
 
 - REPL takes one config/catalog snapshot per submission and resolves explicit
-  targets literally. Selectors use the inventory list's matching rules.
+  targets literally. A trailing `prefix(...)` expands listed suffixes and
+  numeric ranges, keeping the range start's zero padding. Selectors use the inventory list's matching rules.
 - Root host lists use the same scheduler limits as REPL: four workers by default
   and the same size, target, output, and concurrency caps. One remote command
   runs per host. Per-host output remains attributed and a final summary reports
@@ -132,6 +136,42 @@ preserve.
   editor. Remote control sequences cannot execute through its rendering path.
 - Go/Charm is the maintained frontend. Rust is a documented evaluated alternative,
   with no shipped bridge or ongoing frontend parity requirement.
+
+## Rex Integration
+
+- Rex integration is optional and detected from `REX_SESSION` and `REX_BLOCK`;
+  `NSSH_REX=0` or `rex.enabled: false` disables it. Outside Rex, behavior is unchanged, and a Rex
+  failure never fails an nssh operation.
+- Interactive sessions and root host lists report OSC 7501 program status
+  under `app=nssh`, with the terminal-title mode exclusions. Reports carry only
+  sanitized names, states, and counts, never remote output.
+- Interactive sessions label the Rex pane with the sanitized target name
+  through the `rex` CLI and restore the previous label on exit. The pane is
+  left unchanged when its label cannot be read, and an operator rename during
+  the session is kept.
+- Inside Rex, an interactive single host with no SSH options, and a root list
+  with no command, open in the configured session (`nssh` by default), grouped
+  into tabs of `rex.panes_per_tab` panes. A host with a live nssh pane there is
+  focused instead of opened again; with several live panes, the tab holding
+  the most requested hosts and fewest others wins. The app switches to the
+  result.
+- A single host connects in the current pane when stdin or stdout is not a
+  terminal, SSH options are given, the app does not accept actions (Remote
+  Control is off), `rex.single_host: here` is set, or the process is itself a
+  launched pane (`NSSH_REX_PANE=1`). When several Rex apps are connected to
+  the server, nssh cannot tell which one the operator uses; it warns and
+  connects here unless `REX_CLIENT` names the app.
+- Panes are launched by argv with no shell, run `nssh --target HOST`, and
+  resolve their own credentials, so no credential or trust path is added.
+  Placement never closes, moves, or adds panes to existing tabs; Rex closes a
+  pane when its session ends. When nssh fails in a launched pane (the
+  connection, authentication, or nssh itself), it waits for Enter so the
+  error stays readable; a remote session's own exit status closes the pane.
+- `nssh inv list --json` is a stable machine interface: `{"hosts": [...]}`
+  with `host`, `hostname`, `user`, `port`, `provider`, and `group`. The Rex
+  palette actions in `contrib/rex/nssh.lua` use it, and run nssh with the
+  invoking pane's `REX_SESSION` and `REX_BLOCK` and `NSSH_REX_OPEN=1`, which
+  opens even a single host in a tab without a terminal.
 
 ## Runtime Boundaries
 

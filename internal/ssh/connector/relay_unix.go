@@ -89,6 +89,9 @@ func (c *Connector) relay(ctx context.Context) error {
 			return
 		}
 		stdinRelayStarted = true
+		if c.onRelayStart != nil {
+			c.onRelayStart()
+		}
 		c.wg.Add(1)
 		go func() {
 			defer c.wg.Done()

@@ -97,11 +97,17 @@ func ResolveSmartHostForConnect(query, explicitUser string, cfg ...*config.Confi
 		return nil, err
 	}
 
-	hostname, explicitUser := splitConnectQuery(query, explicitUser)
 	catalog, err := BuildHostCatalog(c)
 	if err != nil {
 		return nil, err
 	}
+	return resolveSmartHostFromCatalog(query, explicitUser, c, catalog)
+}
+
+// resolveSmartHostFromCatalog is ResolveSmartHostForConnect with a catalog
+// the caller already built from c.
+func resolveSmartHostFromCatalog(query, explicitUser string, c *config.Config, catalog *HostCatalog) (*ResolvedHost, error) {
+	hostname, explicitUser := splitConnectQuery(query, explicitUser)
 	canonical, err := resolveHostnameFromCatalog(hostname, catalog, selectHostFunc)
 	if err != nil {
 		return nil, err

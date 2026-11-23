@@ -32,6 +32,7 @@ Commands:
 
 ```bash
 nssh inv list
+nssh inv list --json
 nssh inv get <host>
 nssh inv set <host> --hostname <addr> --user <user> -g local/<group>
 nssh inv rm <host>
@@ -42,6 +43,11 @@ nssh inv status
 nssh inv refresh
 nssh inv refresh local
 ```
+
+`nssh inv list --json` prints `{"hosts": [...]}`, one object per host with
+`host` and, when set, `hostname`, `user`, `port`, `provider`, and `group`.
+It honors `-s/--select`. Scripts such as the Rex palette actions in
+`contrib/rex/nssh.lua` depend on these field names.
 
 Local inventory is the implicit `local` provider and writes YAML, usually
 `~/.config/nssh/inventory/local.yaml`. Local host groups are stored under each

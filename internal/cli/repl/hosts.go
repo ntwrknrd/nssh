@@ -16,13 +16,14 @@ import (
 	"github.com/ntwrknrd/nssh/internal/secret"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
 	"github.com/ntwrknrd/nssh/internal/ssh/sshargs"
+	"golang.org/x/term"
 )
 
 // RunHosts executes a root host list using the shared scheduler and capture path.
 // Callers identify bare list candidates before normalizing user@host or URIs.
 // An exact whole-token alias retains the ordinary single-target path.
 func RunHosts(ctx context.Context, req connect.Request) (handled bool, err error) {
-	if req.LiteralTarget || !strings.Contains(req.Host, ",") {
+	if req.LiteralTarget || !strings.ContainsAny(req.Host, ",(") {
 		return false, nil
 	}
 	cfg, err := config.LoadDefault()
@@ -47,12 +48,23 @@ func RunHosts(ctx context.Context, req connect.Request) (handled bool, err error
 		return true, fmt.Errorf("host-list invocation exceeds %d bytes", core.MaxSubmissionBytes)
 	}
 	label := strings.Join(req.RemoteCommand, " ")
-	if len(req.RemoteCommand) == 0 {
-		return true, fmt.Errorf("comma-separated hosts require a remote command")
-	}
 	parts, err := splitHostList(req.Host)
 	if err != nil {
 		return true, err
+	}
+	if len(req.RemoteCommand) == 0 {
+		// Inside Rex, hosts without a command open as interactive panes.
+		names := make([]string, len(parts))
+		for i, part := range parts {
+			names[i] = part
+			if data, ok := cat.Find(part); ok {
+				names[i] = data.Canonical
+			}
+		}
+		if openInRexFunc(ctx, cfg, names, req.SSHArgs) {
+			return true, nil
+		}
+		return true, fmt.Errorf("comma-separated hosts require a remote command; pass one, or use nssh repl")
 	}
 
 	restore := secret.ManageInterrupts()
@@ -96,12 +108,14 @@ func RunHosts(ctx context.Context, req connect.Request) (handled bool, err error
 		sub.Targets = append(sub.Targets, core.Target{Value: part})
 	}
 	output := hostListOutput{out: os.Stdout, errOut: os.Stderr}
+	status := newRexHostStatus(os.Stdout, cfg.Rex.EnabledValue() && term.IsTerminal(int(os.Stdout.Fd())), label)
 	executor := core.Executor{Concurrency: core.DefaultConcurrency, Resolve: resolve, Run: run,
-		OnTargets: func(targets []core.ResolvedTarget) { output.start(label, targets) },
-		OnEvent:   output.event,
+		OnTargets: func(targets []core.ResolvedTarget) { output.start(label, targets); status.start(targets) },
+		OnEvent:   func(event core.Event) { output.event(event); status.event(event) },
 	}
 	events, err := executor.Execute(ctx, sub)
 	output.recap(events)
+	status.finish()
 	if ctx.Err() != nil {
 		return true, &exit.ExitError{Code: 130}
 	}
@@ -116,34 +130,79 @@ func RunHosts(ctx context.Context, req connect.Request) (handled bool, err error
 	return true, nil
 }
 
+// splitHostList splits a root host list on commas outside suffix
+// expansions, expands prefix(suffix,...) members with the REPL grammar, and
+// validates each resulting bare host name.
 func splitHostList(value string) ([]string, error) {
-	if strings.Count(value, ",")+1 > core.MaxSubmissionTargets {
+	var members []string
+	depth, start := 0, 0
+	for i, ch := range value {
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				members = append(members, value[start:i])
+				start = i + 1
+			}
+		}
+		if depth < 0 || depth > 1 {
+			return nil, fmt.Errorf("invalid host-list expansion %q", value)
+		}
+	}
+	if depth != 0 {
+		return nil, fmt.Errorf("invalid host-list expansion %q", value)
+	}
+	members = append(members, value[start:])
+	if len(members) > core.MaxSubmissionTargets {
 		return nil, fmt.Errorf("host list exceeds %d targets", core.MaxSubmissionTargets)
 	}
-	parts := strings.Split(value, ",")
-	for i, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
+	var parts []string
+	for _, member := range members {
+		member = strings.TrimSpace(member)
+		if member == "" {
 			return nil, fmt.Errorf("host list contains an empty member")
 		}
-		address := part
-		if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
-			address = part[1 : len(part)-1]
-		}
-		if _, err := netip.ParseAddr(address); err != nil {
-			for _, ch := range part {
-				valid := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.'
-				if !valid {
-					return nil, fmt.Errorf("invalid bare host-list member %q", part)
-				}
-			}
-			if strings.HasPrefix(part, "-") {
-				return nil, fmt.Errorf("invalid bare host-list member %q", part)
+		expanded := []string{member}
+		if strings.Contains(member, "(") {
+			var err error
+			if expanded, err = core.ExpandTarget(member); err != nil {
+				return nil, err
 			}
 		}
-		parts[i] = part
+		for _, part := range expanded {
+			if err := validateHostListMember(part); err != nil {
+				return nil, err
+			}
+		}
+		parts = append(parts, expanded...)
+		if len(parts) > core.MaxSubmissionTargets {
+			return nil, fmt.Errorf("host list exceeds %d targets", core.MaxSubmissionTargets)
+		}
 	}
 	return parts, nil
+}
+
+func validateHostListMember(part string) error {
+	address := part
+	if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
+		address = part[1 : len(part)-1]
+	}
+	if _, err := netip.ParseAddr(address); err == nil {
+		return nil
+	}
+	for _, ch := range part {
+		valid := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.'
+		if !valid {
+			return fmt.Errorf("invalid bare host-list member %q", part)
+		}
+	}
+	if strings.HasPrefix(part, "-") {
+		return fmt.Errorf("invalid bare host-list member %q", part)
+	}
+	return nil
 }
 
 // Restrict the new list surface to foreground commands with captured output.
