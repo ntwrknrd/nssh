@@ -1023,6 +1023,10 @@ func appendHostKeyPreparationSSHArgs(sshArgs []string, prep *connector.HostKeyPr
 }
 
 func handleCompatibilityFixes(ctx context.Context, query, explicitUser string, smart bool, resolved *ResolvedHost, sshArgs []string, cfg *config.Config, audit *audit.Logger, opts Options, result connectionResult) (connectionResult, error) {
+	// A host name that does not resolve is not an algorithm mismatch.
+	if hostUnresolved(result.Output) {
+		return result, nil
+	}
 	for iteration := 1; iteration <= maxCompatibilityFixIterations; iteration++ {
 		fixes := discoverCompatibilityFixes(ctx, resolved, cfg, result.Output)
 		if len(fixes) == 0 {
@@ -1224,6 +1228,12 @@ func newConnector(resolved *ResolvedHost, sshArgs []string, cfg *config.Config, 
 	conn.SetAcceptOnceMode(cfg.SSH.Security.AcceptOnceMode)
 	conn.SetTimeouts(&cfg.SSH.Connection)
 	return conn
+}
+
+// hostUnresolved reports whether ssh output shows the host name did not
+// resolve.
+func hostUnresolved(output string) bool {
+	return strings.Contains(output, "Could not resolve hostname")
 }
 
 func isCompatibilityError(err error) bool {

@@ -1229,3 +1229,18 @@ func TestCompatibilityFixesApplyWithHardenedAlgorithmDefaults(t *testing.T) {
 		t.Fatalf("fix = %#v, want kex group14 floor", fixes[0])
 	}
 }
+
+func TestHostUnresolvedSkipsCompatibilityFixes(t *testing.T) {
+	output := "ssh: Could not resolve hostname sre-netlab02.example.test: nodename nor servname provided, or not known\n"
+	if !hostUnresolved(output) {
+		t.Fatal("hostUnresolved = false for a resolution failure")
+	}
+	if hostUnresolved("Unable to negotiate with 192.0.2.1 port 22: no matching key exchange method found") {
+		t.Fatal("hostUnresolved = true for a negotiation failure")
+	}
+	in := connectionResult{Err: exit.ErrConnectionFailed, Output: output}
+	got, err := handleCompatibilityFixes(context.Background(), "h", "", false, &ResolvedHost{Hostname: "h"}, nil, nil, nil, Options{}, in)
+	if err != nil || got != in {
+		t.Fatalf("handleCompatibilityFixes = %+v, %v; want the result unchanged", got, err)
+	}
+}

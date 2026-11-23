@@ -5,6 +5,9 @@ type ExitError struct {
 	Code    int
 	Message string
 	Cause   error
+	// Remote reports that Code is the remote session's own exit status,
+	// not a failure of nssh or the connection.
+	Remote bool
 }
 
 func (e *ExitError) Error() string { return e.Message }

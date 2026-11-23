@@ -34,7 +34,17 @@ func Run(opts Options) int {
 		return exit.ExitSuccess
 	}
 
-	if err := execute(opts, args); err != nil {
+	err := execute(opts, args)
+	code := exitCode(err)
+	if code != exit.ExitSuccess {
+		holdFailedPane(err)
+	}
+	return code
+}
+
+// exitCode reports err and returns the process exit code for it.
+func exitCode(err error) int {
+	if err != nil {
 		if ui.IsExplainShown(err) {
 			return exit.ExitSuccess
 		}

@@ -164,7 +164,9 @@ preserve.
 - Panes are launched by argv with no shell, run `nssh --target HOST`, and
   resolve their own credentials, so no credential or trust path is added.
   Placement never closes, moves, or adds panes to existing tabs; Rex closes a
-  pane when its session ends.
+  pane when its session ends. When nssh fails in a launched pane (the
+  connection, authentication, or nssh itself), it waits for Enter so the
+  error stays readable; a remote session's own exit status closes the pane.
 - `nssh inv list --json` is a stable machine interface: `{"hosts": [...]}`
   with `host`, `hostname`, `user`, `port`, `provider`, and `group`. The Rex
   palette actions in `contrib/rex/nssh.lua` use it, and run nssh with the

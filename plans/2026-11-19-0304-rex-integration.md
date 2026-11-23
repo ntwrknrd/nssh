@@ -316,7 +316,10 @@ reports Remote Control, so nssh probes it by selecting the invoking session
 with `rex do session.select` before a single-host launch. Panes are created
 atomically with `session.create` or `session.new_window` layouts whose blocks
 run `command` argv with `shell: none`; Rex has no launch environment option,
-so the argv is `/usr/bin/env NSSH_REX_PANE=1 nssh --target HOST`.
+so the argv is `/usr/bin/env NSSH_REX_PANE=1 nssh --target HOST`. With no
+shell, a pane closes as soon as nssh exits, so a failed pane waits for Enter
+before exiting; otherwise a connection error such as an unresolvable host
+name would flash and vanish.
 
 ## Package boundaries
 
