@@ -18,6 +18,7 @@ func fakeServer(t *testing.T, responses map[string]string) string {
 dir=$(dirname "$0")
 printf '%s\n' "$*" >> "$dir/calls"
 if [ "$1" = do ]; then
+	[ -s "$dir/fail-select" ] && { cat "$dir/fail-select" >&2; exit 3; }
 	[ -f "$dir/fail-select" ] && { echo "Error: refused" >&2; exit 1; }
 	echo '{}'; exit 0
 fi
@@ -40,6 +41,7 @@ if [ -f "$dir/resp/$1" ]; then cat "$dir/resp/$1"; else echo '{}'; fi
 	t.Setenv("REX_BLOCK", "block:me")
 	t.Setenv("REX_BIN_DIR", dir)
 	t.Setenv("NSSH_REX", "")
+	t.Setenv("REX_CLIENT", "")
 	return dir
 }
 
@@ -112,7 +114,7 @@ func TestOpenReusesLivePanesAndAddsTabs(t *testing.T) {
 	dir := fakeServer(t, map[string]string{
 		"session.list":                      `{"sessions":[{"session_id":"session:nssh","label":"NSSH"}]}`,
 		"session.list_blocks":               `{"blocks":[{"block_id":"block:a","label":"acm-core1","placement":"placed","window_id":"window:a"},{"block_id":"block:d","label":"acm-core2","placement":"detached"}]}`,
-		"com.superlogical.terminal.process": `{"child":{"name":"nssh","pid":1,"user_id":501},"last_exit":null}`,
+		"com.superlogical.terminal.process": `{"child":{"name":"login","path":"/usr/bin/login","pid":1,"user_id":0},"foreground":{"name":"ssh","pid":3,"user_id":501},"ancestors":[{"name":"nssh","path":"/opt/nssh/nssh","pid":2,"user_id":501},{"name":"login","pid":1,"user_id":0}],"last_exit":null}`,
 		"com.superlogical.terminal.size":    `{"columns":100,"rows":50}`,
 		"session.new_window":                `{"window_id":"window:b","block_ids":["block:b"],"revision":3}`,
 	})
@@ -161,6 +163,7 @@ func TestOpenFocusesExistingWhenAllLive(t *testing.T) {
 func TestOpenIgnoresPanesNotRunningNSSH(t *testing.T) {
 	for name, process := range map[string]string{
 		"shell":  `{"child":{"name":"zsh","pid":1,"user_id":501},"last_exit":null}`,
+		"login":  `{"child":{"name":"login","pid":1,"user_id":0},"foreground":{"name":"zsh","pid":2,"user_id":501},"ancestors":[{"name":"login","pid":1,"user_id":0}],"last_exit":null}`,
 		"exited": `{"child":{"name":"nssh","pid":1,"user_id":501},"last_exit":{"exit_code":0}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -201,8 +204,8 @@ func TestOpenCurrentSession(t *testing.T) {
 func TestCanSelect(t *testing.T) {
 	dir := fakeServer(t, nil)
 	c := NewClient()
-	if !c.CanSelect(t.Context()) {
-		t.Fatal("CanSelect = false")
+	if err := c.CanSelect(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 	if last := calls(t, dir)[0]; last != `do session.select --args {"session_id":"session:me"}` {
 		t.Fatalf("probe = %q", last)
@@ -210,8 +213,20 @@ func TestCanSelect(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "fail-select"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if c.CanSelect(t.Context()) {
-		t.Fatal("CanSelect = true when the app refuses actions")
+	err := c.CanSelect(t.Context())
+	if err == nil {
+		t.Fatal("CanSelect = nil when the app refuses actions")
+	}
+	if _, several := SeveralApps(err); several {
+		t.Fatalf("SeveralApps(%v) = true", err)
+	}
+	ambiguous := "Error: client target default is ambiguous: multiple app clients are connected\n  EXP16234  …8ba375  Rex 0.1.0 (2061)\n  Studio    …2dfc52  Rex 0.1.0 (2061)\n"
+	if err := os.WriteFile(filepath.Join(dir, "fail-select"), []byte(ambiguous), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	apps, several := SeveralApps(c.CanSelect(t.Context()))
+	if !several || strings.Join(apps, ",") != "EXP16234,Studio" {
+		t.Fatalf("SeveralApps = %v, %v", apps, several)
 	}
 }
 

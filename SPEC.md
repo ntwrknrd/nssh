@@ -156,7 +156,9 @@ preserve.
 - A single host connects in the current pane when stdin or stdout is not a
   terminal, SSH options are given, the app does not accept actions (Remote
   Control is off), `rex.single_host: here` is set, or the process is itself a
-  launched pane (`NSSH_REX_PANE=1`).
+  launched pane (`NSSH_REX_PANE=1`). When several Rex apps are connected to
+  the server, nssh cannot tell which one the operator uses; it warns and
+  connects here unless `REX_CLIENT` names the app.
 - Panes are launched by argv with no shell, run `nssh --target HOST`, and
   resolve their own credentials, so no credential or trust path is added.
   Placement never closes, moves, or adds panes to existing tabs; Rex closes a

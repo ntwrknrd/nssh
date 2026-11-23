@@ -2,6 +2,7 @@ package connect
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/ntwrknrd/nssh/internal/config"
@@ -15,7 +16,12 @@ type fakeRexOpener struct {
 	hosts     []rex.Host
 }
 
-func (f *fakeRexOpener) CanSelect(context.Context) bool { return f.canSelect }
+func (f *fakeRexOpener) CanSelect(context.Context) error {
+	if f.canSelect {
+		return nil
+	}
+	return errors.New("refused")
+}
 
 func (f *fakeRexOpener) Open(_ context.Context, p rex.Placement, hosts []rex.Host) (rex.Opened, error) {
 	f.placement, f.hosts = p, hosts

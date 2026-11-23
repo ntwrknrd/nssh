@@ -40,6 +40,8 @@ type Opened struct {
 	Tabs     []string // labels of new tabs, in order
 	Reused   []string // hosts whose live pane was focused instead
 	Selected bool     // the app switched to the result
+	// SelectErr is why the app did not switch, when it did not.
+	SelectErr error
 }
 
 // ForceOpen reports whether a Rex palette action asked nssh to open its
@@ -56,11 +58,35 @@ func PaneArgv(exe, target string) []string {
 	return []string{"/usr/bin/env", paneEnv + "=1", exe, "--target", target}
 }
 
-// CanSelect reports whether the app accepts actions from the CLI, which needs
-// Remote Control. It selects the invoking session, which the app already
-// shows, so the probe has no visible effect.
-func (c *Client) CanSelect(ctx context.Context) bool {
-	return c.selectSession(ctx, c.session, "") == nil
+// CanSelect returns nil when the app accepts actions from the CLI, which needs
+// Remote Control and, with several apps connected, REX_CLIENT naming one. It
+// selects the invoking session, which the app already shows, so the probe
+// has no visible effect.
+func (c *Client) CanSelect(ctx context.Context) error {
+	return c.selectSession(ctx, c.session, "")
+}
+
+// SeveralApps reports whether err is the rex CLI declining a client action
+// because several apps are connected and REX_CLIENT names none of them. It
+// returns the apps' labels as rex lists them, or nil for any other error.
+func SeveralApps(err error) ([]string, bool) {
+	if err == nil {
+		return nil, false
+	}
+	lines := strings.Split(err.Error(), "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, "ambiguous") {
+			continue
+		}
+		var apps []string
+		for _, entry := range lines[i+1:] {
+			if fields := strings.Fields(entry); len(fields) > 0 {
+				apps = append(apps, fields[0])
+			}
+		}
+		return apps, true
+	}
+	return nil, false
 }
 
 func (c *Client) selectSession(ctx context.Context, session, window string) error {
@@ -174,7 +200,8 @@ func (c *Client) Open(ctx context.Context, p Placement, hosts []Host) (Opened, e
 	if _, err := c.Call(ctx, session, "session.focus_block", map[string]any{"block_id": focus.BlockID}); err != nil {
 		slog.Debug("rex focus failed", "err", err)
 	}
-	result.Selected = c.selectSession(ctx, session, focus.WindowID) == nil
+	result.SelectErr = c.selectSession(ctx, session, focus.WindowID)
+	result.Selected = result.SelectErr == nil
 	return result, nil
 }
 
@@ -222,23 +249,39 @@ func (c *Client) liveHosts(ctx context.Context, session string, hosts []Host) (m
 	return live, nil
 }
 
-// runsNSSH reports whether a terminal block's program is a running nssh.
+// runsNSSH reports whether a terminal block's program is a running nssh. On
+// macOS Rex starts every program under login, so child is login and nssh is
+// found in foreground or its ancestors instead.
 func (c *Client) runsNSSH(ctx context.Context, session, block string) bool {
+	type proc struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+	}
 	var process struct {
-		Child *struct {
-			Name string `json:"name"`
-			Path string `json:"path"`
-		} `json:"child"`
-		LastExit *struct{} `json:"last_exit"`
+		Child      *proc     `json:"child"`
+		Foreground *proc     `json:"foreground"`
+		Ancestors  []proc    `json:"ancestors"`
+		LastExit   *struct{} `json:"last_exit"`
 	}
 	args := map[string]any{"block_id": block, "args": map[string]any{}}
 	if err := c.callJSON(ctx, session, "com.superlogical.terminal.process", args, &process); err != nil {
 		return false
 	}
-	if process.LastExit != nil || process.Child == nil {
+	if process.LastExit != nil {
 		return false
 	}
-	return process.Child.Name == "nssh" || filepath.Base(process.Child.Path) == "nssh"
+	procs := process.Ancestors
+	for _, p := range []*proc{process.Child, process.Foreground} {
+		if p != nil {
+			procs = append(procs, *p)
+		}
+	}
+	for _, p := range procs {
+		if p.Name == "nssh" || filepath.Base(p.Path) == "nssh" {
+			return true
+		}
+	}
+	return false
 }
 
 // splitDirection resolves the split setting to a layout direction: auto puts

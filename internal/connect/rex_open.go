@@ -20,7 +20,7 @@ var (
 
 // rexOpener is the part of the Rex client that opening hosts needs.
 type rexOpener interface {
-	CanSelect(context.Context) bool
+	CanSelect(context.Context) error
 	Open(context.Context, rex.Placement, []rex.Host) (rex.Opened, error)
 }
 
@@ -53,9 +53,15 @@ func OpenInRex(ctx context.Context, cfg *config.Config, targets, sshArgs []strin
 	if client == nil {
 		return false
 	}
-	if single && !forced && !client.CanSelect(ctx) {
-		slog.Debug("rex app does not accept actions; connecting in the current pane")
-		return false
+	if single && !forced {
+		if err := client.CanSelect(ctx); err != nil {
+			if apps, several := rex.SeveralApps(err); several {
+				ui.Warning("%s; connecting here", severalAppsHint(apps))
+			} else {
+				slog.Debug("rex app does not accept actions; connecting in the current pane", "err", err)
+			}
+			return false
+		}
 	}
 	exe, err := rexExecutableFunc()
 	if err != nil {
@@ -90,9 +96,23 @@ func reportRexOpen(opened rex.Opened) {
 	}
 	msg := strings.Join(parts, "; ") + " in Rex session " + opened.Session
 	if !opened.Selected {
-		msg += " (turn on Remote Control in Rex to switch to it automatically)"
+		if apps, several := rex.SeveralApps(opened.SelectErr); several {
+			msg += " (" + severalAppsHint(apps) + " to switch to it)"
+		} else {
+			msg += " (turn on Remote Control in Rex to switch to it automatically)"
+		}
 	}
 	ui.Info("%s", msg)
+}
+
+// severalAppsHint tells the operator how to pick one of several connected
+// Rex apps, which nssh cannot choose between.
+func severalAppsHint(apps []string) string {
+	hint := "several Rex apps are connected; set REX_CLIENT to the one you use"
+	if len(apps) > 0 {
+		hint += " (" + strings.Join(apps, ", ") + ")"
+	}
+	return hint
 }
 
 // noRexOpen reports whether this process must connect where it runs: it is

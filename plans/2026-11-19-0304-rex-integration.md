@@ -250,7 +250,9 @@ session ends. Dead panes never accumulate, and nssh has nothing to clean up.
 
 **Focus.** nssh focuses the first new tab and asks the app to show it with
 `session.select`. Without Remote Control, multi-host opens still place their
-panes and print where they opened.
+panes and print where they opened. When several apps are connected to the
+server, as when one Mac's app drives another Mac's server, the rex CLI needs
+`REX_CLIENT` to name the app; without it nssh warns and does not switch.
 
 ### 7. Palette picker
 
@@ -302,8 +304,9 @@ same placement and reuse rules. This is an explicit prompt, never automatic.
 | Palette multi-select | Yes, through `rex.ui.pick` | 2,000-item limit |
 
 Verified against Rex 0.1.0 (2061) with `rex api describe`: the `process`
-method returns `child` (with `name` and `path`, never other arguments) and
-`last_exit`; `size` returns `columns` and `rows`; `session.select` is an app
+method returns `child` (with `name` and `path`, never other arguments),
+`foreground`, `ancestors`, and `last_exit`. On macOS `child` is always
+`login`, so a live nssh pane is found by `foreground` or `ancestors`; `size` returns `columns` and `rows`; `session.select` is an app
 client action taking `session_id` and an optional `window_id`. No method
 reports Remote Control, so nssh probes it by selecting the invoking session
 with `rex do session.select` before a single-host launch. Panes are created
