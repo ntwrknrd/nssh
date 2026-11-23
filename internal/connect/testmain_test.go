@@ -10,6 +10,8 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	// Never reach a real Rex when tests run inside one.
+	_ = os.Setenv("NSSH_REX", "0")
 	_ = os.Setenv("XDG_CONFIG_HOME", tmp)
 	_ = os.Setenv("XDG_DATA_HOME", tmp)
 	_ = os.Setenv("XDG_STATE_HOME", tmp)

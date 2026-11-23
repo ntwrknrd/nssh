@@ -1,7 +1,8 @@
 # Rex terminal integration for nssh
 
-Status: in progress. Slices 1 (OSC 7501 status) and 2 (pane labels) are
-implemented for testing; later slices are proposed.
+Status: in progress. Slices 1 (OSC 7501 status), 2 (pane labels), and 3
+(opening in the `nssh` session) are implemented for testing; later slices are
+proposed. `session: site` is rejected until slice 8.
 
 ## Summary
 
@@ -290,9 +291,15 @@ same placement and reuse rules. This is an explicit prompt, never automatic.
 | Per-host status | Yes, through OSC 7501 | Display is Rex-defined and may change |
 | Palette multi-select | Yes, through `rex.ui.pick` | 2,000-item limit |
 
-Before implementation, verify the `process` and `size` outputs, the
-`session.select` behavior, and a way to check Remote Control before launching,
-against the installed Rex version.
+Verified against Rex 0.1.0 (2061) with `rex api describe`: the `process`
+method returns `child` (with `name` and `path`, never other arguments) and
+`last_exit`; `size` returns `columns` and `rows`; `session.select` is an app
+client action taking `session_id` and an optional `window_id`. No method
+reports Remote Control, so nssh probes it by selecting the invoking session
+with `rex do session.select` before a single-host launch. Panes are created
+atomically with `session.create` or `session.new_window` layouts whose blocks
+run `command` argv with `shell: none`; Rex has no launch environment option,
+so the argv is `/usr/bin/env NSSH_REX_PANE=1 nssh --target HOST`.
 
 ## Package boundaries
 

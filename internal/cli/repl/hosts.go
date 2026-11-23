@@ -48,12 +48,23 @@ func RunHosts(ctx context.Context, req connect.Request) (handled bool, err error
 		return true, fmt.Errorf("host-list invocation exceeds %d bytes", core.MaxSubmissionBytes)
 	}
 	label := strings.Join(req.RemoteCommand, " ")
-	if len(req.RemoteCommand) == 0 {
-		return true, fmt.Errorf("comma-separated hosts require a remote command")
-	}
 	parts, err := splitHostList(req.Host)
 	if err != nil {
 		return true, err
+	}
+	if len(req.RemoteCommand) == 0 {
+		// Inside Rex, hosts without a command open as interactive panes.
+		names := make([]string, len(parts))
+		for i, part := range parts {
+			names[i] = part
+			if data, ok := cat.Find(part); ok {
+				names[i] = data.Canonical
+			}
+		}
+		if openInRexFunc(ctx, cfg, names, req.SSHArgs) {
+			return true, nil
+		}
+		return true, fmt.Errorf("comma-separated hosts require a remote command; pass one, or use nssh repl")
 	}
 
 	restore := secret.ManageInterrupts()
@@ -97,7 +108,7 @@ func RunHosts(ctx context.Context, req connect.Request) (handled bool, err error
 		sub.Targets = append(sub.Targets, core.Target{Value: part})
 	}
 	output := hostListOutput{out: os.Stdout, errOut: os.Stderr}
-	status := newRexHostStatus(os.Stdout, term.IsTerminal(int(os.Stdout.Fd())), label)
+	status := newRexHostStatus(os.Stdout, cfg.Rex.EnabledValue() && term.IsTerminal(int(os.Stdout.Fd())), label)
 	executor := core.Executor{Concurrency: core.DefaultConcurrency, Resolve: resolve, Run: run,
 		OnTargets: func(targets []core.ResolvedTarget) { output.start(label, targets); status.start(targets) },
 		OnEvent:   func(event core.Event) { output.event(event); status.event(event) },

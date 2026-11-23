@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/ntwrknrd/nssh/internal/connect"
 	core "github.com/ntwrknrd/nssh/internal/repl"
 	"github.com/ntwrknrd/nssh/internal/rex"
 )
@@ -18,6 +19,8 @@ type rexHostStatus struct {
 	finished int
 	failed   int
 }
+
+var openInRexFunc = connect.OpenInRex
 
 func newRexHostStatus(out io.Writer, terminal bool, label string) *rexHostStatus {
 	if !terminal {

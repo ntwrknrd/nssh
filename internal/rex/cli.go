@@ -47,27 +47,53 @@ func NewClient() *Client {
 }
 
 // Call runs `rex api call -s SESSION METHOD ARGS` and returns its JSON output.
-func (c *Client) Call(ctx context.Context, method string, args map[string]any) ([]byte, error) {
+// An empty session omits -s for server-wide methods.
+func (c *Client) Call(ctx context.Context, session, method string, args map[string]any) ([]byte, error) {
+	if args == nil {
+		args = map[string]any{}
+	}
 	data, err := json.Marshal(args)
 	if err != nil {
 		return nil, err
 	}
+	argv := []string{"api", "call"}
+	if session != "" {
+		argv = append(argv, "-s", session)
+	}
+	return c.run(ctx, append(argv, method, string(data))...)
+}
+
+// run executes the rex CLI with argv and returns its standard output.
+func (c *Client) run(ctx context.Context, argv ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, c.bin, "api", "call", "-s", c.session, method, string(data))
+	cmd := exec.CommandContext(ctx, c.bin, argv...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("rex %s: %w: %s", method, err, strings.TrimSpace(stderr.String()))
+		name := strings.Join(argv[:min(len(argv), 3)], " ")
+		return nil, fmt.Errorf("rex %s: %w: %s", name, err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
 }
 
-// BlockLabel returns the current label of a block. The session.describe_block
-// result shape is not documented, so a top-level or block-level label field is
-// accepted; anything else is an error.
+// callJSON calls a method and decodes its result into out.
+func (c *Client) callJSON(ctx context.Context, session, method string, args map[string]any, out any) error {
+	data, err := c.Call(ctx, session, method, args)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, out); err != nil {
+		return fmt.Errorf("rex %s: %w", method, err)
+	}
+	return nil
+}
+
+// BlockLabel returns the current label of a block in the invoking session.
+// session.describe_block reports it as block.label; a top-level label is
+// also accepted.
 func (c *Client) BlockLabel(ctx context.Context, block string) (string, error) {
-	out, err := c.Call(ctx, "session.describe_block", map[string]any{"block_id": block})
+	out, err := c.Call(ctx, c.session, "session.describe_block", map[string]any{"block_id": block})
 	if err != nil {
 		return "", err
 	}
@@ -88,6 +114,6 @@ func (c *Client) BlockLabel(ctx context.Context, block string) (string, error) {
 
 // SetBlockLabel sets a block's label. An empty label restores Rex's default.
 func (c *Client) SetBlockLabel(ctx context.Context, block, label string) error {
-	_, err := c.Call(ctx, "session.set_block_label", map[string]any{"block_id": block, "label": label})
+	_, err := c.Call(ctx, c.session, "session.set_block_label", map[string]any{"block_id": block, "label": label})
 	return err
 }

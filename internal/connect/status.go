@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ntwrknrd/nssh/internal/config"
 	"github.com/ntwrknrd/nssh/internal/exit"
 	"github.com/ntwrknrd/nssh/internal/rex"
 	"github.com/ntwrknrd/nssh/internal/ssh/connector"
@@ -20,9 +21,10 @@ type sessionStatus struct {
 
 // newSessionStatus returns a reporter for an interactive session inside Rex,
 // with the same mode exclusions as the terminal title, or nil otherwise.
-func newSessionStatus(resolved *ResolvedHost, sshArgs []string) *sessionStatus {
+// rex.enabled: false turns it off.
+func newSessionStatus(resolved *ResolvedHost, sshArgs []string, cfg *config.Config) *sessionStatus {
 	name := terminalTitle(resolved)
-	if name == "" || !interactiveSession(sshArgs) || !titleTerminal() {
+	if name == "" || (cfg != nil && !cfg.Rex.EnabledValue()) || !interactiveSession(sshArgs) || !titleTerminal() {
 		return nil
 	}
 	w := rex.NewWriter(titleOutput)
@@ -43,7 +45,8 @@ func (s *sessionStatus) report(state, kind, msg string) {
 // returns a function that restores the previous label. It applies to the same
 // sessions as status reports.
 func (s *sessionStatus) labelPane() func() {
-	if s == nil {
+	// A launched pane already carries the host's label.
+	if s == nil || rex.InPane() {
 		return func() {}
 	}
 	return labelPaneFunc(s.name)

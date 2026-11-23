@@ -164,5 +164,7 @@ func TestHelpSnapshots(t *testing.T) {
 // TestMain handles the -update-snapshots flag
 func TestMain(m *testing.M) {
 	flag.Parse()
+	// Never reach a real Rex when tests run inside one.
+	_ = os.Setenv("NSSH_REX", "0")
 	os.Exit(m.Run())
 }

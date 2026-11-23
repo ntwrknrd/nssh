@@ -35,7 +35,8 @@ preserve.
   `user@host`, and `ssh://` destinations are always single destinations.
 - A root host list applies an explicit `-l` user to every member; otherwise each
   member uses its resolved inventory username. It preserves the one remote argv
-  and shared SSH-option tokens for every host. Root lists require a command.
+  and shared SSH-option tokens for every host. Root lists require a command,
+  except inside Rex, where a list without one opens interactive panes.
 - Interactive connections preserve terminal semantics. Remote commands preserve
   distinct stdout, stderr, and remote exit status.
 - SCP uses the same host, SSH policy, proxy, credential, and host-key resolution
@@ -136,7 +137,7 @@ preserve.
 ## Rex Integration
 
 - Rex integration is optional and detected from `REX_SESSION` and `REX_BLOCK`;
-  `NSSH_REX=0` disables it. Outside Rex, behavior is unchanged, and a Rex
+  `NSSH_REX=0` or `rex.enabled: false` disables it. Outside Rex, behavior is unchanged, and a Rex
   failure never fails an nssh operation.
 - Interactive sessions and root host lists report OSC 7501 program status
   under `app=nssh`, with the terminal-title mode exclusions. Reports carry only
@@ -145,6 +146,18 @@ preserve.
   through the `rex` CLI and restore the previous label on exit. The pane is
   left unchanged when its label cannot be read, and an operator rename during
   the session is kept.
+- Inside Rex, an interactive single host with no SSH options, and a root list
+  with no command, open in the configured session (`nssh` by default), grouped
+  into tabs of `rex.panes_per_tab` panes. A host with a live nssh pane there is
+  focused instead of opened again. The app switches to the result.
+- A single host connects in the current pane when stdin or stdout is not a
+  terminal, SSH options are given, the app does not accept actions (Remote
+  Control is off), `rex.single_host: here` is set, or the process is itself a
+  launched pane (`NSSH_REX_PANE=1`).
+- Panes are launched by argv with no shell, run `nssh --target HOST`, and
+  resolve their own credentials, so no credential or trust path is added.
+  Placement never closes, moves, or adds panes to existing tabs; Rex closes a
+  pane when its session ends.
 
 ## Runtime Boundaries
 

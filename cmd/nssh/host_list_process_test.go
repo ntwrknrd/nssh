@@ -246,3 +246,42 @@ func TestHostListProcessCtrlCCleansChild(t *testing.T) {
 		}
 	}
 }
+
+func TestHostListProcessWithoutCommandOpensRexPanes(t *testing.T) {
+	f := newHostListFixture(t, buildBinary(t))
+	rexDir := filepath.Join(f.dir, "rex")
+	if err := os.MkdirAll(rexDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	fake := `#!/bin/sh
+printf '%s\n' "$*" >> "$(dirname "$0")/calls"
+case "$*" in
+*session.create*) echo '{"session_id":"session:n","initial_windows":[{"window_id":"window:1","block_ids":["block:1","block:2"]}]}' ;;
+*session.list*) echo '{"sessions":[]}' ;;
+*) echo '{}' ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(rexDir, "rex"), []byte(fake), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := f.command(t, "alpha-alias,beta")
+	cmd.Env = append(cmd.Env, "REX_SESSION=session:me", "REX_BLOCK=block:me", "REX_BIN_DIR="+rexDir)
+	if output, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(output), "opened alpha + beta in Rex session nssh") {
+		t.Fatalf("err=%v output=%s", err, output)
+	}
+	data, err := os.ReadFile(filepath.Join(rexDir, "calls"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls := string(data); !strings.Contains(calls, `"label":"alpha"`) || !strings.Contains(calls, `"--target","beta"`) {
+		t.Fatalf("rex calls = %s", calls)
+	}
+	if log := f.readLog(t); log != "" {
+		t.Fatalf("ssh ran in the invoking pane: %q", log)
+	}
+
+	// Outside Rex the command is still required.
+	if _, err := f.run(t, "alpha,beta"); err == nil {
+		t.Fatal("host list without a command succeeded outside Rex")
+	}
+}

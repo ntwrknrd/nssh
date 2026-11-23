@@ -71,7 +71,8 @@ An exact inventory alias containing the whole comma token remains one host.
 `--target`, `user@host`, and `ssh://` forms are always single targets. An explicit
 `-l` applies to all members; otherwise each member uses its inventory username.
 The SSH-option tokens are shared unchanged. Lists use four workers by default,
-require a remote command, and send EOF on remote stdin. Output uses a command
+require a remote command (inside Rex, a list without one opens each host in
+its own pane), and send EOF on remote stdin. Output uses a command
 heading, device headings with status, blank lines between device outputs, and
 a compact results summary.
 Both blocks and summary follow the requested host order. Labels use the supplied

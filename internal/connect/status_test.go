@@ -18,7 +18,7 @@ func inRex(t *testing.T) {
 func TestSessionStatusLifecycle(t *testing.T) {
 	inRex(t)
 	out := withTitleTerminal(t, true)
-	status := newSessionStatus(&ResolvedHost{Canonical: "acm-core1"}, nil)
+	status := newSessionStatus(&ResolvedHost{Canonical: "acm-core1"}, nil, nil)
 	if status == nil {
 		t.Fatal("no reporter inside Rex")
 	}
@@ -51,7 +51,7 @@ func TestSessionStatusLifecycle(t *testing.T) {
 func TestSessionStatusErrorSurvives(t *testing.T) {
 	inRex(t)
 	out := withTitleTerminal(t, true)
-	newSessionStatus(&ResolvedHost{Canonical: "acm-core1"}, nil).finished(&exit.ExitError{Code: 255})
+	newSessionStatus(&ResolvedHost{Canonical: "acm-core1"}, nil, nil).finished(&exit.ExitError{Code: 255})
 	// "acm-core1: exit status 255"
 	if got := out.String(); !strings.HasPrefix(got, "\x1b]7501;state=error:app=nssh:") || !strings.Contains(got, "msg=YWNtLWNvcmUxOiBleGl0IHN0YXR1cyAyNTU=") {
 		t.Fatalf("error report = %q", got)
@@ -63,21 +63,21 @@ func TestSessionStatusGating(t *testing.T) {
 	t.Run("outside rex", func(t *testing.T) {
 		t.Setenv("REX_SESSION", "")
 		withTitleTerminal(t, true)
-		if newSessionStatus(resolved, nil) != nil {
+		if newSessionStatus(resolved, nil, nil) != nil {
 			t.Fatal("reporter outside Rex")
 		}
 	})
 	t.Run("not a terminal", func(t *testing.T) {
 		inRex(t)
 		withTitleTerminal(t, false)
-		if newSessionStatus(resolved, nil) != nil {
+		if newSessionStatus(resolved, nil, nil) != nil {
 			t.Fatal("reporter without a terminal")
 		}
 	})
 	t.Run("non-interactive mode", func(t *testing.T) {
 		inRex(t)
 		withTitleTerminal(t, true)
-		if newSessionStatus(resolved, []string{"-N"}) != nil {
+		if newSessionStatus(resolved, []string{"-N"}, nil) != nil {
 			t.Fatal("reporter for -N")
 		}
 	})
@@ -101,7 +101,7 @@ func TestSessionStatusLabelsPane(t *testing.T) {
 	}
 	t.Cleanup(func() { labelPaneFunc = prev })
 
-	newSessionStatus(&ResolvedHost{Canonical: "acm-core1"}, nil).labelPane()()
+	newSessionStatus(&ResolvedHost{Canonical: "acm-core1"}, nil, nil).labelPane()()
 	var nilStatus *sessionStatus
 	nilStatus.labelPane()()
 	if got := strings.Join(labeled, ","); got != "acm-core1,restored" {

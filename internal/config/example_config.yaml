@@ -237,6 +237,16 @@ ssh:
   #     ServerAliveInterval: 30
   #     ServerAliveCountMax: 3
 
+# Rex terminal integration, used only when nssh runs inside Rex. Interactive
+# hosts open in the session below, paired into split tabs. NSSH_REX=0 also
+# disables it.
+# rex:
+#   enabled: true
+#   session: nssh          # a session label, or current
+#   panes_per_tab: 2       # 1, 2, or 4
+#   split: auto            # auto, side-by-side, or stacked
+#   single_host: tab       # tab, or here for the current pane
+
 logging:
   audit:
     enabled: true

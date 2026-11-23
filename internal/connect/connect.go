@@ -102,6 +102,9 @@ func ConnectHost(ctx context.Context, hostname string, sshArgs []string, opts ..
 		return fmt.Errorf("resolve host: %w", err)
 	}
 	cfg := resolved.Config
+	if OpenInRex(ctx, cfg, []string{rexTarget(hostname, explicitUser, resolved)}, sshArgs) {
+		return nil
+	}
 
 	recorded, err := maybeWrapWithRecording(resolved.Canonical, sshArgs, options)
 	if err != nil {
@@ -852,7 +855,7 @@ func runResolvedConnection(ctx context.Context, resolved *ResolvedHost, sshArgs 
 		}
 	}
 	defer setTerminalTitle(resolved, sshArgs, cfg)()
-	status := newSessionStatus(resolved, sshArgs)
+	status := newSessionStatus(resolved, sshArgs, cfg)
 	defer status.labelPane()()
 	status.connecting()
 	conn := newConnector(resolved, sshArgs, cfg, opts)
